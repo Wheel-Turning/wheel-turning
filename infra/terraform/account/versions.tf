@@ -8,6 +8,13 @@ terraform {
     }
   }
 
-  # Applied first with local state, before any other resource exists. Once the bootstrap stack
-  # has created the state bucket, this block gains an S3 backend and the state migrates there.
+  # Applied first with local state, before any other resource existed, then migrated into the
+  # bucket the bootstrap stack created.
+  backend "s3" {
+    bucket       = "dharma-gates-tfstate-904883674947"
+    key          = "account/terraform.tfstate"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
