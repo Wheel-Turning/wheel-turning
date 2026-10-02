@@ -159,14 +159,15 @@ jobs:
           name: deploy-plan
           run-id: ${{ inputs.plan_run_id }}
           github-token: ${{ github.token }}
-          path: reviewed
+          # Outside the workspace: the checkout below cleans it.
+          path: ${{ runner.temp }}/reviewed
 
       - name: Read the reviewed plan
         id: meta
         run: |
           set -euo pipefail
-          echo "tag=$(jq -r .tag reviewed/deploy.json)" >> "$GITHUB_OUTPUT"
-          echo "sha=$(jq -r .sha reviewed/deploy.json)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(jq -r .tag "$RUNNER_TEMP/reviewed/deploy.json")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .sha "$RUNNER_TEMP/reviewed/deploy.json")" >> "$GITHUB_OUTPUT"
 
       # Terraform needs the exact configuration the plan was made from.
       - uses: actions/checkout@v4
@@ -189,7 +190,7 @@ jobs:
           set -euo pipefail
           terraform init -input=false
           # Refuses to run if anything changed since the plan was reviewed.
-          terraform apply -input=false -no-color "$GITHUB_WORKSPACE/reviewed/migrate.tfplan"
+          terraform apply -input=false -no-color "$RUNNER_TEMP/reviewed/migrate.tfplan"
 
       - name: Run migrations as dg_owner
         working-directory: ${{ env.TF_DIR }}
