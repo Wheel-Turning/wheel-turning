@@ -1,0 +1,120 @@
+# Spec 01: runs on every pull request and push.
+name: ci
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Compile-time checked queries build from the committed .sqlx data, not a live database.
+  SQLX_OFFLINE: "true"
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      # Database tests start their own pgvector container through testcontainers, using the
+      # runner's Docker. Pull once up front so the first test does not time out on the pull.
+      - run: docker pull pgvector/pgvector:pg16
+      - run: cargo test --workspace
+
+  sqlx-prepare:
+    name: cargo sqlx prepare --check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: dg
+          POSTGRES_PASSWORD: dg
+          POSTGRES_DB: dg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dg"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://dg:dg@localhost:5432/dg
+      SQLX_OFFLINE: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli
+      # Migrate with the real binary, then check the committed query data against the result.
+      - run: cargo run -p dg-cli -- db migrate
+      - name: dg db migrate is idempotent
+        run: cargo run -p dg-cli -- db migrate 2>&1 | tee migrate.log && grep -q 'applied=0' migrate.log
+      - run: cargo sqlx prepare --workspace --check
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
+      - name: a payment SDK as a test dependency fails the policy
+        run: bash scripts/check-deny-bans.sh
+
+  terraform:
+    name: terraform fmt and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.16"
+      - run: terraform fmt -check -recursive infra/terraform
+      - name: terraform validate every root module
+        run: |
+          set -euo pipefail
+          for root in infra/terraform/envs/*/; do
+            echo "::group::$root"
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check sidecars scripts
+      - run: uvx ruff format --check sidecars scripts
