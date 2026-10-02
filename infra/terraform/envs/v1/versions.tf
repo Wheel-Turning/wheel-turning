@@ -7,7 +7,17 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
+    }
   }
 
-  # M1 adds the S3 backend once the bootstrap stack has created the state bucket.
+  backend "s3" {
+    bucket       = "dharma-gates-tfstate-904883674947"
+    key          = "v1/terraform.tfstate"
+    region       = "us-east-2"
+    encrypt      = true
+    use_lockfile = true
+  }
 }

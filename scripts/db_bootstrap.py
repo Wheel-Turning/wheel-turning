@@ -1,0 +1,108 @@
+"""One-time database bootstrap for a new v1 environment, run by a person, never by CI.
+
+Runs the dg-v1-admin task (which connects as the RDS master user) to:
+  1. apply the migrations, which create the Spec 02 group roles
+  2. create dg_owner_login, dg_web_login and dg_pipeline_login with the passwords Terraform
+     generated into Secrets Manager (ECS injects them; they never pass through this script)
+then runs the dg-v1-migrate task once as dg_owner_login to prove the owner login works.
+
+Every step is idempotent, so rerunning it is safe, for example after rotating passwords.
+
+Needs the AWS CLI with an admin profile (for example AWS_PROFILE=wheel-turning) and the
+admin and migrate task definitions pointing at a pushed image (terraform apply with
+migrate_image_tag set).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+
+
+def aws(*args: str) -> dict:
+    out = subprocess.run(
+        ["aws", *args, "--output", "json"], check=True, capture_output=True, text=True
+    )
+    return json.loads(out.stdout) if out.stdout.strip() else {}
+
+
+def tf_output(tf_dir: str) -> dict:
+    out = subprocess.run(
+        ["terraform", f"-chdir={tf_dir}", "output", "-json"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return {k: v["value"] for k, v in json.loads(out.stdout).items()}
+
+
+def run_task(outputs: dict, family: str, command: list[str] | None, label: str) -> None:
+    network = {
+        "awsvpcConfiguration": {
+            "subnets": outputs["public_subnet_ids"],
+            "securityGroups": [outputs["security_group_ids"]["web"]],
+            "assignPublicIp": "ENABLED",
+        }
+    }
+    args = [
+        "ecs", "run-task",
+        "--cluster", outputs["cluster_name"],
+        "--task-definition", family,
+        "--launch-type", "FARGATE",
+        "--network-configuration", json.dumps(network),
+    ]  # fmt: skip
+    container = family.rsplit("-", 1)[-1]
+    if command:
+        overrides = {"containerOverrides": [{"name": container, "command": command}]}
+        args += ["--overrides", json.dumps(overrides)]
+    task_arn = aws(*args)["tasks"][0]["taskArn"]
+    print(f"{label}: started {task_arn.rsplit('/', 1)[-1]}", flush=True)
+    subprocess.run(
+        [
+            "aws", "ecs", "wait", "tasks-stopped",
+            "--cluster", outputs["cluster_name"], "--tasks", task_arn,
+        ],
+        check=True,
+    )  # fmt: skip
+    task = aws("ecs", "describe-tasks", "--cluster", outputs["cluster_name"], "--tasks", task_arn)
+    task = task["tasks"][0]
+    code = task["containers"][0].get("exitCode")
+    stream = f"{container}/{container}/{task_arn.rsplit('/', 1)[-1]}"
+    try:
+        events = aws(
+            "logs", "get-log-events", "--log-group-name", "/dg-v1/admin",
+            "--log-stream-name", stream,
+        )["events"]  # fmt: skip
+        for event in events:
+            print(f"    {event['message']}")
+    except subprocess.CalledProcessError:
+        print("    (no log output)")
+    if code != 0:
+        reason = task.get("stoppedReason", "")
+        raise SystemExit(f"{label} failed: exit code {code} {reason}".strip())
+    print(f"{label}: ok")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--tf-dir", default="infra/terraform/envs/v1")
+    args = parser.parse_args()
+    outputs = tf_output(args.tf_dir)
+    families = outputs["task_definition_families"]
+
+    run_task(outputs, families["admin"], ["dg", "db", "migrate"], "migrate as master")
+    for group in ("dg_owner", "dg_web", "dg_pipeline"):
+        login = f"{group}_login"
+        command = [
+            "dg", "db", "create-login", "--role", group, "--login", login,
+            "--password-env", f"DG_LOGIN_PASSWORD_{login.upper()}",
+        ]  # fmt: skip
+        run_task(outputs, families["admin"], command, f"create {login}")
+    run_task(outputs, families["migrate"], None, "migrate as dg_owner_login")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

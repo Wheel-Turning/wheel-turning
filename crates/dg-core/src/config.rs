@@ -143,9 +143,15 @@ impl Config {
             })?,
         };
 
-        let database_url = Secret::new(get("DATABASE_URL").ok_or(ConfigError::Missing {
-            key: "DATABASE_URL",
-        })?);
+        let database_url = match get("DATABASE_URL") {
+            Some(url) => Secret::new(url),
+            None if get("DG_DB_HOST").is_some() => database_url_from_parts(&get, env)?,
+            None => {
+                return Err(ConfigError::Missing {
+                    key: "DATABASE_URL",
+                });
+            }
+        };
         check_database_url("DATABASE_URL", &database_url, env)?;
 
         let database_url_analyst = get("DATABASE_URL_ANALYST").map(Secret::new);
@@ -209,6 +215,50 @@ impl Config {
             key: "DG_LLM_MODEL",
         })
     }
+}
+
+/// Builds `DATABASE_URL` from separate parts, for deployments where the password is injected on
+/// its own from Secrets Manager and must never sit in a stored connection string:
+/// `DG_DB_HOST`, `DG_DB_PORT` (default 5432), `DG_DB_NAME` (default `dg`), `DG_DB_USER` and
+/// `DG_DB_PASSWORD`. Outside dev the URL requires TLS.
+fn database_url_from_parts<G>(get: &G, env: Env) -> Result<Secret, ConfigError>
+where
+    G: Fn(&str) -> Option<String>,
+{
+    let host = get("DG_DB_HOST").ok_or(ConfigError::Missing { key: "DG_DB_HOST" })?;
+    let port_text = get("DG_DB_PORT").unwrap_or_else(|| "5432".to_owned());
+    let port: u16 = port_text.trim().parse().map_err(|_| ConfigError::Invalid {
+        key: "DG_DB_PORT",
+        reason: format!("expected a port number, got {port_text:?}"),
+    })?;
+    let name = get("DG_DB_NAME").unwrap_or_else(|| "dg".to_owned());
+    let user = get("DG_DB_USER").ok_or(ConfigError::Missing { key: "DG_DB_USER" })?;
+    let password = Secret::new(get("DG_DB_PASSWORD").ok_or(ConfigError::Missing {
+        key: "DG_DB_PASSWORD",
+    })?);
+    let ssl = if env.is_dev() { "" } else { "?sslmode=require" };
+    Ok(Secret::new(format!(
+        "postgres://{}:{}@{}:{}/{}{}",
+        percent_encode(&user),
+        percent_encode(password.expose()),
+        host.trim(),
+        port,
+        percent_encode(&name),
+        ssl
+    )))
+}
+
+/// Percent-encodes everything outside the URL unreserved set.
+fn percent_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 fn check_database_url(key: &'static str, url: &Secret, env: Env) -> Result<(), ConfigError> {
@@ -401,6 +451,49 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn database_url_is_built_from_parts_with_tls_outside_dev() {
+        let config = load(&[
+            ("DG_ENV", "prod"),
+            ("DG_SESSION_SECRET", SESSION_SECRET),
+            ("DG_DB_HOST", "dg-v1.abc.us-east-2.rds.amazonaws.com"),
+            ("DG_DB_USER", "dg_web_login"),
+            ("DG_DB_PASSWORD", "p@ss/w:rd"),
+        ])
+        .unwrap();
+        assert_eq!(
+            config.database_url.expose(),
+            "postgres://dg_web_login:p%40ss%2Fw%3Ard@dg-v1.abc.us-east-2.rds.amazonaws.com:5432/dg?sslmode=require"
+        );
+    }
+
+    #[test]
+    fn database_url_parts_require_user_and_password() {
+        assert_eq!(
+            load(&[("DG_DB_HOST", "localhost"), ("DG_DB_USER", "dg")]).unwrap_err(),
+            ConfigError::Missing {
+                key: "DG_DB_PASSWORD"
+            }
+        );
+        assert_eq!(
+            load(&[("DG_DB_HOST", "localhost"), ("DG_DB_PASSWORD", "x")]).unwrap_err(),
+            ConfigError::Missing { key: "DG_DB_USER" }
+        );
+    }
+
+    #[test]
+    fn explicit_database_url_wins_over_parts() {
+        let config = load(&[
+            ("DATABASE_URL", "postgres://dg:dg@localhost:5432/dg"),
+            ("DG_DB_HOST", "elsewhere"),
+        ])
+        .unwrap();
+        assert_eq!(
+            config.database_url.expose(),
+            "postgres://dg:dg@localhost:5432/dg"
+        );
     }
 
     #[test]

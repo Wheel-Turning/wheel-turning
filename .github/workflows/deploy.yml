@@ -1,0 +1,257 @@
+# Spec 01: deploy.yml runs on a version tag or by hand. It builds the container image, pushes it
+# to ECR, runs terraform plan and holds for manual approval, applies, then runs migrations as a
+# one-off ECS task under dg_owner before the new service revision starts taking traffic.
+#
+# The repository is private on GitHub's free plan, which has no environment approval gates, so
+# approval is a second, hand-started run:
+#
+#   1. plan   (a v* tag push, or: gh workflow run deploy.yml -f action=plan)
+#             builds and pushes the image, saves plan A as an artifact, previews plan B
+#   2. review the plan in that run's summary
+#   3. apply  (gh workflow run deploy.yml -f action=apply -f plan_run_id=<run id from step 1>)
+#             applies exactly the saved plan A, runs migrations, then applies plan B
+#
+# Plan A changes only the migrate and admin task definitions to the new image. Plan B changes the
+# web task definition and service to it, and the apply run refuses plan B if it would touch
+# anything else. AWS access is the OIDC deploy role, which trusts only main and v* tags.
+name: deploy
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: plan, or apply a reviewed plan
+        type: choice
+        options: [plan, apply]
+        default: plan
+      plan_run_id:
+        description: Run id of the reviewed plan (apply only)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for the AWS deploy role
+  actions: read # download the reviewed plan from the plan run
+
+concurrency:
+  group: deploy-v1
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  ROLE_ARN: arn:aws:iam::904883674947:role/ci/dg-v1-github-deploy
+  TF_DIR: infra/terraform/envs/v1
+  ECR_REPOSITORY: dg-v1
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  plan:
+    if: github.event_name == 'push' || inputs.action == 'plan'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Image tag
+        id: tag
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then tag="$GITHUB_REF_NAME"; else tag="main-${GITHUB_SHA::12}"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Is this image already pushed?
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.exists.outputs.exists == 'false'
+
+      - uses: docker/build-push-action@v6
+        if: steps.exists.outputs.exists == 'false'
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.16"
+          terraform_wrapper: false
+
+      - name: Plan A (migrate task definitions only)
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          NEW_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          current="$(terraform output -raw image_tag)"
+          terraform plan -input=false -no-color \
+            -var "image_tag=${current}" -var "migrate_image_tag=${NEW_TAG}" \
+            -out=migrate.tfplan | tee plan-a.txt
+          terraform plan -input=false -no-color -lock=false \
+            -var "image_tag=${NEW_TAG}" -var "migrate_image_tag=${NEW_TAG}" | tee plan-b.txt
+          jq -n --arg tag "$NEW_TAG" --arg previous "$current" --arg sha "$GITHUB_SHA" \
+            '{tag: $tag, previous_tag: $previous, sha: $sha}' > deploy.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deploy-plan
+          path: |
+            ${{ env.TF_DIR }}/migrate.tfplan
+            ${{ env.TF_DIR }}/deploy.json
+          retention-days: 7
+
+      - name: Summary
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          NEW_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          {
+            echo "## Deploy plan for \`${NEW_TAG}\`"
+            echo
+            echo "Review both plans, then apply:"
+            echo
+            echo '```'
+            echo "gh workflow run deploy.yml -f action=apply -f plan_run_id=${GITHUB_RUN_ID}"
+            echo '```'
+            echo
+            echo "### Plan A: migrate and admin task definitions (applied exactly as shown)"
+            echo '```'
+            sed -n '/Terraform will perform/,$p' plan-a.txt || cat plan-a.txt
+            echo '```'
+            echo "### Plan B preview: web task definition and service (applied after migrations)"
+            echo '```'
+            sed -n '/Terraform will perform/,$p' plan-b.txt || cat plan-b.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a plan run
+        if: inputs.plan_run_id == ''
+        run: |
+          echo "::error::apply needs plan_run_id, the run id of a reviewed plan"
+          exit 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy-plan
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+          path: reviewed
+
+      - name: Read the reviewed plan
+        id: meta
+        run: |
+          set -euo pipefail
+          echo "tag=$(jq -r .tag reviewed/deploy.json)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .sha reviewed/deploy.json)" >> "$GITHUB_OUTPUT"
+
+      # Terraform needs the exact configuration the plan was made from.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.16"
+          terraform_wrapper: false
+
+      - name: Apply plan A
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          # Refuses to run if anything changed since the plan was reviewed.
+          terraform apply -input=false -no-color "$GITHUB_WORKSPACE/reviewed/migrate.tfplan"
+
+      - name: Run migrations as dg_owner
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          cluster="$(terraform output -raw cluster_name)"
+          family="$(terraform output -json task_definition_families | jq -r .migrate)"
+          subnets="$(terraform output -json public_subnet_ids | jq -r 'join(",")')"
+          sg="$(terraform output -json security_group_ids | jq -r .web)"
+          task="$(aws ecs run-task --cluster "$cluster" --task-definition "$family" \
+            --launch-type FARGATE --count 1 \
+            --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" \
+            --query 'tasks[0].taskArn' --output text)"
+          echo "migrate task: $task"
+          aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
+          exit_code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
+            --query 'tasks[0].containers[0].exitCode' --output text)"
+          aws logs get-log-events --log-group-name /dg-v1/admin \
+            --log-stream-name "migrate/migrate/${task##*/}" --query 'events[].message' --output text || true
+          if [[ "$exit_code" != "0" ]]; then
+            echo "::error::migrations failed with exit code $exit_code; the web service was not changed"
+            exit 1
+          fi
+
+      - name: Plan B (web task definition and service only)
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          NEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          terraform plan -input=false -no-color \
+            -var "image_tag=${NEW_TAG}" -var "migrate_image_tag=${NEW_TAG}" -out=web.tfplan
+          unexpected="$(terraform show -json web.tfplan | jq -r '
+            [.resource_changes[]
+             | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+             | .address
+             | select(. != "module.service.aws_ecs_task_definition.web"
+                      and . != "module.service.aws_ecs_service.web")] | .[]')"
+          if [[ -n "$unexpected" ]]; then
+            echo "::error::plan B would change more than the web service: $unexpected"
+            exit 1
+          fi
+
+      - name: Apply plan B and wait for the service
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          terraform apply -input=false -no-color web.tfplan
+          aws ecs wait services-stable --cluster "$(terraform output -raw cluster_name)" \
+            --services "$(terraform output -raw service_name)"
+
+      - name: /healthz answers over HTTPS
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          url="$(terraform output -raw url)/healthz"
+          for attempt in $(seq 1 20); do
+            if body="$(curl -fsS --max-time 10 "$url")"; then
+              echo "$url -> $body"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::$url did not answer"
+          exit 1
