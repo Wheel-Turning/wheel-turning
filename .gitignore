@@ -1,0 +1,40 @@
+# Rust
+/target/
+tests/deny-fixture/target/
+tests/deny-fixture/Cargo.lock
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Data that must never be committed: exports, models, scratch, audio
+/data/
+/models/
+/scratch/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+*.webm
+*.mp4
+
+# Python
+__pycache__/
+.venv/
+.ruff_cache/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
