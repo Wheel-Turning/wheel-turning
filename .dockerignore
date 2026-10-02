@@ -1,0 +1,15 @@
+target/
+.git/
+.github/
+docs/
+infra/
+data/
+models/
+scratch/
+fixtures/
+sidecars/
+tests/deny-fixture/target/
+.env
+.env.*
+**/*.tfstate*
+**/.terraform/

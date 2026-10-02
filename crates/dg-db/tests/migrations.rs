@@ -12,7 +12,10 @@ async fn migrations_apply_to_an_empty_database_and_are_idempotent() {
 
     let first = dg_db::migrate(&pool).await.unwrap();
     assert_eq!(first.applied, first.known);
-    assert_eq!(first.known, 8, "Spec 02 defines eight migrations");
+    assert!(
+        first.known >= 8,
+        "Spec 02 defines eight migrations, later milestones add more"
+    );
 
     let second = dg_db::migrate(&pool).await.unwrap();
     assert_eq!(second.applied, 0, "a second run must change nothing");
