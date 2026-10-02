@@ -54,6 +54,8 @@ resource "aws_db_parameter_group" "this" {
   parameter {
     name  = "rds.force_ssl"
     value = "1"
+    # A static parameter: it takes effect at boot, and the instance was created with it.
+    apply_method = "pending-reboot"
   }
 }
 
