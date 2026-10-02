@@ -20,8 +20,11 @@ pub enum TelemetryError {
 /// Installs the global log subscriber: JSON outside dev, compact text in dev.
 pub fn init_logging(env: Env, filter: &str) -> Result<(), TelemetryError> {
     let filter = EnvFilter::try_new(filter).map_err(|e| TelemetryError::Filter(e.to_string()))?;
+    // Color codes only help a person at a terminal; piped output stays plain text.
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let builder = tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(ansi)
         .with_writer(std::io::stdout);
     let result = if env.is_dev() {
         builder.compact().try_init()
