@@ -114,12 +114,12 @@ The `Dockerfile` is multi-stage. The final image holds the `dg` binary, the ONNX
 
 M0, foundation
 
-- [ ] Every crate in the layout exists, builds, and has a short crate-level doc comment stating its single responsibility.
-- [ ] `ci.yml` is green with all jobs listed above.
-- [ ] `dg db migrate` is idempotent. Running it twice changes nothing.
-- [ ] Config loader tests cover a missing required key failing at startup and secret values never appearing in `Debug` or log output.
-- [ ] `dg-api` serves `/healthz` with database connectivity checked.
-- [ ] `deny.toml` bans payment SDKs, including `async-stripe`, and a test dependency on a banned crate fails CI.
+- [x] Every crate in the layout exists, builds, and has a short crate-level doc comment stating its single responsibility.
+- [x] `ci.yml` is green with all jobs listed above.
+- [x] `dg db migrate` is idempotent. Running it twice changes nothing.
+- [x] Config loader tests cover a missing required key failing at startup and secret values never appearing in `Debug` or log output.
+- [x] `dg-api` serves `/healthz` with database connectivity checked.
+- [x] `deny.toml` bans payment SDKs, including `async-stripe`, and a test dependency on a banned crate fails CI.
 
 M1, AWS baseline
 
