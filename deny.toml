@@ -1,0 +1,53 @@
+# cargo-deny policy. CI runs `cargo deny check`.
+# Rule 7 in CLAUDE.md: no payment or card-handling crate may enter the dependency tree.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+# Workspace crates are not published and carry no license file.
+private = { ignore = true }
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # Payment SDKs and card handling. Dana links send people to each sangha's own donation page;
+    # this codebase never touches money.
+    { crate = "async-stripe", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "stripe-rust", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "stripe", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "stripe-sdk", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "paypal-rs", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "braintree", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "square-rust-sdk", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "adyen", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "mollie-api", reason = "payment SDK: Dharma Gates never handles payments" },
+    { crate = "creditcard", reason = "card handling: Dharma Gates never handles payments" },
+    { crate = "card-validate", reason = "card handling: Dharma Gates never handles payments" },
+    # Audio-storage crates are added in M4, once the transcript pipeline fixes which audio
+    # crates it needs in memory under the scratch directory.
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,15 @@
+# A package that must FAIL `cargo deny check bans` against the repository's deny.toml.
+# It pulls a payment SDK in as a test-only dependency, which the policy still forbids.
+# scripts/check-deny-bans.sh runs it in CI. It is excluded from the workspace and never built.
+
+[package]
+name = "deny-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[workspace]
+
+[dev-dependencies]
+async-stripe = "0.41"

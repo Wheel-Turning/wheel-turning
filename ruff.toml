@@ -1,0 +1,6 @@
+# Lints the Python sidecar and scripts. CI runs `ruff check` and `ruff format --check`.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]

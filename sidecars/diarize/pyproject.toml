@@ -1,0 +1,9 @@
+[project]
+name = "dg-diarize"
+version = "0.1.0"
+description = "Diarization sidecar behind the Diarizer trait. Placeholder until M4 (Spec 04)."
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
