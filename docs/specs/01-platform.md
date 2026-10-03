@@ -14,13 +14,13 @@ services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: dg
-      POSTGRES_PASSWORD: dg
-      POSTGRES_DB: dg
+      POSTGRES_USER: wt
+      POSTGRES_PASSWORD: wt
+      POSTGRES_DB: wt
     ports: ["5432:5432"]
     volumes: ["dgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dg"]
+      test: ["CMD-SHELL", "pg_isready -U wt"]
       interval: 5s
       retries: 10
   diarize:
@@ -33,39 +33,39 @@ volumes:
 
 First run, in order:
 
-1. `cp .env.example .env` and set `DATABASE_URL=postgres://dg:dg@localhost:5432/dg`.
+1. `cp .env.example .env` and set `DATABASE_URL=postgres://wt:wt@localhost:5432/wt`.
 2. `docker compose up -d db`.
-3. `cargo run -p dg-cli -- db migrate`.
+3. `cargo run -p wt-cli -- db migrate`.
 4. `cargo test --workspace`. Postgres tests start their own container through `testcontainers` and do not touch the dev database.
-5. `cargo run -p dg-api` serves on `DG_BIND`, default `127.0.0.1:8080`.
+5. `cargo run -p wt-api` serves on `WT_BIND`, default `127.0.0.1:8080`.
 
 The `.env.example` file lists every key in the configuration reference with a safe local value and no real secrets.
 
 ## Configuration reference
 
-Configuration comes from environment variables, with tunable parameters in two TOML files: `config/pipeline.toml` (Specs 03 and 04) and `config/retrieval.toml` (Spec 05). The loader in `dg-core` validates everything at startup, fails fast on a missing required key, and never logs secret values. Secrets come only from the environment or AWS Secrets Manager, never from files in the repository.
+Configuration comes from environment variables, with tunable parameters in two TOML files: `config/pipeline.toml` (Specs 03 and 04) and `config/retrieval.toml` (Spec 05). The loader in `wt-core` validates everything at startup, fails fast on a missing required key, and never logs secret values. Secrets come only from the environment or AWS Secrets Manager, never from files in the repository.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `DG_ENV` | `dev` | One of `dev`, `staging`, `prod`. In `prod` the loader refuses debug flags. |
+| `WT_ENV` | `dev` | One of `dev`, `staging`, `prod`. In `prod` the loader refuses debug flags. |
 | `DATABASE_URL` | none, required | Postgres connection string for the application role |
-| `DATABASE_URL_ANALYST` | none | Connection for the analyst role, used only by `dg report` |
-| `DG_BIND` | `127.0.0.1:8080` | Web listen address |
-| `DG_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
-| `DG_SCRATCH_DIR` | `/var/dg/scratch` | The only place audio or video may exist |
-| `DG_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
-| `DG_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
-| `DG_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `DG_MODEL_DIR` |
-| `DG_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
-| `DG_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
+| `DATABASE_URL_ANALYST` | none | Connection for the analyst role, used only by `wt report` |
+| `WT_BIND` | `127.0.0.1:8080` | Web listen address |
+| `WT_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
+| `WT_SCRATCH_DIR` | `/var/wt/scratch` | The only place audio or video may exist |
+| `WT_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
+| `WT_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
+| `WT_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `WT_MODEL_DIR` |
+| `WT_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
+| `WT_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
 | `ANTHROPIC_API_KEY` | none | API credential, secret |
-| `DG_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text |
+| `WT_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text |
 | `YOUTUBE_API_KEY` | none | Key for the YouTube Data API, secret |
-| `DG_ALLOW_THIRD_PARTY_FETCH` | `false` | Enables the `yt-dlp` fetch mode. See Spec 03. |
-| `DG_DIARIZE_URL` | `http://127.0.0.1:8090` | Base URL of the diarization sidecar |
-| `DG_WHISPER_MODEL` | none | Path to the whisper large-v3 model file for ASR |
-| `DG_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
-| `DG_LOG` | `info` | Log filter. Logs are JSON in non-dev environments. |
+| `WT_ALLOW_THIRD_PARTY_FETCH` | `false` | Enables the `yt-dlp` fetch mode. See Spec 03. |
+| `WT_DIARIZE_URL` | `http://127.0.0.1:8090` | Base URL of the diarization sidecar |
+| `WT_WHISPER_MODEL` | none | Path to the whisper large-v3 model file for ASR |
+| `WT_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
+| `WT_LOG` | `info` | Log filter. Logs are JSON in non-dev environments. |
 
 ## AWS topology
 
@@ -106,9 +106,9 @@ Three GitHub Actions workflows cover the lifecycle.
 
 1. `ci.yml` runs on every pull request and push. Jobs: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` with Docker available for Postgres containers, `cargo sqlx prepare --check` against a migrated database, `cargo deny check`, Terraform `fmt -check` and `validate`, and `ruff` on the Python sidecar and scripts. Cargo and target directories are cached.
 2. `deploy.yml` runs on a version tag or by hand. It builds the container image, pushes it to ECR, runs `terraform plan` and holds for manual approval, applies, then runs migrations as a one-off ECS task under `dg_owner` before the new service revision starts taking traffic.
-3. `nightly.yml` runs `dg audit` as a one-off task against the live database and fails loudly if any audit check fails. Spec 07 lists the checks.
+3. `nightly.yml` runs `wt audit` as a one-off task against the live database and fails loudly if any audit check fails. Spec 07 lists the checks.
 
-The `Dockerfile` is multi-stage. The final image holds the `dg` binary, the ONNX Runtime shared library located through `ORT_DYLIB_PATH`, and nothing else. Models are not baked into the image. The service downloads them from the models bucket at start into ephemeral storage and refuses to serve until they load.
+The `Dockerfile` is multi-stage. The final image holds the `wt` binary, the ONNX Runtime shared library located through `ORT_DYLIB_PATH`, and nothing else. Models are not baked into the image. The service downloads them from the models bucket at start into ephemeral storage and refuses to serve until they load.
 
 ## Acceptance criteria
 
@@ -116,9 +116,9 @@ M0, foundation
 
 - [x] Every crate in the layout exists, builds, and has a short crate-level doc comment stating its single responsibility.
 - [x] `ci.yml` is green with all jobs listed above.
-- [x] `dg db migrate` is idempotent. Running it twice changes nothing.
+- [x] `wt db migrate` is idempotent. Running it twice changes nothing.
 - [x] Config loader tests cover a missing required key failing at startup and secret values never appearing in `Debug` or log output.
-- [x] `dg-api` serves `/healthz` with database connectivity checked.
+- [x] `wt-api` serves `/healthz` with database connectivity checked.
 - [x] `deny.toml` bans payment SDKs, including `async-stripe`, and a test dependency on a banned crate fails CI.
 
 M1, AWS baseline

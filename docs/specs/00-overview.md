@@ -1,5 +1,5 @@
 <!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "Overview and build plan", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
-# Dharma Gates: V1 Technical Specs
+# Wheel Turning: V1 Technical Specs
 
 2026-10-02 · @Alex
 
@@ -25,7 +25,7 @@ Claude Code builds to these defaults without asking. Each has an escape hatch be
 | Reranker | bge-reranker-v2-m3 in ONNX through `ort`, with a smaller model as a latency fallback | A per-passage relevance threshold is needed | `Reranker` trait |
 | Transcription | Existing captions when present, otherwise whisper large-v3 through `whisper-rs` on a batch host | Audio is transient and 140 hours is small | `Transcriber` trait |
 | Diarization | pyannote in a Python HTTP sidecar behind a `Diarizer` trait | No mature Rust equivalent | sherpa-onnx in process after the ten-video sample decides it |
-| Language model | Claude API through `reqwest`, structured JSON output, temperature 0, model name read from `DG_LLM_MODEL` | Extraction, classification help, synthesis and verification | `LlmClient` trait |
+| Language model | Claude API through `reqwest`, structured JSON output, temperature 0, model name read from `WT_LLM_MODEL` | Extraction, classification help, synthesis and verification | `LlmClient` trait |
 | Hosting | AWS with Terraform: RDS Postgres, ECS Fargate for the web service, S3, Secrets Manager. GPU work runs on an on-demand EC2 batch host or the founder's machine. | The builder wants AWS skills and the footprint is small | Any Postgres host works, since nothing else is AWS-specific |
 | Tester access | Invite tokens issued by the CLI, stored hashed, exchanged for a session cookie | Accounts are out of scope | Identity-aware proxy later |
 | Units | Money in integer US cents. Media offsets in integer milliseconds. Timestamps in UTC. | Avoids rounding and timezone bugs | None |
@@ -35,7 +35,7 @@ Claude Code builds to these defaults without asking. Each has an escape hatch be
 The repository is a single Cargo workspace. The layout below is the target; milestones create crates as they need them.
 
 ```text
-dharma-gates/
+wheel-turning/
   Cargo.toml                workspace
   rust-toolchain.toml
   CLAUDE.md                 the conventions below, read by Claude Code
@@ -43,21 +43,21 @@ dharma-gates/
   docker-compose.yml        local Postgres with pgvector
   docs/specs/               one file per spec tab
   crates/
-    dg-core/                domain types, ids, errors, typestate, config
-    dg-db/                  sqlx pool, migration runner, repositories, views
-    dg-registry/            teachers, aliases, sanghas, glossary, consent records
-    dg-ingest/              SourceAdapter trait, YouTube and storage adapters, dedupe
-    dg-asr/                 Transcriber trait, caption parsers, whisper-rs
-    dg-segment/             Diarizer client, segment labels, student-speech removal
-    dg-extract/             LlmClient, schemas, extraction, citation resolution
-    dg-ml/                  Embedder and Reranker traits, ort implementations
-    dg-index/               chunker, embedding, index writer
-    dg-retrieve/            hybrid search, rerank, selection
-    dg-synth/               synthesis, validator, verifier
-    dg-dana/                split calculator
-    dg-api/                 Axum app, templates, invite auth
-    dg-cli/                 the dg binary: commands and worker
-    dg-eval/                evaluation harness
+    wt-core/                domain types, ids, errors, typestate, config
+    wt-db/                  sqlx pool, migration runner, repositories, views
+    wt-registry/            teachers, aliases, sanghas, glossary, consent records
+    wt-ingest/              SourceAdapter trait, YouTube and storage adapters, dedupe
+    wt-asr/                 Transcriber trait, caption parsers, whisper-rs
+    wt-segment/             Diarizer client, segment labels, student-speech removal
+    wt-extract/             LlmClient, schemas, extraction, citation resolution
+    wt-ml/                  Embedder and Reranker traits, ort implementations
+    wt-index/               chunker, embedding, index writer
+    wt-retrieve/            hybrid search, rerank, selection
+    wt-synth/               synthesis, validator, verifier
+    wt-dana/                split calculator
+    wt-api/                 Axum app, templates, invite auth
+    wt-cli/                 the wt binary: commands and worker
+    wt-eval/                evaluation harness
   migrations/               sqlx migrations
   sidecars/diarize/         Python FastAPI service
   scripts/                  export_models.py, notebooks
@@ -70,7 +70,7 @@ These rules go into `CLAUDE.md` verbatim.
 
 1. Read the matching spec tab and the PRD section before writing code. If the two conflict, stop and ask. Do not resolve it silently.
 2. No `unwrap` or `expect` outside tests. Library crates use `thiserror`, binaries use `anyhow`.
-3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `dg-index` and the takedown routine.
+3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `wt-index` and the takedown routine.
 4. The ranker input type has no field for sangha, profile status, upload volume or donation link. Do not add one.
 5. A language model never produces text that is displayed as a quotation. It returns passage IDs and JSON only.
 6. Audio exists only under the configured scratch directory, and the pipeline deletes it explicitly on success and failure. No schema column or bucket holds audio.
@@ -88,9 +88,9 @@ Milestones are ordered so the riskiest PRD hypotheses are tested before the inte
 
 | Milestone | Deliverable | Depends on | Done when |
 | --- | --- | --- | --- |
-| M0, foundation | Workspace, CI, local Postgres with pgvector in Docker, migration runner, config loader, structured logging | None | CI is green and `dg db migrate` applies every migration to an empty database |
+| M0, foundation | Workspace, CI, local Postgres with pgvector in Docker, migration runner, config loader, structured logging | None | CI is green and `wt db migrate` applies every migration to an empty database |
 | M1, AWS baseline | Terraform for network, RDS, S3 buckets, container registry, Fargate service, secrets, and an on-demand GPU batch host | M0 | A deployed `/healthz` answers, and the scratch bucket lifecycle rule is verified by a test object expiring |
-| M2, registry, consent, gate | Teacher, sangha and alias registries, consent records, typestate gate, `servable_passage` view, `dg consent`, `dg audit`, takedown skeleton | M0 | Gate and view tests pass, including an unconsented talk failing to index and to appear in the view |
+| M2, registry, consent, gate | Teacher, sangha and alias registries, consent records, typestate gate, `servable_passage` view, `wt consent`, `wt audit`, takedown skeleton | M0 | Gate and view tests pass, including an unconsented talk failing to index and to appear in the view |
 | M3, discovery and ingestion | Job queue, source adapters, YouTube metadata discovery, deduplication, talk classification, review report | M2 | Discovery on the configured channel yields a deduplicated talk list with states up to `awaiting_consent` |
 | M4, transcript pipeline | Media fetch for cleared talks, captions or ASR, diarization, segmentation, glossary correction, extraction, citation resolution, chunking, embedding, indexing, transcript export | M3 | One consented talk goes from discovered to ready, and the ten-video segmentation sample report exists |
 | Gate A | Python notebook retrieval test over the available cleaned transcripts, rated by the teacher reviewer | M4 | The reviewer rates a majority of test questions faithful and relevant, or the build stops and the PRD is revisited |
@@ -123,8 +123,8 @@ Several PRD open items gate real data, not software. The code is built so each o
 | --- | --- | --- |
 | Speaker consent, Kanshin first | Founder | Gate refuses to fetch, transcribe or index any talk whose teacher lacks a granted consent record. Development runs on synthetic fixtures. |
 | Rights holder per talk | Founder | `rights_holder` null or `unknown` blocks the cleared state and indexing |
-| Counsel review of YouTube caption ingestion, text-only storage, excerpt display, dana routing | Founder with counsel | Third-party fetching (`yt-dlp`) is disabled by default behind `DG_ALLOW_THIRD_PARTY_FETCH`. Metadata comes from the official YouTube Data API. Media comes from SSZ storage or the channel owner's authorized route. |
-| Language-model provider terms with zero retention confirmed | Founder | `DG_LLM_REAL_DATA_OK` defaults to false, and any call carrying real transcript text is refused until it is set. Extraction and synthesis run on fixtures only. |
+| Counsel review of YouTube caption ingestion, text-only storage, excerpt display, dana routing | Founder with counsel | Third-party fetching (`yt-dlp`) is disabled by default behind `WT_ALLOW_THIRD_PARTY_FETCH`. Metadata comes from the official YouTube Data API. Media comes from SSZ storage or the channel owner's authorized route. |
+| Language-model provider terms with zero retention confirmed | Founder | `WT_LLM_REAL_DATA_OK` defaults to false, and any call carrying real transcript text is refused until it is set. Extraction and synthesis run on fixtures only. |
 | Teacher reviewer scheduled with an unflattering-ratings brief | Founder | Gate A cannot be marked passed without at least one reviewer's recorded ratings |
 | SSZ permission note and speaker-release line | Founder | No code effect in v1. Recorded as a checklist item in the runbook. |
 

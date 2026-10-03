@@ -32,17 +32,17 @@ allow-wildcard-paths = true
 deny = [
     # Payment SDKs and card handling. Dana links send people to each sangha's own donation page;
     # this codebase never touches money.
-    { crate = "async-stripe", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "stripe-rust", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "stripe", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "stripe-sdk", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "paypal-rs", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "braintree", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "square-rust-sdk", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "adyen", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "mollie-api", reason = "payment SDK: Dharma Gates never handles payments" },
-    { crate = "creditcard", reason = "card handling: Dharma Gates never handles payments" },
-    { crate = "card-validate", reason = "card handling: Dharma Gates never handles payments" },
+    { crate = "async-stripe", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "stripe-rust", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "stripe", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "stripe-sdk", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "paypal-rs", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "braintree", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "square-rust-sdk", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "adyen", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "mollie-api", reason = "payment SDK: Wheel Turning never handles payments" },
+    { crate = "creditcard", reason = "card handling: Wheel Turning never handles payments" },
+    { crate = "card-validate", reason = "card handling: Wheel Turning never handles payments" },
     # Audio-storage crates are added in M4, once the transcript pipeline fixes which audio
     # crates it needs in memory under the scratch directory.
 ]

@@ -54,16 +54,16 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: dg
-          POSTGRES_PASSWORD: dg
-          POSTGRES_DB: dg
+          POSTGRES_USER: wt
+          POSTGRES_PASSWORD: wt
+          POSTGRES_DB: wt
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U dg"
+          --health-cmd "pg_isready -U wt"
           --health-interval 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgres://dg:dg@localhost:5432/dg
+      DATABASE_URL: postgres://wt:wt@localhost:5432/wt
       SQLX_OFFLINE: "false"
     steps:
       - uses: actions/checkout@v4
@@ -73,9 +73,9 @@ jobs:
         with:
           tool: sqlx-cli
       # Migrate with the real binary, then check the committed query data against the result.
-      - run: cargo run -p dg-cli -- db migrate
-      - name: dg db migrate is idempotent
-        run: cargo run -p dg-cli -- db migrate 2>&1 | tee migrate.log && grep -q 'applied=0' migrate.log
+      - run: cargo run -p wt-cli -- db migrate
+      - name: wt db migrate is idempotent
+        run: cargo run -p wt-cli -- db migrate 2>&1 | tee migrate.log && grep -q 'applied=0' migrate.log
       - run: cargo sqlx prepare --workspace --check
 
   deny:

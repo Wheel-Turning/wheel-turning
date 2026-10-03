@@ -6,7 +6,7 @@ variable "region" {
 variable "github_owner_id" {
   description = "Numeric id of the GitHub organisation. The trust policy pins ids, not names, so renaming the org or repo does not open or break it."
   type        = string
-  default     = "337015568" # Dharma-Paths
+  default     = "337015568" # Wheel-Turning
 }
 
 variable "github_repo_id" {

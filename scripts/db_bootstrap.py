@@ -92,12 +92,12 @@ def main() -> int:
     outputs = tf_output(args.tf_dir)
     families = outputs["task_definition_families"]
 
-    run_task(outputs, families["admin"], ["dg", "db", "migrate"], "migrate as master")
+    run_task(outputs, families["admin"], ["wt", "db", "migrate"], "migrate as master")
     for group in ("dg_owner", "dg_web", "dg_pipeline"):
         login = f"{group}_login"
         command = [
-            "dg", "db", "create-login", "--role", group, "--login", login,
-            "--password-env", f"DG_LOGIN_PASSWORD_{login.upper()}",
+            "wt", "db", "create-login", "--role", group, "--login", login,
+            "--password-env", f"WT_LOGIN_PASSWORD_{login.upper()}",
         ]  # fmt: skip
         run_task(outputs, families["admin"], command, f"create {login}")
     run_task(outputs, families["migrate"], None, "migrate as dg_owner_login")

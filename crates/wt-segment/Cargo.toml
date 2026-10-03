@@ -1,0 +1,13 @@
+[package]
+name = "wt-segment"
+description = "The Diarizer client, segment labels and student-speech removal."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

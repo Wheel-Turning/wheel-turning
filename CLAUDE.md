@@ -1,4 +1,4 @@
-# Dharma Gates
+# Wheel Turning
 
 A private, text-only retrieval demo over consented Zen talks. The specs in `docs/specs/` are binding: read `00-overview.md` first, then the spec for the milestone in hand.
 
@@ -6,7 +6,7 @@ A private, text-only retrieval demo over consented Zen talks. The specs in `docs
 
 1. Read the matching spec tab and the PRD section before writing code. If the two conflict, stop and ask. Do not resolve it silently.
 2. No `unwrap` or `expect` outside tests. Library crates use `thiserror`, binaries use `anyhow`.
-3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `dg-index` and the takedown routine.
+3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `wt-index` and the takedown routine.
 4. The ranker input type has no field for sangha, profile status, upload volume or donation link. Do not add one.
 5. A language model never produces text that is displayed as a quotation. It returns passage IDs and JSON only.
 6. Audio exists only under the configured scratch directory, and the pipeline deletes it explicitly on success and failure. No schema column or bucket holds audio.
@@ -34,4 +34,4 @@ cargo deny check
 
 - Migrations in `migrations/` are forward-only and never edited after merge. Add a new numbered file instead.
 - Compile-time checked queries use `sqlx::query!`. After changing one, run `cargo sqlx prepare --workspace` against a migrated database and commit `.sqlx/`.
-- Configuration keys are listed in `.env.example` and loaded by `dg_core::config`. Secrets are wrapped in `dg_core::config::Secret`, which never prints its value.
+- Configuration keys are listed in `.env.example` and loaded by `wt_core::config`. Secrets are wrapped in `wt_core::config::Secret`, which never prints its value.

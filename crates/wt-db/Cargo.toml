@@ -1,0 +1,26 @@
+[package]
+name = "wt-db"
+description = "The sqlx connection pool, the migration runner, repositories and views."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Starts a throwaway pgvector Postgres in Docker for integration tests in this and other crates.
+test-support = ["dep:testcontainers"]
+
+[dependencies]
+wt-core.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+testcontainers = { workspace = true, optional = true }
+
+[dev-dependencies]
+wt-db = { path = ".", features = ["test-support"] }
+tokio.workspace = true

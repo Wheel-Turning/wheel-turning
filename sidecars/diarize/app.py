@@ -8,7 +8,7 @@ is not ready, so nothing can mistake it for a working diarizer.
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="dg-diarize")
+app = FastAPI(title="wt-diarize")
 
 
 @app.get("/healthz")

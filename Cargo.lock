@@ -607,104 +607,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dg-api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "dg-core",
- "dg-db",
- "http-body-util",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "dg-asr"
-version = "0.1.0"
-
-[[package]]
-name = "dg-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dg-core",
- "dg-db",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "dg-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "dg-dana"
-version = "0.1.0"
-
-[[package]]
-name = "dg-db"
-version = "0.1.0"
-dependencies = [
- "dg-core",
- "dg-db",
- "sqlx",
- "testcontainers",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "dg-eval"
-version = "0.1.0"
-
-[[package]]
-name = "dg-extract"
-version = "0.1.0"
-
-[[package]]
-name = "dg-index"
-version = "0.1.0"
-
-[[package]]
-name = "dg-ingest"
-version = "0.1.0"
-
-[[package]]
-name = "dg-ml"
-version = "0.1.0"
-
-[[package]]
-name = "dg-registry"
-version = "0.1.0"
-
-[[package]]
-name = "dg-retrieve"
-version = "0.1.0"
-
-[[package]]
-name = "dg-segment"
-version = "0.1.0"
-
-[[package]]
-name = "dg-synth"
-version = "0.1.0"
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3221,6 +3123,104 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "wt-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "wt-core",
+ "wt-db",
+]
+
+[[package]]
+name = "wt-asr"
+version = "0.1.0"
+
+[[package]]
+name = "wt-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "tokio",
+ "tracing",
+ "wt-core",
+ "wt-db",
+]
+
+[[package]]
+name = "wt-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "wt-dana"
+version = "0.1.0"
+
+[[package]]
+name = "wt-db"
+version = "0.1.0"
+dependencies = [
+ "sqlx",
+ "testcontainers",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "wt-core",
+ "wt-db",
+]
+
+[[package]]
+name = "wt-eval"
+version = "0.1.0"
+
+[[package]]
+name = "wt-extract"
+version = "0.1.0"
+
+[[package]]
+name = "wt-index"
+version = "0.1.0"
+
+[[package]]
+name = "wt-ingest"
+version = "0.1.0"
+
+[[package]]
+name = "wt-ml"
+version = "0.1.0"
+
+[[package]]
+name = "wt-registry"
+version = "0.1.0"
+
+[[package]]
+name = "wt-retrieve"
+version = "0.1.0"
+
+[[package]]
+name = "wt-segment"
+version = "0.1.0"
+
+[[package]]
+name = "wt-synth"
+version = "0.1.0"
 
 [[package]]
 name = "xattr"

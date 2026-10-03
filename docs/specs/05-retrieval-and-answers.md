@@ -51,7 +51,7 @@ named_per_talk_cap = 2
 
 Two input types keep the ranker honest. Everything before selection works on `RankInput`, which has only a passage id, text and embedding. Selection works on `SelectInput`, which adds teacher id, talk id, start time and the relevance score. Neither has a field for sangha, profile status, upload volume or donation link, and sangha details are joined only when the answer is assembled.
 
-Steps in `dg-retrieve`:
+Steps in `wt-retrieve`:
 
 1. Full-text search. Content words from the query, minus stopwords, are joined with OR into a `to_tsquery('english', ...)` expression, since practitioner questions are long and an AND query returns nothing. Rank by `ts_rank_cd`, take `fts_top_k`.
 2. Vector search. Embed the query, run `set local hnsw.ef_search = 100`, and order by cosine distance, taking `vector_top_k`. Both searches read `servable_passage` and nothing else. In named mode both add `teacher_id = $1`.
@@ -73,7 +73,7 @@ pub struct SynthesisOutput { pub themes: Vec<ThemeDraft> }
 pub struct VerifierOutput { pub supported: bool, pub unsupported_part: Option<String> }
 ```
 
-The generation prompt, stored in `crates/dg-synth/prompts/synthesize.md`, must state these rules to the model:
+The generation prompt, stored in `crates/wt-synth/prompts/synthesize.md`, must state these rules to the model:
 
 - You receive a question and numbered passages from different talks. Return at most four themes.
 - Each theme is one sentence of at most 30 words describing a difference or a shared emphasis in how the passages approach the question.
@@ -90,7 +90,7 @@ Deterministic filters then run in this order, and each drop is counted and logge
 5. It contains no quotation marks and no teacher alias from the registry.
 6. Grounding. After stopword removal and simple stemming, at least `min_grounding_ratio` (default 0.4) of its content words appear in the union of its cited passages. This ratio is tuned on the claim audit and is a coarse guard against drift, not a proof.
 
-Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/dg-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `DG_LLM_VERIFIER_MODEL` may name a different model and defaults to `DG_LLM_MODEL`.
+Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_VERIFIER_MODEL` may name a different model and defaults to `WT_LLM_MODEL`.
 
 Outcomes:
 
@@ -136,7 +136,7 @@ Tuning keys under `[answer]` and `[synthesis]` in `config/retrieval.toml`: `link
 
 ## Dana calculator
 
-The PRD's dana mechanic is a pure function in `dg-dana`. It handles no money, performs no I/O and has no payment dependency.
+The PRD's dana mechanic is a pure function in `wt-dana`. It handles no money, performs no I/O and has no payment dependency.
 
 ```rust
 pub struct Recipient { pub sangha_id: SanghaId, pub name: String, pub url: Option<String>,
@@ -173,7 +173,7 @@ A synthetic fixture corpus with planted relevant passages across at least five f
 M5, retrieval and assembly
 
 - [ ] Full-text-only, vector-only and fused retrieval each return the planted relevant passages for the fixture queries, and fusion beats either alone on a mixed query.
-- [ ] Retrieval code reads only `servable_passage`. A test connects as `dg_web` and confirms a direct read of `passage` is denied, and a grep test fails on any other table name in `dg-retrieve` queries.
+- [ ] Retrieval code reads only `servable_passage`. A test connects as `dg_web` and confirms a direct read of `passage` is denied, and a grep test fails on any other table name in `wt-retrieve` queries.
 - [ ] Selection never pads. Fixtures with candidates from one, two and four teachers produce exactly that teacher count, and the count is stored.
 - [ ] Per-teacher cap, source ceiling, near-duplicate gap and MMR each have a test that fails when the rule is removed.
 - [ ] Named mode filters to the named teacher, suspends the three-teacher target, produces the `NamedNone` and `NamedFew` notices from fixtures, and never returns another teacher's passage.
@@ -194,4 +194,4 @@ M7, dana calculator
 
 - [ ] All property tests in the dana section pass with at least 1,000 cases each.
 - [ ] URL template validation rejects a non-HTTPS template and a template whose host differs from the donation URL.
-- [ ] `cargo deny` still passes with no payment dependency in `dg-dana`.
+- [ ] `cargo deny` still passes with no payment dependency in `wt-dana`.

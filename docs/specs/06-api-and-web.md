@@ -1,7 +1,7 @@
 <!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "06 API and web", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 06: API and web interface
 
-Implements the web parts of M5 and M7: the Axum application in `dg-api`, server-rendered with Askama templates and htmx, with no JavaScript build step. A polished interface is out of scope for v1, so the page is plain, fast and readable on a phone. Styling is one hand-written `static/app.css`, and htmx is vendored at a pinned version under `static/`.
+Implements the web parts of M5 and M7: the Axum application in `wt-api`, server-rendered with Askama templates and htmx, with no JavaScript build step. A polished interface is out of scope for v1, so the page is plain, fast and readable on a phone. Styling is one hand-written `static/app.css`, and htmx is vendored at a pinned version under `static/`.
 
 | Method and path | Auth | Purpose |
 | --- | --- | --- |
@@ -22,9 +22,9 @@ An ask is rate limited per tester by `ask_rate_per_hour` (default 30) with an in
 
 The PRD puts accounts out of scope, so access is an invite link and a cookie.
 
-1. `dg tester invite --label <text>` creates 32 random bytes from the operating system generator, encodes them URL-safe, stores only the SHA-256 in `tester.token_hash`, and prints the invite URL once. `dg tester list` and `dg tester revoke --label <text>` manage testers.
-2. `GET /join/{token}` hashes the token and looks it up by the unique index. If the tester exists and is not revoked, it sets the cookie `dg_session` and redirects to `/`. Any other result returns a generic `404` with no hint.
-3. The cookie value is the tester id and issue time, signed with HMAC-SHA256 under `DG_SESSION_SECRET`. It is `HttpOnly`, `Secure` outside `dev`, `SameSite=Lax`, with a 30-day lifetime.
+1. `wt tester invite --label <text>` creates 32 random bytes from the operating system generator, encodes them URL-safe, stores only the SHA-256 in `tester.token_hash`, and prints the invite URL once. `wt tester list` and `wt tester revoke --label <text>` manage testers.
+2. `GET /join/{token}` hashes the token and looks it up by the unique index. If the tester exists and is not revoked, it sets the cookie `wt_session` and redirects to `/`. Any other result returns a generic `404` with no hint.
+3. The cookie value is the tester id and issue time, signed with HMAC-SHA256 under `WT_SESSION_SECRET`. It is `HttpOnly`, `Secure` outside `dev`, `SameSite=Lax`, with a 30-day lifetime.
 4. Middleware verifies the signature on every request and checks that the tester is not revoked, with a 60-second cache. It updates `last_seen_at` at most once an hour.
 5. State-changing routes are `POST` and require a CSRF token, an HMAC of the session value rendered into each form as a hidden field.
 6. The token never appears in logs. The request logger records the path as `/join/[redacted]`.
@@ -32,7 +32,7 @@ The PRD puts accounts out of scope, so access is an invite link and a cookie.
 
 ## Answer page structure
 
-The answer page renders `AnswerView` from Spec 05 in this order. Templates live in `crates/dg-api/templates/`.
+The answer page renders `AnswerView` from Spec 05 in this order. Templates live in `crates/wt-api/templates/`.
 
 1. Header with the site name and a link to `/about`.
 2. The question as asked, then one line stating the result honestly, such as "Passages from 3 teachers" or "Found passages from 2 teachers for this question".
@@ -63,9 +63,9 @@ The PRD's policy is that query logs are disclosed to testers, read in aggregate,
 3. The three give routes work like this. `POST /a/{id}/dana` writes a `dana_event` of kind `split_computed` with the entered total. Opening the panel writes `panel_open`. `GET /give/...` writes `link_click` with the sangha id (null for the site line), then redirects. The redirect target comes from the registry row, never from a request parameter, and an unlisted or unverified sangha returns `404`.
 4. Feedback kinds are `good`, `not_faithful`, `not_relevant`, `note` and `flag_query`. `flag_query` also sets `query_log.flagged` and `flagged_at`, which `dg_web` is allowed to update and nothing else.
 5. Disclosure copy appears under the search box and on `/about`: "Your questions are logged. They are read only in aggregate, and one is opened only if you flag it."
-6. The reporting commands run as `dg_analyst`: `dg report answers --since <duration>` (from `v_answer_stats`), `dg report dana`, `dg report coverage` (from `v_consent_coverage`), and `dg report flagged` (through `flagged_queries()`). None of them can read unflagged query text.
+6. The reporting commands run as `dg_analyst`: `wt report answers --since <duration>` (from `v_answer_stats`), `wt report dana`, `wt report coverage` (from `v_consent_coverage`), and `wt report flagged` (through `flagged_queries()`). None of them can read unflagged query text.
 7. The owner role can read every table, so reading raw queries with it is outside the stated policy. The CLI offers no command that does so, and the runbook says the role is for migrations and break-glass repair only.
-8. `dg tester delete --label <text>` removes that tester and every query log, answer, feedback and dana event row for them, for a tester who asks to be forgotten. Query logs otherwise stay until the test ends.
+8. `wt tester delete --label <text>` removes that tester and every query log, answer, feedback and dana event row for them, for a tester who asks to be forgotten. Query logs otherwise stay until the test ends.
 
 ## Acceptance criteria
 
@@ -76,9 +76,9 @@ The PRD's policy is that query logs are disclosed to testers, read in aggregate,
 - [ ] Snapshot tests with `insta` cover the answer page for standard, named, thin coverage, none found, and multi-named cases.
 - [ ] A passage whose text contains `<script>` renders escaped, and no model text appears outside the synthesis section.
 - [ ] `/give` logs a click and redirects only to the registry URL. A tampered `amount_cents`, an unverified sangha and an unlisted sangha are each rejected.
-- [ ] The dana fragment equals the output of the `dg-dana` function for the same inputs, and the no-JavaScript path shows the same split.
+- [ ] The dana fragment equals the output of the `wt-dana` function for the same inputs, and the no-JavaScript path shows the same split.
 - [ ] `flag_query` sets the flag, and the flagged query is readable only through `flagged_queries()`.
-- [ ] `dg report` commands run as `dg_analyst` and cannot read unflagged query text.
+- [ ] `wt report` commands run as `dg_analyst` and cannot read unflagged query text.
 - [ ] A failed log insert produces an error page and no answer.
 - [ ] The rate limit returns `429` after `ask_rate_per_hour` asks in an hour.
 - [ ] Security headers and `robots` rules are present on every response.
