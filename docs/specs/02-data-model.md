@@ -4,7 +4,7 @@ Implements the whole v1 schema for Postgres 16 with pgvector. Migrations live in
 
 Conventions:
 
-- Primary keys are `uuid` with `gen_random_uuid()`. Rust wraps each in a newtype in `dg-core` such as `TalkId` so ids of different tables cannot be mixed.
+- Primary keys are `uuid` with `gen_random_uuid()`. Rust wraps each in a newtype in `wt-core` such as `TalkId` so ids of different tables cannot be mixed.
 - Timestamps are `timestamptz` and end in `_at`. Media offsets are integer milliseconds ending in `_ms`. Money is integer cents ending in `_cents`.
 - Every mutable table has `created_at` and `updated_at`, with `updated_at` kept by a shared `set_updated_at()` trigger.
 - Enums are Postgres enums. New values are added with `alter type ... add value`.
@@ -298,7 +298,7 @@ left join work_locator wl on wl.id = c.work_locator_id
 left join work w on w.id = wl.work_id;
 ```
 
-Roles are created by migration as `NOLOGIN` group roles. An ops command, `dg db create-login --role <name>`, creates the login role that inherits from one and takes its password from Secrets Manager. Passwords never appear in migrations.
+Roles are created by migration as `NOLOGIN` group roles. An ops command, `wt db create-login --role <name>`, creates the login role that inherits from one and takes its password from Secrets Manager. Passwords never appear in migrations.
 
 | Role | Used by | Grants |
 | --- | --- | --- |

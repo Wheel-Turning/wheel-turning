@@ -12,7 +12,7 @@ Only the accented arrow lets a talk into the pipeline, and each pipeline job rec
 
 ## Source adapters
 
-All sources implement one trait in `dg-ingest`. Discovery returns metadata only. The two fetch methods take a `Talk<Consented>`, so media and captions cannot be requested for a talk that has not passed the gate.
+All sources implement one trait in `wt-ingest`. Discovery returns metadata only. The two fetch methods take a `Talk<Consented>`, so media and captions cannot be requested for a talk that has not passed the gate.
 
 ```rust
 #[async_trait]
@@ -55,9 +55,9 @@ The YouTube adapter has these behaviors:
 2. The source URL stored for each talk is the canonical watch URL. Timestamped links append `&t=<seconds>s`.
 3. In `owner_api` mode, captions come from `captions.list` and `captions.download`, which need OAuth consent from the owner of the channel. Credentials are a refresh token in Secrets Manager (`YOUTUBE_OAUTH_REFRESH_TOKEN`). If the channel is not controlled by the founder, `fetch_captions` returns `None` and the pipeline transcribes from audio.
 4. The Data API offers no media download, so `fetch_media` in `owner_api` mode returns `IngestError::MediaNotAvailable` and the worker falls back to the storage adapter, which holds the SSZ video.
-5. In `third_party` mode the adapter shells out to `yt-dlp` for subtitles and audio. This mode exists only behind `DG_ALLOW_THIRD_PARTY_FETCH=true`. The default is false, startup logs a warning when it is true, and the adapter returns `IngestError::ThirdPartyFetchDisabled` otherwise. The PRD lists YouTube terms and caption ingestion at scale as a counsel question, so nobody enables this mode before that review.
+5. In `third_party` mode the adapter shells out to `yt-dlp` for subtitles and audio. This mode exists only behind `WT_ALLOW_THIRD_PARTY_FETCH=true`. The default is false, startup logs a warning when it is true, and the adapter returns `IngestError::ThirdPartyFetchDisabled` otherwise. The PRD lists YouTube terms and caption ingestion at scale as a counsel question, so nobody enables this mode before that review.
 
-The storage adapter lists files under its root with name, size, modified time and duration from `ffprobe`. It reads a file only inside `fetch_media`. `dg ingest match-storage` pairs storage files to YouTube records by normalized title, date and duration, writes a review table of proposed matches, and on confirmation sets `source_video.raw.storage_key` on the YouTube record. A talk with no storage match stays at `needs_review` with reason `no_media`.
+The storage adapter lists files under its root with name, size, modified time and duration from `ffprobe`. It reads a file only inside `fetch_media`. `wt ingest match-storage` pairs storage files to YouTube records by normalized title, date and duration, writes a review table of proposed matches, and on confirmation sets `source_video.raw.storage_key` on the YouTube record. A talk with no storage match stays at `needs_review` with reason `no_media`.
 
 ## Deduplication and classification
 
@@ -72,11 +72,11 @@ Discovery creates a `source_video` row and a `talk` row in state `discovered` fo
 
 A talk that survives every rule moves to `awaiting_consent`. Every merge, exclusion and reclassification writes a row to `correction_log`.
 
-`dg ingest report --out report.html` writes the review page: duplicate clusters with the kept record marked, excluded items with reasons, talks in `needs_review` with their reasons, series coverage by part number so a gap such as missing Genjokoan paragraphs 5 and 6 is visible, a month-by-month count that shows a gap like April 2022 to February 2023, and any donation-looking links found in descriptions for a human to verify. The report sets nothing automatically.
+`wt ingest report --out report.html` writes the review page: duplicate clusters with the kept record marked, excluded items with reasons, talks in `needs_review` with their reasons, series coverage by part number so a gap such as missing Genjokoan paragraphs 5 and 6 is visible, a month-by-month count that shows a gap like April 2022 to February 2023, and any donation-looking links found in descriptions for a human to verify. The report sets nothing automatically.
 
 ## The consent gate in the pipeline
 
-The gate has a Rust half and a database half, and both must agree. The database half is the `past_gate_requires_consent` constraint in Spec 02. The Rust half is a typestate in `dg-core`.
+The gate has a Rust half and a database half, and both must agree. The database half is the `past_gate_requires_consent` constraint in Spec 02. The Rust half is a typestate in `wt-core`.
 
 ```rust
 pub struct Pending;
@@ -96,16 +96,16 @@ impl Talk<Pending> {
 
 Rules:
 
-1. Only `authorize` builds a `Talk<Consented>`, and its constructor is private to `dg-core`. Every function that fetches media, writes a transcript, segments, extracts, embeds or indexes takes a `&Talk<Consented>`.
+1. Only `authorize` builds a `Talk<Consented>`, and its constructor is private to `wt-core`. Every function that fetches media, writes a transcript, segments, extracts, embeds or indexes takes a `&Talk<Consented>`.
 2. Every job handler loads its talk and calls `authorize` again at the start, so a consent change between stages stops the pipeline at the next job.
 3. State changes go through `TalkRepo::advance(&Talk<Consented>, next_state)`, which exists only for consented talks. The only way into `cleared` is `TalkRepo::clear(Talk<Consented>)`.
-4. `dg consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `declined`, talks move to `excluded` with reason `declined`. With `withdrawn`, the command stops and asks for explicit confirmation, then runs the takedown routine in Spec 07 for the teacher.
-5. `dg talk set-rights --talk <id> | --teacher <name> --holder <text>` sets the rights holder and logs the change. `--holder speaker` writes the teacher's display name. A talk may also be excluded by hand with `dg talk exclude --talk <id> --reason <text>`, which is how a speaker's limits are applied in v1.
+4. `wt consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `declined`, talks move to `excluded` with reason `declined`. With `withdrawn`, the command stops and asks for explicit confirmation, then runs the takedown routine in Spec 07 for the teacher.
+5. `wt talk set-rights --talk <id> | --teacher <name> --holder <text>` sets the rights holder and logs the change. `--holder speaker` writes the teacher's display name. A talk may also be excluded by hand with `wt talk exclude --talk <id> --reason <text>`, which is how a speaker's limits are applied in v1.
 6. A teacher with no consent row is treated as `unknown`. The default is never permission.
 
 ## Job queue
 
-The queue is the `job` table from Spec 02 with a small worker in `dg-cli`. Claiming uses `SKIP LOCKED` so any number of workers can run without double-claiming.
+The queue is the `job` table from Spec 02 with a small worker in `wt-cli`. Claiming uses `SKIP LOCKED` so any number of workers can run without double-claiming.
 
 ```sql
 with next as (
@@ -125,17 +125,17 @@ Behavior:
 2. The idempotency key is `{kind}:{talk_id}:{input_hash}`, where the input hash covers the stage's inputs (for example the current transcript hash and the glossary version). Enqueue uses `on conflict do nothing`, so re-enqueueing unchanged work is a no-op and changed inputs produce a new job.
 3. On failure with attempts left, the job returns to `queued` with `run_at` pushed back by an exponential delay of 30 seconds doubled per attempt and capped at one hour, and `last_error` is stored. After `max_attempts` the job becomes `dead` and the talk keeps its stage state with `state_reason` set to the error summary.
 4. A reaper returns `running` jobs whose `locked_at` is older than `job_lock_timeout_s` (default 7200) to `queued`. Long jobs such as ASR refresh `locked_at` every minute.
-5. `dg worker --kinds audio --concurrency 1` runs only the named kinds, so the GPU host takes the heavy stages and any other machine takes the rest.
-6. `dg pipeline retry --talk <id>` re-enqueues the failed stage. `dg pipeline advance` enqueues `audio` for every talk in `cleared`.
+5. `wt worker --kinds audio --concurrency 1` runs only the named kinds, so the GPU host takes the heavy stages and any other machine takes the rest.
+6. `wt pipeline retry --talk <id>` re-enqueues the failed stage. `wt pipeline advance` enqueues `audio` for every talk in `cleared`.
 
 ## Commands, configuration and acceptance
 
 Commands added by this spec:
 
-- `dg registry import --file registry.toml` loads teachers, aliases and sanghas.
-- `dg consent set | list`, `dg talk set-rights`, `dg talk exclude`.
-- `dg ingest discover [--source <name>]`, `dg ingest match-storage`, `dg ingest report --out <path>`.
-- `dg pipeline advance`, `dg pipeline retry --talk <id>`, `dg worker --kinds <list> --concurrency <n>`.
+- `wt registry import --file registry.toml` loads teachers, aliases and sanghas.
+- `wt consent set | list`, `wt talk set-rights`, `wt talk exclude`.
+- `wt ingest discover [--source <name>]`, `wt ingest match-storage`, `wt ingest report --out <path>`.
+- `wt pipeline advance`, `wt pipeline retry --talk <id>`, `wt worker --kinds <list> --concurrency <n>`.
 
 Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `job_lock_timeout_s = 7200`.
 
@@ -153,8 +153,8 @@ Acceptance criteria for M3:
 - [ ] A synthetic corpus with planted duplicates, an 11-second clip, a title-variant duplicate and a differently dated near-duplicate produces the expected exclusions and no false merges.
 - [ ] Series extraction handles the five named series and records part numbers. The report lists missing parts.
 - [ ] Eight concurrent workers never claim the same job. Retry backoff, `dead` after max attempts, and the stale-lock reaper each have a test.
-- [ ] With `DG_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
-- [ ] `dg ingest report` renders every section listed above from the fixture corpus.
+- [ ] With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
+- [ ] `wt ingest report` renders every section listed above from the fixture corpus.
 
 ## Licensed sources
 
@@ -173,14 +173,14 @@ Noncommercial and no-derivatives variants are off by default because both raise 
 
 Mechanics:
 
-1. `dg license capture --sangha <name> --url <page> --code <license code> --scope "<text>"` fetches the page with plain HTTP and respects `robots.txt`, saves its text to S3 under `license-evidence/`, records the SHA-256, and inserts a `license_evidence` row with `allowed = false`.
-2. `dg license approve --id <evidence id> --reviewer <name>` is a person's step after reading the snapshot. It sets `allowed = true` only if the license code is in `allowed_license_codes`, and refuses otherwise.
-3. `dg license apply --source <name> --evidence <id> [--limit <n>] [--since <date>]` sets `rights_basis = license`, `rights_holder` to the sangha name or the teacher where known, and `license_evidence_id` on matching talks, then moves them to `cleared`. For YouTube sources it applies only to videos whose `raw.status.license` is `creativeCommon`, so discovery now requests `part=snippet,contentDetails,status` from `videos.list`. Other videos stay gated.
+1. `wt license capture --sangha <name> --url <page> --code <license code> --scope "<text>"` fetches the page with plain HTTP and respects `robots.txt`, saves its text to S3 under `license-evidence/`, records the SHA-256, and inserts a `license_evidence` row with `allowed = false`.
+2. `wt license approve --id <evidence id> --reviewer <name>` is a person's step after reading the snapshot. It sets `allowed = true` only if the license code is in `allowed_license_codes`, and refuses otherwise.
+3. `wt license apply --source <name> --evidence <id> [--limit <n>] [--since <date>]` sets `rights_basis = license`, `rights_holder` to the sangha name or the teacher where known, and `license_evidence_id` on matching talks, then moves them to `cleared`. For YouTube sources it applies only to videos whose `raw.status.license` is `creativeCommon`, so discovery now requests `part=snippet,contentDetails,status` from `videos.list`. Other videos stay gated.
 4. The gate's `authorize` takes a rights basis, either `Consent(&CurrentConsent)` or `License(&LicenseEvidence)`. `GateError` gains `LicenseNotAllowed` and `LicenseUnverified`. Every stage re-authorizes as before. Setting `allowed = false` later stops that sangha's talks at their next job and removes them from the serving view at once.
 5. A new `RssAdapter` (`platform = "rss"`) reads podcast feeds. It takes title, publish date, duration, description and the enclosure URL from each item, and `fetch_media` downloads the enclosure, which is the file the publisher distributes for listening. It sends a `User-Agent` naming the project and a contact address, waits at least one second between requests, and returns `None` for captions.
-6. A sangha's licensed talks bring new teachers. Import them with `dg registry import`. They need no `speaker_consent` rows, and an unresolved speaker still lands in `needs_review`.
+6. A sangha's licensed talks bring new teachers. Import them with `wt registry import`. They need no `speaker_consent` rows, and an unresolved speaker still lands in `needs_review`.
 7. Start with a capped batch chosen to cover the 50-question topics, and measure teacher breadth before ingesting more. Transcribing a large archive costs real GPU time.
-8. Everything else the PRD promises still holds: attribution, the sangha's own donation link, which stays unverified until someone verifies it, and a removal path. `dg takedown --sangha <name>` expands into per-talk takedowns, each logged with scope `talk`. Notify each sangha before the corpus widens beyond the private demo, and honor any removal request even where the license would allow use.
+8. Everything else the PRD promises still holds: attribution, the sangha's own donation link, which stays unverified until someone verifies it, and a removal path. `wt takedown --sangha <name>` expands into per-talk takedowns, each logged with scope `talk`. Notify each sangha before the corpus widens beyond the private demo, and honor any removal request even where the license would allow use.
 
 ```toml
 [[source]]
@@ -198,11 +198,11 @@ Acceptance criteria for licensed sources:
 - [ ] `apply` on a YouTube source skips videos that are not flagged `creativeCommon`.
 - [ ] Setting evidence to `allowed = false` stops the talk's next job and removes it from the serving view.
 - [ ] `RssAdapter` passes feed fixtures, sends the identifying `User-Agent`, honors the delay, and never fetches a path that `robots.txt` disallows.
-- [ ] `dg takedown --sangha <name>` removes every talk of a sangha and logs each one.
+- [ ] `wt takedown --sangha <name>` removes every talk of a sangha and logs each one.
 
 ## Noncommercial conditions
 
-Purpose. Dharma Gates is not a commercial venture. It exists to help people find what teachers have said and to carry dana to the sanghas that gave the talks. The rules below turn that intent into checks the build enforces, so a noncommercial license is relied on only while they hold. They do not settle whether an NC or ND license permits transcription and excerpting. That question stays with counsel. Forming a nonprofit is a legal step outside the code, and the configuration flag below is an assertion the build checks, not a status.
+Purpose. Wheel Turning is not a commercial venture. It exists to help people find what teachers have said and to carry dana to the sanghas that gave the talks. The rules below turn that intent into checks the build enforces, so a noncommercial license is relied on only while they hold. They do not settle whether an NC or ND license permits transcription and excerpting. That question stays with counsel. Forming a nonprofit is a legal step outside the code, and the configuration flag below is an assertion the build checks, not a status.
 
 Rules:
 
@@ -233,7 +233,7 @@ Acceptance criteria:
 
 ## First license read, October 2, 2026
 
-Read from public pages by Claude, not yet captured with `dg license capture` and not approved by a person. The status column says what each source needs next.
+Read from public pages by Claude, not yet captured with `wt license capture` and not approved by a person. The status column says what each source needs next.
 
 | Source | What the pages say | License code | Allowed by default | Status |
 | --- | --- | --- | --- | --- |
@@ -248,21 +248,21 @@ Decision of October 3, 2026. Recorded talks from teachers who have not replied a
 
 What does not change. Student speech is never stored, indexed or shown, whatever the basis. A talk still needs a resolved speaker, a known rights holder and a registered sangha. A speaker who has declined or withdrawn is never used. Honest labeling holds: the page never says a mandated talk is used with the teacher's permission.
 
-The switch. A `rights_setting` row `talks_basis` is `consent` or `mandate`. The migration default is `consent`, so a fresh database never serves a mandated talk until the owner decides. `dg rights set-talks-basis mandate --by "<name>"` turns the policy on, `dg rights set-talks-basis consent --by "<name>"` turns it off, and each change writes a `rights_event`. While it is `consent`, the serving view returns no mandated talks, though nothing is deleted.
+The switch. A `rights_setting` row `talks_basis` is `consent` or `mandate`. The migration default is `consent`, so a fresh database never serves a mandated talk until the owner decides. `wt rights set-talks-basis mandate --by "<name>"` turns the policy on, `wt rights set-talks-basis consent --by "<name>"` turns it off, and each change writes a `rights_event`. While it is `consent`, the serving view returns no mandated talks, though nothing is deleted.
 
 How a talk is cleared under the mandate:
 
-1. A talk source, such as a sangha's YouTube channel, is added with `dg source add --kind talks --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`. It creates mandate evidence and a `source_policy` row of kind `talks`.
+1. A talk source, such as a sangha's YouTube channel, is added with `wt source add --kind talks --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`. It creates mandate evidence and a `source_policy` row of kind `talks`.
 2. Discovery and classification run as before. When a talk's speaker resolves to a registered teacher who has not opted out and has no active exclusion, and the source is enabled, the talk takes `rights_basis = 'mandate'`, the source's evidence, and state `cleared`, with no wait for a reply. An unresolved speaker still goes to `needs_review`.
 3. Every pipeline job re-authorizes the talk, so an opt-out stops the next job at once.
 4. In the gate, `authorize` gains `RightsBasis::Mandate(&MandateEvidence)`. `GateError` gains `MandateOff`, `TeacherOptedOut` and `Excluded`.
-5. A teacher's answer changes the basis. `dg consent set --status granted` moves that teacher's talks to `speaker_consent` and the page begins to say they are used with permission. `declined` or `withdrawn` runs the teacher takedown and creates exclusions, replacing the earlier behavior of only excluding talks.
+5. A teacher's answer changes the basis. `wt consent set --status granted` moves that teacher's talks to `speaker_consent` and the page begins to say they are used with permission. `declined` or `withdrawn` runs the teacher takedown and creates exclusions, replacing the earlier behavior of only excluding talks.
 
 Teacher controls and notice:
 
-- `dg teacher opt-out --teacher <name> --reason "<text>" --by "<name>"` sets `opted_out_at`, which removes that teacher's passages from the serving view immediately, then runs the takedown and adds permanent exclusions for the person and the content hashes of the removed transcripts. `--suspend-only` stops after the first step, for the period while a request is verified.
+- `wt teacher opt-out --teacher <name> --reason "<text>" --by "<name>"` sets `opted_out_at`, which removes that teacher's passages from the serving view immediately, then runs the takedown and adds permanent exclusions for the person and the content hashes of the removed transcripts. `--suspend-only` stops after the first step, for the period while a request is verified.
 - Teachers, like anyone, can use the Rights and removal page, and every passage, talk or text, carries a "Report this excerpt" link. `PassageView` gains a `report_link`.
-- `dg rights notice-draft --teacher <name>` fills `templates/teacher_notice.md` with the facts a teacher should have: what the tool does, that talks are used on the project's own decision, what an excerpt looks like, how to leave with one message, and an invitation to give explicit permission. The notice is drafted and recorded by the CLI and sent by hand. Nothing is sent automatically. Recording the send, the follow-up date and the reply uses the same `permission_request` and ledger commands as for texts, now keyed by teacher.
+- `wt rights notice-draft --teacher <name>` fills `templates/teacher_notice.md` with the facts a teacher should have: what the tool does, that talks are used on the project's own decision, what an excerpt looks like, how to leave with one message, and an invitation to give explicit permission. The notice is drafted and recorded by the CLI and sent by hand. Nothing is sent automatically. Recording the send, the follow-up date and the reply uses the same `permission_request` and ledger commands as for texts, now keyed by teacher.
 - On a page, a mandated passage says "Talk by \<teacher>, \<sangha>" with the source link and the attribution line stored with the mandate.
 
 Migrations. `0015_mandate_basis.sql` holds only `alter type rights_basis add value 'mandate';`, because a new enum value cannot be used in the same transaction. `0016_mandated_talks.sql`:
@@ -337,17 +337,17 @@ Acceptance criteria for mandated talks:
 - [ ] With `talks_basis = 'consent'`, a mandated, ready talk returns nothing from `servable_passage`. After `set-talks-basis mandate` it serves, and each switch writes a `rights_event`.
 - [ ] A talk from a mandated talk source with a resolved, non-opted-out teacher reaches `cleared` without a consent row, and an unresolved speaker lands in `needs_review`.
 - [ ] The constraint rejects a mandated talk with no evidence, and the typestate cannot build a `Talk<Consented>` for an opted-out teacher or an excluded one.
-- [ ] `dg teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks.
+- [ ] `wt teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks.
 - [ ] `--suspend-only` removes the teacher from serving and deletes nothing.
 - [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown.
 - [ ] A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
-- [ ] `dg rights notice-draft` produces a file from the template and sends nothing.
+- [ ] `wt rights notice-draft` produces a file from the template and sends nothing.
 
 ## Seattle Soto Zen sources
 
 Decision of October 3, 2026, revised the same day. SSZ publishes every dharma talk on Vimeo, and only some of them on Apple Podcasts and Spotify. Vimeo is therefore the complete list and the listening link, and the podcast feed is a partial source of audio. The v1 route is:
 
-1. Vimeo is the canonical list. A `VimeoAdapter` in `dg-ingest` (platform `vimeo`) discovers talks in two ways. With `WT_VIMEO_ACCESS_TOKEN` it lists the account's videos through the Vimeo API and reads name, description, duration, creation time, link, privacy and license. Without a token it reads the video links from the public talks page at `seattlesotozen.org/talks-page/`, obeying `robots.txt`, and takes each video's title, duration and upload date from Vimeo's public oEmbed endpoint. Either way each video becomes a `source_video` of platform `vimeo`, with its metadata in `raw`.
+1. Vimeo is the canonical list. A `VimeoAdapter` in `wt-ingest` (platform `vimeo`) discovers talks in two ways. With `WT_VIMEO_ACCESS_TOKEN` it lists the account's videos through the Vimeo API and reads name, description, duration, creation time, link, privacy and license. Without a token it reads the video links from the public talks page at `seattlesotozen.org/talks-page/`, obeying `robots.txt`, and takes each video's title, duration and upload date from Vimeo's public oEmbed endpoint. Either way each video becomes a `source_video` of platform `vimeo`, with its metadata in `raw`.
 2. Media comes from the first route that works, in this order. (a) A matching podcast episode. `wt source resolve-feed --apple-id 1472964846` finds the feed address, the owner confirms it, and the importer matches episodes to Vimeo talks by normalized title, date and duration. A matched episode's audio enclosure is used and nothing is downloaded from Vimeo. The feed source is configured with `role = "audio_only"`, so it never creates talk records and only attaches audio to talks that Vimeo already lists. (b) A Vimeo download link, which exists only when the account owner has enabled downloads for a video, read through the API with a token that has the `private` and `video_files` scopes. (c) A file from SSZ's own storage through the storage adapter. (d) Third-party fetching, which stays off behind `WT_ALLOW_THIRD_PARTY_FETCH` and needs counsel's answer and SSZ's agreement first, because Vimeo's terms limit downloading to what an owner allows.
 3. The owner asks SSZ for route (b) or (c). Ask whoever administers the SSZ Vimeo account either to create a personal access token for the project with the `public`, `private` and `video_files` scopes and enable downloads on the talks, or to share a bulk export. This is the same conversation as the SSZ permission note in the PRD.
 4. Link style. `link_style = "vimeo"` renders the page address with `#t=<seconds>s`. A talk with only a podcast match uses `none`, and the page shows "starts at h:mm:ss". This supersedes rule 2 of Answer assembly in Spec 05.
