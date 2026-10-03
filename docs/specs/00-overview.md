@@ -1,4 +1,4 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "Overview and build plan", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
+<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "Overview and build plan", on 2026-10-03. The doc is the source of truth until this file is edited in the repo. -->
 # Dharma Gates: V1 Technical Specs
 
 2026-10-02 · @Alex
@@ -131,3 +131,13 @@ Several PRD open items gate real data, not software. The code is built so each o
 A manual look at ten SSZ videos to check whether files are trimmed is an inspection by a person. It produces notes, not stored text, and does not need the gate.
 
 Licensed corpus. The PRD lists open-license material and other sanghas as out of scope for v1, and this build amends that. Soto sanghas that publish talks under a license the project may rely on can be added beside consented SSZ talks, cleared by license evidence instead of speaker consent. The rules, commands and tests are in the Licensed sources section of the ingestion spec. Two items need a person: reading each sangha's license statement before approving it, and counsel's answer on noncommercial and no-derivatives variants, which the build rejects by default.
+
+Texts and reference assets. Foundational texts such as the Dhammapada and the Platform Sutra, and background material such as glossaries and lineage charts, are specified in 08 Texts and reference. Texts are searchable in their own section and never count as teachers. Reference assets feed the pipeline and are never shown as results.
+
+## Feature backlog
+
+Items that are decided but deliberately not built or enabled in v1.
+
+1. Automatic sending of permission requests, teacher notices and follow-ups from a project domain email address. Domain email is not enabled yet. Until it is, the CLI drafts every request and notice, a person sends it by hand, and `dg rights sent` records the date and schedules the follow-up. When it is built, sending goes through the same ledger so nothing changes in the records.
+2. Email notification for new Rights and removal requests, under the setting name `DG_RIGHTS_NOTIFY_EMAIL`. Until then, open requests are read with `dg takedown requests list` and the audit warns when one is overdue.
+3. Public per-teacher status on the rights page, if teachers ask for it. The page lists sources only for now.

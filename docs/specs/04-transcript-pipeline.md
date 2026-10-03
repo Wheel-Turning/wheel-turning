@@ -1,4 +1,4 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "04 Transcript pipeline", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
+<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "04 Transcript pipeline", on 2026-10-03. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 04: Transcript pipeline
 
 Implements M4. It takes a `cleared` talk to `ready`: media in, passages and embeddings out, audio deleted, student speech never stored. The gate rules are in Spec 03 and every handler here starts by re-authorizing the talk. Table definitions are in Spec 02.

@@ -1,4 +1,4 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "07 Evaluation and ops", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
+<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "07 Evaluation and ops", on 2026-10-03. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 07: Evaluation, testing and operations
 
 Implements M8 and the test layer every earlier milestone relies on. The PRD's pass and fail criteria are only meaningful if the harness can run unchanged on every build, so evaluation is a product feature here, not an afterthought.

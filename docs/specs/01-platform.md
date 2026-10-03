@@ -1,4 +1,4 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "01 Platform", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
+<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "01 Platform", on 2026-10-03. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 01: Platform and infrastructure
 
 Implements milestones M0 and M1. This spec covers the local development stack, configuration, the AWS footprint in Terraform, and CI. The data model lives in Spec 02 and every pipeline stage in Specs 03 and 04.

@@ -1,4 +1,4 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "06 API and web", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
+<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "06 API and web", on 2026-10-03. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 06: API and web interface
 
 Implements the web parts of M5 and M7: the Axum application in `dg-api`, server-rendered with Askama templates and htmx, with no JavaScript build step. A polished interface is out of scope for v1, so the page is plain, fast and readable on a phone. Styling is one hand-written `static/app.css`, and htmx is vendored at a pinned version under `static/`.
