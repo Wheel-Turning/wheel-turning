@@ -1,4 +1,4 @@
-# Dharma Gates
+# Wheel Turning
 
 A private, text-only retrieval demo over consented Zen talks. A tester asks a situational question and gets grouped verbatim passages, a verified synthesis line, source links that land on the right moment, and a dana panel, drawn only from talks whose speakers have consented.
 
