@@ -41,7 +41,7 @@ Ten dimensions cover the five properties. Where a line is numeric it is a starti
 
 Checks sit at the stage where an error is cheapest to catch, and the earliest ones keep bad data from ever becoming text.
 
-&#91;embedded content: quality gates by pipeline stage · 8 checks\]
+In short: one check per pipeline stage, each placed where an error is cheapest to catch, with the consent gate first. Each check names its stage, what must pass, and where a failing talk goes.
 
 Read each row left to right: the stage, the check it must pass, and where a failing talk goes. The consent gate comes first because nothing downstream should exist for a talk that fails it. Blocking failures follow the quarantine rules in the failure handling section.
 

@@ -47,7 +47,14 @@ In v1 the practitioners are SSZ members and a few invited teachers, not the publ
 
 Each phase tests one hypothesis and ends at a gate, so the project can fail fast. v1 ends at Gate A, the two v2 tracks run in parallel, and both must finish before Gate B.
 
-&#91;embedded content: roadmap · 4 phases, 2 gates\]
+| Phase | Hypothesis | Gate |
+| --- | --- | --- |
+| v1: private demo | Passages teachers would stand behind, and dana links get followed | Gate A: faithful retrieval, no invented claim in synthesis, testers following dana links |
+| v2a: teacher track | Teachers judge the excerpts and control their own talks | Gate B |
+| v2b: sangha track | Sanghas supply archives and keep donation links right | Gate B |
+| v3: gifts and texts | Single-gift payment split and licensed translations | None yet |
+
+Gate B: roughly 15 to 25 Soto centers, a few thousand segmented talks, three or more teachers in most answers. v2a and v2b run as separate tracks, so either can slip without stalling the other.
 
 Translation license conversations start during v1, because publisher timelines run in months and their answers decide what v3 can contain.
 

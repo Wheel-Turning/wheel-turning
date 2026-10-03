@@ -70,7 +70,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 
 The v1 footprint is small on purpose. One web service, one database and three buckets carry everything, and a GPU host exists only while a batch is running.
 
-&#91;embedded content: AWS topology for v1 · 8 resources, 2 audio locations\]
+In short: tester → load balancer → web service → database (one view read, query logs written). The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager feeds both compute roles at start, and both services log to CloudWatch Logs.
 
 The tester reaches the web service through the load balancer. The web service reads one database view and writes query logs. The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager holds the database credentials, the Claude and YouTube keys and the session secret, and both compute roles read them at start. CloudWatch Logs receives structured logs from both services.
 

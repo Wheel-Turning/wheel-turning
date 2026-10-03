@@ -6,7 +6,7 @@ Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It tak
 
 Every talk has one state in `talk.state`. The pipeline states are the eight stages between `cleared` and `ready` and are listed in Spec 02.
 
-&#91;embedded content: talk state machine · 10 states, 1 gate\]
+In short: a talk enters the pipeline only through the consent gate, which leads to `cleared`. From `cleared` it moves through the pipeline stages to `ready`. Quarantine holds a talk out of serving and returns it to the pipeline after repair and a passing re-check. Takedown leads to `withdrawn`.
 
 Only the accented arrow lets a talk into the pipeline, and each pipeline job rechecks the gate before it runs. Quarantine holds a talk out of serving without deleting anything, and a talk returns to the pipeline after repair and a passing re-check. Takedown is the only route to `withdrawn`.
 
