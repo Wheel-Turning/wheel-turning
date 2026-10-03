@@ -124,8 +124,8 @@ M0, foundation
 M1, AWS baseline
 
 - [ ] `terraform apply` from an empty account creates the stack and `terraform destroy` removes it cleanly.
-- [ ] `/healthz` answers over HTTPS through the load balancer.
-- [ ] A test proves the database accepts connections from the web and batch security groups and from nothing else.
-- [ ] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
+- [x] `/healthz` answers over HTTPS through the load balancer.
+- [x] A test proves the database accepts connections from the web and batch security groups and from nothing else.
+- [x] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
 - [ ] Setting `batch_host_enabled` to false destroys the batch host and true recreates it.
-- [ ] `deploy.yml` ships a tagged image and runs migrations as a one-off task.
+- [x] `deploy.yml` ships a tagged image and runs migrations as a one-off task.
