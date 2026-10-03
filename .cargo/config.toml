@@ -1,0 +1,4 @@
+# Offline query data for sqlx::query! macros, so builds outside this directory (trybuild's
+# compile-fail crates) find it too.
+[env]
+SQLX_OFFLINE_DIR = { value = ".sqlx", relative = true }
