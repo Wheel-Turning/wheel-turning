@@ -209,7 +209,7 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
-  # ---- Batch host: launch template and the GPU instance --------------------------------------
+  # ---- Batch host: launch template and the instance (GPU, or CPU for the toggle test) --------
   statement {
     sid = "BatchLaunchTemplate"
     actions = [
@@ -225,7 +225,7 @@ data "aws_iam_policy_document" "deploy" {
     condition {
       test     = "StringEquals"
       variable = "ec2:InstanceType"
-      values   = ["g5.xlarge"]
+      values   = var.batch_instance_types
     }
   }
   statement {

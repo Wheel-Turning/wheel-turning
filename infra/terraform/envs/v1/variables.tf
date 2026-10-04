@@ -55,3 +55,9 @@ variable "batch_host_enabled" {
   type        = bool
   default     = false
 }
+
+variable "batch_host_instance_type" {
+  description = "Batch host instance type. The default is the GPU type the pipeline needs; AWS declined the account's GPU quota, so v1 transcribes on the owner's own machine and this only runs for the toggle test with a small CPU type such as t3.small (Spec 01, GPU access)."
+  type        = string
+  default     = "g5.xlarge"
+}

@@ -25,3 +25,9 @@ variable "state_bucket" {
   type    = string
   default = "dharma-gates-tfstate-904883674947"
 }
+
+variable "batch_instance_types" {
+  description = "Instance types CI may launch for the batch host: the GPU default, and the small CPU type the M1 toggle test uses after AWS declined the GPU quota (Spec 01, GPU access)."
+  type        = list(string)
+  default     = ["g5.xlarge", "t3.small"]
+}
