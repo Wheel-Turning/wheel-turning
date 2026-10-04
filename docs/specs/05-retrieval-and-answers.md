@@ -89,7 +89,7 @@ Deterministic filters then run in this order, and each drop is counted and logge
 5. It contains no quotation marks and no teacher alias from the registry.
 6. Grounding. After stopword removal and simple stemming, at least `min_grounding_ratio` (default 0.4) of its content words appear in the union of its cited passages. This ratio is tuned on the claim audit and is a coarse guard against drift, not a proof.
 
-Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_VERIFIER_MODEL` may name a different model and defaults to `WT_LLM_MODEL`.
+Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_MODEL_VERIFY` may name a different model and defaults to `WT_LLM_MODEL`.
 
 Outcomes:
 

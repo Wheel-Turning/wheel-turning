@@ -49,6 +49,11 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_ENV` | `dev` | One of `dev`, `staging`, `prod`. In `prod` the loader refuses debug flags. |
 | `DATABASE_URL` | none, required | Postgres connection string for the application role |
 | `DATABASE_URL_ANALYST` | none | Connection for the analyst role, used only by `wt report` |
+| `WT_DB_HOST` | none | Database host. When `DATABASE_URL` is unset and this is set, the loader builds the URL from the `WT_DB_*` keys, so the password never sits in a stored connection string. |
+| `WT_DB_PORT` | `5432` | Database port, used with `WT_DB_HOST` |
+| `WT_DB_NAME` | `wt` | Database name, used with `WT_DB_HOST` |
+| `WT_DB_USER` | none, required with `WT_DB_HOST` | Database login |
+| `WT_DB_PASSWORD` | none, required with `WT_DB_HOST` | Database password, secret, injected from Secrets Manager |
 | `WT_BIND` | `127.0.0.1:8080` | Web listen address |
 | `WT_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
 | `WT_SCRATCH_DIR` | `/var/wt/scratch` | The only place audio or video may exist |
@@ -57,13 +62,25 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `WT_MODEL_DIR` |
 | `WT_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
 | `WT_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
+| `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction. See Spec 04. |
+| `WT_LLM_MODEL_SYNTH` | `WT_LLM_MODEL` | Model for synthesis. See Spec 05. |
+| `WT_LLM_MODEL_VERIFY` | `WT_LLM_MODEL` | Model for the synthesis verifier. See Spec 05. |
+| `WT_LLM_MODEL_VISION` | `WT_LLM_MODEL` | Model for the vision re-read of poorly read OCR pages. See Spec 08. |
+| `WT_LLM_MONTHLY_CAP_USD` | `25` | Monthly spending cap for language model calls. See Spec 04. |
 | `ANTHROPIC_API_KEY` | none | API credential, secret |
 | `WT_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text |
 | `YOUTUBE_API_KEY` | none | Key for the YouTube Data API, secret |
+| `YOUTUBE_OAUTH_REFRESH_TOKEN` | none | OAuth refresh token for caption download in `owner_api` mode, secret, kept in Secrets Manager. See Spec 03. |
+| `WT_VIMEO_ACCESS_TOKEN` | none | Vimeo API token, secret. Unset means discovery reads the public talks page. See Spec 03. |
 | `WT_ALLOW_THIRD_PARTY_FETCH` | `false` | Enables the `yt-dlp` fetch mode. See Spec 03. |
 | `WT_DIARIZE_URL` | `http://127.0.0.1:8090` | Base URL of the diarization sidecar |
+| `HF_TOKEN` | none | Hugging Face access token for the pyannote model, secret. Read by the diarization sidecar, not by the loader. See Spec 04. |
 | `WT_WHISPER_MODEL` | none | Path to the whisper large-v3 model file for ASR |
 | `WT_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
+| `WT_ALERT_TOPIC_ARN` | none | SNS topic for alerts to the owner. Empty turns alerts off. See Spec 08. |
+| `WT_PRIVACY_DEFAULT` | `share` | Question-keeping mode for new testers, `share` or `count_only`. Set to `count_only` before any public launch. See Spec 06. |
+| `WT_QUERY_RETENTION_DAYS` | `180` | Days a kept question's text is stored. See Spec 06. |
+| `WT_COUNT_ONLY_TTL_HOURS` | `24` | Hours a question is kept in count-only mode before it is deleted. See Spec 06. |
 | `WT_LOG` | `info` | Log filter. Logs are JSON in non-dev environments. |
 
 ## AWS topology
