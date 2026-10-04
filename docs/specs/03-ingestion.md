@@ -1,4 +1,3 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "03 Ingestion", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 03: Discovery and ingestion
 
 Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It takes a video from a source listing to a talk in state `cleared`, with speaker, sangha, series, part and type resolved, and it defines the job queue every later stage runs on. Fetching media, transcribing and everything after `cleared` belongs to Spec 04. Table definitions are in Spec 02 and are not repeated here.
@@ -7,7 +6,7 @@ Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It tak
 
 Every talk has one state in `talk.state`. The pipeline states are the eight stages between `cleared` and `ready` and are listed in Spec 02.
 
-> Diagram: talk state machine · 10 states, 1 gate (see the "03 Ingestion" tab in the source doc)
+&#91;embedded content: talk state machine · 10 states, 1 gate\]
 
 Only the accented arrow lets a talk into the pipeline, and each pipeline job rechecks the gate before it runs. Quarantine holds a talk out of serving without deleting anything, and a talk returns to the pipeline after repair and a passing re-check. Takedown is the only route to `withdrawn`.
 
@@ -167,7 +166,7 @@ Allowed licenses are set in `config/pipeline.toml`:
 
 ```toml
 [licenses]
-allowed_license_codes = ["cc0", "cc-by-4.0", "cc-by-3.0", "cc-by-sa-4.0", "cc-by-sa-3.0"]
+allowed_license_codes = ["public-domain", "permission-excerpt", "operator-mandate", "cc0", "cc-by-4.0", "cc-by-3.0", "cc-by-sa-4.0", "cc-by-sa-3.0"]
 ```
 
 Noncommercial and no-derivatives variants are off by default because both raise open questions. A no-derivatives license may treat transcription and excerpting as adaptation, and a noncommercial license may reach a site that carries a donation line. Adding one to the list needs counsel's answer, recorded in `correction_log`. Many archives use those variants, so this default may exclude a large share of what exists.
@@ -242,3 +241,142 @@ Read from public pages by Claude, not yet captured with `dg license capture` and
 | San Francisco Zen Center archive | The archive says talks are published under a Creative Commons license and does not name the variant. The current archive host adds that talks are shared with SFZC's permission. The archive includes guest teachers. | Unknown | Unknown | Ask SFZC's audio contact for the exact license and whether it covers guest speakers. |
 | Dharma Seed | A talk page states Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 for the whole site. | `cc-by-nc-nd-4.0` | No | Blocked until counsel rules on noncommercial and no-derivatives use. |
 | AudioDharma | Talk posts by Gil Fronsdal state Creative Commons Attribution-NonCommercial-No Derivative Works 4.0. His talks also appear in the SFZC archive. | `cc-by-nc-nd-4.0` | No | Same block. It also shows that an archive's blanket statement may not cover every speaker in it. |
+
+## Mandated talks
+
+Decision of October 3, 2026. Recorded talks from teachers who have not replied are used by default on the project owner's mandate, and a teacher can leave at any time. This amends the PRD, whose rule is that no talk is indexed without its speaker's consent, and it turns the consent invitation into a notice that also invites explicit permission. Kanshin's view is being sought and may change the decision, so the behavior sits behind one switch that can be turned back with a single command.
+
+What does not change. Student speech is never stored, indexed or shown, whatever the basis. A talk still needs a resolved speaker, a known rights holder and a registered sangha. A speaker who has declined or withdrawn is never used. Honest labeling holds: the page never says a mandated talk is used with the teacher's permission.
+
+The switch. A `rights_setting` row `talks_basis` is `consent` or `mandate`. The migration default is `consent`, so a fresh database never serves a mandated talk until the owner decides. `dg rights set-talks-basis mandate --by "<name>"` turns the policy on, `dg rights set-talks-basis consent --by "<name>"` turns it off, and each change writes a `rights_event`. While it is `consent`, the serving view returns no mandated talks, though nothing is deleted.
+
+How a talk is cleared under the mandate:
+
+1. A talk source, such as a sangha's YouTube channel, is added with `dg source add --kind talks --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`. It creates mandate evidence and a `source_policy` row of kind `talks`.
+2. Discovery and classification run as before. When a talk's speaker resolves to a registered teacher who has not opted out and has no active exclusion, and the source is enabled, the talk takes `rights_basis = 'mandate'`, the source's evidence, and state `cleared`, with no wait for a reply. An unresolved speaker still goes to `needs_review`.
+3. Every pipeline job re-authorizes the talk, so an opt-out stops the next job at once.
+4. In the gate, `authorize` gains `RightsBasis::Mandate(&MandateEvidence)`. `GateError` gains `MandateOff`, `TeacherOptedOut` and `Excluded`.
+5. A teacher's answer changes the basis. `dg consent set --status granted` moves that teacher's talks to `speaker_consent` and the page begins to say they are used with permission. `declined` or `withdrawn` runs the teacher takedown and creates exclusions, replacing the earlier behavior of only excluding talks.
+
+Teacher controls and notice:
+
+- `dg teacher opt-out --teacher <name> --reason "<text>" --by "<name>"` sets `opted_out_at`, which removes that teacher's passages from the serving view immediately, then runs the takedown and adds permanent exclusions for the person and the content hashes of the removed transcripts. `--suspend-only` stops after the first step, for the period while a request is verified.
+- Teachers, like anyone, can use the Rights and removal page, and every passage, talk or text, carries a "Report this excerpt" link. `PassageView` gains a `report_link`.
+- `dg rights notice-draft --teacher <name>` fills `templates/teacher_notice.md` with the facts a teacher should have: what the tool does, that talks are used on the project's own decision, what an excerpt looks like, how to leave with one message, and an invitation to give explicit permission. The notice is drafted and recorded by the CLI and sent by hand. Nothing is sent automatically. Recording the send, the follow-up date and the reply uses the same `permission_request` and ledger commands as for texts, now keyed by teacher.
+- On a page, a mandated passage says "Talk by \<teacher>, \<sangha>" with the source link and the attribution line stored with the mandate.
+
+Migrations. `0015_mandate_basis.sql` holds only `alter type rights_basis add value 'mandate';`, because a new enum value cannot be used in the same transaction. `0016_mandated_talks.sql`:
+
+```sql
+create table rights_setting (
+  key text primary key,
+  value text not null,
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+insert into rights_setting (key, value, updated_by) values ('talks_basis', 'consent', 'migration');
+
+alter table source_policy add column kind text not null default 'texts'
+  check (kind in ('texts','talks'));
+alter table talk add column source_key text references source_policy(key);
+alter table teacher add column opted_out_at timestamptz;
+alter table teacher add column opted_out_reason text;
+
+alter table rights_event alter column source_key drop not null;
+alter table rights_event add column teacher_id uuid references teacher(id);
+alter table rights_event add constraint rights_event_target
+  check (source_key is not null or teacher_id is not null);
+alter table permission_request alter column source_key drop not null;
+alter table permission_request add column teacher_id uuid references teacher(id);
+alter table permission_request add constraint permission_request_target
+  check (source_key is not null or teacher_id is not null);
+
+alter table talk drop constraint past_gate_requires_consent;
+alter table talk add constraint past_gate_requires_consent check (
+  state not in ('cleared','fetching','transcribing','diarizing','segmenting',
+                'correcting','extracting','resolving','indexing','ready')
+  or (teacher_id is not null and sangha_id is not null
+      and rights_holder is not null and lower(rights_holder) <> 'unknown'
+      and ((rights_basis = 'speaker_consent' and consent_status = 'granted')
+        or (rights_basis in ('license','mandate') and license_evidence_id is not null))));
+
+create or replace view servable_passage with (security_barrier = true) as
+select p.id as passage_id, p.text, p.start_ms, p.end_ms, p.ordinal, p.segment_kind,
+       p.embedding, p.tsv,
+       t.id as talk_id, t.title as talk_title, t.talk_date, t.series, t.part,
+       sv.platform, sv.external_id, sv.url as source_url,
+       te.id as teacher_id, te.display_name as teacher_name,
+       s.id as sangha_id, s.name as sangha_name, s.listed,
+       s.donation_url, s.donation_url_template, s.donation_verified,
+       t.rights_basis, le.display_notice
+from passage p
+join talk t on t.id = p.talk_id
+join source_video sv on sv.id = t.source_video_id
+join teacher te on te.id = t.teacher_id
+join sangha s on s.id = t.sangha_id
+left join license_evidence le on le.id = t.license_evidence_id
+where t.state = 'ready'
+  and t.rights_holder is not null and lower(t.rights_holder) <> 'unknown'
+  and te.opted_out_at is null
+  and (
+    (t.rights_basis = 'speaker_consent' and t.consent_status = 'granted')
+    or (t.rights_basis = 'license' and le.allowed)
+    or (t.rights_basis = 'mandate' and le.allowed
+        and (select value from rights_setting where key = 'talks_basis') = 'mandate'
+        and (t.source_key is null
+             or exists (select 1 from source_policy sp where sp.key = t.source_key and sp.enabled)))
+  );
+```
+
+The grants for the new objects follow the pattern above: `dg_web` selects `rights_setting` and nothing writes it except `dg_pipeline`.
+
+Audit additions: a servable passage whose teacher has `opted_out_at` set, or that matches an active exclusion, fails. A mandated talk served while `talks_basis` is `consent` fails. A teacher with mandated talks and no recorded notice after 14 days warns, and so does an overdue follow-up.
+
+Acceptance criteria for mandated talks:
+
+- [ ] With `talks_basis = 'consent'`, a mandated, ready talk returns nothing from `servable_passage`. After `set-talks-basis mandate` it serves, and each switch writes a `rights_event`.
+- [ ] A talk from a mandated talk source with a resolved, non-opted-out teacher reaches `cleared` without a consent row, and an unresolved speaker lands in `needs_review`.
+- [ ] The constraint rejects a mandated talk with no evidence, and the typestate cannot build a `Talk<Consented>` for an opted-out teacher or an excluded one.
+- [ ] `dg teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks.
+- [ ] `--suspend-only` removes the teacher from serving and deletes nothing.
+- [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown.
+- [ ] A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
+- [ ] `dg rights notice-draft` produces a file from the template and sends nothing.
+
+## Seattle Soto Zen sources
+
+Decision of October 3, 2026, revised the same day. SSZ publishes every dharma talk on Vimeo, and only some of them on Apple Podcasts and Spotify. Vimeo is therefore the complete list and the listening link, and the podcast feed is a partial source of audio. The v1 route is:
+
+1. Vimeo is the canonical list. A `VimeoAdapter` in `dg-ingest` (platform `vimeo`) discovers talks in two ways. With `WT_VIMEO_ACCESS_TOKEN` it lists the account's videos through the Vimeo API and reads name, description, duration, creation time, link, privacy and license. Without a token it reads the video links from the public talks page at `seattlesotozen.org/talks-page/`, obeying `robots.txt`, and takes each video's title, duration and upload date from Vimeo's public oEmbed endpoint. Either way each video becomes a `source_video` of platform `vimeo`, with its metadata in `raw`.
+2. Media comes from the first route that works, in this order. (a) A matching podcast episode. `wt source resolve-feed --apple-id 1472964846` finds the feed address, the owner confirms it, and the importer matches episodes to Vimeo talks by normalized title, date and duration. A matched episode's audio enclosure is used and nothing is downloaded from Vimeo. The feed source is configured with `role = "audio_only"`, so it never creates talk records and only attaches audio to talks that Vimeo already lists. (b) A Vimeo download link, which exists only when the account owner has enabled downloads for a video, read through the API with a token that has the `private` and `video_files` scopes. (c) A file from SSZ's own storage through the storage adapter. (d) Third-party fetching, which stays off behind `WT_ALLOW_THIRD_PARTY_FETCH` and needs counsel's answer and SSZ's agreement first, because Vimeo's terms limit downloading to what an owner allows.
+3. The owner asks SSZ for route (b) or (c). Ask whoever administers the SSZ Vimeo account either to create a personal access token for the project with the `public`, `private` and `video_files` scopes and enable downloads on the talks, or to share a bulk export. This is the same conversation as the SSZ permission note in the PRD.
+4. Link style. `link_style = "vimeo"` renders the page address with `#t=<seconds>s`. A talk with only a podcast match uses `none`, and the page shows "starts at h:mm:ss". This supersedes rule 2 of Answer assembly in Spec 05.
+5. Captions. Vimeo can hold text tracks. When the API returns one, it is saved in scratch as a reference for measuring accuracy and is never used as the transcript.
+6. A completeness check compares the Vimeo list with the talks page and the feed and reports talks missing from either, so the PRD's figure of about 225 distinct talks is checked against Vimeo.
+
+```toml
+[[source]]
+name = "ssz-vimeo"
+platform = "vimeo"
+talks_page = "https://seattlesotozen.org/talks-page/"
+default_sangha = "Seattle Soto Zen"
+link_style = "vimeo"
+
+[[source]]
+name = "ssz-podcast"
+platform = "rss"
+feed_url = "RESOLVED_BY_wt_source_resolve_feed"
+default_sangha = "Seattle Soto Zen"
+link_style = "none"
+role = "audio_only"
+```
+
+Acceptance criteria for the SSZ sources:
+
+- [ ] Vimeo discovery returns the same talk set from a recorded API fixture and from a recorded talks-page fixture with oEmbed responses.
+- [ ] Talks-page discovery obeys `robots.txt` and makes no request to a disallowed path.
+- [ ] Feed episodes match Vimeo talks by title, date and duration, an `audio_only` source never creates a talk, and a matched talk uses the enclosure with no Vimeo download.
+- [ ] With no usable media route a talk stays at `needs_review` with reason `no_media` and nothing is fetched.
+- [ ] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation.
+- [ ] Each `link_style` renders the right link, and `none` renders the "starts at" text.
+- [ ] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.

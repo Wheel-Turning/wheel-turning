@@ -1,4 +1,3 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "04 Transcript pipeline", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 04: Transcript pipeline
 
 Implements M4. It takes a `cleared` talk to `ready`: media in, passages and embeddings out, audio deleted, student speech never stored. The gate rules are in Spec 03 and every handler here starts by re-authorizing the talk. Table definitions are in Spec 02.
@@ -201,3 +200,64 @@ M4 is done when every item below passes in CI with fakes, and one synthetic talk
 - [ ] A synthetic talk goes from `cleared` to `ready` through `dg worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
 - [ ] `dg export transcripts --format jsonl --out <dir>` writes the corrected segments of every consented `ready` talk for the Gate A notebook.
 - [ ] `dg segment sample --count 10` renders the segmentation report.
+
+## Language-model spend cap
+
+The language model is the one metered cost in the system, so v1 caps it. Settings: `WT_LLM_MONTHLY_CAP_USD` (default 25), the per-stage models `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_VISION` (each falls back to `WT_LLM_MODEL`), and a hand-edited price table in `config/llm_prices.toml` with input and output dollars per million tokens for each model and a `checked_on` date.
+
+Mechanism:
+
+1. Every call writes a `llm_usage` row with the stage, model, input and output token counts from the API response, and an estimated cost from the price table.
+2. Before each call the client adds up the month so far. At 80 percent of the cap it sends an alert. At the cap it refuses.
+3. A refused ingestion call (extract, classify, vision) puts its job back in the queue until the first of the next month, unless the owner raises the cap with `wt llm cap set <usd> --by "<name>"`.
+4. A refused synthesis or verifier call makes the answer render without a synthesis line, which the spec already allows, and the log records `cap_reached`.
+5. The first month of ingestion needs more room, so the owner sets the cap to about 60 for that month and back to 25 afterward. Also set a monthly spend limit in the Anthropic Console as a second guard.
+
+Estimates at list prices of October 3, 2026. Sources disagree about the current Sonnet-class price, with figures of $2 and $10 and of $3 and $15 per million input and output tokens, so these use the higher pair. Haiku 4.5 is $1 and $5. Check the price table against the provider's pricing page before relying on them. The Batch API halves both rates for jobs that can wait.
+
+| Work | Estimate |
+| --- | --- |
+| One pass of extraction and classification over the 140 hours of SSZ talks, about 1.4 million words of input | About $3 on Haiku, about $8 on a Sonnet-class model |
+| The OCR rescue pass for one edition at the 200-page cap | About $1 on Haiku, about $3.50 on a Sonnet-class model |
+| One answer: a synthesis call and up to 4 verifier calls, about 8,000 input and 500 output tokens | About $0.03 on a Sonnet-class model |
+| 500 answers in a month from a small tester group | About $16 on a Sonnet-class model |
+
+Default models: a Haiku-class model for extraction, classification and vision, and a Sonnet-class model for synthesis and verification, because those two stages decide whether an invented claim reaches a page. Expect about $20 a month in steady use and under $60 in the first month.
+
+Migration `0020_llm_usage.sql`:
+
+```sql
+create table llm_usage (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  stage text not null,
+  model text not null,
+  input_tokens integer not null,
+  output_tokens integer not null,
+  est_cost_usd numeric(10,4) not null
+);
+create index llm_usage_month_idx on llm_usage (created_at);
+```
+
+Acceptance criteria for the spend cap:
+
+- [ ] Each call records tokens and an estimated cost, and the month-to-date sum matches the sum of the rows.
+- [ ] A fake client at 80 percent publishes one alert, and at 100 percent refuses further calls.
+- [ ] A refused ingestion job returns to the queue with a run time on the first of the next month, and `wt llm cap set` releases it.
+- [ ] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry.
+- [ ] A stage whose model setting is empty uses `WT_LLM_MODEL`, and the loader fails at startup if neither is set when a language-model stage is enabled.
+
+## Transcription model and where it runs
+
+Decision of October 3, 2026, following the GPU quota refusal in Spec 01.
+
+1. The default model stays `large-v3`. The SSZ talks are in English, so `distil-large-v3` is allowed through `asr.model_path`. Its model card describes it as MIT licensed, over 5 times faster than large-v3 on a Mac M1, and within 0.8 points of word error rate on long-form audio.
+2. The first full run uses `distil-large-v3` on the owner's Apple Silicon Mac, built with whisper.cpp's Metal support, with `wt worker --kinds audio --concurrency 1`. Expect it to run in the background for days, not hours, and measure the real speed on the sample before planning.
+3. `wt asr benchmark --talks <ids>` runs both models over the ten-talk sample and compares each with a manual caption or a hand-corrected passage where one exists, and prints word error rate on the glossary terms, on teacher names and overall. Keep `large-v3` for the full run if `distil-large-v3` misses core vocabulary.
+4. Whichever model runs, the transcript JSON records its name and version, so a later switch to a better model can reprocess only the affected talks.
+
+Acceptance criteria:
+
+- [ ] A worker on the owner's Mac transcribes a synthetic audio fixture end to end with the Metal build and records the model name in the transcript.
+- [ ] `wt asr benchmark` prints the three error rates for both models on a fixture with known text.
+- [ ] Changing `asr.model_path` changes the recorded model name and requeues only talks transcribed with the old one when asked.

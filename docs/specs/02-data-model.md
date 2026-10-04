@@ -1,4 +1,3 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "02 Data model", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 02: Data model and migrations
 
 Implements the whole v1 schema for Postgres 16 with pgvector. Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are forward-only, and are never edited after merge. The SQL below is the contract. Column names and constraints are binding, and index parameters may be tuned after measurement.
@@ -18,7 +17,7 @@ create extension if not exists vector;
 create extension if not exists pg_trgm;
 
 create type consent_status as enum ('unknown','requested','granted','declined','withdrawn');
-create type source_platform as enum ('youtube','storage','rss');
+create type source_platform as enum ('youtube','storage','rss','vimeo');
 create type talk_type as enum ('dharma_talk','class','retreat_talk','service','non_talk','other');
 create type talk_state as enum (
   'discovered','needs_review','awaiting_consent','cleared',
