@@ -10,6 +10,6 @@ These still carry the old name, one line each with why and when it changes:
 - **RDS database name `dg` and master user `dg_admin`**: changing either replaces the database instance; set at the rebuild.
 - **Database roles `dg_owner`, `dg_pipeline`, `dg_web`, `dg_analyst` and logins `dg_*_login`**: created by applied migrations, and each login starts its session with `SET ROLE dg_*`, so a rename breaks live logins; a new migration renames them during the rebuild, before any real data exists.
 - **Migrations `0001` to `0009`**: applied migrations are never edited, so their text keeps the old names even after the roles are renamed.
-- **Doc lines that describe the rename or the history**: `docs/PRD.md` line 3 ("Formerly Dharma Gates") and its "What changed" row, spec 00 line 147, spec 01 line 136 and spec 09 line 229 name `dg` or Dharma Gates on purpose.
+- **Doc lines that describe the rename or the history**: `docs/PRD.md` line 3 ("Formerly Dharma Gates") and its "What changed" row, the naming notes in specs 00 and 01 and the mandate commands note in spec 09 name `dg` or Dharma Gates on purpose.
 - **The `dgdata` volume** in `docker-compose.yml` and spec 01: renaming it orphans the existing local database volume.
 - **Git history, merged branch names and past PR titles**: history is not rewritten.
