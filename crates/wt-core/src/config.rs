@@ -187,7 +187,7 @@ impl Config {
             bind,
             session_secret,
             scratch_dir: get("WT_SCRATCH_DIR")
-                .map_or_else(|| PathBuf::from("/var/wt/scratch"), PathBuf::from),
+                .map_or_else(|| PathBuf::from("./data/scratch"), PathBuf::from),
             transcript_bucket: get("WT_TRANSCRIPT_BUCKET"),
             model_dir: get("WT_MODEL_DIR").map_or_else(|| PathBuf::from("./models"), PathBuf::from),
             embed_model: get("WT_EMBED_MODEL").unwrap_or_else(|| "bge-m3-int8".to_owned()),
@@ -383,7 +383,7 @@ mod tests {
         let config = load(&[("DATABASE_URL", "postgres://wt:wt@localhost:5432/wt")]).unwrap();
         assert_eq!(config.env, Env::Dev);
         assert_eq!(config.bind, "127.0.0.1:8080".parse().unwrap());
-        assert_eq!(config.scratch_dir, PathBuf::from("/var/wt/scratch"));
+        assert_eq!(config.scratch_dir, PathBuf::from("./data/scratch"));
         assert_eq!(config.model_dir, PathBuf::from("./models"));
         assert_eq!(config.embed_model, "bge-m3-int8");
         assert_eq!(config.rerank_model, "bge-reranker-v2-m3-int8");
