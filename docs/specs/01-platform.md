@@ -126,7 +126,8 @@ M1, AWS baseline
 - [ ] `/healthz` answers over HTTPS through the load balancer.
 - [ ] A test proves the database accepts connections from the web and batch security groups and from nothing else.
 - [ ] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
-- [ ] Setting `batch_host_enabled` to false destroys the batch host and true recreates it.
+- [ ] Setting `batch_host_enabled` to false destroys the batch host and true recreates it, run with `batch_host_instance_type = "t3.small"` (see GPU access).
+- ~~GPU quota granted for one `g5.xlarge`.~~ Dropped on October 3, 2026: AWS declined the GPU quota request, and v1 transcribes on the owner's Mac, so M1 does not need it (see GPU access).
 - [ ] `deploy.yml` ships a tagged image and runs migrations as a one-off task.
 
 ## Domain, naming and alerts
