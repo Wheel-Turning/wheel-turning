@@ -51,7 +51,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `DATABASE_URL_ANALYST` | none | Connection for the analyst role, used only by `dg report` |
 | `DG_BIND` | `127.0.0.1:8080` | Web listen address |
 | `DG_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
-| `DG_SCRATCH_DIR` | `/var/dg/scratch` | The only place audio or video may exist |
+| `DG_SCRATCH_DIR` | `./data/scratch` | The only place audio or video may exist |
 | `DG_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
 | `DG_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
 | `DG_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `DG_MODEL_DIR` |
@@ -70,7 +70,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 
 The v1 footprint is small on purpose. One web service, one database and three buckets carry everything, and a GPU host exists only while a batch is running.
 
-In short: tester → load balancer → web service → database (one view read, query logs written). The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager feeds both compute roles at start, and both services log to CloudWatch Logs.
+A tester reaches the application load balancer over HTTPS, which forwards to the web service on Fargate. The web service reads one database view, writes query logs, loads its models from the models bucket at start, and calls the Claude API. The database is RDS Postgres 16 with pgvector in a private subnet. The GPU batch host, which runs only on demand, runs the worker, whisper and the diarization sidecar. It reads from the video sources, writes to the database and the transcripts bucket, stages media in the scratch bucket with a one-day expiry, and calls the Claude API. Audio exists only on the batch host's disk and in the scratch bucket.
 
 The tester reaches the web service through the load balancer. The web service reads one database view and writes query logs. The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager holds the database credentials, the Claude and YouTube keys and the session secret, and both compute roles read them at start. CloudWatch Logs receives structured logs from both services.
 
@@ -149,6 +149,27 @@ Acceptance criteria:
 Decision of October 3, 2026. AWS declined the GPU quota request, and v1 does not need it.
 
 - The M1 acceptance item for the batch host is met with a CPU instance. The variable `batch_host_instance_type` defaults to `g5.xlarge`, and the toggle test runs with a small CPU type such as `t3.small`, which proves that the host is created and destroyed without any GPU quota. The GPU quota item is dropped from the M1 checklist with this reason recorded.
-- Transcription for v1 runs on the owner's Apple Silicon Mac through whisper.cpp with Metal. Spec 04 sets the model.
+- Transcription for v1 runs on the owner's Windows PC through whisper.cpp, built with CUDA if the PC has an NVIDIA graphics card, with Vulkan for other graphics cards, and CPU only as a last resort. Spec 04 sets the model.
 - Appealing is optional. AWS often declines GPU quota on accounts with little billing history. Reapply after a few weeks of normal use, ask for 4 vCPUs, which is one `g5.xlarge` or `g4dn.xlarge`, name the use, and say the instance runs on demand and stops when idle.
-- If the Mac proves too slow, rent a GPU virtual machine by the hour from a provider, run `wt worker --kinds audio` on it, and delete it afterward, so audio sits only on a machine the owner controls. Hosted transcription services are not used, because they would send audio of talks that may not have consented to a third party.
+- If the PC proves too slow, rent a GPU virtual machine by the hour from a provider, run `wt worker --kinds audio` on it, and delete it afterward, so audio sits only on a machine the owner controls. Hosted transcription services are not used, because they would send audio of talks that may not have consented to a third party.
+
+## Windows notes
+
+The owner develops on Windows. The repository, its shell scripts and the Terraform and `aws` commands assume a Unix shell, so the recommended setup is WSL 2 with Ubuntu, with Docker Desktop's WSL 2 backend turned on, the repository cloned inside the Linux file system (under `~`, not under `/mnt/c`), and Claude Code started from that Ubuntu terminal. CUDA works inside WSL 2 when the Windows NVIDIA driver is current, and the CUDA toolkit is installed in Ubuntu for the whisper.cpp build. Running everything natively in PowerShell also works but needs the Visual Studio C++ Build Tools for Rust, Git for Windows and CMake, and some scripts may need small changes. Wherever the repository lives, `.env` lives in its root, in the same file system that Claude Code runs in.
+
+- Line endings. Windows converts line endings by default, which breaks shell scripts and changes the checksums sqlx records for migration files. The repository carries a `.gitattributes` with `* text=auto eol=lf` and `*.sql text eol=lf`, and `git config core.autocrlf false` is set on the owner's machine.
+- Paths. Documentation and manifests use forward slashes, which work in PowerShell, WSL and the tools used here. The scratch directory defaults to `./data/scratch` for local work, which is valid on Windows and in WSL, and the deployed service sets it to a path on its own volume.
+- Long paths. Turn on long path support in Windows and run `git config core.longpaths true`, because Rust build directories and node-style trees get deep.
+- Installs. Use `winget` or Scoop on Windows, or `apt` in WSL 2, for `ffmpeg`, `tesseract` and `poppler`. There is no Homebrew on this machine.
+- Memory. WSL 2 and Docker Desktop each take a share of RAM, and the owner's PC has 16 GB. A `.wslconfig` file limits WSL 2 memory, and heavy builds and transcription runs are done at separate times.
+
+Acceptance criteria:
+
+- [ ] A fresh clone inside WSL 2 passes the M0 commands in `CLAUDE.md` with no manual changes.
+- [ ] `docs/windows.md` lists the installs, the file locations and the commands that differ, and is checked by running it on a clean machine or a clean WSL distribution.
+
+More acceptance criteria for Windows:
+
+- [ ] `.gitattributes` exists with the line-ending rules, and a clone on Windows produces the same migration checksums as a clone on Linux.
+- [ ] `cargo sqlx migrate run` and `cargo test --workspace` pass on a Windows clone with the settings above.
+- [ ] A Windows clone with long paths on builds without path errors.

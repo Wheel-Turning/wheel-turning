@@ -6,7 +6,7 @@ Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It tak
 
 Every talk has one state in `talk.state`. The pipeline states are the eight stages between `cleared` and `ready` and are listed in Spec 02.
 
-In short: a talk enters the pipeline only through the consent gate, which leads to `cleared`. From `cleared` it moves through the pipeline stages to `ready`. Quarantine holds a talk out of serving and returns it to the pipeline after repair and a passing re-check. Takedown leads to `withdrawn`.
+Discovered moves to Awaiting consent after classification. Awaiting consent moves to Cleared when a rights basis is recorded (consent, a verified license or the owner's mandate) and the rights holder is known. Cleared moves through fetch, transcribe, diarize, segment, correct, extract, resolve and index to Ready. Needs review holds a talk whose speaker or media is unclear and returns it to Awaiting consent or sends it to Excluded. Excluded covers duplicates, non-talks, declines and held-out talks. Quarantined takes a talk out of serving when a check fails, until it is repaired and rechecked. Withdrawn follows a takedown, and a stub row blocks re-ingest.
 
 Only the accented arrow lets a talk into the pipeline, and each pipeline job rechecks the gate before it runs. Quarantine holds a talk out of serving without deleting anything, and a talk returns to the pipeline after repair and a passing re-check. Takedown is the only route to `withdrawn`.
 
