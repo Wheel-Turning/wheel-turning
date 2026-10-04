@@ -1,4 +1,3 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "01 Platform", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 01: Platform and infrastructure
 
 Implements milestones M0 and M1. This spec covers the local development stack, configuration, the AWS footprint in Terraform, and CI. The data model lives in Spec 02 and every pipeline stage in Specs 03 and 04.
@@ -71,7 +70,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 
 The v1 footprint is small on purpose. One web service, one database and three buckets carry everything, and a GPU host exists only while a batch is running.
 
-> Diagram: AWS topology for v1 · 8 resources, 2 audio locations (see the "01 Platform" tab in the source doc)
+In short: tester → load balancer → web service → database (one view read, query logs written). The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager feeds both compute roles at start, and both services log to CloudWatch Logs.
 
 The tester reaches the web service through the load balancer. The web service reads one database view and writes query logs. The batch host fetches media, transcribes, diarizes and writes text, and deletes its audio when each stage ends. Secrets Manager holds the database credentials, the Claude and YouTube keys and the session secret, and both compute roles read them at start. CloudWatch Logs receives structured logs from both services.
 
@@ -114,18 +113,42 @@ The `Dockerfile` is multi-stage. The final image holds the `wt` binary, the ONNX
 
 M0, foundation
 
-- [x] Every crate in the layout exists, builds, and has a short crate-level doc comment stating its single responsibility.
-- [x] `ci.yml` is green with all jobs listed above.
-- [x] `wt db migrate` is idempotent. Running it twice changes nothing.
-- [x] Config loader tests cover a missing required key failing at startup and secret values never appearing in `Debug` or log output.
-- [x] `wt-api` serves `/healthz` with database connectivity checked.
-- [x] `deny.toml` bans payment SDKs, including `async-stripe`, and a test dependency on a banned crate fails CI.
+- [ ] Every crate in the layout exists, builds, and has a short crate-level doc comment stating its single responsibility.
+- [ ] `ci.yml` is green with all jobs listed above.
+- [ ] `wt db migrate` is idempotent. Running it twice changes nothing.
+- [ ] Config loader tests cover a missing required key failing at startup and secret values never appearing in `Debug` or log output.
+- [ ] `wt-api` serves `/healthz` with database connectivity checked.
+- [ ] `deny.toml` bans payment SDKs, including `async-stripe`, and a test dependency on a banned crate fails CI.
 
 M1, AWS baseline
 
 - [ ] `terraform apply` from an empty account creates the stack and `terraform destroy` removes it cleanly.
-- [x] `/healthz` answers over HTTPS through the load balancer.
-- [x] A test proves the database accepts connections from the web and batch security groups and from nothing else.
-- [x] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
+- [ ] `/healthz` answers over HTTPS through the load balancer.
+- [ ] A test proves the database accepts connections from the web and batch security groups and from nothing else.
+- [ ] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
 - [ ] Setting `batch_host_enabled` to false destroys the batch host and true recreates it.
-- [x] `deploy.yml` ships a tagged image and runs migrations as a one-off task.
+- [ ] `deploy.yml` ships a tagged image and runs migrations as a one-off task.
+
+## Domain, naming and alerts
+
+Decisions of October 3, 2026.
+
+- Naming. The GitHub organization is `Wheel-Turning` and the repository is `Wheel-Turning/wheel-turning`. Crates are `wt-*`, the command is `wt`, environment variables start with `WT_`, and AWS resources are prefixed `wt-`. Wherever the specs say `dg`, `DG_` or `dharma-gates`, the first Claude Code pass renames them and lists every change for review.
+- Domain. The project owns `wheelturning.org`. The Terraform variable `domain_name` is set to `demo.wheelturning.org` for v1, which leaves the apex free. The `service` module requests an ACM certificate with DNS validation. The owner adds the validation record at the registrar, or moves DNS to Route 53 and sets `route53_zone_id` so Terraform does it. The same module adds the record that points the name at the load balancer. `/rights`, `/accessibility` and `/robots.txt` are public on that name.
+- Alerts. The `observability` module adds an SNS topic, an email subscription to the variable `alert_email`, and an `sns:Publish` permission on that topic for the web service and the batch host. The owner must click the confirmation link AWS emails to that address, or nothing arrives. The topic ARN goes to the code as `WT_ALERT_TOPIC_ARN`. Spec 08 lists what is published.
+- Accounts. AWS, Anthropic, Google Cloud and Hugging Face accounts are opened in the owner's own name for now. Moving them to a nonprofit later means creating new accounts and migrating, which the runbook notes.
+
+Acceptance criteria:
+
+- [ ] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply.
+- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed.
+- [ ] The web role can publish to the alert topic and to nothing else in SNS.
+
+## GPU access
+
+Decision of October 3, 2026. AWS declined the GPU quota request, and v1 does not need it.
+
+- The M1 acceptance item for the batch host is met with a CPU instance. The variable `batch_host_instance_type` defaults to `g5.xlarge`, and the toggle test runs with a small CPU type such as `t3.small`, which proves that the host is created and destroyed without any GPU quota. The GPU quota item is dropped from the M1 checklist with this reason recorded.
+- Transcription for v1 runs on the owner's Apple Silicon Mac through whisper.cpp with Metal. Spec 04 sets the model.
+- Appealing is optional. AWS often declines GPU quota on accounts with little billing history. Reapply after a few weeks of normal use, ask for 4 vCPUs, which is one `g5.xlarge` or `g4dn.xlarge`, name the use, and say the instance runs on demand and stops when idle.
+- If the Mac proves too slow, rent a GPU virtual machine by the hour from a provider, run `wt worker --kinds audio` on it, and delete it afterward, so audio sits only on a machine the owner controls. Hosted transcription services are not used, because they would send audio of talks that may not have consented to a third party.

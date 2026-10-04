@@ -1,4 +1,3 @@
-<!-- Exported from the "Dharma Gates: V1 Technical Specs" doc (https://claude.ai/code/artifact/68e63636-e0f6-43ee-ab79-ccc03b76946d), tab "05 Retrieval and answers", on 2026-10-02. The doc is the source of truth until this file is edited in the repo. -->
 # Spec 05: Retrieval, synthesis and dana
 
 Implements M5 (retrieval and answer assembly), M6 (synthesis) and the dana calculator of M7. A question comes in and a persisted, renderable `AnswerView` comes out. Rules come from the PRD's answer experience and ranking sections, and tunable values live in `config/retrieval.toml`.
