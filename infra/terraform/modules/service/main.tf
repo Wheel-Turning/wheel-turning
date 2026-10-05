@@ -419,6 +419,10 @@ output "alb_arn_suffix" {
   value = aws_lb.this.arn_suffix
 }
 
+output "target_group_arn_suffix" {
+  value = aws_lb_target_group.web.arn_suffix
+}
+
 output "certificate_validation_records" {
   description = "Add each as a DNS-only CNAME at Cloudflare."
   value = [for o in aws_acm_certificate.this.domain_validation_options : {

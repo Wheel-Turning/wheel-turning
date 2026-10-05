@@ -251,6 +251,32 @@ jobs:
           aws ecs wait services-stable --cluster "$(terraform output -raw cluster_name)" \
             --services "$(terraform output -raw service_name)"
 
+      # The circuit breaker rolls a failed revision back on its own, and the service is then
+      # stable again on the old image, so a stable service alone does not prove the deploy.
+      - name: The service runs the new image
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          NEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cluster="$(terraform output -raw cluster_name)"
+          service="$(terraform output -raw service_name)"
+          primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+            --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
+          rollout="$(jq -r .rolloutState <<<"$primary")"
+          task_def="$(jq -r .taskDefinition <<<"$primary")"
+          image="$(aws ecs describe-task-definition --task-definition "$task_def" \
+            --query "taskDefinition.containerDefinitions[?name=='web'] | [0].image" --output text)"
+          echo "primary deployment: $task_def ($rollout), image $image"
+          if [[ "$rollout" != "COMPLETED" ]]; then
+            echo "::error::the primary deployment is $rollout, not COMPLETED"
+            exit 1
+          fi
+          if [[ "$image" != *":${NEW_TAG}" ]]; then
+            echo "::error::the service runs $image, not tag ${NEW_TAG}; the circuit breaker probably rolled back"
+            exit 1
+          fi
+
       - name: /healthz answers over HTTPS
         working-directory: ${{ env.TF_DIR }}
         run: |
@@ -259,9 +285,34 @@ jobs:
           for _ in $(seq 1 20); do
             if body="$(curl -fsS --max-time 10 "$url")"; then
               echo "$url -> $body"
+              if [[ "$(jq -r '.status + " " + .database' <<<"$body")" != "ok ok" ]]; then
+                echo "::error::$url answered but did not report ok: $body"
+                exit 1
+              fi
               exit 0
             fi
             sleep 15
           done
           echo "::error::$url did not answer"
           exit 1
+
+      # Beyond /healthz: plain HTTP redirects to HTTPS, and the router answers an unknown path
+      # with 404, not a 5xx. Add a rendered page and a static asset here once M6 serves them.
+      - name: Smoke checks
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          url="$(terraform output -raw url)"
+          host="${url#https://}"
+          redirect="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' "http://${host}/healthz")"
+          echo "http://${host}/healthz -> $redirect"
+          if [[ "$redirect" != 301\ https://${host}* && "$redirect" != 302\ https://${host}* ]]; then
+            echo "::error::plain HTTP did not redirect to HTTPS: $redirect"
+            exit 1
+          fi
+          missing="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${url}/smoke-check-no-such-page")"
+          echo "${url}/smoke-check-no-such-page -> $missing"
+          if [[ "$missing" != "404" ]]; then
+            echo "::error::an unknown path returned $missing, expected 404"
+            exit 1
+          fi
