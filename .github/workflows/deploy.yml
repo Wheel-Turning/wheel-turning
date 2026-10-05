@@ -56,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -82,10 +82,10 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.exists.outputs.exists == 'false'
 
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         if: steps.exists.outputs.exists == 'false'
         with:
           context: .
@@ -116,7 +116,7 @@ jobs:
           jq -n --arg tag "$NEW_TAG" --arg previous "$current" --arg sha "$GITHUB_SHA" \
             '{tag: $tag, previous_tag: $previous, sha: $sha}' > deploy.json
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: deploy-plan
           path: |
@@ -162,7 +162,7 @@ jobs:
           echo "::error::apply needs plan_run_id, the run id of a reviewed plan"
           exit 1
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: deploy-plan
           run-id: ${{ inputs.plan_run_id }}
@@ -183,7 +183,7 @@ jobs:
           ref: ${{ steps.meta.outputs.sha }}
           persist-credentials: false
 
-      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ env.ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -253,6 +253,8 @@ jobs:
 
       # The circuit breaker rolls a failed revision back on its own, and the service is then
       # stable again on the old image, so a stable service alone does not prove the deploy.
+      # services-stable returns once the task count settles, a little before ECS marks the
+      # rollout COMPLETED, so this polls the rollout state for up to 10 minutes.
       - name: The service runs the new image
         working-directory: ${{ env.TF_DIR }}
         env:
@@ -261,15 +263,22 @@ jobs:
           set -euo pipefail
           cluster="$(terraform output -raw cluster_name)"
           service="$(terraform output -raw service_name)"
-          primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
-            --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
-          rollout="$(jq -r .rolloutState <<<"$primary")"
+          for attempt in $(seq 1 60); do
+            primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
+            rollout="$(jq -r .rolloutState <<<"$primary")"
+            if [[ "$rollout" == "COMPLETED" || "$rollout" == "FAILED" ]]; then
+              break
+            fi
+            echo "primary deployment is $rollout (check $attempt of 60), waiting"
+            sleep 10
+          done
           task_def="$(jq -r .taskDefinition <<<"$primary")"
           image="$(aws ecs describe-task-definition --task-definition "$task_def" \
             --query "taskDefinition.containerDefinitions[?name=='web'] | [0].image" --output text)"
           echo "primary deployment: $task_def ($rollout), image $image"
           if [[ "$rollout" != "COMPLETED" ]]; then
-            echo "::error::the primary deployment is $rollout, not COMPLETED"
+            echo "::error::the primary deployment is $rollout, not COMPLETED: $(jq -r .rolloutStateReason <<<"$primary")"
             exit 1
           fi
           if [[ "$image" != *":${NEW_TAG}" ]]; then
