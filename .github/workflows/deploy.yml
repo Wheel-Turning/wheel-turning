@@ -1,6 +1,6 @@
 # Spec 01: deploy.yml runs on a version tag or by hand. It builds the container image, pushes it
 # to ECR, runs terraform plan and holds for manual approval, applies, then runs migrations as a
-# one-off ECS task under dg_owner before the new service revision starts taking traffic.
+# one-off ECS task under wt_owner before the new service revision starts taking traffic.
 #
 # The repository is private on GitHub's free plan, which has no environment approval gates, so
 # approval is a second, hand-started run:
@@ -39,9 +39,9 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
-  ROLE_ARN: arn:aws:iam::904883674947:role/ci/dg-v1-github-deploy
+  ROLE_ARN: arn:aws:iam::904883674947:role/ci/wt-v1-github-deploy
   TF_DIR: infra/terraform/envs/v1
-  ECR_REPOSITORY: dg-v1
+  ECR_REPOSITORY: wt-v1
   TF_IN_AUTOMATION: "1"
 
 jobs:
@@ -201,7 +201,7 @@ jobs:
           # Refuses to run if anything changed since the plan was reviewed.
           terraform apply -input=false -no-color "$RUNNER_TEMP/reviewed/migrate.tfplan"
 
-      - name: Run migrations as dg_owner
+      - name: Run migrations as wt_owner
         working-directory: ${{ env.TF_DIR }}
         run: |
           set -euo pipefail
@@ -217,7 +217,7 @@ jobs:
           aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
           exit_code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
             --query 'tasks[0].containers[0].exitCode' --output text)"
-          aws logs get-log-events --log-group-name /dg-v1/admin \
+          aws logs get-log-events --log-group-name /wt-v1/admin \
             --log-stream-name "migrate/migrate/${task##*/}" --query 'events[].message' --output text || true
           if [[ "$exit_code" != "0" ]]; then
             echo "::error::migrations failed with exit code $exit_code; the web service was not changed"
@@ -251,6 +251,32 @@ jobs:
           aws ecs wait services-stable --cluster "$(terraform output -raw cluster_name)" \
             --services "$(terraform output -raw service_name)"
 
+      # The circuit breaker rolls a failed revision back on its own, and the service is then
+      # stable again on the old image, so a stable service alone does not prove the deploy.
+      - name: The service runs the new image
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          NEW_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cluster="$(terraform output -raw cluster_name)"
+          service="$(terraform output -raw service_name)"
+          primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+            --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
+          rollout="$(jq -r .rolloutState <<<"$primary")"
+          task_def="$(jq -r .taskDefinition <<<"$primary")"
+          image="$(aws ecs describe-task-definition --task-definition "$task_def" \
+            --query "taskDefinition.containerDefinitions[?name=='web'] | [0].image" --output text)"
+          echo "primary deployment: $task_def ($rollout), image $image"
+          if [[ "$rollout" != "COMPLETED" ]]; then
+            echo "::error::the primary deployment is $rollout, not COMPLETED"
+            exit 1
+          fi
+          if [[ "$image" != *":${NEW_TAG}" ]]; then
+            echo "::error::the service runs $image, not tag ${NEW_TAG}; the circuit breaker probably rolled back"
+            exit 1
+          fi
+
       - name: /healthz answers over HTTPS
         working-directory: ${{ env.TF_DIR }}
         run: |
@@ -259,9 +285,34 @@ jobs:
           for _ in $(seq 1 20); do
             if body="$(curl -fsS --max-time 10 "$url")"; then
               echo "$url -> $body"
+              if [[ "$(jq -r '.status + " " + .database' <<<"$body")" != "ok ok" ]]; then
+                echo "::error::$url answered but did not report ok: $body"
+                exit 1
+              fi
               exit 0
             fi
             sleep 15
           done
           echo "::error::$url did not answer"
           exit 1
+
+      # Beyond /healthz: plain HTTP redirects to HTTPS, and the router answers an unknown path
+      # with 404, not a 5xx. Add a rendered page and a static asset here once M6 serves them.
+      - name: Smoke checks
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          url="$(terraform output -raw url)"
+          host="${url#https://}"
+          redirect="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' "http://${host}/healthz")"
+          echo "http://${host}/healthz -> $redirect"
+          if [[ "$redirect" != 301\ https://${host}* && "$redirect" != 302\ https://${host}* ]]; then
+            echo "::error::plain HTTP did not redirect to HTTPS: $redirect"
+            exit 1
+          fi
+          missing="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${url}/smoke-check-no-such-page")"
+          echo "${url}/smoke-check-no-such-page -> $missing"
+          if [[ "$missing" != "404" ]]; then
+            echo "::error::an unknown path returned $missing, expected 404"
+            exit 1
+          fi

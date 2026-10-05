@@ -14,7 +14,7 @@ param(
     [string]$AwsProfile = 'wheel-turning',
     [string]$Region = 'us-east-2',
     # Terraform's local.name in infra/terraform/envs/v1: the RDS identifier, and the batch host's Name tag prefix.
-    [string]$StackName = 'dg-v1',
+    [string]$StackName = 'wt-v1',
     # 5432 is left free for the dev database in Docker.
     [int]$LocalPort = 5433,
     [switch]$CheckOnly
@@ -113,6 +113,6 @@ while (-not (Get-NetTCPConnection -LocalPort $LocalPort -State Listen -ErrorActi
 Write-Host ''
 Write-Host "Port forward is open on localhost:$LocalPort." -ForegroundColor Green
 Write-Host 'Point the worker at it in .env (docs/windows.md). The database requires TLS, so keep sslmode=require:'
-Write-Host "    DATABASE_URL=postgres://dg_pipeline_login:<password>@localhost:$LocalPort/dg?sslmode=require"
-Write-Host "The password is the secret $StackName/db_dg_pipeline_login. Percent-encode it if it has symbols."
+Write-Host "    DATABASE_URL=postgres://wt_pipeline_login:<password>@localhost:$LocalPort/wt?sslmode=require"
+Write-Host "The password is the secret $StackName/db_wt_pipeline_login. Percent-encode it if it has symbols."
 Write-Host 'Then run: wt worker --kinds audio --concurrency 1'

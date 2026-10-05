@@ -80,23 +80,23 @@ async fn migrations_create_the_spec_objects() {
     }
 
     let roles: Vec<String> = sqlx::query_scalar(
-        "select rolname::text from pg_roles where rolname like 'dg\\_%' and not rolcanlogin order by 1",
+        "select rolname::text from pg_roles where rolname like 'wt\\_%' and not rolcanlogin order by 1",
     )
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(roles, ["dg_analyst", "dg_owner", "dg_pipeline", "dg_web"]);
+    assert_eq!(roles, ["wt_analyst", "wt_owner", "wt_pipeline", "wt_web"]);
 
     let foreign_owned: Vec<String> = sqlx::query_scalar(
         "select c.relname::text from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = 'public' and c.relkind in ('r', 'v')
-           and c.relname <> '_sqlx_migrations' and pg_get_userbyid(c.relowner) <> 'dg_owner'",
+           and c.relname <> '_sqlx_migrations' and pg_get_userbyid(c.relowner) <> 'wt_owner'",
     )
     .fetch_all(&pool)
     .await
     .unwrap();
     assert!(
         foreign_owned.is_empty(),
-        "not owned by dg_owner: {foreign_owned:?}"
+        "not owned by wt_owner: {foreign_owned:?}"
     );
 }

@@ -1,8 +1,8 @@
 """Spec 01 M1: prove the database accepts connections only from the web and batch groups.
 
 Checks the live AWS configuration, not the Terraform source:
-- the RDS instance is not publicly accessible and sits only in the dg-v1-db security group
-- that group's inbound rules are exactly TCP 5432 from dg-v1-web and from dg-v1-batch, with no
+- the RDS instance is not publicly accessible and sits only in the wt-v1-db security group
+- that group's inbound rules are exactly TCP 5432 from wt-v1-web and from wt-v1-batch, with no
   CIDR, prefix-list or other group sources, and it has no outbound rules
 - the instance's subnets have no route to an internet gateway
 
@@ -34,7 +34,7 @@ def group_id(name: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--name", default="dg-v1", help="stack name prefix")
+    parser.add_argument("--name", default="wt-v1", help="stack name prefix")
     args = parser.parse_args()
     n = args.name
     failures: list[str] = []

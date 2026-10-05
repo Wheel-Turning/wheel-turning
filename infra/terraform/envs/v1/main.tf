@@ -5,7 +5,20 @@ provider "aws" {
 
   default_tags {
     tags = {
-      project = "dharma-gates"
+      project = "wheel-turning"
+      env     = "v1"
+    }
+  }
+}
+
+# Route 53 health check metrics exist only in us-east-1, so the alarm on them is created there.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      project = "wheel-turning"
       env     = "v1"
     }
   }
@@ -14,7 +27,7 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  name = "dg-v1"
+  name = "wt-v1"
   # Created by infra/terraform/github-oidc, which is applied before this stack.
   workload_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name}/${local.name}-workload-boundary"
 }
@@ -50,6 +63,14 @@ module "observability" {
   alb_arn_suffix = module.service.alb_arn_suffix
   db_identifier  = module.database.identifier
   scratch_bucket = module.storage.bucket_names["scratch"]
+
+  target_group_arn_suffix = module.service.target_group_arn_suffix
+  health_check_fqdn       = var.domain_name
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
 }
 
 module "iam" {

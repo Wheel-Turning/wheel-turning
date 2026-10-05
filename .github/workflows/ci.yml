@@ -145,7 +145,7 @@ jobs:
       - name: terraform validate every root module
         run: |
           set -euo pipefail
-          for root in infra/terraform/account/ infra/terraform/bootstrap/ infra/terraform/github-oidc/ infra/terraform/envs/*/; do
+          for root in infra/terraform/account/ infra/terraform/bootstrap/ infra/terraform/github-oidc/ infra/terraform/records/ infra/terraform/envs/*/; do
             echo "::group::$root"
             terraform -chdir="$root" init -backend=false -input=false
             terraform -chdir="$root" validate

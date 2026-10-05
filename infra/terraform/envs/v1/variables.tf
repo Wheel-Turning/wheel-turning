@@ -36,8 +36,9 @@ variable "db_instance_class" {
 }
 
 variable "db_deletion_protection" {
-  type    = bool
-  default = false
+  description = "On since the October 2026 destroy-and-rebuild test proved the stack destroys cleanly. Set false and apply before any deliberate destroy."
+  type        = bool
+  default     = true
 }
 
 variable "web_cpu" {

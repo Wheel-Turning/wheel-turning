@@ -21,7 +21,7 @@ terraform {
 }
 
 variable "name" {
-  description = "Name prefix, also the secret path prefix (for example dg-v1 gives dg-v1/...)."
+  description = "Name prefix, also the secret path prefix (for example wt-v1 gives wt-v1/...)."
   type        = string
 }
 
@@ -46,9 +46,9 @@ locals {
   # Spec 02 plus a login role that inherits from each.
   generated = {
     session_secret       = "Key that signs session cookies"
-    db_dg_owner_login    = "Password of the dg_owner_login database role (migrations)"
-    db_dg_web_login      = "Password of the dg_web_login database role (web service)"
-    db_dg_pipeline_login = "Password of the dg_pipeline_login database role (batch host and CLI)"
+    db_wt_owner_login    = "Password of the wt_owner_login database role (migrations)"
+    db_wt_web_login      = "Password of the wt_web_login database role (web service)"
+    db_wt_pipeline_login = "Password of the wt_pipeline_login database role (batch host and CLI)"
   }
 }
 

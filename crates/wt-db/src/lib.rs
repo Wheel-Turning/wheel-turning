@@ -95,7 +95,7 @@ async fn applied_count(pool: &PgPool) -> Result<usize, DbError> {
 }
 
 /// The NOLOGIN group roles from Spec 02. A login role inherits from exactly one of them.
-pub const GROUP_ROLES: [&str; 4] = ["dg_owner", "dg_pipeline", "dg_web", "dg_analyst"];
+pub const GROUP_ROLES: [&str; 4] = ["wt_owner", "wt_pipeline", "wt_web", "wt_analyst"];
 
 /// Why a login role could not be created.
 #[derive(Debug, thiserror::Error)]

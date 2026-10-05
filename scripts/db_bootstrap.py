@@ -1,10 +1,10 @@
 """One-time database bootstrap for a new v1 environment, run by a person, never by CI.
 
-Runs the dg-v1-admin task (which connects as the RDS master user) to:
+Runs the wt-v1-admin task (which connects as the RDS master user) to:
   1. apply the migrations, which create the Spec 02 group roles
-  2. create dg_owner_login, dg_web_login and dg_pipeline_login with the passwords Terraform
+  2. create wt_owner_login, wt_web_login and wt_pipeline_login with the passwords Terraform
      generated into Secrets Manager (ECS injects them; they never pass through this script)
-then runs the dg-v1-migrate task once as dg_owner_login to prove the owner login works.
+then runs the wt-v1-migrate task once as wt_owner_login to prove the owner login works.
 
 Every step is idempotent, so rerunning it is safe, for example after rotating passwords.
 
@@ -72,7 +72,7 @@ def run_task(outputs: dict, family: str, command: list[str] | None, label: str) 
     stream = f"{container}/{container}/{task_arn.rsplit('/', 1)[-1]}"
     try:
         events = aws(
-            "logs", "get-log-events", "--log-group-name", "/dg-v1/admin",
+            "logs", "get-log-events", "--log-group-name", "/wt-v1/admin",
             "--log-stream-name", stream,
         )["events"]  # fmt: skip
         for event in events:
@@ -93,14 +93,14 @@ def main() -> int:
     families = outputs["task_definition_families"]
 
     run_task(outputs, families["admin"], ["wt", "db", "migrate"], "migrate as master")
-    for group in ("dg_owner", "dg_web", "dg_pipeline"):
+    for group in ("wt_owner", "wt_web", "wt_pipeline"):
         login = f"{group}_login"
         command = [
             "wt", "db", "create-login", "--role", group, "--login", login,
             "--password-env", f"WT_LOGIN_PASSWORD_{login.upper()}",
         ]  # fmt: skip
         run_task(outputs, families["admin"], command, f"create {login}")
-    run_task(outputs, families["migrate"], None, "migrate as dg_owner_login")
+    run_task(outputs, families["migrate"], None, "migrate as wt_owner_login")
     return 0
 
 

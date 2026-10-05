@@ -1,6 +1,11 @@
 # Spec 01 observability: CloudWatch log groups with 30-day retention, and alarms on the load
 # balancer 5xx rate, database CPU and free storage, and a scratch bucket that is not empty after
-# 24 hours. Alarms email the alert address through one SNS topic.
+# 24 hours, plus two alarms that fire with no traffic at all: no healthy web task behind the load
+# balancer, and a Route 53 health check that cannot reach /healthz over HTTPS from outside AWS.
+# Alarms email the alert address through one SNS topic per region.
+#
+# Route 53 publishes health check metrics only in us-east-1, so that alarm and its topic live
+# there, through the aws.us_east_1 provider.
 
 variable "name" {
   type = string
@@ -17,6 +22,15 @@ variable "log_retention_days" {
 
 variable "alb_arn_suffix" {
   type = string
+}
+
+variable "target_group_arn_suffix" {
+  type = string
+}
+
+variable "health_check_fqdn" {
+  description = "Hostname the external health check requests /healthz from, over HTTPS."
+  type        = string
 }
 
 variable "db_identifier" {
@@ -149,6 +163,72 @@ resource "aws_cloudwatch_metric_alarm" "scratch_not_empty" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.alarms.arn]
   ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
+# The 5xx alarm stays quiet when nobody is using the app. This one does not: the target group
+# reports zero healthy hosts whenever the web task is down or failing /healthz.
+resource "aws_cloudwatch_metric_alarm" "no_healthy_web_task" {
+  alarm_name          = "${var.name}-no-healthy-web-task"
+  alarm_description   = "No healthy web task behind the load balancer for 5 minutes."
+  namespace           = "AWS/ApplicationELB"
+  metric_name         = "HealthyHostCount"
+  dimensions          = { LoadBalancer = var.alb_arn_suffix, TargetGroup = var.target_group_arn_suffix }
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 5
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
+# Checks the path a tester takes: public DNS, the certificate, the load balancer and the app.
+# Three checker regions, the minimum, keep the request rate on /healthz low.
+resource "aws_route53_health_check" "healthz" {
+  fqdn              = var.health_check_fqdn
+  type              = "HTTPS"
+  port              = 443
+  resource_path     = "/healthz"
+  request_interval  = 30
+  failure_threshold = 3
+  regions           = ["us-east-1", "us-west-2", "eu-west-1"]
+
+  tags = {
+    Name = "${var.name}-healthz"
+  }
+}
+
+resource "aws_sns_topic" "alarms_us_east_1" {
+  provider = aws.us_east_1
+  name     = "${var.name}-alarms"
+}
+
+# A second subscription, so a second confirmation email.
+resource "aws_sns_topic_subscription" "email_us_east_1" {
+  provider  = aws.us_east_1
+  topic_arn = aws_sns_topic.alarms_us_east_1.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+resource "aws_cloudwatch_metric_alarm" "healthz_unreachable" {
+  provider            = aws.us_east_1
+  alarm_name          = "${var.name}-healthz-unreachable"
+  alarm_description   = "https://${var.health_check_fqdn}/healthz has failed the Route 53 health check for 3 minutes."
+  namespace           = "AWS/Route53"
+  metric_name         = "HealthCheckStatus"
+  dimensions          = { HealthCheckId = aws_route53_health_check.healthz.id }
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarms_us_east_1.arn]
+  ok_actions          = [aws_sns_topic.alarms_us_east_1.arn]
 }
 
 output "log_group_names" {

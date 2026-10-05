@@ -2,8 +2,8 @@
 # HTTPS listener. Health check on /healthz, HTTP redirects to HTTPS.
 #
 # Two task definitions run the same image:
-# - web: the always-on service, connecting as dg_web_login
-# - migrate: a one-off task for `wt db migrate`, connecting as dg_owner_login
+# - web: the always-on service, connecting as wt_web_login
+# - migrate: a one-off task for `wt db migrate`, connecting as wt_owner_login
 # - admin: a one-off task connecting as the RDS master user, used only to bootstrap migrations
 #   and create login roles (`wt db create-login`)
 #
@@ -179,10 +179,10 @@ resource "aws_ecs_task_definition" "web" {
     portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
     environment = concat(local.common_env, local.db_env, [
       { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
-      { name = "WT_DB_USER", value = "dg_web_login" },
+      { name = "WT_DB_USER", value = "wt_web_login" },
     ])
     secrets = [
-      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_web_login"] },
+      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
       { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
     ]
     logConfiguration = {
@@ -215,10 +215,10 @@ resource "aws_ecs_task_definition" "migrate" {
     essential = true
     command   = ["wt", "db", "migrate"]
     environment = concat(local.common_env, local.db_env, [
-      { name = "WT_DB_USER", value = "dg_owner_login" },
+      { name = "WT_DB_USER", value = "wt_owner_login" },
     ])
     secrets = [
-      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_owner_login"] },
+      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_owner_login"] },
       { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
     ]
     logConfiguration = {
@@ -249,7 +249,7 @@ resource "aws_ecs_task_definition" "admin" {
     name      = "admin"
     image     = "${aws_ecr_repository.this.repository_url}:${local.migrate_tag}"
     essential = true
-    # Overridden per run, for example ["wt", "db", "create-login", "--role", "dg_web", ...].
+    # Overridden per run, for example ["wt", "db", "create-login", "--role", "wt_web", ...].
     command = ["wt", "db", "migrate"]
     environment = concat(local.common_env, local.db_env, [
       { name = "WT_DB_USER", value = var.db.master_username },
@@ -258,9 +258,9 @@ resource "aws_ecs_task_definition" "admin" {
       # RDS stores the master credentials as JSON; ECS extracts one key.
       { name = "WT_DB_PASSWORD", valueFrom = "${var.db.master_secret_arn}:password::" },
       { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
-      { name = "WT_LOGIN_PASSWORD_DG_OWNER_LOGIN", valueFrom = var.secret_arns["db_dg_owner_login"] },
-      { name = "WT_LOGIN_PASSWORD_DG_WEB_LOGIN", valueFrom = var.secret_arns["db_dg_web_login"] },
-      { name = "WT_LOGIN_PASSWORD_DG_PIPELINE_LOGIN", valueFrom = var.secret_arns["db_dg_pipeline_login"] },
+      { name = "WT_LOGIN_PASSWORD_WT_OWNER_LOGIN", valueFrom = var.secret_arns["db_wt_owner_login"] },
+      { name = "WT_LOGIN_PASSWORD_WT_WEB_LOGIN", valueFrom = var.secret_arns["db_wt_web_login"] },
+      { name = "WT_LOGIN_PASSWORD_WT_PIPELINE_LOGIN", valueFrom = var.secret_arns["db_wt_pipeline_login"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -417,6 +417,10 @@ output "alb_dns_name" {
 
 output "alb_arn_suffix" {
   value = aws_lb.this.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  value = aws_lb_target_group.web.arn_suffix
 }
 
 output "certificate_validation_records" {
