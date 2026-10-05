@@ -40,10 +40,10 @@ Run these in PowerShell.
 | WSL 2 with Ubuntu | `wsl --install -d Ubuntu` | The development environment | From the spec |
 | Docker Desktop | `winget install Docker.DockerDesktop`, then turn on the WSL 2 backend | Postgres for `cargo test` and the dev database | From the spec |
 | Visual Studio Build Tools with the C++ workload | Visual Studio Installer | MSVC, CMake and Ninja for the native whisper.cpp build | Tested (Build Tools 18, MSVC 14.51) |
-| Vulkan SDK | `winget install KhronosGroup.VulkanSDK` | The Vulkan build of whisper.cpp | Tested (1.4.363.0) |
-| Python 3.12 and uv | `winget install astral-sh.uv`, then `uv python install 3.12` | OpenVINO runtime and encoder conversion | Tested. If uv reports a missing version link, use `uv python install 3.12 --reinstall` and point `uv venv` at the full path of the downloaded `python.exe`. |
+| Vulkan SDK | `winget install KhronosGroup.VulkanSDK` | The Vulkan build of whisper.cpp, which the worker runs (Spec 04). Required. | Tested (1.4.363.0) |
+| Python 3.12 and uv | `winget install astral-sh.uv`, then `uv python install 3.12` | Optional. Only for the OpenVINO build, which the worker does not use. | Tested. If uv reports a missing version link, use `uv python install 3.12 --reinstall` and point `uv venv` at the full path of the downloaded `python.exe`. |
 | ffmpeg | `winget install Gyan.FFmpeg` | Audio conversion for the worker | Tested (9.0.2) |
-| AWS CLI v2 and the Session Manager plugin | `winget install Amazon.AWSCLI`, `winget install Amazon.SessionManagerPlugin` | Signing in, and the SSM port forward the worker uses to reach the database | Installed: AWS CLI 2.34.36, Session Manager plugin 1.2.814.0 (`session-manager-plugin --version`, October 4, 2026). The port forward against AWS is not tested yet. |
+| AWS CLI v2 and the Session Manager plugin | `winget install Amazon.AWSCLI`, `winget install Amazon.SessionManagerPlugin` | Signing in, and the SSM port forward the worker uses to reach the database | Installed: AWS CLI 2.34.36, Session Manager plugin 1.2.814.0 (`session-manager-plugin --version`, October 4, 2026). The port forward was tested against AWS on October 4, 2026. |
 | Rust | `winget install Rustlang.Rustup` | Building `wt` natively for the worker | Installed |
 
 Scoop works too. There is no Homebrew on Windows.
@@ -69,7 +69,7 @@ Terraform, the AWS CLI v2, the Session Manager plugin and the GitHub CLI come fr
 | Repository | `~/code/wheel-turning`, inside the Linux file system, not under `/mnt/c` | `C:\Users\<you>\Code\wheel-turning`, for the transcription worker |
 | Local configuration | `.env` in the clone, copied from `.env.example` | `.env` in the native clone |
 | Scratch audio | `./data/scratch` (the default) | `.\data\scratch` (the default) |
-| whisper.cpp builds and models for the worker | Not used | Outside git. The benchmark used `.bench\`, excluded through `.git\info\exclude`. |
+| whisper.cpp builds and models for the worker | Not used | Outside git. The worker runs `ggml-large-v3.bin` from the Hugging Face repository `ggerganov/whisper.cpp` on the Vulkan build (Spec 04). The benchmark kept its builds and models in `.bench\`, excluded through `.git\info\exclude`. |
 | Inbox for drafts and benchmark audio | `data-inbox/`, ignored by git | `data-inbox\`, ignored by git |
 
 `./data/`, `data-inbox/`, `.env` and audio files are all ignored by git.
@@ -80,9 +80,9 @@ Terraform, the AWS CLI v2, the Session Manager plugin and the GitHub CLI come fr
 | --- | --- | --- |
 | Load the MSVC compiler environment | Not needed | Run `vcvars64.bat` from Build Tools. To use it from PowerShell, run it through `cmd /c "… && set"` and import the variables, as `.bench\build.ps1` does. |
 | Build whisper.cpp with Vulkan | Not used | `cmake -S . -B build-vulkan -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON` and then `cmake --build build-vulkan` |
-| Build whisper.cpp with OpenVINO | Not used | `-DWHISPER_OPENVINO=1 -DOpenVINO_DIR=<venv>\Lib\site-packages\openvino\cmake`. The runtime DLLs in `openvino\libs` must be on `PATH` at run time. |
-| Vulkan on the Arc 140V | Not used | Set `GGML_VK_DISABLE_COOPMAT=1`. With default settings Vulkan produces garbage or crashes on this GPU. See `docs/asr-benchmark.md`. |
-| Python output with emoji (the ONNX exporter) | Works | Set `PYTHONUTF8=1`, or the console's cp1252 encoding fails |
+| Build whisper.cpp with OpenVINO (optional, not used by the worker) | Not used | `-DWHISPER_OPENVINO=1 -DOpenVINO_DIR=<venv>\Lib\site-packages\openvino\cmake`. The runtime DLLs in `openvino\libs` must be on `PATH` at run time. |
+| Vulkan on the Arc 140V | Not used | Set `GGML_VK_DISABLE_COOPMAT=1` for the worker; `.env.example` carries it. With default settings Vulkan produces garbage or crashes on this GPU. See `docs/asr-benchmark.md`. |
+| Python output with emoji (the ONNX exporter, OpenVINO conversion only) | Works | Set `PYTHONUTF8=1`, or the console's cp1252 encoding fails |
 | `scripts/check-deny-bans.sh` | `bash scripts/check-deny-bans.sh` | Run it in WSL 2 or Git Bash |
 | Paths in docs and manifests | Forward slashes | Forward slashes work in PowerShell and the tools used here |
 
@@ -108,9 +108,9 @@ aws ssm start-session --profile wheel-turning --region us-east-2 --target <batch
 
 Close that window to end the forward, then stop the batch host (Spec 07 runbook).
 
-Status: the tool checks and the window launch were tested on October 4, 2026. The forward has not been run against AWS.
+Status: tested against AWS on October 4, 2026, with the batch host as a `t3.small`. The script found the host and the database and opened the forward, and Postgres answered a TLS request through `localhost:5433`. No worker has logged in through it yet.
 
 ## Open points
 
 - **Clone layout.** Spec 01 puts the clone inside WSL 2, and Spec 04 builds the worker natively, so the owner keeps two clones. Spec 01 does not yet say how the two share `.env` and models.
-- **Port forward.** `scripts/worker-setup.ps1` is not yet run against AWS. Mark it tested once a forward has opened and the worker has connected.
+- **Worker login through the forward.** The forward works against AWS, but no worker has logged in through it with `dg_pipeline_login` yet. Mark it tested once `wt worker` connects.
