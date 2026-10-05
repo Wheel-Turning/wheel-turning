@@ -225,6 +225,8 @@ pub async fn facts(conn: &mut PgConnection, talk: TalkId) -> Result<ClassifyFact
 pub struct Candidate {
     /// The other talk.
     pub talk: TalkId,
+    /// Its title as published, for the recording date it states.
+    pub title: String,
     /// Its title, normalized the same way as `wt_ingest::classify::normalize_title`.
     pub normalized_title: String,
     /// `pg_trgm` similarity of the two normalized titles.
@@ -250,7 +252,7 @@ pub async fn duplicate_candidates(
 ) -> Result<Vec<Candidate>, IngestDbError> {
     let rows = sqlx::query!(
         r#"with c as (
-             select t.id, t.state::text as state, t.duration_s, sv.published_at,
+             select t.id, t.title, t.state::text as state, t.duration_s, sv.published_at,
                     coalesce((sv.raw->>'has_captions')::boolean, false) as has_captions,
                     trim(regexp_replace(lower(normalize(t.title, NFKC)), '[^[:alnum:]]+', ' ', 'g'))
                       as norm
@@ -258,7 +260,7 @@ pub async fn duplicate_candidates(
              where t.id <> $1 and t.duplicate_of is null
                and t.state not in ('excluded', 'withdrawn')
                and t.duration_s between $3::int - $4::int and $3::int + $4::int)
-           select id as "id!", state as "state!", duration_s, published_at,
+           select id as "id!", title as "title!", state as "state!", duration_s, published_at,
                   has_captions as "has_captions!", norm as "norm!",
                   similarity(norm, $2) as "similarity!"
            from c"#,
@@ -273,6 +275,7 @@ pub async fn duplicate_candidates(
         .into_iter()
         .map(|r| Candidate {
             talk: TalkId::from(r.id),
+            title: r.title,
             normalized_title: r.norm,
             similarity: r.similarity,
             published_at: r.published_at,
@@ -562,4 +565,23 @@ pub async fn alias_list(conn: &mut PgConnection) -> Result<Vec<(String, String)>
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows.into_iter().map(|r| (r.teacher, r.alias)).collect())
+}
+
+/// Records a talk's date, from the recording date its title states or else its upload date.
+/// Only talks before the gate change. Derived from the title, so not logged.
+pub async fn set_talk_date(
+    conn: &mut PgConnection,
+    talk: TalkId,
+    date: Option<sqlx::types::chrono::NaiveDate>,
+) -> Result<(), IngestDbError> {
+    sqlx::query!(
+        "update talk set talk_date = $2
+         where id = $1 and talk_date is distinct from $2
+           and state in ('discovered', 'needs_review', 'awaiting_consent')",
+        talk.as_uuid(),
+        date
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }

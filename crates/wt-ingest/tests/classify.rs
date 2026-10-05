@@ -733,3 +733,111 @@ aliases = ["Cy"]
         "unchanged rules queue nothing"
     );
 }
+
+#[tokio::test]
+async fn recording_dates_in_titles_set_talk_dates_and_catch_late_re_uploads() {
+    let fx = start().await;
+    let adapter = FakeAdapter(Mutex::new(
+        [
+            // One recording uploaded twice, 13 days apart, the second with a typo.
+            (
+                "2001",
+                "2021-11-07_Ada_Sunday_Shobogenzo-Uji_Part-9.mp4",
+                2718,
+                "2021-11-13T18:00:00Z",
+            ),
+            (
+                "2002",
+                "2021-11-07_Sunday_Ada_Sbobogenzo_Uji_Part-9",
+                2711,
+                "2021-11-26T18:00:00Z",
+            ),
+            // One title, two talks a week apart, each uploaded later.
+            (
+                "2003",
+                "Ada: Facing the Jewel Mirror, on January 18, 2026",
+                2025,
+                "2026-02-01T18:00:00Z",
+            ),
+            (
+                "2004",
+                "Ada: Facing the Jewel Mirror, on January 25, 2026",
+                2062,
+                "2026-02-06T18:00:00Z",
+            ),
+            // A title date after the upload is a typo: the upload date stands.
+            (
+                "2005",
+                "Ada: Endings, on May 30, 2023",
+                2400,
+                "2023-05-10T18:00:00Z",
+            ),
+            // No date in the title: weekly talks with one generic title stay apart.
+            (
+                "2006",
+                "Sunday Dharma Talk: Ada - Bendowa Series",
+                1778,
+                "2021-02-25T18:00:00Z",
+            ),
+            (
+                "2007",
+                "Sunday Dharma Talk: Ada - Bendowa Series",
+                1751,
+                "2021-03-04T18:00:00Z",
+            ),
+        ]
+        .into_iter()
+        .map(|(id, t, d, at)| video(id, t, d, at, false))
+        .collect(),
+    ));
+    discover(&fx, &adapter).await;
+    classify_all(&fx).await;
+
+    let dates: BTreeMap<String, (Option<String>, String, Option<String>)> = sqlx::query_as(
+        "select sv.external_id, t.talk_date::text, t.state::text, dsv.external_id
+         from talk t join source_video sv on sv.id = t.source_video_id
+         left join talk d on d.id = t.duplicate_of
+         left join source_video dsv on dsv.id = d.source_video_id",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(
+        |(id, date, state, dup): (String, Option<String>, String, Option<String>)| {
+            (id, (date, state, dup))
+        },
+    )
+    .collect();
+    let date = |id: &str| dates[id].0.as_deref();
+
+    assert_eq!(
+        date("2001"),
+        Some("2021-11-07"),
+        "the recording date, not the upload"
+    );
+    assert_eq!(dates["2002"].1, "excluded");
+    assert_eq!(
+        dates["2002"].2.as_deref(),
+        Some("2001"),
+        "the late re-upload merges into the first"
+    );
+    assert_eq!(
+        (date("2003"), date("2004")),
+        (Some("2026-01-18"), Some("2026-01-25"))
+    );
+    assert_eq!(
+        (dates["2003"].2.as_deref(), dates["2004"].2.as_deref()),
+        (None, None)
+    );
+    assert_eq!(
+        date("2005"),
+        Some("2023-05-10"),
+        "a future title date is ignored"
+    );
+    assert_eq!(
+        (dates["2006"].2.as_deref(), dates["2007"].2.as_deref()),
+        (None, None)
+    );
+    assert_eq!(date("2006"), Some("2021-02-25"));
+}

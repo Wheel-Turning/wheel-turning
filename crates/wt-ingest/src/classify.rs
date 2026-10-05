@@ -109,7 +109,7 @@ pub fn talk_type(cfg: &ClassifyConfig, normalized: &str, duration_s: Option<i32>
 pub struct DupFacts {
     /// Normalized title.
     pub title: String,
-    /// Days since the Unix epoch of the publish date, when known.
+    /// The talk's date as a day number: its recording date, or else its upload date.
     pub day: Option<i64>,
     /// Duration in seconds, when known.
     pub duration_s: Option<i32>,

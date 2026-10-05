@@ -1,6 +1,7 @@
 //! Discovery runs and the `classify` job (Spec 03, Deduplication and classification).
 
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::Datelike;
+use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{Acquire, PgConnection};
 use wt_core::ids::{SanghaId, TalkId};
 use wt_db::ingest::{self, Candidate, IngestDbError, NewVideo, PRE_GATE, Recorded};
@@ -9,6 +10,7 @@ use wt_db::registry::{self, RegistryDbError, SpeakerOutcome};
 
 use crate::classify::{self, DupFacts, Exclusion};
 use crate::config::{ClassifyConfig, ConfigError, SourceConfig, SourcesFile};
+use crate::dates;
 use crate::source::{DiscoveredVideo, IngestError, SourceAdapter};
 
 /// Errors from a discovery run or a classify job.
@@ -76,15 +78,19 @@ fn fnv64(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-/// The version of everything classification reads besides the video: the pipeline and series
-/// files as written, and every alias with its teacher. A change to any of them gives a new
-/// version, so `reclassify` queues work exactly when the rules changed.
+/// The version of the classification rules in code. Raise it whenever a rule's code changes,
+/// so `reclassify` applies the change to talks already classified.
+pub const CLASSIFIER_VERSION: &str = "2026-10-05.recording-dates";
+
+/// The version of everything classification reads besides the video: the rule code, the
+/// pipeline and series files as written, and every alias with its teacher. A change to any of
+/// them gives a new version, so `reclassify` queues work exactly when the rules changed.
 pub fn rules_version(
     pipeline_toml: &str,
     series_toml: &str,
     aliases: &[(String, String)],
 ) -> String {
-    let canonical = serde_json::json!([pipeline_toml, series_toml, aliases]);
+    let canonical = serde_json::json!([CLASSIFIER_VERSION, pipeline_toml, series_toml, aliases]);
     fnv64(canonical.to_string().as_bytes())
 }
 
@@ -227,6 +233,8 @@ pub async fn classify_talk(
         return Ok(Classified::Skipped);
     }
     let title = classify::normalize_title(&facts.title);
+    let date = dates::talk_date(&facts.title, facts.published_at.map(|t| t.date_naive()));
+    ingest::set_talk_date(conn, talk, date).await?;
 
     if let Some(ex) = classify::exclusion(cfg, &title, facts.duration_s) {
         ingest::exclude(conn, talk, ex.reason(), ex.talk_type(), None, actor).await?;
@@ -235,8 +243,17 @@ pub async fn classify_talk(
 
     let series = classify::series(cfg, &title);
     let part = series.as_ref().and_then(|(_, p)| *p);
-    if let Some(kept) =
-        merge_duplicates(conn, cfg, talk, &title, &facts, series.as_ref(), actor).await?
+    if let Some(kept) = merge_duplicates(
+        conn,
+        cfg,
+        talk,
+        &title,
+        date,
+        &facts,
+        series.as_ref(),
+        actor,
+    )
+    .await?
     {
         return Ok(Classified::Duplicate { of: kept });
     }
@@ -276,11 +293,13 @@ pub async fn classify_talk(
 /// past the gate if there is one (it cannot be demoted), otherwise one with captions, otherwise
 /// the earliest published. The others before the gate become duplicates of it. Returns the
 /// kept talk when it is not this one.
+#[allow(clippy::too_many_arguments)]
 async fn merge_duplicates(
     conn: &mut PgConnection,
     cfg: &ClassifyConfig,
     talk: TalkId,
     title: &str,
+    date: Option<NaiveDate>,
     facts: &ingest::ClassifyFacts,
     series: Option<&(String, Option<i32>)>,
     actor: &str,
@@ -296,7 +315,7 @@ async fn merge_duplicates(
         .max(i32::try_from(pct_gap as i64).unwrap_or(i32::MAX));
     let me = DupFacts {
         title: title.to_owned(),
-        day: facts.published_at.map(day),
+        day: date.map(day),
         duration_s: Some(duration),
         series_part: series.and_then(|(n, p)| p.map(|p| (n.clone(), p))),
     };
@@ -307,7 +326,10 @@ async fn merge_duplicates(
             .filter(|c| {
                 let other = DupFacts {
                     title: c.normalized_title.clone(),
-                    day: c.published_at.map(day),
+                    // Like the series below, from the title: the other talk's stored date
+                    // may not be set yet.
+                    day: dates::talk_date(&c.title, c.published_at.map(|t| t.date_naive()))
+                        .map(day),
                     duration_s: c.duration_s,
                     // From the title, not the stored columns: the other talk may not be
                     // classified yet, and the result must not depend on job order.
@@ -358,8 +380,8 @@ async fn merge_duplicates(
     Ok((best != talk).then_some(best))
 }
 
-fn day(at: DateTime<Utc>) -> i64 {
-    at.timestamp().div_euclid(86_400)
+fn day(date: NaiveDate) -> i64 {
+    i64::from(date.num_days_from_ce())
 }
 
 /// Runs one claimed `classify` job in a transaction with its completion, so the talk's new
