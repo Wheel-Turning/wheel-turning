@@ -141,10 +141,10 @@ Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_s
 
 Acceptance criteria for M2:
 
-- [ ] `Talk<Pending>` cannot be passed to any fetch, transcript, index or advance function. A compile-fail test (`trybuild`) proves it.
-- [ ] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
-- [ ] Consent propagation: granting moves eligible talks to `cleared`, and declining or withdrawing runs the teacher takedown in the same transaction.
-- [ ] `speaker_consent` history is append-only through the CLI and the database.
+- [x] `Talk<Pending>` cannot be passed to any fetch, transcript, index or advance function. A compile-fail test (`trybuild`) proves it. (`wt-db/tests/gate/` covers `clear` and `advance` and forging a `Talk<Consented>`; fetch, transcript and index add cases when M4 adds them.)
+- [x] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
+- [x] Consent propagation: granting moves eligible talks to `cleared`, and declining or withdrawing runs the teacher takedown in the same transaction.
+- [x] `speaker_consent` history is append-only through the CLI and the database.
 - [ ] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
 
 Acceptance criteria for M3:
