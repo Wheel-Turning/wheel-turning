@@ -1,8 +1,16 @@
 # ASR benchmark on the owner's Windows PC
 
-Run on October 4, 2026. distil-large-v3 transcribes the benchmark clip about 10 to 11 times faster than real time when OpenVINO runs the encoder on the Arc GPU or the NPU, and about 2 times faster on the CPU alone. Vulkan gives garbage with its default settings on this GPU. With the GPU's matrix-core (coopmat) path turned off it is correct and runs about 8 times faster than real time.
+Run on October 4, 2026. Spec 04's decision rule picks **whisper.cpp with the OpenVINO encoder on the Arc GPU**, and the route **run the whole corpus on this PC**. The best measured real-time factor was 11.53, well above the rule's threshold of 3. The NPU route was close behind at 9.9 to 10.6. Vulkan with the GPU's matrix-core (coopmat) path turned off reached 7.8 to 8.8. CPU only reached 1.8. Vulkan with its default settings fails on this GPU.
 
-Spec 04 has no rule that picks a setup by speed, so this report picks none. Its only rule is to keep `large-v3` if `distil-large-v3` misses core vocabulary, and that needs word error rates on a hand-corrected sample, which this benchmark does not measure.
+## Decision rule (Spec 04)
+
+"Owner's hardware and the decision rule" takes the best measured real-time factor on the sample:
+
+- **3 or more:** run the whole corpus on this PC. This is the case here, at 11.53.
+- **Between 1 and 3:** run the first 20 to 30 talks on this PC for Gate A, and rent a GPU machine for the rest.
+- **Below 1:** rent a GPU machine for everything.
+
+Speed only decides the route. Spec 04 also says to keep `large-v3` for the full run if `distil-large-v3` misses core vocabulary. That needs word error rates on a hand-corrected sample, and this benchmark does not measure them.
 
 ## Machine and inputs
 
@@ -19,48 +27,62 @@ Spec 04 has no rule that picks a setup by speed, so this report picks none. Its 
 | OpenVINO | 2026.3.1 runtime and CMake files from the `openvino` Python package |
 | Model | `ggml-distil-large-v3.bin`, SHA-256 `2883a11b…2b69a298`, matching Hugging Face |
 | OpenVINO encoder | Converted from `distil-whisper/distil-large-v3-openai` `model.bin` with whisper.cpp's own `convert_encoder`, FP32 |
-| Clip | `data-inbox/benchmark/clip.mp3`, the LibriVox preface to *Sermons of a Buddhist Abbot*, converted to 16 kHz mono WAV. It is 313.16 s long, shorter than the 10 minutes asked for, so nothing was trimmed. |
+| Clip | The first 10:00 of `soba_03_shaku_64kb.mp3`, chapter 3 of the LibriVox recording of *Sermons of a Buddhist Abbot*, converted to 16 kHz mono WAV. One volunteer reader. |
 
-Every run uses `whisper-cli` with `-t 8 -l en` and the defaults: beam size 5, best-of 5, flash attention on. Each setup ran twice in a row with nothing else running.
+The clip is a public-domain reading of a Zen teacher's sermons. Spec 04 says the clip is "never a talk from a teacher". The owner chose this clip knowing that.
+
+Every run uses `whisper-cli` with `-t 8 -l en` and the defaults: beam size 5, best-of 5, flash attention on. The setups ran one after another, in Spec 04's order, with nothing else running.
 
 The real-time factor is seconds of audio divided by wall-clock seconds, model load included. Peak RAM is the process's peak working set. GPU memory is the process's shared plus dedicated GPU memory from Windows performance counters. On this integrated GPU that memory also comes out of the 16 GB.
 
 ## Results
 
-| Setup | RTF, run 1 | RTF, run 2 | Wall time, run 2 | Peak RAM | GPU memory | Transcript | Errors |
+| Setup | RTF, run 1 | RTF, run 2 | Wall time, run 2 | Peak RAM | GPU memory | Words | Errors |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| CPU only, 8 threads | 1.89 | 1.94 | 161.6 s | 1.8 GB | 0 | Correct, 807 words | None |
-| Vulkan, default | 1.30 | 1.00 | 313.3 s | 1.9 GB | 1.7 GB | Garbage: repeated fragments such as "e e e e" and "have have" | None reported. The exit code is 0, so only the text shows the failure. |
-| Vulkan, `GGML_VK_DISABLE_COOPMAT=1` | 7.31 | 8.23 | 38.0 s | 2.0 GB | 1.7 GB | Correct, 818 words | Invented last line: "I'm going to be able to be able to be." |
-| OpenVINO encoder on GPU | 7.93 | 10.10 | 31.0 s | 5.8 GB | 3.8 GB in run 1, 1.7 GB in run 2 | Correct, 825 words | None |
-| OpenVINO encoder on NPU | 2.22 | 11.03 | 28.4 s | 7.1 GB in run 1, 4.1 GB in run 2 | 1.4 GB | Correct, 820 words | "Thank you." repeated at the end |
+| Vulkan, default | — | not run | — | 2.0 GB | 1.7 GB | 0 | Crashed after 107 s with exit code −1 and no message, and wrote no transcript |
+| Vulkan, `GGML_VK_DISABLE_COOPMAT=1` | 7.79 | 8.77 | 68.4 s | 2.0 GB | 1.7 GB | 1,749 | None |
+| OpenVINO encoder on GPU | 11.03 | 11.53 | 52.0 s | 5.7 GB | 1.7 GB | 1,747 | None |
+| OpenVINO encoder on NPU | 10.56 | 9.90 | 60.6 s | 4.1 GB | 1.4 GB | 1,753 | None |
+| CPU only, 8 threads | 1.81 | 1.75 | 342.8 s | 1.8 GB | 0 | 1,752 | None |
 
 Notes on the results:
 
-- **First runs.** The first OpenVINO run on each device compiles the encoder and caches it next to the model (`…-encoder-openvino-cache`). The NPU run 1 figure of 2.22 is mostly that compilation. Run 2 shows steady-state speed.
-- **Where the time goes.** With OpenVINO only the encoder moves off the CPU, and the decoder stays on the CPU threads. Encoding took 5.5 s on the GPU and 7.5 s on the NPU, against 142 s on the CPU. Decoding took 9 to 12 s in every correct setup.
-- **Vulkan defaults.** With default settings Vulkan encodes every 30-second window several times and decodes far more tokens. That is the garbage output, not a slow but valid run. Turning off flash attention (`-nfa`) did not fix it on a 60-second test. Turning off coopmat did.
-- **Endings.** The invented lines at the end of the Vulkan and NPU transcripts sit in the silence after the recording ends, a known whisper failure on trailing silence. The text before them matches the CPU transcript.
-- **Agreement.** Against the CPU transcript, the OpenVINO GPU and NPU transcripts differ in 116 and 85 word-level diff lines, mostly spelling of names such as "Tostoi"/"Tostoy" and line breaks. No reference transcript exists, so no setup's accuracy is measured.
+- **Default Vulkan.** It ran once, to confirm the failure seen on the earlier clip, where it wrote repeated fragments instead of text.
+- **OpenVINO cache.** The OpenVINO encoder was already compiled and cached from the earlier runs, so run 1 on each device includes no compilation. A first run on a fresh machine is slower; on the earlier clip the NPU's first run was 2.22.
+- **Where the time goes.** With OpenVINO only the encoder moves off the CPU, and the decoder stays on the CPU threads. Encoding the clip took 6.6 s on the GPU, 14.0 s on the NPU, 39.4 s on Vulkan and 296.5 s on the CPU. Decoding took 19 to 30 s in every setup.
+- **Transcripts.** The four working setups produce the same text apart from punctuation, capitals and line breaks, and all four end mid-sentence where the clip is cut. No reference transcript exists, so no setup's accuracy is measured.
 
 ## What the speeds mean for the SSZ corpus
 
-The PRD puts the SSZ corpus at about 140 hours. Compute time is 140 hours divided by the real-time factor:
+The PRD puts the SSZ corpus at about 140 hours. Compute time is 140 hours divided by the mean real-time factor of the two runs:
 
-| Setup | RTF, run 2 | Compute time for 140 h |
+| Setup | Mean RTF | Compute time for 140 h |
 | --- | --- | --- |
-| CPU only, 8 threads | 1.94 | about 72 h |
-| Vulkan, coopmat off | 8.23 | about 17 h |
-| OpenVINO encoder on GPU | 10.10 | about 14 h |
-| OpenVINO encoder on NPU | 11.03 | about 13 h |
+| OpenVINO encoder on GPU | 11.28 | about 12.4 h |
+| OpenVINO encoder on NPU | 10.23 | about 13.7 h |
+| Vulkan, coopmat off | 8.28 | about 16.9 h |
+| CPU only, 8 threads | 1.78 | about 78.7 h |
 
-The clip is a single clean LibriVox reading, not a recorded dharma talk with room sound and several speakers. Talk audio may run at a different speed.
+The clip is a single clean reading. Recorded talks with room sound, several speakers and long silences may run at a different speed.
+
+## Earlier run on a shorter clip
+
+The first run used the 5:13 LibriVox preface to the same book. The speeds were close:
+
+| Setup | RTF on the 5:13 preface |
+| --- | --- |
+| Vulkan, coopmat off | 8.23 |
+| OpenVINO encoder on GPU | 10.10 |
+| OpenVINO encoder on NPU | 11.03 |
+| CPU only | 1.94 |
+
+On that clip default Vulkan finished but wrote repeated fragments. That earlier clip and its results are kept as `clip-preface-313s.wav` and `.bench/results-preface/`.
 
 ## Not covered
 
-- **Accuracy.** No word error rate was measured for any setup, and Spec 04's `large-v3` versus `distil-large-v3` check was not run.
+- **Accuracy.** No word error rate was measured, and Spec 04's `large-v3` versus `distil-large-v3` check was not run.
+- **`wt asr benchmark`.** The command in Spec 04's acceptance items does not exist yet. These runs used `whisper-cli` through the scripts below. The chosen setup is recorded here by hand.
 - **Configurations.** `large-v3`, quantized models, smaller beam sizes and thread counts other than 8 were not run.
-- **Length.** The clip is 5 minutes 13 seconds, not 10 minutes.
 
 ## Reproducing
 
@@ -68,5 +90,5 @@ The build scripts, runner, models and results are in `.bench/` in the primary ch
 
 - `build.ps1`: builds `build-cpu`, `build-vulkan` (`-DGGML_VULKAN=ON`) and `build-openvino` (`-DWHISPER_OPENVINO=1 -DOpenVINO_DIR=…`).
 - `convert_distil.py`: converts the encoder for OpenVINO.
-- `run_all.ps1`: runs every setup twice.
+- `run_all.ps1`: runs every setup in Spec 04's order.
 - `results/runs.jsonl`: one line per run, with the transcripts and stderr logs beside it.
