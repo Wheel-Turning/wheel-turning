@@ -82,11 +82,12 @@ async fn a_clean_database_passes_every_check_in_prod() {
 }
 
 #[tokio::test]
-async fn consent_drift_fails_when_a_declined_teachers_passages_remain() {
+async fn consent_drift_fails_when_passages_outlive_consent() {
     let fx = common::start().await;
     let t = clean(&fx.pool).await;
 
-    consent(&fx.pool, ADA, ConsentStatus::Declined).await;
+    // Consent falling back to requested returns the talk to the gate and keeps its passages.
+    consent(&fx.pool, ADA, ConsentStatus::Requested).await;
     let report = audit(&fx.pool, Env::Prod).await;
     only(&report, &["consent_drift"]);
     assert!(report.failed());
@@ -98,11 +99,18 @@ async fn consent_drift_fails_when_a_declined_teachers_passages_remain() {
     assert_eq!(drift.severity, Severity::Fail);
     assert_eq!(drift.findings, 1);
 
-    // The takedown the decline calls for clears it.
     wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(t), ACTOR)
         .await
         .unwrap();
     assert!(!audit(&fx.pool, Env::Prod).await.failed());
+}
+
+#[tokio::test]
+async fn a_decline_leaves_nothing_for_the_audit_to_find() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    consent(&fx.pool, ADA, ConsentStatus::Declined).await;
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
 }
 
 #[tokio::test]

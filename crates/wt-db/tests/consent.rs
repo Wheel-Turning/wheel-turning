@@ -95,43 +95,123 @@ async fn consent_set_finds_the_teacher_by_alias_in_any_case() {
     );
 }
 
-#[tokio::test]
-async fn declining_excludes_every_talk_and_stops_serving_at_once() {
+/// Spec 03, Mandated talks, rule 5: a decline or a withdrawal runs the teacher takedown, so
+/// the material is deleted at once, not only held out of serving.
+async fn refusal_takes_down_every_talk(status: ConsentStatus) {
     let fx = common::start().await;
     let waiting = talk(&fx.pool, Some(ADA), None).await;
     let served = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    let bo = talk(&fx.pool, Some(BO), Some(BO)).await;
     consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    consent(&fx.pool, BO, ConsentStatus::Granted).await;
     common::make_ready(&fx.pool, served).await;
-    assert_eq!(servable(&fx.pool).await, 1);
+    common::make_ready(&fx.pool, bo).await;
+    assert_eq!(servable(&fx.pool).await, 2);
 
-    let out = set_consent(&fx.pool, ADA, ConsentStatus::Declined, None, None, ACTOR)
+    let out = set_consent(&fx.pool, ADA, status, Some("reply-2"), None, ACTOR)
         .await
         .unwrap();
 
-    let mut excluded = out.excluded.clone();
-    excluded.sort();
+    let report = out.takedown.expect("a refusal runs the takedown");
+    let mut taken = report.talks.clone();
+    taken.sort();
     let mut expected = vec![waiting, served];
     expected.sort();
-    assert_eq!(excluded, expected);
+    assert_eq!(taken, expected);
+    assert_eq!(report.rows.get("passage"), Some(&1));
+    assert!(out.cleared.is_empty());
+
     for t in [waiting, served] {
-        assert_eq!(state(&fx.pool, t).await, "excluded");
-        assert_eq!(state_reason(&fx.pool, t).await.as_deref(), Some("declined"));
+        assert_eq!(state(&fx.pool, t).await, "withdrawn");
+        let talk_status: String =
+            sqlx::query_scalar("select consent_status::text from talk where id = $1")
+                .bind(t.as_uuid())
+                .fetch_one(&fx.pool)
+                .await
+                .unwrap();
+        assert_eq!(talk_status, status.as_str());
+        for table in ["passage", "segment", "transcript", "citation", "job"] {
+            let sql = format!("select count(*) from {table} where talk_id = $1");
+            assert_eq!(count(&fx.pool, &sql, t.as_uuid()).await, 0, "{table}");
+        }
     }
-    assert_eq!(servable(&fx.pool).await, 0);
+    assert_eq!(servable(&fx.pool).await, 1, "only Bo is still served");
+    assert_eq!(state(&fx.pool, bo).await, "ready");
+
+    let recorded: Vec<(String, Option<String>)> = sqlx::query_as(
+        "select sc.status::text, sc.evidence_ref from speaker_consent sc
+         join teacher te on te.id = sc.teacher_id
+         where te.display_name = $1 order by sc.created_at",
+    )
+    .bind(ADA)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded.last(),
+        Some(&(status.as_str().to_owned(), Some("reply-2".to_owned()))),
+        "one row for the refusal, with its evidence; the takedown adds no second row"
+    );
+    assert_eq!(recorded.len(), 2);
+    let logged: Vec<String> = sqlx::query_scalar("select scope from takedown_log")
+        .fetch_all(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(logged, vec!["teacher"]);
 }
 
 #[tokio::test]
-async fn granting_after_a_decline_brings_declined_talks_back() {
+async fn declining_takes_down_every_talk_of_the_teacher() {
+    refusal_takes_down_every_talk(ConsentStatus::Declined).await;
+}
+
+#[tokio::test]
+async fn withdrawing_takes_down_every_talk_of_the_teacher() {
+    refusal_takes_down_every_talk(ConsentStatus::Withdrawn).await;
+}
+
+#[tokio::test]
+async fn granting_after_a_decline_does_not_bring_talks_back() {
     let fx = common::start().await;
     let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
     consent(&fx.pool, ADA, ConsentStatus::Declined).await;
-    assert_eq!(state(&fx.pool, t).await, "excluded");
+    assert_eq!(state(&fx.pool, t).await, "withdrawn");
 
     let out = set_consent(&fx.pool, ADA, ConsentStatus::Granted, None, None, ACTOR)
         .await
         .unwrap();
-    assert_eq!(out.cleared, vec![t]);
-    assert_eq!(state(&fx.pool, t).await, "cleared");
+    assert!(out.cleared.is_empty());
+    assert_eq!(state(&fx.pool, t).await, "withdrawn");
+}
+
+#[tokio::test]
+async fn a_takedown_that_fails_records_no_refusal() {
+    let fx = common::start().await;
+    let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    let passage = common::make_ready(&fx.pool, t).await;
+    // A stored answer the takedown cannot parse makes it fail partway through.
+    let answer = common::answer(&fx.pool, &[passage]).await;
+    sqlx::query(
+        "update answer set payload = jsonb_set(payload, '{themes,0,description}', '5') where id = $1",
+    )
+    .bind(answer)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let err = set_consent(&fx.pool, ADA, ConsentStatus::Declined, None, None, ACTOR)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, ConsentError::Takedown(_)), "{err:?}");
+    assert_eq!(
+        current_consent(&fx.pool, ADA).await.as_deref(),
+        Some("granted"),
+        "the consent row and the takedown commit together or not at all"
+    );
+    assert_eq!(state(&fx.pool, t).await, "ready");
+    assert_eq!(servable(&fx.pool).await, 1);
 }
 
 #[tokio::test]
@@ -147,26 +227,6 @@ async fn a_hand_exclusion_survives_a_later_grant() {
         state_reason(&fx.pool, t).await.as_deref(),
         Some("speaker asked to hold this one")
     );
-}
-
-#[tokio::test]
-async fn withdrawing_is_refused_here_and_records_nothing() {
-    let fx = common::start().await;
-    let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
-    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
-
-    let err = set_consent(&fx.pool, ADA, ConsentStatus::Withdrawn, None, None, ACTOR)
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, ConsentError::WithdrawalNeedsTakedown),
-        "{err:?}"
-    );
-    assert_eq!(
-        current_consent(&fx.pool, ADA).await.as_deref(),
-        Some("granted")
-    );
-    assert_eq!(state(&fx.pool, t).await, "cleared");
 }
 
 #[tokio::test]

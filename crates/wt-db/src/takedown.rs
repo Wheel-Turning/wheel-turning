@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use sqlx::types::Uuid;
 use sqlx::{PgConnection, PgPool};
 use wt_core::answer::AnswerPayload;
+use wt_core::gate::ConsentStatus;
 use wt_core::ids::{PassageId, TalkId, TeacherId};
 use wt_core::stores::{OnTakedown, STORES, StoreKind};
 
@@ -81,14 +82,43 @@ pub async fn dry_run(pool: &PgPool, scope: &Scope) -> Result<TakedownReport, Tak
 }
 
 /// Runs the takedown's database step in one transaction. Serving stops the moment it commits.
+/// A teacher scope also records `withdrawn` consent.
 pub async fn run(
     pool: &PgPool,
     scope: &Scope,
     actor: &str,
 ) -> Result<TakedownReport, TakedownError> {
     let mut tx = pool.begin().await?;
-    let (talks, teacher) = resolve_scope(&mut tx, scope).await?;
-    let mut report = count(&mut tx, &talks).await?;
+    let consent = if let Scope::Teacher(name) = scope {
+        let (teacher_id, _) = find_teacher(&mut tx, name).await?;
+        sqlx::query!(
+            r#"insert into speaker_consent (teacher_id, status, decided_at, created_by)
+               values ($1, 'withdrawn', now(), $2)"#,
+            teacher_id.as_uuid(),
+            actor
+        )
+        .execute(&mut *tx)
+        .await?;
+        Some(ConsentStatus::Withdrawn)
+    } else {
+        None
+    };
+    let report = run_in(&mut tx, scope, actor, consent).await?;
+    tx.commit().await?;
+    Ok(report)
+}
+
+/// The takedown's database step inside the caller's transaction, so a consent change and its
+/// takedown commit together. `consent` is written to the talks' `consent_status`; recording the
+/// `speaker_consent` row is the caller's job.
+pub(crate) async fn run_in(
+    tx: &mut PgConnection,
+    scope: &Scope,
+    actor: &str,
+    consent: Option<ConsentStatus>,
+) -> Result<TakedownReport, TakedownError> {
+    let (talks, teacher) = resolve_scope(tx, scope).await?;
+    let mut report = count(tx, &talks).await?;
     let talk_ids: Vec<Uuid> = talks.iter().map(TalkId::as_uuid).collect();
 
     let removed: Vec<Uuid> =
@@ -158,24 +188,13 @@ pub async fn run(
 
     sqlx::query!(
         r#"update talk set state = 'withdrawn', state_reason = 'takedown', content_hash = null,
-                  consent_status = case when $2 then 'withdrawn' else consent_status end
+                  consent_status = coalesce($2::text::consent_status, consent_status)
            where id = any($1)"#,
         &talk_ids,
-        teacher.is_some()
+        consent.map(ConsentStatus::as_str)
     )
     .execute(&mut *tx)
     .await?;
-
-    if let Some(teacher_id) = teacher {
-        sqlx::query!(
-            r#"insert into speaker_consent (teacher_id, status, decided_at, created_by)
-               values ($1, 'withdrawn', now(), $2)"#,
-            teacher_id.as_uuid(),
-            actor
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
 
     let counts = serde_json::to_value(&report).unwrap_or_default();
     let (scope_text, talk_col) = match scope {
@@ -194,7 +213,6 @@ pub async fn run(
     .execute(&mut *tx)
     .await?;
 
-    tx.commit().await?;
     Ok(report)
 }
 

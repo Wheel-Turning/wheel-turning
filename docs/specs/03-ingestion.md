@@ -99,7 +99,7 @@ Rules:
 1. Only `authorize` builds a `Talk<Consented>`, and its constructor is private to `wt-core`. Every function that fetches media, writes a transcript, segments, extracts, embeds or indexes takes a `&Talk<Consented>`.
 2. Every job handler loads its talk and calls `authorize` again at the start, so a consent change between stages stops the pipeline at the next job.
 3. State changes go through `TalkRepo::advance(&Talk<Consented>, next_state)`, which exists only for consented talks. The only way into `cleared` is `TalkRepo::clear(Talk<Consented>)`.
-4. `wt consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `declined`, talks move to `excluded` with reason `declined`. With `withdrawn`, the command stops and asks for explicit confirmation, then runs the takedown routine in Spec 07 for the teacher.
+4. `wt consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `declined` or `withdrawn`, the same transaction runs the teacher takedown in Spec 07, so the teacher's talks move to `withdrawn` and their text is deleted, not only excluded (decision of October 4, 2026; see Mandated talks, rule 5). A decline, a withdrawal, an opt-out and a takedown request all end in that takedown. If the takedown fails, the consent row is not recorded either.
 5. `wt talk set-rights --talk <id> | --teacher <name> --holder <text>` sets the rights holder and logs the change. `--holder speaker` writes the teacher's display name. A talk may also be excluded by hand with `wt talk exclude --talk <id> --reason <text>`, which is how a speaker's limits are applied in v1.
 6. A teacher with no consent row is treated as `unknown`. The default is never permission.
 
@@ -143,7 +143,7 @@ Acceptance criteria for M2:
 
 - [ ] `Talk<Pending>` cannot be passed to any fetch, transcript, index or advance function. A compile-fail test (`trybuild`) proves it.
 - [ ] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
-- [ ] Consent propagation: granting moves eligible talks to `cleared`, declining moves them to `excluded`, and withdrawing requires confirmation and triggers takedown.
+- [ ] Consent propagation: granting moves eligible talks to `cleared`, and declining or withdrawing runs the teacher takedown in the same transaction.
 - [ ] `speaker_consent` history is append-only through the CLI and the database.
 - [ ] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
 

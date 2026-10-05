@@ -8,15 +8,15 @@ use wt_core::ids::{TalkId, TeacherId};
 use crate::DbError;
 use crate::correction::log_change;
 use crate::registry::{RegistryDbError, find_teacher};
+use crate::takedown::{self, Scope, TakedownError, TakedownReport};
 use crate::talk::{TalkError, TalkRepo};
 
 /// Consent command errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ConsentError {
-    /// Withdrawal deletes text, so it goes through the takedown routine, which needs explicit
-    /// confirmation.
-    #[error("withdrawing consent runs a takedown; use the takedown routine with confirmation")]
-    WithdrawalNeedsTakedown,
+    /// The takedown a decline or withdrawal runs failed, so nothing was recorded.
+    #[error(transparent)]
+    Takedown(#[from] TakedownError),
     /// The teacher or talk could not be found.
     #[error(transparent)]
     Registry(#[from] RegistryDbError),
@@ -39,8 +39,8 @@ impl From<sqlx::Error> for ConsentError {
 pub struct Propagation {
     /// Talks moved to `cleared`.
     pub cleared: Vec<TalkId>,
-    /// Talks moved to `excluded` because the speaker declined.
-    pub excluded: Vec<TalkId>,
+    /// The teacher takedown a decline or withdrawal ran.
+    pub takedown: Option<TakedownReport>,
     /// Talks moved back to `awaiting_consent` because consent is no longer granted.
     pub returned_to_awaiting: Vec<TalkId>,
     /// Talks left waiting, with the gate's reason (for example a rights holder still unknown).
@@ -62,8 +62,9 @@ pub struct ConsentRow {
     pub talks: String,
 }
 
-/// `dg consent set`: appends a `speaker_consent` row and applies it to every talk of the teacher
-/// in one transaction. `withdrawn` is refused here: it runs the takedown routine instead.
+/// `wt consent set`: appends a `speaker_consent` row and applies it to every talk of the teacher
+/// in one transaction. `declined` and `withdrawn` run the teacher takedown in that transaction
+/// (Spec 03, Mandated talks, rule 5), so the material is deleted, not only excluded.
 pub async fn set_consent(
     pool: &PgPool,
     teacher: &str,
@@ -72,11 +73,8 @@ pub async fn set_consent(
     scope_note: Option<&str>,
     actor: &str,
 ) -> Result<Propagation, ConsentError> {
-    if status == ConsentStatus::Withdrawn {
-        return Err(ConsentError::WithdrawalNeedsTakedown);
-    }
     let mut tx = pool.begin().await?;
-    let (teacher_id, _) = find_teacher(&mut tx, teacher).await?;
+    let (teacher_id, display_name) = find_teacher(&mut tx, teacher).await?;
     sqlx::query!(
         r#"insert into speaker_consent (teacher_id, status, scope_note, evidence_ref, decided_at, created_by)
            values ($1, $2::text::consent_status, $3, $4, now(), $5)"#,
@@ -88,7 +86,18 @@ pub async fn set_consent(
     )
     .execute(&mut *tx)
     .await?;
-    let propagation = propagate(&mut tx, teacher_id, status, actor).await?;
+    let propagation = match status {
+        ConsentStatus::Declined | ConsentStatus::Withdrawn => {
+            let report =
+                takedown::run_in(&mut tx, &Scope::Teacher(display_name), actor, Some(status))
+                    .await?;
+            Propagation {
+                takedown: Some(report),
+                ..Propagation::default()
+            }
+        }
+        _ => propagate(&mut tx, teacher_id, status, actor).await?,
+    };
     tx.commit().await?;
     Ok(propagation)
 }
@@ -104,18 +113,6 @@ async fn propagate(
 
     match status {
         ConsentStatus::Granted => {
-            // A teacher who declined and later grants gets their declined talks back.
-            let revived = sqlx::query_scalar!(
-                r#"update talk set state = 'awaiting_consent', state_reason = null
-                   where teacher_id = $1 and state = 'excluded' and state_reason = 'declined'
-                   returning id"#,
-                teacher_id.as_uuid()
-            )
-            .fetch_all(&mut *conn)
-            .await?;
-            for id in revived {
-                log_state(conn, id, "excluded", "awaiting_consent", actor, &reason).await?;
-            }
             sqlx::query!(
                 r#"update talk set consent_status = 'granted',
                           rights_basis = coalesce(rights_basis, 'speaker_consent')
@@ -142,30 +139,6 @@ async fn propagate(
                         .push((talk_id, gate_reason(&gate).to_owned())),
                 }
             }
-        }
-        ConsentStatus::Declined => {
-            let excluded = sqlx::query!(
-                r#"update talk t set state = 'excluded', state_reason = 'declined',
-                          consent_status = 'declined'
-                   from (select id, state::text as old_state from talk
-                         where teacher_id = $1 and state not in ('excluded', 'withdrawn')
-                         for update) old
-                   where t.id = old.id
-                   returning t.id, old.old_state as "old_state!""#,
-                teacher_id.as_uuid()
-            )
-            .fetch_all(&mut *conn)
-            .await?;
-            for row in excluded {
-                log_state(conn, row.id, &row.old_state, "excluded", actor, &reason).await?;
-                out.excluded.push(TalkId::from(row.id));
-            }
-            sqlx::query!(
-                "update talk set consent_status = 'declined' where teacher_id = $1 and state <> 'withdrawn'",
-                teacher_id.as_uuid()
-            )
-            .execute(&mut *conn)
-            .await?;
         }
         ConsentStatus::Requested | ConsentStatus::Unknown => {
             // The database forbids a talk past the gate without granted consent, so any talk
@@ -207,7 +180,8 @@ async fn propagate(
             .execute(&mut *conn)
             .await?;
         }
-        ConsentStatus::Withdrawn => return Err(ConsentError::WithdrawalNeedsTakedown),
+        // set_consent runs the takedown for these instead.
+        ConsentStatus::Declined | ConsentStatus::Withdrawn => {}
     }
     Ok(out)
 }
