@@ -1,6 +1,6 @@
 # Wheel Turning
 
-A private, text-only retrieval demo over consented Zen talks. The specs in `docs/specs/` are binding: read `00-overview.md` first, then the spec for the milestone in hand.
+A private, text-only retrieval demo over Zen talks used with a recorded rights basis: the teacher's permission, a license, or the owner's mandate unless the teacher opts out. The specs in `docs/specs/` are binding: read `00-overview.md` first, then the spec for the milestone in hand.
 
 ## Rules
 
