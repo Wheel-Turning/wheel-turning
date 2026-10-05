@@ -1,8 +1,8 @@
 # ASR benchmark on the owner's Windows PC
 
-Run on October 4, 2026. Spec 04's decision rule picks **whisper.cpp with the OpenVINO encoder on the Arc GPU**, and the route **run the whole corpus on this PC**. The best measured real-time factor was 11.53, well above the rule's threshold of 3. The NPU route was close behind at 9.9 to 10.6. Vulkan with the GPU's matrix-core (coopmat) path turned off reached 7.8 to 8.8. CPU only reached 1.8. Vulkan with its default settings fails on this GPU.
+Run on October 4, 2026. **The owner chose `large-v3` on Vulkan with coopmat off**, after the accuracy results below. On speed alone, Spec 04's decision rule picks **whisper.cpp with the OpenVINO encoder on the Arc GPU**, and the route **run the whole corpus on this PC**. The best measured real-time factor was 11.53, well above the rule's threshold of 3. The NPU route was close behind at 9.9 to 10.6. Vulkan with the GPU's matrix-core (coopmat) path turned off reached 7.8 to 8.8. CPU only reached 1.8. Vulkan with its default settings fails on this GPU.
 
-Accuracy was measured afterwards against the book's own text (see Accuracy). `large-v3` makes fewer errors than `distil-large-v3`: 1.12% word error rate against 1.71% on the same OpenVINO GPU route. It also gets 1 of the 4 Buddhist terms of art in the clip wrong, where `distil-large-v3` gets 3 or all 4 wrong. It is much slower: 1.06 times real time on the OpenVINO route, because its 32-layer decoder runs on the CPU there, and 3.17 to 3.26 times real time on Vulkan, where the decoder runs on the GPU. The rules' outcome is set out under Decision rule; the choice is the owner's.
+Accuracy was measured afterwards against the book's own text (see Accuracy). `large-v3` makes fewer errors than `distil-large-v3`: 1.12% word error rate against 1.71% on the same OpenVINO GPU route. It also gets 1 of the 4 Buddhist terms of art in the clip wrong, where `distil-large-v3` gets 3 or all 4 wrong. It is much slower: 1.06 times real time on the OpenVINO route, because its 32-layer decoder runs on the CPU there, and 3.17 to 3.26 times real time on Vulkan, where the decoder runs on the GPU. The rules' outcome is set out under Decision rule.
 
 ## Decision rule (Spec 04)
 
@@ -23,7 +23,7 @@ Both outcomes sit close to their lines. The rule's sample is one clip of a clean
 
 Each `large-v3` setup also changed one clause (see Faithfulness): on Vulkan it dropped an 8-word clause, and on OpenVINO it added a clause that is not in the book.
 
-The owner decides. Specs 01 and 04 name the OpenVINO encoder on the GPU, which reflects the speed-only result; that text changes if `large-v3` is chosen.
+On October 4, 2026 the owner chose `large-v3` on Vulkan, run with `GGML_VK_DISABLE_COOPMAT=1`. Specs 01 and 04 and the architecture north star now say so, and Spec 01's configuration table lists the variable. The dropped clause is recorded in Spec 04 as a known risk for the claim audit and the timestamp checks.
 
 ## Machine and inputs
 
@@ -124,16 +124,16 @@ Short clips of the three passages are in `data-inbox/benchmark/`, a folder git i
 
 ## What the speeds mean for the SSZ corpus
 
-The PRD puts the SSZ corpus at about 140 hours. Compute time is 140 hours divided by the mean real-time factor of the two runs. The first four rows are `distil-large-v3`:
+The PRD now puts the SSZ corpus at about 163 hours, after a full inventory of the Vimeo account; it said 140 when these runs were made. Compute time is 163 hours divided by the mean real-time factor of the two runs. The first four rows are `distil-large-v3`:
 
-| Setup | Mean RTF | Compute time for 140 h |
+| Setup | Mean RTF | Compute time for 163 h |
 | --- | --- | --- |
-| OpenVINO encoder on GPU | 11.28 | about 12.4 h |
-| OpenVINO encoder on NPU | 10.23 | about 13.7 h |
-| Vulkan, coopmat off | 8.28 | about 16.9 h |
-| CPU only, 8 threads | 1.78 | about 78.7 h |
-| `large-v3`, Vulkan, coopmat off | 3.22 | about 43.5 h |
-| `large-v3`, OpenVINO encoder on GPU | 1.06 | about 132 h |
+| OpenVINO encoder on GPU | 11.28 | about 14.5 h |
+| OpenVINO encoder on NPU | 10.23 | about 15.9 h |
+| Vulkan, coopmat off | 8.28 | about 19.7 h |
+| CPU only, 8 threads | 1.78 | about 91.6 h |
+| `large-v3`, Vulkan, coopmat off (chosen) | 3.22 | about 50.7 h |
+| `large-v3`, OpenVINO encoder on GPU | 1.06 | about 154 h |
 
 The clip is a single clean reading. Recorded talks with room sound, several speakers and long silences may run at a different speed.
 
