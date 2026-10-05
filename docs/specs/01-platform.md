@@ -188,5 +188,5 @@ Acceptance criteria:
 More acceptance criteria for Windows:
 
 - [ ] `.gitattributes` exists with the line-ending rules, and a clone on Windows produces the same migration checksums as a clone on Linux.
-- [ ] `cargo sqlx migrate run` and `cargo test --workspace` pass on a Windows clone with the settings above.
+- [ ] `wt db migrate` and `cargo test --workspace` pass on a Windows clone with the settings above.
 - [ ] A Windows clone with long paths on builds without path errors.

@@ -34,4 +34,4 @@ cargo deny check
 
 - Migrations in `migrations/` are forward-only and never edited after merge. Add a new numbered file instead.
 - Compile-time checked queries use `sqlx::query!`. After changing one, run `cargo sqlx prepare --workspace` against a migrated database and commit `.sqlx/`.
-- Configuration keys are listed in `.env.example` and loaded by `wt_core::config`. Secrets are wrapped in `wt_core::config::Secret`, which never prints its value.
+- Configuration keys are listed in `.env.example`. `wt_core::config` loads each key once its milestone wires it in, and the diarization sidecar reads `HF_TOKEN`. Secrets are wrapped in `wt_core::config::Secret`, which never prints its value.

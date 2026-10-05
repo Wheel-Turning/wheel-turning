@@ -27,7 +27,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 
 ## Planned, not yet numbered
 
-These come from the October 3 specs. Each gets its number at merge.
+These come from the October 3 and 4 specs. Each gets its number at merge.
 
 | Spec | Spec's number | Description | Notes |
 |---|---|---|---|
@@ -39,3 +39,7 @@ These come from the October 3 specs. Each gets its number at merge.
 | 08 | 0014 | rights ledger | |
 | 03 | 0015 | `mandate` value on `rights_basis` | Must be its own migration: a new enum value cannot be used in the transaction that adds it |
 | 03 | 0016 | mandated talks: `rights_setting`, opt-out, new `past_gate_requires_consent` and `servable_passage` | Depends on objects from Spec 08's migrations, so it merges after them |
+| 06 | 0017 | `accessibility_report` table | New table |
+| 08 | 0018 | retention and legal text: `text_edition.legal_text`, `legal_pages`, `source_deleted_at`, `source_policy.source_retention` | Alters Spec 08's `text_edition` and `source_policy`, so it merges after the migrations that create them |
+| 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
+| 04 | 0020 | `llm_usage` table and its monthly index | New table |
