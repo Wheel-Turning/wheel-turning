@@ -35,7 +35,7 @@ impl From<sqlx::Error> for ConsentError {
 }
 
 /// What a consent change did to the teacher's talks.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Propagation {
     /// Talks moved to `cleared`.
     pub cleared: Vec<TalkId>,

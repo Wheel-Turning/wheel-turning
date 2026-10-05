@@ -1,9 +1,16 @@
 //! The wt binary: commands and the worker.
 
+use std::path::PathBuf;
+use std::process::ExitCode;
+
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use wt_core::Config;
-use wt_core::telemetry::init_logging;
+use wt_core::gate::ConsentStatus;
+use wt_core::ids::TalkId;
+use wt_core::telemetry::{LogOutput, init_logging};
+
+mod commands;
 
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
@@ -19,6 +26,27 @@ enum Command {
         #[command(subcommand)]
         command: DbCommand,
     },
+    /// The teacher, alias and sangha registry (Spec 03).
+    Registry {
+        #[command(subcommand)]
+        command: RegistryCommand,
+    },
+    /// Speaker consent (Spec 03, the consent gate).
+    Consent {
+        #[command(subcommand)]
+        command: ConsentCommand,
+    },
+    /// Rights holders and hand exclusions for talks (Spec 03, rule 5).
+    Talk {
+        #[command(subcommand)]
+        command: TalkCommand,
+    },
+    /// Remove a teacher's or a talk's text from every store (Spec 07). Prints the counts as
+    /// JSON. A real run needs --yes.
+    Takedown(TakedownArgs),
+    /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
+    /// fail has findings.
+    Audit,
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,20 +68,130 @@ enum DbCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum RegistryCommand {
+    /// Load sanghas, teachers and aliases from a registry file. Safe to run repeatedly.
+    Import {
+        /// The registry TOML, for example config/registry.toml.
+        #[arg(long)]
+        file: PathBuf,
+        /// Who is making the change, for correction_log.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConsentCommand {
+    /// Record a teacher's consent and apply it to their talks. declined and withdrawn run the
+    /// teacher takedown, which needs --yes.
+    Set {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// granted, requested, declined, withdrawn or unknown.
+        #[arg(long, value_parser = parse_status)]
+        status: ConsentStatus,
+        /// Pointer to the stored reply, never the reply text.
+        #[arg(long)]
+        evidence: Option<String>,
+        /// Limits the speaker set, in their words.
+        #[arg(long)]
+        scope_note: Option<String>,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Confirm the takedown a decline or withdrawal runs.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Every teacher with their latest consent and talk counts by state.
+    List,
+}
+
+#[derive(Debug, Subcommand)]
+enum TalkCommand {
+    /// Set the rights holder for a talk or every talk of a teacher, and clear any talk that
+    /// now passes the gate.
+    SetRights {
+        #[command(flatten)]
+        target: TalkOrTeacher,
+        /// The holder's name, or `speaker` for the teacher's display name.
+        #[arg(long)]
+        holder: String,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Hold one talk out, which is how a speaker's limits apply. Runs a single-talk takedown,
+    /// which needs --yes.
+    Exclude {
+        /// The talk id.
+        #[arg(long)]
+        talk: TalkId,
+        /// Why, recorded as the talk's state reason.
+        #[arg(long)]
+        reason: String,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Confirm the takedown.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct TalkOrTeacher {
+    /// One talk, by id.
+    #[arg(long)]
+    talk: Option<TalkId>,
+    /// Every talk of a teacher, by display name or alias.
+    #[arg(long)]
+    teacher: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct TakedownArgs {
+    #[command(flatten)]
+    target: TalkOrTeacher,
+    /// Who asked for it or ran it, for takedown_log.
+    #[arg(long, visible_alias = "by")]
+    actor: String,
+    /// Print the counts and change nothing.
+    #[arg(long, conflicts_with = "yes")]
+    dry_run: bool,
+    /// Confirm a real run.
+    #[arg(long)]
+    yes: bool,
+}
+
+fn parse_status(value: &str) -> Result<ConsentStatus, String> {
+    ConsentStatus::parse(value).ok_or_else(|| {
+        format!("{value:?} is not one of granted, requested, declined, withdrawn, unknown")
+    })
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     let config = Config::from_env().context("loading configuration")?;
-    init_logging(config.env, &config.log)?;
+    // Reports go to stdout, so logs must not.
+    init_logging(config.env, &config.log, LogOutput::Stderr)?;
+    let pool = || async {
+        wt_db::connect(&config.database_url)
+            .await
+            .context("connecting to the database")
+    };
 
     match cli.command {
         Command::Db {
             command: DbCommand::Migrate,
         } => {
-            let pool = wt_db::connect(&config.database_url)
+            let report = wt_db::migrate(&pool().await?)
                 .await
-                .context("connecting to the database")?;
-            let report = wt_db::migrate(&pool).await.context("applying migrations")?;
+                .context("applying migrations")?;
             tracing::info!(
                 applied = report.applied,
                 known = report.known,
@@ -74,14 +212,78 @@ async fn main() -> anyhow::Result<()> {
                 .filter(|p| !p.is_empty())
                 .map(wt_core::Secret::new)
                 .with_context(|| format!("{password_env} is not set"))?;
-            let pool = wt_db::connect(&config.database_url)
-                .await
-                .context("connecting to the database")?;
-            let outcome = wt_db::create_login(&pool, &role, &login, &password)
+            let outcome = wt_db::create_login(&pool().await?, &role, &login, &password)
                 .await
                 .with_context(|| format!("creating login {login}"))?;
             tracing::info!(login = %login, role = %role, outcome = ?outcome, "login ready");
         }
+        Command::Registry {
+            command: RegistryCommand::Import { file, by },
+        } => commands::registry_import(&pool().await?, &file, &by).await?,
+        Command::Consent {
+            command:
+                ConsentCommand::Set {
+                    teacher,
+                    status,
+                    evidence,
+                    scope_note,
+                    by,
+                    yes,
+                },
+        } => {
+            commands::consent_set(
+                &pool().await?,
+                &teacher,
+                status,
+                evidence.as_deref(),
+                scope_note.as_deref(),
+                &by,
+                yes,
+            )
+            .await?;
+        }
+        Command::Consent {
+            command: ConsentCommand::List,
+        } => commands::consent_list(&pool().await?).await?,
+        Command::Talk {
+            command: TalkCommand::SetRights { target, holder, by },
+        } => commands::set_rights(&pool().await?, target.into(), &holder, &by).await?,
+        Command::Talk {
+            command:
+                TalkCommand::Exclude {
+                    talk,
+                    reason,
+                    by,
+                    yes,
+                },
+        } => commands::exclude(&pool().await?, talk, &reason, &by, yes).await?,
+        Command::Takedown(args) => {
+            commands::takedown(
+                &pool().await?,
+                args.target.into(),
+                &args.actor,
+                args.dry_run,
+                args.yes,
+            )
+            .await?;
+        }
+        Command::Audit => return commands::audit(&pool().await?, config.env).await,
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Exactly one of the two, which clap's argument group guarantees.
+enum Target {
+    Talk(TalkId),
+    Teacher(String),
+}
+
+impl From<TalkOrTeacher> for Target {
+    fn from(args: TalkOrTeacher) -> Self {
+        match args.talk {
+            Some(talk) => Target::Talk(talk),
+            // The group makes --teacher present whenever --talk is absent.
+            None => Target::Teacher(args.teacher.unwrap_or_default()),
+        }
+    }
 }

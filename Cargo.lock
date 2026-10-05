@@ -3250,10 +3250,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "serde",
+ "serde_json",
+ "sqlx",
  "tokio",
  "tracing",
  "wt-core",
  "wt-db",
+ "wt-registry",
 ]
 
 [[package]]

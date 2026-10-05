@@ -10,7 +10,7 @@ use crate::correction::log_change;
 use crate::talk::TalkError;
 
 /// What an import changed.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct ImportReport {
     /// Sanghas created or updated.
     pub sanghas: usize,
