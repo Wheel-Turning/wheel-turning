@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = 'withdrawn', state_reason = $3, content_hash = null,\n                  consent_status = coalesce($2::text::consent_status, consent_status)\n           where id = any($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "494cf23542e3282ce7d51c52e3b8c8fa240c4eaa030ac4084f556bdb81cbc190"
+}

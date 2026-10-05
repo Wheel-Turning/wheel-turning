@@ -103,19 +103,20 @@ pub async fn run(
     } else {
         None
     };
-    let report = run_in(&mut tx, scope, actor, consent).await?;
+    let report = run_in(&mut tx, scope, actor, consent, "takedown").await?;
     tx.commit().await?;
     Ok(report)
 }
 
 /// The takedown's database step inside the caller's transaction, so a consent change and its
 /// takedown commit together. `consent` is written to the talks' `consent_status`; recording the
-/// `speaker_consent` row is the caller's job.
+/// `speaker_consent` row is the caller's job. `reason` becomes the talks' `state_reason`.
 pub(crate) async fn run_in(
     tx: &mut PgConnection,
     scope: &Scope,
     actor: &str,
     consent: Option<ConsentStatus>,
+    reason: &str,
 ) -> Result<TakedownReport, TakedownError> {
     let (talks, teacher) = resolve_scope(tx, scope).await?;
     let mut report = count(tx, &talks).await?;
@@ -187,11 +188,12 @@ pub(crate) async fn run_in(
         .await?;
 
     sqlx::query!(
-        r#"update talk set state = 'withdrawn', state_reason = 'takedown', content_hash = null,
+        r#"update talk set state = 'withdrawn', state_reason = $3, content_hash = null,
                   consent_status = coalesce($2::text::consent_status, consent_status)
            where id = any($1)"#,
         &talk_ids,
-        consent.map(ConsentStatus::as_str)
+        consent.map(ConsentStatus::as_str),
+        reason
     )
     .execute(&mut *tx)
     .await?;

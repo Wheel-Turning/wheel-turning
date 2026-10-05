@@ -374,11 +374,24 @@ async fn quarantined_and_partly_indexed_talks_keep_passages_without_drift() {
 async fn consent_drift_fails_for_an_excluded_talk_that_kept_its_passages() {
     let fx = common::start().await;
     let t = clean(&fx.pool).await;
-    wt_db::consent::exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
+    // For example, a late duplicate finding that moved the talk without deleting anything.
+    sqlx::query("update talk set state = 'excluded', state_reason = 'duplicate' where id = $1")
+        .bind(t.as_uuid())
+        .execute(&fx.pool)
         .await
         .unwrap();
 
     let report = audit(&fx.pool, Env::Prod).await;
     only(&report, &["consent_drift"]);
     assert!(report.failed());
+}
+
+#[tokio::test]
+async fn a_hand_exclusion_leaves_nothing_for_the_audit_to_find() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    wt_db::consent::exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
+        .await
+        .unwrap();
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
 }

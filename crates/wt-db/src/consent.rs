@@ -88,9 +88,14 @@ pub async fn set_consent(
     .await?;
     let propagation = match status {
         ConsentStatus::Declined | ConsentStatus::Withdrawn => {
-            let report =
-                takedown::run_in(&mut tx, &Scope::Teacher(display_name), actor, Some(status))
-                    .await?;
+            let report = takedown::run_in(
+                &mut tx,
+                &Scope::Teacher(display_name),
+                actor,
+                Some(status),
+                "takedown",
+            )
+            .await?;
             Propagation {
                 takedown: Some(report),
                 ..Propagation::default()
@@ -366,13 +371,15 @@ pub async fn set_rights(
     Ok(cleared)
 }
 
-/// `dg talk exclude`: excludes one talk by hand, which is how a speaker's limits apply in v1.
+/// `wt talk exclude`: holds one talk out by hand, which is how a speaker's limits apply in v1.
+/// It runs a single-talk takedown in the same transaction, so the talk's text is deleted and the
+/// talk ends in `withdrawn` with `reason` as its state reason.
 pub async fn exclude_talk(
     pool: &PgPool,
     talk_id: TalkId,
     reason: &str,
     actor: &str,
-) -> Result<(), ConsentError> {
+) -> Result<TakedownReport, ConsentError> {
     let mut tx = pool.begin().await?;
     let old = sqlx::query_scalar!(
         r#"select state::text as "s!" from talk where id = $1 for update"#,
@@ -385,18 +392,12 @@ pub async fn exclude_talk(
         return Err(TalkError::WrongState {
             id: talk_id,
             state: old,
-            target: wt_core::gate::TalkState::Excluded,
+            target: wt_core::gate::TalkState::Withdrawn,
         }
         .into());
     }
-    sqlx::query!(
-        "update talk set state = 'excluded', state_reason = $2 where id = $1",
-        talk_id.as_uuid(),
-        reason
-    )
-    .execute(&mut *tx)
-    .await?;
-    log_state(&mut tx, talk_id.as_uuid(), &old, "excluded", actor, reason).await?;
+    let report = takedown::run_in(&mut tx, &Scope::Talk(talk_id), actor, None, reason).await?;
+    log_state(&mut tx, talk_id.as_uuid(), &old, "withdrawn", actor, reason).await?;
     tx.commit().await?;
-    Ok(())
+    Ok(report)
 }

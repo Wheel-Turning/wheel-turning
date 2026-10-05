@@ -51,9 +51,10 @@ pub enum TalkState {
     Ready,
     /// Held out of serving without deleting anything.
     Quarantined,
-    /// Excluded: not a talk, a duplicate, declined, or excluded by hand.
+    /// Excluded: not a talk, or a duplicate. Declined and hand-excluded talks are taken down.
     Excluded,
-    /// Taken down. Only the takedown routine sets this.
+    /// Taken down after a takedown request, a decline, a withdrawal or a hand exclusion. Only
+    /// the takedown routine sets this.
     Withdrawn,
 }
 

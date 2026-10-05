@@ -222,7 +222,7 @@ async fn a_hand_exclusion_survives_a_later_grant() {
         .await
         .unwrap();
     consent(&fx.pool, ADA, ConsentStatus::Granted).await;
-    assert_eq!(state(&fx.pool, t).await, "excluded");
+    assert_eq!(state(&fx.pool, t).await, "withdrawn");
     assert_eq!(
         state_reason(&fx.pool, t).await.as_deref(),
         Some("speaker asked to hold this one")
@@ -391,13 +391,46 @@ async fn a_talk_with_no_speaker_cannot_take_the_speaker_as_holder() {
 }
 
 #[tokio::test]
-async fn exclude_logs_the_reason_and_refuses_missing_or_withdrawn_talks() {
+async fn exclude_takes_the_talk_down_and_refuses_missing_or_withdrawn_talks() {
     let fx = common::start().await;
     let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
-    exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
+    let kept = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    common::make_ready(&fx.pool, t).await;
+    common::make_ready(&fx.pool, kept).await;
+
+    let report = exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
         .await
         .unwrap();
-    assert_eq!(state(&fx.pool, t).await, "excluded");
+
+    assert_eq!(report.talks, vec![t]);
+    assert_eq!(report.rows.get("passage"), Some(&1));
+    assert_eq!(state(&fx.pool, t).await, "withdrawn");
+    assert_eq!(
+        state_reason(&fx.pool, t).await.as_deref(),
+        Some("held out by the speaker")
+    );
+    for table in ["passage", "segment", "transcript", "citation", "job"] {
+        let sql = format!("select count(*) from {table} where talk_id = $1");
+        assert_eq!(count(&fx.pool, &sql, t.as_uuid()).await, 0, "{table}");
+    }
+    assert_eq!(
+        state(&fx.pool, kept).await,
+        "ready",
+        "the teacher's other talk stays"
+    );
+    assert_eq!(servable(&fx.pool).await, 1);
+    assert_eq!(
+        current_consent(&fx.pool, ADA).await.as_deref(),
+        Some("granted"),
+        "excluding one talk does not change the teacher's consent"
+    );
+    let logged: Vec<(String, Option<sqlx::types::Uuid>)> =
+        sqlx::query_as("select scope, talk_id from takedown_log")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(logged, vec![("talk".to_owned(), Some(t.as_uuid()))]);
     assert_eq!(
         count(
             &fx.pool,
@@ -427,7 +460,7 @@ async fn exclude_logs_the_reason_and_refuses_missing_or_withdrawn_talks() {
         matches!(
             err,
             ConsentError::Talk(TalkError::WrongState {
-                target: TalkState::Excluded,
+                target: TalkState::Withdrawn,
                 ..
             })
         ),
