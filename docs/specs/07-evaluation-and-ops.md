@@ -43,11 +43,11 @@ Commands:
 
 ## Gate A notebook retrieval test
 
-The PRD orders its risks by how cheaply they can be tested, and the cheapest high-impact one is whether retrieval over practitioner-style questions returns faithful passages. Gate A tests that in a notebook over real consented transcripts before any retrieval or interface code is built in Rust.
+The PRD orders its risks by how cheaply they can be tested, and the cheapest high-impact one is whether retrieval over practitioner-style questions returns faithful passages. Gate A tests that in a notebook over real cleared transcripts before any retrieval or interface code is built in Rust.
 
 Inputs:
 
-- `dg export transcripts --format jsonl --out data/export/` writes one JSON object per passage of every consented, `ready` talk: `passage_id`, an opaque `talk_id`, an opaque `teacher_id`, `start_ms` and `text`. It writes no audio and no names. The export directory is gitignored and lives only on the founder's machine.
+- `dg export transcripts --format jsonl --out data/export/` writes one JSON object per passage of every cleared, `ready` talk: `passage_id`, an opaque `talk_id`, an opaque `teacher_id`, `start_ms` and `text`. It writes no audio and no names. The export directory is gitignored and lives only on the founder's machine.
 - A 20-question subset of the practitioner set covering multi-voice topics, single-teacher topics and grief. The size is a default and may change.
 
 Method, in `scripts/notebooks/gate_a_retrieval.ipynb`:
@@ -68,8 +68,8 @@ The notebook is also the reference for the Rust retrieval build. After M5, a par
 
 | Check | Finding | Severity |
 | --- | --- | --- |
-| Consent drift | A passage whose talk is not `ready`, not consented, or has an unknown rights holder | Fail |
-| Serving parity | The count of rows in `servable_passage` differs from passages of ready, consented talks | Fail |
+| Consent drift | A passage whose talk is not `ready`, has no recorded rights basis, or has an unknown rights holder | Fail |
+| Serving parity | The count of rows in `servable_passage` differs from passages of ready talks with a recorded rights basis | Fail |
 | Student speech | Any `qa_student` segment, or any transcript JSON span or word attributed to a non-teacher speaker | Fail |
 | Audio residue | A scratch directory older than `scratch_resume_ttl_h`, a scratch bucket object older than 24 hours, or an audio-typed object in any other bucket | Fail |
 | Takedown completeness | Any row or S3 object remaining for a scope recorded in `takedown_log` | Fail |
@@ -106,7 +106,7 @@ Log-based metrics in CloudWatch cover ask latency, `synthesis_failed`, `rerank_d
 
 The runbook is `docs/runbook.md`, written as the work is built, and it contains these procedures:
 
-1. Start and stop the batch host, run `dg worker --kinds audio`, and confirm the scratch directory and bucket are empty afterward.
+1. Start the batch host, open the SSM port forward from the owner's PC, run `dg worker --kinds audio` on the PC, stop the batch host, and confirm the scratch directory and bucket are empty afterward.
 2. Add a teacher, set aliases, record a consent reply with its evidence reference, and set the rights holder.
 3. Handle a takedown request: confirm identity, run a dry run, run the takedown, send the teacher the counts and the seven-day backup note. Target the same day.
 4. Respond to a blocking quality failure: quarantine, repair, re-check, release, and record the decision.
