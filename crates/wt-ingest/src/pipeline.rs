@@ -417,3 +417,101 @@ pub async fn run_classify_job(
     tx.commit().await?;
     Ok(outcome)
 }
+
+/// Counts from one feed run.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct FeedReport {
+    /// Episodes in the feed.
+    pub listed: usize,
+    /// Episodes seen for the first time.
+    pub new: usize,
+    /// Episodes matched to a talk in this run.
+    pub matched: usize,
+    /// Episodes still without a match.
+    pub unmatched: usize,
+}
+
+/// Reads an `audio_only` feed: records every episode, never a talk, and matches each unmatched
+/// episode to a Vimeo talk from `vimeo_sources` by title, date and length. One transaction.
+pub async fn discover_feed(
+    conn: &mut PgConnection,
+    cfg: &ClassifyConfig,
+    source: &SourceConfig,
+    adapter: &dyn SourceAdapter,
+    vimeo_sources: &[String],
+    actor: &str,
+) -> Result<FeedReport, PipelineError> {
+    use crate::feedmatch::{self, Candidate, Side};
+    use wt_db::feed::{self, NewEpisode};
+
+    let episodes = adapter.discover(None).await?;
+    let mut report = FeedReport {
+        listed: episodes.len(),
+        ..FeedReport::default()
+    };
+    let mut tx = conn.begin().await?;
+    for e in &episodes {
+        let (_, new) = feed::record_episode(
+            &mut tx,
+            &NewEpisode {
+                source: &source.name,
+                external_id: &e.external_id,
+                url: &e.url,
+                title: &e.title,
+                description: e.description.as_deref(),
+                published_at: e.published_at,
+                duration_s: e.duration_s,
+                channel_ref: e.channel_ref.as_deref(),
+                item: &e.raw,
+            },
+        )
+        .await?;
+        report.new += usize::from(new);
+    }
+
+    for episode in feed::unmatched_episodes(&mut tx, &source.name).await? {
+        let Some(duration) = episode.duration_s else {
+            report.unmatched += 1;
+            continue;
+        };
+        let published = episode.published_at.map(|t| t.date_naive());
+        let recorded = dates::recording_date(&episode.title, published);
+        let me = Side {
+            date: recorded.or(published),
+            dated_in_title: recorded.is_some(),
+            duration_s: Some(duration),
+        };
+        let candidates: Vec<Candidate<String>> = feed::talk_candidates(
+            &mut tx,
+            vimeo_sources,
+            &episode.normalized_title,
+            duration,
+            feedmatch::max_gap_s(cfg, duration),
+        )
+        .await?
+        .into_iter()
+        .map(|t| {
+            let uploaded = t.published_at.map(|p| p.date_naive());
+            let titled = dates::recording_date(&t.title, uploaded);
+            Candidate {
+                key: t.vimeo_id,
+                side: Side {
+                    date: titled.or(uploaded),
+                    dated_in_title: titled.is_some(),
+                    duration_s: t.duration_s,
+                },
+                similarity: t.similarity,
+            }
+        })
+        .collect();
+        match feedmatch::choose(cfg, &me, &candidates) {
+            Some((vimeo_id, how)) => {
+                feed::set_match(&mut tx, episode.id, &vimeo_id, how.as_str(), actor).await?;
+                report.matched += 1;
+            }
+            None => report.unmatched += 1,
+        }
+    }
+    tx.commit().await?;
+    Ok(report)
+}

@@ -12,6 +12,13 @@ dedupe_title_identical_tolerance_s = 120
 long_talk_seconds = 900
 job_lock_timeout_s = 7200
 
+# Matching podcast feed episodes to Vimeo talks (Spec 03, Seattle Soto Zen sources). Starting
+# values, to tune against the real feed.
+feed_match_days = 14
+feed_match_duration_tolerance_s = 120
+feed_match_duration_tolerance_pct = 5
+feed_match_title_similarity = 0.5
+
 # Clips, quotes and trailers are not talks: excluded with reason non_talk.
 exclude_title_patterns = ['\bquote\b', '\bclip\b', '\btrailer\b']
 

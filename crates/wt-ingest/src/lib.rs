@@ -5,9 +5,13 @@ pub mod classify;
 pub mod completeness;
 pub mod config;
 pub mod dates;
+pub mod feedmatch;
+pub mod http;
 pub mod pipeline;
+pub mod podcast;
 pub mod report;
 pub mod robots;
+pub mod rss;
 pub mod source;
 pub mod vimeo;
 

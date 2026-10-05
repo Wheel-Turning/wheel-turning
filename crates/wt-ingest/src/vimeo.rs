@@ -13,11 +13,8 @@ use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
 use url::Url;
 use wt_core::Secret;
 
-use crate::robots::Robots;
+use crate::http::{self, parse_url};
 use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
-
-/// The identifying `User-Agent` sent with every request.
-pub const USER_AGENT: &str = concat!("WheelTurning/", env!("CARGO_PKG_VERSION"));
 
 const PAGE_SIZE: u32 = 100;
 const API_FIELDS: &str = "uri,name,description,duration,created_time,link,privacy,license,\
@@ -49,13 +46,6 @@ impl VimeoEndpoints {
     }
 }
 
-fn parse_url(text: &str) -> Result<Url, IngestError> {
-    Url::parse(text).map_err(|e| IngestError::Parse {
-        url: text.to_owned(),
-        message: e.to_string(),
-    })
-}
-
 /// Lists a Vimeo account's videos.
 pub struct VimeoAdapter {
     source: String,
@@ -73,14 +63,7 @@ impl VimeoAdapter {
         talks_page: Option<&str>,
         endpoints: VimeoEndpoints,
     ) -> Result<Self, IngestError> {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| IngestError::Http {
-                url: String::new(),
-                message: e.to_string(),
-            })?;
+        let client = http::client()?;
         Ok(Self {
             source: source.to_owned(),
             client,
@@ -173,38 +156,8 @@ impl VimeoAdapter {
                 source_name: self.source.clone(),
                 what: "a talks_page",
             })?;
-        let mut robots_url = page.clone();
-        robots_url.set_path("/robots.txt");
-        robots_url.set_query(None);
-        let response = self.get(&robots_url, None).await?;
-        let robots = match response.status().as_u16() {
-            200..=299 => Robots::parse(&response.text().await.unwrap_or_default(), USER_AGENT),
-            // No robots.txt means no rules.
-            404 | 410 => Robots::default(),
-            status => {
-                return Err(IngestError::Status {
-                    url: robots_url.to_string(),
-                    status,
-                });
-            }
-        };
-        let path = match page.query() {
-            Some(q) => format!("{}?{q}", page.path()),
-            None => page.path().to_owned(),
-        };
-        if !robots.allows(&path) {
-            return Err(IngestError::RobotsDisallowed(page.to_string()));
-        }
-
-        let html = self
-            .get_ok(page, None)
-            .await?
-            .text()
-            .await
-            .map_err(|e| IngestError::Http {
-                url: page.to_string(),
-                message: e.without_url().to_string(),
-            })?;
+        http::check_robots(&self.client, page).await?;
+        let html = http::text(page, http::get_ok(&self.client, page).await?).await?;
         Ok(page_video_ids(&html))
     }
 

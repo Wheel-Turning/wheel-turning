@@ -97,6 +97,16 @@ pub struct SourceConfig {
     /// `audio_only` sources attach audio to existing talks and never create one.
     #[serde(default)]
     pub role: Option<String>,
+    /// A podcast feed's address, set by `wt source resolve-feed` once a person confirms it.
+    #[serde(default)]
+    pub feed_url: Option<String>,
+}
+
+impl SourceConfig {
+    /// Whether this source only attaches audio to talks another source lists.
+    pub fn is_audio_only(&self) -> bool {
+        self.role.as_deref() == Some("audio_only")
+    }
 }
 
 /// `config/sources.toml`.
@@ -181,6 +191,16 @@ pub struct IngestSettings {
     pub type_patterns: Vec<TypePatternEntry>,
     /// The job lock timeout used by the reaper, in seconds.
     pub job_lock_timeout_s: i32,
+    /// A feed episode and a Vimeo talk match only if their dates are this many days apart or
+    /// fewer. Episodes are often published days or weeks after the talk.
+    pub feed_match_days: i64,
+    /// Their lengths may differ by the larger of this many seconds and the percentage below,
+    /// since podcast audio is often trimmed.
+    pub feed_match_duration_tolerance_s: i32,
+    /// See `feed_match_duration_tolerance_s`.
+    pub feed_match_duration_tolerance_pct: f32,
+    /// Minimum `pg_trgm` similarity of normalized titles for a title match.
+    pub feed_match_title_similarity: f32,
 }
 
 impl Default for IngestSettings {
@@ -197,6 +217,10 @@ impl Default for IngestSettings {
             review_title_patterns: Vec::new(),
             type_patterns: Vec::new(),
             job_lock_timeout_s: 7200,
+            feed_match_days: 14,
+            feed_match_duration_tolerance_s: 120,
+            feed_match_duration_tolerance_pct: 5.0,
+            feed_match_title_similarity: 0.5,
         }
     }
 }

@@ -501,3 +501,92 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("User-agent: *\nDisallow: /*/lookup?\n"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lookup"))
+        .and(query_param("id", "1000000001"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resultCount": 1,
+            "results": [{ "collectionName": "Fixture Zendo Talks", "feedUrl": "https://example.invalid/feed.xml" }],
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = std::env::temp_dir().join(format!("wt-feed-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sources = dir.join("sources.toml");
+    let original = "# Fixture sources. This comment must survive.\n\n\
+                    [[source]]\nname = \"fixture-vimeo\"\nplatform = \"vimeo\"\ndefault_sangha = \"Fixture Mountain Zendo\"\n\n\
+                    # The feed, once resolved.\n[[source]]\nname = \"fixture-podcast\"\nplatform = \"rss\"\n\
+                    default_sangha = \"Fixture Mountain Zendo\"\nrole = \"audio_only\"\n";
+    std::fs::write(&sources, original).unwrap();
+    let lookup = format!("{}/lookup", server.uri());
+    let run = |extra: &[&str]| {
+        let mut args = vec![
+            "source",
+            "resolve-feed",
+            "--apple-id",
+            "1000000001",
+            "--source",
+            "fixture-podcast",
+            "--config-dir",
+            dir.to_str().unwrap(),
+            "--lookup-url",
+            &lookup,
+        ];
+        args.extend_from_slice(extra);
+        Command::new(env!("CARGO_BIN_EXE_wt"))
+            .args(&args)
+            // The command never connects; the loader only needs a well-formed address.
+            .env("DATABASE_URL", "postgres://wt:wt@127.0.0.1:1/wt")
+            .env("WT_LOG", "warn")
+            .env_remove("WT_ENV")
+            .env_remove("WT_DB_HOST")
+            .output()
+            .unwrap()
+    };
+
+    let printed = run(&[]);
+    assert!(printed.status.success(), "{}", stderr(&printed));
+    let json: serde_json::Value = serde_json::from_slice(&printed.stdout).unwrap();
+    assert_eq!(json["feed_url"], "https://example.invalid/feed.xml");
+    assert_eq!(json["podcast"], "Fixture Zendo Talks");
+    assert_eq!(json["saved"], false);
+    assert!(stderr(&printed).contains("--yes"));
+    assert_eq!(
+        std::fs::read_to_string(&sources).unwrap(),
+        original,
+        "nothing saved without --yes"
+    );
+
+    let saved = run(&["--yes"]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let text = std::fs::read_to_string(&sources).unwrap();
+    assert!(text.contains("feed_url = \"https://example.invalid/feed.xml\""));
+    assert!(text.contains("# Fixture sources. This comment must survive."));
+    assert!(text.contains("# The feed, once resolved."));
+    let file = wt_ingest::config::SourcesFile::parse(&text, "saved").unwrap();
+    assert_eq!(
+        file.get("fixture-podcast").unwrap().feed_url.as_deref(),
+        Some("https://example.invalid/feed.xml")
+    );
+    assert_eq!(
+        file.get("fixture-vimeo").unwrap().feed_url,
+        None,
+        "only the named source changes"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

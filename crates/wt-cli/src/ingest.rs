@@ -9,6 +9,7 @@ use wt_core::Config;
 use wt_db::job::{self, Failure, JobKind};
 use wt_ingest::config::{ClassifyConfig, SourcesFile};
 use wt_ingest::pipeline;
+use wt_ingest::rss::RssAdapter;
 use wt_ingest::vimeo::{VimeoAdapter, VimeoEndpoints};
 use wt_ingest::{SourceAdapter, SourcePlatform};
 
@@ -32,11 +33,14 @@ pub async fn discover(
         sources.get(name)?;
     }
     let mut reports = serde_json::Map::new();
-    for source in sources
+    // Audio-only feeds attach to talks other sources list, so they run after those sources.
+    let mut chosen: Vec<_> = sources
         .sources
         .iter()
         .filter(|s| only.is_none_or(|n| n == s.name))
-    {
+        .collect();
+    chosen.sort_by_key(|s| s.is_audio_only());
+    for source in chosen {
         let adapter: Box<dyn SourceAdapter> = match source.platform {
             SourcePlatform::Vimeo => Box::new(VimeoAdapter::new(
                 &source.name,
@@ -44,6 +48,48 @@ pub async fn discover(
                 source.talks_page.as_deref(),
                 VimeoEndpoints::vimeo()?,
             )?),
+            SourcePlatform::Rss => {
+                let Some(feed_url) = source.feed_url.as_deref() else {
+                    if only.is_some() {
+                        bail!(
+                            "source {} has no feed_url yet: run `wt source resolve-feed` first",
+                            source.name
+                        );
+                    }
+                    tracing::info!(source = %source.name, "no feed_url yet; skipped");
+                    continue;
+                };
+                let adapter = RssAdapter::new(feed_url)?;
+                if source.is_audio_only() {
+                    let cfg = ClassifyConfig::load(
+                        &config_dir.join("pipeline.toml"),
+                        &config_dir.join("series.toml"),
+                    )?;
+                    let vimeo: Vec<String> = sources
+                        .sources
+                        .iter()
+                        .filter(|s| {
+                            s.platform == SourcePlatform::Vimeo
+                                && s.default_sangha == source.default_sangha
+                        })
+                        .map(|s| s.name.clone())
+                        .collect();
+                    let mut conn = pool.acquire().await?;
+                    let report = pipeline::discover_feed(
+                        &mut conn,
+                        &cfg,
+                        source,
+                        &adapter,
+                        &vimeo,
+                        "wt ingest discover",
+                    )
+                    .await
+                    .with_context(|| format!("reading feed {}", source.name))?;
+                    reports.insert(source.name.clone(), serde_json::to_value(&report)?);
+                    continue;
+                }
+                Box::new(adapter)
+            }
             other => {
                 if only.is_some() {
                     bail!(
@@ -284,9 +330,40 @@ pub async fn completeness(
             state: r.state,
         })
         .collect();
-    let feed = "No podcast feed source is set up yet. Once it is, this section lists Vimeo talks \
-                missing from the feed and feed episodes with no Vimeo match.";
-    let mut report = completeness::compare(account.as_deref(), &page_ids, &recorded, feed);
+    let feed_source = sources.sources.iter().find(|s| {
+        s.platform == SourcePlatform::Rss
+            && s.is_audio_only()
+            && s.default_sangha == source.default_sangha
+    });
+    let episodes: Vec<completeness::FeedEpisode> = match feed_source {
+        Some(f) => wt_db::feed::episodes(&mut conn, &f.name)
+            .await?
+            .into_iter()
+            .map(|e| completeness::FeedEpisode {
+                id: e.external_id,
+                title: e.title,
+                duration_s: e.duration_s,
+                matched_vimeo_id: e.matched_vimeo_id,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let (feed, note) = match feed_source {
+        None => (
+            None,
+            "No podcast feed source is set up for this sangha.".to_owned(),
+        ),
+        Some(f) if episodes.is_empty() => (
+            None,
+            format!(
+                "Feed source {name} has no episodes recorded yet. Resolve its address with \
+                 `wt source resolve-feed`, then run `wt ingest discover --source {name}`.",
+                name = f.name
+            ),
+        ),
+        Some(f) => (Some((f.name.as_str(), episodes.as_slice())), String::new()),
+    };
+    let mut report = completeness::compare(account.as_deref(), &page_ids, &recorded, feed, &note);
     report.account_list_source = from;
 
     let now = sqlx::types::chrono::Utc::now()
@@ -307,5 +384,12 @@ pub async fn completeness(
         "in_account_not_on_page": report.account_not_on_page.len(),
         "listed_not_recorded": ids(&report.listed_not_recorded),
         "recorded_not_listed": ids(&report.recorded_not_listed),
+        "feed": report.feed.as_ref().map(|f| serde_json::json!({
+            "source": f.source,
+            "episodes": f.episodes,
+            "matched": f.matched,
+            "vimeo_missing_from_feed": f.vimeo_missing_from_feed.len(),
+            "episodes_unmatched": f.episodes_unmatched.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
+        })),
     }))
 }

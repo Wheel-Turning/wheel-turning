@@ -1,0 +1,304 @@
+//! An `audio_only` podcast feed against a real database: episodes match Vimeo talks by title,
+//! date and length, the feed never creates a talk, and a matched talk's media route is the
+//! episode's enclosure (Spec 03, Seattle Soto Zen sources). Everything here is synthetic.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use async_trait::async_trait;
+use sqlx::PgPool;
+use sqlx::types::chrono::{DateTime, Utc};
+use wt_core::ids::TalkId;
+use wt_db::feed::{self, MediaRoute};
+use wt_db::job::{self, JobKind};
+use wt_db::test_support::TestDb;
+use wt_ingest::config::{ClassifyConfig, SourcesFile};
+use wt_ingest::pipeline::{self, FeedReport};
+use wt_ingest::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
+use wt_registry::RegistryFile;
+
+const REGISTRY: &str = r#"
+[[sangha]]
+name = "Fixture Mountain Zendo"
+
+[[teacher]]
+display_name = "Ada Fixture"
+sangha = "Fixture Mountain Zendo"
+aliases = ["Ada"]
+"#;
+
+const SOURCES: &str = r#"
+[[source]]
+name = "fixture-vimeo"
+platform = "vimeo"
+default_sangha = "Fixture Mountain Zendo"
+
+[[source]]
+name = "fixture-podcast"
+platform = "rss"
+default_sangha = "Fixture Mountain Zendo"
+role = "audio_only"
+feed_url = "https://example.invalid/feed.xml"
+"#;
+
+struct Fake(SourcePlatform, Mutex<Vec<DiscoveredVideo>>);
+
+#[async_trait]
+impl SourceAdapter for Fake {
+    fn platform(&self) -> SourcePlatform {
+        self.0
+    }
+    async fn discover(
+        &self,
+        _: Option<DateTime<Utc>>,
+    ) -> Result<Vec<DiscoveredVideo>, IngestError> {
+        Ok(self.1.lock().unwrap().clone())
+    }
+}
+
+fn item(id: &str, title: &str, seconds: i32, at: &str, enclosure: Option<&str>) -> DiscoveredVideo {
+    DiscoveredVideo {
+        external_id: id.to_owned(),
+        url: format!("https://example.invalid/{id}"),
+        title: title.to_owned(),
+        description: None,
+        published_at: Some(at.parse().unwrap()),
+        duration_s: Some(seconds),
+        channel_ref: None,
+        has_captions: false,
+        raw: match enclosure {
+            Some(url) => serde_json::json!({ "enclosure": { "url": url, "type": "audio/mpeg" } }),
+            None => serde_json::json!({}),
+        },
+    }
+}
+
+struct Fx {
+    _db: TestDb,
+    pool: PgPool,
+    cfg: ClassifyConfig,
+    sources: SourcesFile,
+}
+
+async fn start() -> Fx {
+    let db = TestDb::start()
+        .await
+        .expect("docker must be running for database tests");
+    let pool = wt_db::connect(db.url()).await.unwrap();
+    wt_db::migrate(&pool).await.unwrap();
+    wt_db::registry::import(
+        &pool,
+        &RegistryFile::parse(REGISTRY, "fixture").unwrap(),
+        "test",
+    )
+    .await
+    .unwrap();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    Fx {
+        _db: db,
+        pool,
+        cfg: ClassifyConfig::load(&root.join("pipeline.toml"), &root.join("series.toml")).unwrap(),
+        sources: SourcesFile::parse(SOURCES, "fixture").unwrap(),
+    }
+}
+
+async fn talks(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from talk")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn talk_of(pool: &PgPool, vimeo_id: &str) -> TalkId {
+    let id: sqlx::types::Uuid = sqlx::query_scalar(
+        "select t.id from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.platform = 'vimeo' and sv.external_id = $1",
+    )
+    .bind(vimeo_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    TalkId::from(id)
+}
+
+async fn run_feed(fx: &Fx, feed: &Fake) -> FeedReport {
+    let mut conn = fx.pool.acquire().await.unwrap();
+    pipeline::discover_feed(
+        &mut conn,
+        &fx.cfg,
+        fx.sources.get("fixture-podcast").unwrap(),
+        feed,
+        &["fixture-vimeo".to_owned()],
+        "test",
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
+    let fx = start().await;
+    let vimeo = Fake(
+        SourcePlatform::Vimeo,
+        Mutex::new(vec![
+            item(
+                "700000001",
+                "Dharma Talk on Fixtures, by Ada on May 12, 2024",
+                2420,
+                "2024-05-14T18:00:00Z",
+                None,
+            ),
+            item(
+                "700000002",
+                "Ada: A Long Talk",
+                3700,
+                "2024-05-06T18:00:00Z",
+                None,
+            ),
+            item(
+                "700000003",
+                "Ada: A Talk Not in the Feed",
+                2000,
+                "2024-04-01T18:00:00Z",
+                None,
+            ),
+        ]),
+    );
+    {
+        let mut conn = fx.pool.acquire().await.unwrap();
+        pipeline::discover(
+            &mut conn,
+            fx.sources.get("fixture-vimeo").unwrap(),
+            &vimeo,
+            None,
+        )
+        .await
+        .unwrap();
+        while let Some(j) = job::claim(&mut conn, &[JobKind::Classify], "w")
+            .await
+            .unwrap()
+        {
+            pipeline::run_classify_job(&mut conn, &j, &fx.cfg, &fx.sources, "test")
+                .await
+                .unwrap();
+        }
+    }
+    assert_eq!(talks(&fx.pool).await, 3);
+
+    let podcast = Fake(
+        SourcePlatform::Rss,
+        Mutex::new(vec![
+            // Different title words, but the same recording date and nearly the same length.
+            item(
+                "ep-1",
+                "Fixtures (May 12, 2024)",
+                2412,
+                "2024-05-21T18:00:00Z",
+                Some("https://example.invalid/1.mp3"),
+            ),
+            // The same title, published a day before the Vimeo upload, slightly longer.
+            item(
+                "ep-2",
+                "A Long Talk",
+                3734,
+                "2024-05-05T18:00:00Z",
+                Some("https://example.invalid/2.mp3"),
+            ),
+            // Nothing on Vimeo is this.
+            item(
+                "ep-3",
+                "Some Other Recording",
+                1500,
+                "2024-03-01T18:00:00Z",
+                Some("https://example.invalid/3.mp3"),
+            ),
+        ]),
+    );
+    let report = run_feed(&fx, &podcast).await;
+    assert_eq!(
+        report,
+        FeedReport {
+            listed: 3,
+            new: 3,
+            matched: 2,
+            unmatched: 1
+        }
+    );
+    assert_eq!(
+        talks(&fx.pool).await,
+        3,
+        "an audio-only feed never creates a talk"
+    );
+
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let episodes = feed::episodes(&mut conn, "fixture-podcast").await.unwrap();
+    let matched = |id: &str| {
+        episodes
+            .iter()
+            .find(|e| e.external_id == id)
+            .unwrap()
+            .matched_vimeo_id
+            .clone()
+    };
+    assert_eq!(matched("ep-1").as_deref(), Some("700000001"));
+    assert_eq!(matched("ep-2").as_deref(), Some("700000002"));
+    assert_eq!(matched("ep-3"), None);
+
+    // A matched talk's audio comes from the enclosure; nothing comes from Vimeo.
+    match feed::media_route(&mut conn, talk_of(&fx.pool, "700000001").await)
+        .await
+        .unwrap()
+    {
+        MediaRoute::FeedEnclosure { url, mime_type, .. } => {
+            assert_eq!(url, "https://example.invalid/1.mp3");
+            assert_eq!(mime_type.as_deref(), Some("audio/mpeg"));
+        }
+        MediaRoute::None => panic!("expected the enclosure"),
+    }
+    assert_eq!(
+        feed::media_route(&mut conn, talk_of(&fx.pool, "700000003").await)
+            .await
+            .unwrap(),
+        MediaRoute::None
+    );
+    drop(conn);
+
+    // Running again changes nothing, and rediscovering Vimeo keeps the matches.
+    assert_eq!(
+        run_feed(&fx, &podcast).await,
+        FeedReport {
+            listed: 3,
+            new: 0,
+            matched: 0,
+            unmatched: 1
+        }
+    );
+    vimeo.1.lock().unwrap()[0].title =
+        "Dharma Talk on Fixtures, by Ada on May 12, 2024 (remastered)".into();
+    let mut conn = fx.pool.acquire().await.unwrap();
+    pipeline::discover(
+        &mut conn,
+        fx.sources.get("fixture-vimeo").unwrap(),
+        &vimeo,
+        None,
+    )
+    .await
+    .unwrap();
+    let episodes = feed::episodes(&mut conn, "fixture-podcast").await.unwrap();
+    assert_eq!(
+        episodes
+            .iter()
+            .filter(|e| e.matched_vimeo_id.is_some())
+            .count(),
+        2
+    );
+
+    let logged: i64 = sqlx::query_scalar(
+        "select count(*) from correction_log where entity = 'source_video' and field = 'match'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, 2, "each match is logged once");
+}

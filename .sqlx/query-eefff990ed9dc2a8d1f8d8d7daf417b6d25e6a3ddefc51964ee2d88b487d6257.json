@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_video (platform, external_id, url, channel_ref, title, description,\n                                     published_at, duration_s, raw)\n           values ('rss', $1, $2, $3, $4, $5, $6, $7, $8)\n           on conflict (platform, external_id) do update\n             set url = excluded.url, channel_ref = excluded.channel_ref, title = excluded.title,\n                 description = excluded.description, published_at = excluded.published_at,\n                 duration_s = excluded.duration_s,\n                 raw = excluded.raw || jsonb_strip_nulls(\n                         jsonb_build_object('match', source_video.raw->'match'))\n           returning id, (xmax = 0) as \"inserted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "inserted!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "eefff990ed9dc2a8d1f8d8d7daf417b6d25e6a3ddefc51964ee2d88b487d6257"
+}

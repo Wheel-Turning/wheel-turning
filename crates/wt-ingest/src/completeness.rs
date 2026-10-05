@@ -141,8 +141,38 @@ pub struct CompletenessReport {
     pub listed_not_recorded: Vec<Entry>,
     /// Recorded, but in no current list: removed or hidden since discovery.
     pub recorded_not_listed: Vec<Entry>,
-    /// The podcast feed comparison, or why it did not run.
-    pub feed: String,
+    /// The podcast feed comparison, when a feed source has episodes.
+    pub feed: Option<FeedComparison>,
+    /// Why there is no feed comparison, when there is none.
+    pub feed_note: String,
+}
+
+/// One feed episode, as the completeness check sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FeedEpisode {
+    /// The episode's guid.
+    pub id: String,
+    /// Title.
+    pub title: String,
+    /// Length in seconds.
+    pub duration_s: Option<i32>,
+    /// The Vimeo talk it matched, if any.
+    pub matched_vimeo_id: Option<String>,
+}
+
+/// Vimeo against the podcast feed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FeedComparison {
+    /// The feed source's name.
+    pub source: String,
+    /// Episodes in the feed.
+    pub episodes: usize,
+    /// Episodes matched to a Vimeo talk.
+    pub matched: usize,
+    /// Live Vimeo talks with no episode: their audio must come from elsewhere.
+    pub vimeo_missing_from_feed: Vec<Entry>,
+    /// Episodes that matched no Vimeo talk.
+    pub episodes_unmatched: Vec<FeedEpisode>,
 }
 
 /// Compares the lists. `account` is `None` when no account list is available.
@@ -150,7 +180,8 @@ pub fn compare(
     account: Option<&[ListedVideo]>,
     page_ids: &[String],
     recorded: &[RecordedVideo],
-    feed: &str,
+    feed: Option<(&str, &[FeedEpisode])>,
+    feed_note: &str,
 ) -> CompletenessReport {
     let account_map: BTreeMap<&str, &ListedVideo> = account
         .unwrap_or_default()
@@ -211,7 +242,29 @@ pub fn compare(
         account_not_on_page: sorted(acc.difference(&page).copied().collect()),
         listed_not_recorded: sorted(listed.difference(&recorded_ids).copied().collect()),
         recorded_not_listed: sorted(recorded_ids.difference(&listed).copied().collect()),
-        feed: feed.to_owned(),
+        feed: feed.map(|(source, episodes)| {
+            let matched: BTreeSet<&str> = episodes
+                .iter()
+                .filter_map(|e| e.matched_vimeo_id.as_deref())
+                .collect();
+            let live: BTreeSet<&str> = rec
+                .values()
+                .filter(|r| !matches!(r.state.as_str(), "excluded" | "withdrawn"))
+                .map(|r| r.id.as_str())
+                .collect();
+            FeedComparison {
+                source: source.to_owned(),
+                episodes: episodes.len(),
+                matched: matched.len(),
+                vimeo_missing_from_feed: sorted(live.difference(&matched).copied().collect()),
+                episodes_unmatched: episodes
+                    .iter()
+                    .filter(|e| e.matched_vimeo_id.is_none())
+                    .cloned()
+                    .collect(),
+            }
+        }),
+        feed_note: feed_note.to_owned(),
     }
 }
 
@@ -312,11 +365,50 @@ pub fn render_html(r: &CompletenessReport, generated_at: &str) -> String {
         );
         table(&mut out, entries, empty);
     }
-    let _ = writeln!(
-        out,
-        "<h2 id=\"feed\">Podcast feed</h2>\n<p class=\"muted\">{}</p>",
-        escape(&r.feed)
-    );
+    match &r.feed {
+        None => {
+            let _ = writeln!(
+                out,
+                "<h2 id=\"feed\">Podcast feed</h2>\n<p class=\"muted\">{}</p>",
+                escape(&r.feed_note)
+            );
+        }
+        Some(f) => {
+            let _ = writeln!(
+                out,
+                "<h2 id=\"feed\">Podcast feed: {}</h2>\n<p>{} episodes, {} matched to a Vimeo talk.</p>",
+                escape(&f.source),
+                f.episodes,
+                f.matched
+            );
+            let _ = writeln!(
+                out,
+                "<h2 id=\"vimeo-missing-from-feed\">Vimeo talks missing from the feed ({})</h2>",
+                f.vimeo_missing_from_feed.len()
+            );
+            table(&mut out, &f.vimeo_missing_from_feed, "None.");
+            let _ = writeln!(
+                out,
+                "<h2 id=\"episodes-unmatched\">Feed episodes with no Vimeo match ({})</h2>",
+                f.episodes_unmatched.len()
+            );
+            if f.episodes_unmatched.is_empty() {
+                out.push_str("<p class=\"muted\">None.</p>\n");
+            } else {
+                out.push_str("<table><tr><th>Episode</th><th>Title</th><th>Length</th></tr>\n");
+                for e in &f.episodes_unmatched {
+                    let _ = writeln!(
+                        out,
+                        "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
+                        escape(&e.id),
+                        escape(&e.title),
+                        escape(&clock(e.duration_s))
+                    );
+                }
+                out.push_str("</table>\n");
+            }
+        }
+    }
     out.push_str("</body></html>\n");
     out
 }
@@ -397,7 +489,27 @@ mod tests {
             recorded("20"),
             recorded("30"),
         ];
-        let r = compare(Some(&account), &page, &rec, "No feed source is configured.");
+        let feed = [
+            FeedEpisode {
+                id: "ep-a".into(),
+                title: "A".into(),
+                duration_s: Some(60),
+                matched_vimeo_id: Some("11".into()),
+            },
+            FeedEpisode {
+                id: "ep-b".into(),
+                title: "B".into(),
+                duration_s: None,
+                matched_vimeo_id: None,
+            },
+        ];
+        let r = compare(
+            Some(&account),
+            &page,
+            &rec,
+            Some(("fixture-podcast", &feed)),
+            "",
+        );
         let ids = |e: &[Entry]| e.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
         assert_eq!(
             ids(&r.page_not_in_account),
@@ -422,7 +534,17 @@ mod tests {
             Some("awaiting_consent")
         );
 
-        let without = compare(None, &page, &rec, "");
+        let f = r.feed.as_ref().unwrap();
+        assert_eq!((f.episodes, f.matched), (2, 1));
+        assert_eq!(
+            ids(&f.vimeo_missing_from_feed),
+            ["30", "20", "12"],
+            "every live talk without an episode"
+        );
+        assert_eq!(f.episodes_unmatched[0].id, "ep-b");
+
+        let without = compare(None, &page, &rec, None, "No feed source is set up yet.");
+        assert!(without.feed.is_none());
         assert!(
             without.page_not_in_account.is_empty(),
             "nothing to compare the page with"
@@ -436,6 +558,8 @@ mod tests {
             "listed-not-recorded",
             "recorded-not-listed",
             "feed",
+            "vimeo-missing-from-feed",
+            "episodes-unmatched",
         ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "section {id}");
         }

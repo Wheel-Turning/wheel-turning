@@ -12,6 +12,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 
 mod commands;
 mod ingest;
+mod source;
 
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
@@ -55,6 +56,34 @@ enum Command {
     },
     /// Run queued jobs (Spec 03, Job queue).
     Worker(WorkerArgs),
+    /// Source settings (Spec 03, Seattle Soto Zen sources).
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SourceCommand {
+    /// Look up a podcast's feed address from its Apple Podcasts id and print it. Saves it as
+    /// feed_url on the source in sources.toml only with --yes, after you have checked it.
+    ResolveFeed {
+        /// The Apple Podcasts id, such as 1472964846 for Seattle Soto Zen.
+        #[arg(long)]
+        apple_id: u64,
+        /// The feed source in sources.toml.
+        #[arg(long, default_value = "ssz-podcast")]
+        source: String,
+        /// Save the address. Without it nothing is written.
+        #[arg(long)]
+        yes: bool,
+        /// The directory holding sources.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+        /// The lookup API address. For tests.
+        #[arg(long, hide = true, default_value = wt_ingest::podcast::APPLE_LOOKUP)]
+        lookup_url: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -395,6 +424,16 @@ async fn main() -> anyhow::Result<ExitCode> {
                     config_dir,
                 },
         } => ingest::reclassify(&pool().await?, &config_dir, talk, dry_run).await?,
+        Command::Source {
+            command:
+                SourceCommand::ResolveFeed {
+                    apple_id,
+                    source,
+                    yes,
+                    config_dir,
+                    lookup_url,
+                },
+        } => source::resolve_feed(&config_dir, &source, apple_id, &lookup_url, yes).await?,
         Command::Worker(args) => {
             ingest::worker(
                 &pool().await?,

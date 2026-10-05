@@ -139,7 +139,7 @@ Commands added by this spec:
 - `wt ingest discover [--source <name>]`, `wt ingest match-storage`, `wt ingest report --out <path>`, `wt ingest reclassify [--talk <id>] [--dry-run]`.
 - `wt pipeline advance`, `wt pipeline retry --talk <id>`, `wt worker --kinds <list> --concurrency <n>`.
 
-Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `review_title_patterns`, `job_lock_timeout_s = 7200`.
+Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `review_title_patterns`, `job_lock_timeout_s = 7200`, `feed_match_days = 14`, `feed_match_duration_tolerance_s = 120`, `feed_match_duration_tolerance_pct = 5`, `feed_match_title_similarity = 0.5`.
 
 Acceptance criteria for M2:
 
@@ -200,7 +200,7 @@ Acceptance criteria for licensed sources:
 - [ ] A licensed talk cannot reach `cleared` without evidence, and cannot appear in `servable_passage` unless that evidence is `allowed`. Both are database tests.
 - [ ] `apply` on a YouTube source skips videos that are not flagged `creativeCommon`.
 - [ ] Setting evidence to `allowed = false` stops the talk's next job and removes it from the serving view.
-- [ ] `RssAdapter` passes feed fixtures, sends the identifying `User-Agent`, honors the delay, and never fetches a path that `robots.txt` disallows.
+- [x] `RssAdapter` passes feed fixtures, sends the identifying `User-Agent`, honors the delay, and never fetches a path that `robots.txt` disallows.
 - [ ] `wt takedown --sangha <name>` removes every talk of a sangha and logs each one.
 
 ## Noncommercial conditions
@@ -352,7 +352,7 @@ Acceptance criteria for mandated talks:
 Decision of October 3, 2026, revised the same day. SSZ publishes every dharma talk on Vimeo, and only some of them on Apple Podcasts and Spotify. Vimeo is therefore the complete list and the listening link, and the podcast feed is a partial source of audio. The v1 route is:
 
 1. Vimeo is the canonical list. A `VimeoAdapter` in `wt-ingest` (platform `vimeo`) discovers talks in two ways. With `WT_VIMEO_ACCESS_TOKEN` it lists the account's videos through the Vimeo API and reads name, description, duration, creation time, link, privacy and license. Without a token it reads the video links from the public talks page at `seattlesotozen.org/talks-page/`, obeying `robots.txt`, and takes each video's title, duration and upload date from Vimeo's public oEmbed endpoint. Either way each video becomes a `source_video` of platform `vimeo`, with its metadata in `raw`.
-2. Media comes from the first route that works, in this order. (a) A matching podcast episode. `wt source resolve-feed --apple-id 1472964846` finds the feed address, the owner confirms it, and the importer matches episodes to Vimeo talks by normalized title, date and duration. A matched episode's audio enclosure is used and nothing is downloaded from Vimeo. The feed source is configured with `role = "audio_only"`, so it never creates talk records and only attaches audio to talks that Vimeo already lists. (b) A Vimeo download link, which exists only when the account owner has enabled downloads for a video, read through the API with a token that has the `private` and `video_files` scopes. (c) A file from SSZ's own storage through the storage adapter. (d) Third-party fetching, which stays off behind `WT_ALLOW_THIRD_PARTY_FETCH` and needs counsel's answer and SSZ's agreement first, because Vimeo's terms limit downloading to what an owner allows.
+2. Media comes from the first route that works, in this order. (a) A matching podcast episode. `wt source resolve-feed --apple-id 1472964846` finds the feed address, the owner confirms it, and the importer matches episodes to Vimeo talks by normalized title, date and duration. A matched episode's audio enclosure is used and nothing is downloaded from Vimeo. Episodes are stored as `rss` source videos with no talk, and the match is recorded on the episode. An episode matches a talk whose date is within `feed_match_days` of its own and whose length is within the larger of `feed_match_duration_tolerance_s` and `feed_match_duration_tolerance_pct`; among those, the most similar title wins if it reaches `feed_match_title_similarity`, and otherwise a talk with the same recording date in its title wins if it is the only one. Dates are recording dates where titles state them, as in rule 3. Anything else stays unmatched for the completeness check (decision of October 5, 2026). The feed source is configured with `role = "audio_only"`, so it never creates talk records and only attaches audio to talks that Vimeo already lists. (b) A Vimeo download link, which exists only when the account owner has enabled downloads for a video, read through the API with a token that has the `private` and `video_files` scopes. (c) A file from SSZ's own storage through the storage adapter. (d) Third-party fetching, which stays off behind `WT_ALLOW_THIRD_PARTY_FETCH` and needs counsel's answer and SSZ's agreement first, because Vimeo's terms limit downloading to what an owner allows.
 3. The owner asks SSZ for route (b) or (c). Ask whoever administers the SSZ Vimeo account either to create a personal access token for the project with the `public`, `private` and `video_files` scopes and enable downloads on the talks, or to share a bulk export. This is the same conversation as the SSZ permission note in the PRD.
 4. Link style. `link_style = "vimeo"` renders the page address with `#t=<seconds>s`. A talk with only a podcast match uses `none`, and the page shows "starts at h:mm:ss". This supersedes rule 2 of Answer assembly in Spec 05.
 5. Captions. Vimeo can hold text tracks. When the API returns one, it is saved in scratch as a reference for measuring accuracy and is never used as the transcript.
@@ -379,11 +379,11 @@ Acceptance criteria for the SSZ sources:
 
 - [ ] Vimeo discovery returns the same talk set from a recorded API fixture and from a recorded talks-page fixture with oEmbed responses.
 - [x] Talks-page discovery obeys `robots.txt` and makes no request to a disallowed path.
-- [ ] Feed episodes match Vimeo talks by title, date and duration, an `audio_only` source never creates a talk, and a matched talk uses the enclosure with no Vimeo download.
+- [x] Feed episodes match Vimeo talks by title, date and duration, an `audio_only` source never creates a talk, and a matched talk uses the enclosure with no Vimeo download. (`wt-ingest/tests/feed.rs`: the matched talk's media route is the enclosure; downloading it is M4's fetch.)
 - [ ] With no usable media route a talk stays at `needs_review` with reason `no_media` and nothing is fetched.
-- [ ] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation.
+- [x] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation. (Confirmation is `--yes`.)
 - [ ] Each `link_style` renders the right link, and `none` renders the "starts at" text.
-- [ ] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.
+- [x] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.
 
 ## SSZ inventory of October 5, 2026
 
