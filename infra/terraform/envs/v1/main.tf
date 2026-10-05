@@ -95,6 +95,7 @@ module "batch_host" {
   source                = "../../modules/batch_host"
   name                  = local.name
   enabled               = var.batch_host_enabled
+  instance_type         = var.batch_host_instance_type
   subnet_id             = module.network.public_subnet_ids[0]
   security_group_id     = module.network.security_group_ids["batch"]
   instance_profile_name = module.iam.batch_instance_profile_name
