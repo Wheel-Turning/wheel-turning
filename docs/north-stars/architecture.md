@@ -132,7 +132,7 @@ None of these decisions touches an invariant. Each one has a trigger that forces
 | Speaker diarization | Python sidecar with pyannote, or sherpa-onnx in Rust | Result of the ten-video segmentation sample |
 | Embedding location | Local through ONNX, or a hosted API | Consent wording is final and provider terms are confirmed |
 | Synthesis verifier | Second language-model call, or a local entailment model | First claim-by-claim review of 20 answers |
-| ASR hosting | Decided October 4, 2026: the owner's Windows PC, with the OpenVINO encoder on its Intel GPU, reaching the database through an SSM port forward | Decided; see docs/asr-benchmark.md |
+| ASR hosting | Decided October 4, 2026: the owner's Windows PC, running large-v3 through Vulkan on its Intel GPU, reaching the database through an SSM port forward | Decided; see docs/asr-benchmark.md |
 | Tester access | Invite-link allowlist, or an identity-aware proxy | Before the first tester sees the page |
 | Model provider terms | Zero-retention agreement and its scope | Before any speaker's transcript is sent for extraction |
 
