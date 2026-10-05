@@ -483,5 +483,21 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
         html.contains("excluded: non_talk"),
         "the clip is listed with its reason"
     );
+
+    // Discovery queued these talks under a metadata key, so the first reclassify queues both
+    // once under the rules version, and a second run with the same rules queues nothing.
+    let dry = fx.json(&["ingest", "reclassify", "--dry-run", "--config-dir", dir_arg]);
+    assert_eq!(
+        (dry["eligible"].as_u64(), dry["queued"].as_u64()),
+        (Some(2), Some(2))
+    );
+    let first = fx.json(&["ingest", "reclassify", "--config-dir", dir_arg]);
+    assert_eq!(first["queued"], 2);
+    assert_eq!(first["rules_version"], dry["rules_version"]);
+    let second = fx.json(&["ingest", "reclassify", "--config-dir", dir_arg]);
+    assert_eq!(
+        (second["queued"].as_u64(), second["already_done"].as_u64()),
+        (Some(0), Some(2))
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

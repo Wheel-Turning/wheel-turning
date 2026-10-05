@@ -62,14 +62,86 @@ pub fn input_hash(v: &DiscoveredVideo) -> String {
         v.duration_s,
         v.has_captions
     ]);
-    // FNV-1a over the canonical JSON: stable across runs and builds, which is all a job key
-    // needs. It is not a security boundary.
+    fnv64(canonical.to_string().as_bytes())
+}
+
+/// FNV-1a as hex: stable across runs and builds, which is all a job key needs. It is not a
+/// security boundary.
+fn fnv64(bytes: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in canonical.to_string().bytes() {
-        hash ^= u64::from(byte);
+    for byte in bytes {
+        hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     format!("{hash:016x}")
+}
+
+/// The version of everything classification reads besides the video: the pipeline and series
+/// files as written, and every alias with its teacher. A change to any of them gives a new
+/// version, so `reclassify` queues work exactly when the rules changed.
+pub fn rules_version(
+    pipeline_toml: &str,
+    series_toml: &str,
+    aliases: &[(String, String)],
+) -> String {
+    let canonical = serde_json::json!([pipeline_toml, series_toml, aliases]);
+    fnv64(canonical.to_string().as_bytes())
+}
+
+/// What `reclassify` found and queued.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ReclassifyReport {
+    /// The rules version the jobs carry.
+    pub rules_version: String,
+    /// Talks eligible: before the gate, or excluded by classification.
+    pub eligible: usize,
+    /// Jobs queued now.
+    pub queued: usize,
+    /// Talks already queued or run under this rules version.
+    pub already_done: usize,
+    /// Talks whose source is unknown, so no sangha can be credited; left alone.
+    pub no_source: usize,
+}
+
+/// Queues classification again for every talk before the gate and every talk classification
+/// excluded, or only `only`, keyed by `rules_version` so unchanged rules queue nothing. An
+/// excluded talk is reopened when its job runs, not here. With `dry_run` nothing is queued and
+/// `queued` counts what would be.
+pub async fn reclassify(
+    conn: &mut PgConnection,
+    rules_version: &str,
+    only: Option<TalkId>,
+    dry_run: bool,
+) -> Result<ReclassifyReport, PipelineError> {
+    let mut report = ReclassifyReport {
+        rules_version: rules_version.to_owned(),
+        ..ReclassifyReport::default()
+    };
+    let mut tx = conn.begin().await?;
+    let targets = ingest::reclassify_targets(&mut tx, only).await?;
+    report.eligible = targets.len();
+    let key = format!("rules-{rules_version}");
+    for t in targets {
+        let Some(source) = t.source else {
+            report.no_source += 1;
+            continue;
+        };
+        if dry_run {
+            report.queued += 1;
+            continue;
+        }
+        let payload = serde_json::json!({ "source": source, "reopen": t.state == "excluded" });
+        match job::enqueue(&mut tx, JobKind::Classify, Some(t.talk), &key, &payload).await? {
+            Some(_) => report.queued += 1,
+            None => report.already_done += 1,
+        }
+    }
+    if dry_run {
+        tx.rollback().await?;
+    } else {
+        tx.commit().await?;
+    }
+    Ok(report)
 }
 
 /// Lists a source and records every video, each with its talk and classify job. The whole
@@ -308,8 +380,16 @@ pub async fn run_classify_job(
         .and_then(|s| s.as_str())
         .ok_or_else(|| PipelineError::BadJob(job.id.to_string()))?;
     debug_assert_eq!(job.kind, JobKind::Classify);
+    let reopen = job
+        .payload
+        .get("reopen")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true);
     let mut tx = conn.begin().await?;
     let venue = registry::find_sangha(&mut tx, &sources.get(source)?.default_sangha).await?;
+    if reopen {
+        ingest::reopen(&mut tx, talk, actor).await?;
+    }
     let outcome = classify_talk(&mut tx, cfg, talk, venue, actor).await?;
     job::succeed(&mut tx, job).await?;
     tx.commit().await?;

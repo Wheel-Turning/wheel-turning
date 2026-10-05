@@ -183,3 +183,26 @@ pub async fn report(pool: &PgPool, config_dir: &Path, out: &Path) -> anyhow::Res
     );
     Ok(())
 }
+
+/// Queues classification again for talks before the gate and talks classification excluded,
+/// when the rules (pipeline.toml, series.toml or the registry's aliases) have changed since
+/// their last run. Prints the counts as JSON. A worker then runs the jobs.
+pub async fn reclassify(
+    pool: &PgPool,
+    config_dir: &Path,
+    talk: Option<wt_core::ids::TalkId>,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let read = |name: &str| {
+        let path = config_dir.join(name);
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))
+    };
+    let (pipeline_toml, series_toml) = (read("pipeline.toml")?, read("series.toml")?);
+    // Refuse rules that do not load before queuing work that would fail on them.
+    ClassifyConfig::parse(&pipeline_toml, "pipeline.toml", &series_toml, "series.toml")?;
+    let mut conn = pool.acquire().await?;
+    let aliases = wt_db::ingest::alias_list(&mut conn).await?;
+    let version = pipeline::rules_version(&pipeline_toml, &series_toml, &aliases);
+    let report = pipeline::reclassify(&mut conn, &version, talk, dry_run).await?;
+    print_json(&report)
+}

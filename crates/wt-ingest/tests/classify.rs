@@ -137,7 +137,7 @@ fn corpus() -> Vec<DiscoveredVideo> {
         ("1011", "Q&A with Ada", 2000, "2020-06-14T18:00:00Z", false),
         (
             "1012",
-            "A talk on sitting",
+            "A talk on sitting by Cy Example",
             2400,
             "2020-07-05T18:00:00Z",
             false,
@@ -212,13 +212,17 @@ async fn discover(fx: &Fx, adapter: &FakeAdapter) -> DiscoveryReport {
 
 /// Runs every queued classify job, as a worker would. Returns the outcome per external id.
 async fn classify_all(fx: &Fx) -> BTreeMap<String, Classified> {
+    classify_all_with(fx, &fx.cfg).await
+}
+
+async fn classify_all_with(fx: &Fx, cfg: &ClassifyConfig) -> BTreeMap<String, Classified> {
     let mut conn = fx.pool.acquire().await.unwrap();
     let mut out = BTreeMap::new();
     while let Some(j) = job::claim(&mut conn, &[JobKind::Classify], "w")
         .await
         .unwrap()
     {
-        let outcome = pipeline::run_classify_job(&mut conn, &j, &fx.cfg, &fx.sources, ACTOR)
+        let outcome = pipeline::run_classify_job(&mut conn, &j, cfg, &fx.sources, ACTOR)
             .await
             .unwrap();
         let id: String = sqlx::query_scalar(
@@ -593,4 +597,139 @@ async fn the_database_normalizes_titles_exactly_as_rule_1_does() {
         .map(|t| wt_ingest::classify::normalize_title(t))
         .collect();
     assert_eq!(from_sql, from_rust);
+}
+
+fn config_text(name: &str) -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    std::fs::read_to_string(root.join(name)).unwrap()
+}
+
+async fn reclassify(fx: &Fx, pipeline_toml: &str, dry_run: bool) -> pipeline::ReclassifyReport {
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let aliases = wt_db::ingest::alias_list(&mut conn).await.unwrap();
+    let version = pipeline::rules_version(pipeline_toml, &config_text("series.toml"), &aliases);
+    pipeline::reclassify(&mut conn, &version, None, dry_run)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn reclassify_applies_changed_rules_once_and_leaves_withdrawn_talks_alone() {
+    let fx = start().await;
+    let adapter = FakeAdapter(Mutex::new(corpus()));
+    discover(&fx, &adapter).await;
+
+    // First pass under a mistaken rule that drops every "jewel" talk as a non-talk.
+    let good = config_text("pipeline.toml");
+    let wrong = good.replace(
+        r"exclude_title_patterns = ['\bquote\b'",
+        r"exclude_title_patterns = ['\bjewel\b', '\bquote\b'",
+    );
+    assert_ne!(wrong, good, "the mistaken rule was planted");
+    let wrong_cfg =
+        ClassifyConfig::parse(&wrong, "wrong", &config_text("series.toml"), "series").unwrap();
+    classify_all_with(&fx, &wrong_cfg).await;
+    let before = rows(&fx.pool).await;
+    for id in ["1005", "1006", "1007"] {
+        assert_eq!(
+            before[id].reason.as_deref(),
+            Some("non_talk"),
+            "{id} wrongly excluded"
+        );
+    }
+    assert_eq!(before["1012"].reason.as_deref(), Some("speaker_unresolved"));
+    sqlx::query(
+        "update talk set state = 'withdrawn', state_reason = 'takedown'
+         where source_video_id = (select id from source_video where external_id = '1009')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    // The rule is corrected and the registry learns a new teacher.
+    let more = RegistryFile::parse(
+        r#"
+[[sangha]]
+name = "Fixture Mountain Zendo"
+
+[[teacher]]
+display_name = "Cy Example"
+sangha = "Fixture Mountain Zendo"
+aliases = ["Cy"]
+"#,
+        "more",
+    )
+    .unwrap();
+    wt_db::registry::import(&fx.pool, &more, ACTOR)
+        .await
+        .unwrap();
+
+    let dry = reclassify(&fx, &good, true).await;
+    let queued: i64 = sqlx::query_scalar("select count(*) from job where state = 'queued'")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(queued, 0, "a dry run queues nothing");
+
+    let report = reclassify(&fx, &good, false).await;
+    assert_eq!(report.queued, dry.queued);
+    // Every talk but the withdrawn one.
+    assert_eq!(
+        (report.eligible, report.queued, report.already_done),
+        (13, 13, 0)
+    );
+    classify_all(&fx).await;
+
+    let after = rows(&fx.pool).await;
+    let state = |id: &str| (after[id].state.as_str(), after[id].reason.as_deref());
+    assert_eq!(
+        state("1005"),
+        ("excluded", Some("duplicate")),
+        "the planted pair merges again"
+    );
+    assert_eq!(after["1005"].duplicate_of.as_deref(), Some("1006"));
+    assert_eq!(state("1006"), ("awaiting_consent", Some("consent_missing")));
+    assert_eq!(state("1007"), ("awaiting_consent", Some("consent_missing")));
+    assert_eq!(
+        after["1012"].teacher.as_deref(),
+        Some("Cy Example"),
+        "the new alias resolves"
+    );
+    assert_eq!(
+        state("1003"),
+        ("excluded", Some("non_talk")),
+        "still a non-talk"
+    );
+    assert_eq!(
+        state("1002"),
+        ("excluded", Some("duplicate")),
+        "still a duplicate"
+    );
+    assert_eq!(
+        state("1010"),
+        ("needs_review", Some("untitled")),
+        "a person's hold stays"
+    );
+    assert_eq!(
+        state("1009"),
+        ("withdrawn", Some("takedown")),
+        "never touched"
+    );
+    let reopened: i64 = sqlx::query_scalar(
+        "select count(*) from correction_log where reason = 'reopened for reclassification'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        reopened, 7,
+        "each classifier exclusion was reopened and logged"
+    );
+
+    let again = reclassify(&fx, &good, false).await;
+    assert_eq!(
+        (again.queued, again.already_done),
+        (0, 13),
+        "unchanged rules queue nothing"
+    );
 }

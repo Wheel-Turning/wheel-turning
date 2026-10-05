@@ -69,6 +69,21 @@ enum IngestCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Queue classification again after pipeline.toml, series.toml or the registry's aliases
+    /// change: for talks before the gate, and talks classification itself excluded (reopened
+    /// when their job runs). Unchanged rules queue nothing. Prints counts as JSON; `wt worker`
+    /// runs the jobs. Cleared, pipeline and withdrawn talks are never touched.
+    Reclassify {
+        /// Only this talk.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Count what would be queued, and queue nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// The directory holding pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// Write the review page: duplicate clusters, exclusions, review holds, series coverage,
     /// videos by month and donation-looking links. Reads only; it changes nothing.
     Report {
@@ -335,6 +350,14 @@ async fn main() -> anyhow::Result<ExitCode> {
         Command::Ingest {
             command: IngestCommand::Report { out, config_dir },
         } => ingest::report(&pool().await?, &config_dir, &out).await?,
+        Command::Ingest {
+            command:
+                IngestCommand::Reclassify {
+                    talk,
+                    dry_run,
+                    config_dir,
+                },
+        } => ingest::reclassify(&pool().await?, &config_dir, talk, dry_run).await?,
         Command::Worker(args) => {
             ingest::worker(
                 &pool().await?,

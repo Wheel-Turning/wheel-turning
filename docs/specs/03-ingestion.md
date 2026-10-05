@@ -72,6 +72,8 @@ Discovery creates a `source_video` row and a `talk` row in state `discovered` fo
 
 A talk that survives every rule moves to `awaiting_consent`. Every merge, exclusion and reclassification writes a row to `correction_log`.
 
+When `config/pipeline.toml`, `config/series.toml` or the registry's aliases change, `wt ingest reclassify [--talk <id>] [--dry-run]` queues a `classify` job for every talk before the gate and every talk that classification itself excluded (reasons `non_talk`, `too_short`, `excluded_session` and `duplicate`). The job key carries a hash of those files and the aliases, so unchanged rules queue nothing. An excluded talk is reopened to `discovered`, with a `correction_log` row, when its job runs, so a corrected rule can undo a wrong exclusion or merge. A hold a person must release stays held, as above, and cleared, pipeline and withdrawn talks are never touched (decision of October 5, 2026).
+
 `wt ingest report --out report.html` writes the review page: duplicate clusters with the kept record marked, excluded items with reasons, talks in `needs_review` with their reasons, series coverage by part number so a gap such as missing Genjokoan paragraphs 5 and 6 is visible, a month-by-month count that shows a gap like April 2022 to February 2023, and any donation-looking links found in descriptions for a human to verify. The report sets nothing automatically.
 
 ## The consent gate in the pipeline
@@ -134,7 +136,7 @@ Commands added by this spec:
 
 - `wt registry import --file registry.toml` loads teachers, aliases and sanghas.
 - `wt consent set | list`, `wt talk set-rights`, `wt talk exclude`.
-- `wt ingest discover [--source <name>]`, `wt ingest match-storage`, `wt ingest report --out <path>`.
+- `wt ingest discover [--source <name>]`, `wt ingest match-storage`, `wt ingest report --out <path>`, `wt ingest reclassify [--talk <id>] [--dry-run]`.
 - `wt pipeline advance`, `wt pipeline retry --talk <id>`, `wt worker --kinds <list> --concurrency <n>`.
 
 Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `review_title_patterns`, `job_lock_timeout_s = 7200`.

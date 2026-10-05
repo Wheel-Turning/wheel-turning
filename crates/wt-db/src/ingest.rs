@@ -473,3 +473,93 @@ pub async fn report_rows(conn: &mut PgConnection) -> Result<Vec<ReportRow>, Inge
         })
         .collect())
 }
+
+/// Exclusion reasons that classification itself set, and so may undo when its rules change.
+/// Hand exclusions and refusals end in `withdrawn` through a takedown and are never reopened.
+pub const CLASSIFIER_EXCLUSIONS: [&str; 4] =
+    ["non_talk", "too_short", "excluded_session", "duplicate"];
+
+/// A talk `wt ingest reclassify` may run classification on again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReclassifyTarget {
+    /// The talk.
+    pub talk: TalkId,
+    /// The configured source it came from, from `source_video.raw.source`.
+    pub source: Option<String>,
+    /// Its state.
+    pub state: String,
+}
+
+/// Talks before the gate, and talks excluded by classification, optionally only `only`.
+pub async fn reclassify_targets(
+    conn: &mut PgConnection,
+    only: Option<TalkId>,
+) -> Result<Vec<ReclassifyTarget>, IngestDbError> {
+    let rows = sqlx::query!(
+        r#"select t.id, sv.raw->>'source' as source, t.state::text as "state!"
+           from talk t join source_video sv on sv.id = t.source_video_id
+           where (t.state in ('discovered', 'needs_review', 'awaiting_consent')
+                  or (t.state = 'excluded' and t.state_reason = any($1)))
+             and ($2::uuid is null or t.id = $2)
+           order by sv.published_at nulls last, t.id"#,
+        &CLASSIFIER_EXCLUSIONS.map(str::to_owned)[..],
+        only.map(|t| t.as_uuid())
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ReclassifyTarget {
+            talk: TalkId::from(r.id),
+            source: r.source,
+            state: r.state,
+        })
+        .collect())
+}
+
+/// Returns a talk excluded by classification to `discovered`, clearing `duplicate_of`, so the
+/// rules run on it afresh. Logs the change. Returns false for any other talk.
+pub async fn reopen(
+    conn: &mut PgConnection,
+    talk: TalkId,
+    actor: &str,
+) -> Result<bool, IngestDbError> {
+    let old = sqlx::query!(
+        r#"update talk t set state = 'discovered', state_reason = null, duplicate_of = null
+           from talk before
+           where t.id = $1 and before.id = t.id
+             and t.state = 'excluded' and t.state_reason = any($2)
+           returning before.state_reason, before.duplicate_of"#,
+        talk.as_uuid(),
+        &CLASSIFIER_EXCLUSIONS.map(str::to_owned)[..]
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(old) = old else {
+        return Ok(false);
+    };
+    log_change(
+        conn,
+        "talk",
+        talk.as_uuid(),
+        "state",
+        Some(serde_json::json!({
+            "state": "excluded", "reason": old.state_reason, "duplicate_of": old.duplicate_of,
+        })),
+        Some(serde_json::json!({ "state": "discovered" })),
+        actor,
+        "reopened for reclassification",
+    )
+    .await?;
+    Ok(true)
+}
+
+/// Every alias with its teacher, in a stable order, for the rules version.
+pub async fn alias_list(conn: &mut PgConnection) -> Result<Vec<(String, String)>, IngestDbError> {
+    let rows = sqlx::query!(
+        "select teacher_id::text as \"teacher!\", alias from teacher_alias order by 1, 2"
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.teacher, r.alias)).collect())
+}
