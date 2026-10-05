@@ -373,7 +373,7 @@ fn config_dir() -> PathBuf {
 }
 
 #[tokio::test]
-async fn the_worker_drains_classify_jobs_and_refuses_kinds_it_cannot_run() {
+async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
     let fx = start().await;
     fx.import_registry();
     let item = serde_json::json!({});
@@ -466,5 +466,22 @@ async fn the_worker_drains_classify_jobs_and_refuses_kinds_it_cannot_run() {
         .await
         .unwrap();
     assert_eq!(done, 2);
+
+    let page = dir.join("report.html");
+    let out = fx.wt(&[
+        "ingest",
+        "report",
+        "--out",
+        page.to_str().unwrap(),
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(out.status.success(), "report failed: {}", stderr(&out));
+    let html = std::fs::read_to_string(&page).unwrap();
+    assert!(html.contains("<h1>Ingest review</h1>"));
+    assert!(
+        html.contains("excluded: non_talk"),
+        "the clip is listed with its reason"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

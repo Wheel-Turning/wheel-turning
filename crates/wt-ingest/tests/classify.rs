@@ -14,6 +14,7 @@ use wt_db::job::{self, JobKind};
 use wt_db::test_support::TestDb;
 use wt_ingest::config::{ClassifyConfig, SourcesFile};
 use wt_ingest::pipeline::{self, Classified, DiscoveryReport};
+use wt_ingest::report;
 use wt_ingest::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
 use wt_registry::RegistryFile;
 
@@ -157,7 +158,16 @@ fn corpus() -> Vec<DiscoveredVideo> {
         ),
     ]
     .into_iter()
-    .map(|(id, t, d, at, c)| video(id, t, d, at, c))
+    .map(|(id, t, d, at, c)| {
+        let mut v = video(id, t, d, at, c);
+        if id == "1001" {
+            v.description = Some(
+                "Recorded at the zendo. Support the sangha: https://example.invalid/donate.                  Schedule: https://example.invalid/calendar"
+                    .to_owned(),
+            );
+        }
+        v
+    })
     .collect()
 }
 
@@ -413,4 +423,127 @@ async fn a_withdrawn_talk_is_never_requeued() {
     assert_eq!(report.withdrawn, 1);
     assert!(classify_all(&fx).await.is_empty());
     assert_eq!(rows(&fx.pool).await["1001"].state, "withdrawn");
+}
+
+#[tokio::test]
+async fn the_report_renders_every_section_from_the_fixture_corpus() {
+    let fx = start().await;
+    let adapter = FakeAdapter(Mutex::new(corpus()));
+    discover(&fx, &adapter).await;
+    classify_all(&fx).await;
+
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let rows = wt_db::ingest::report_rows(&mut conn).await.unwrap();
+    let report = report::build(
+        &rows,
+        &fx.cfg.series,
+        "2026-10-05T12:00:00Z".parse().unwrap(),
+    );
+
+    assert_eq!(report.totals.talks, 14);
+    assert_eq!(report.totals.excluded, 5);
+
+    // Duplicate clusters, kept record first.
+    let kept: Vec<_> = report
+        .duplicate_clusters
+        .iter()
+        .map(|c| c.kept.source.as_str())
+        .collect();
+    assert_eq!(kept, ["vimeo 1001", "vimeo 1006"]);
+    assert_eq!(
+        report.duplicate_clusters[1].duplicates[0].source,
+        "vimeo 1005"
+    );
+    assert!(report.duplicate_clusters[1].kept.captions);
+
+    // Exclusions other than duplicates, with reasons.
+    let excluded: Vec<_> = report.excluded.iter().map(|i| i.status.as_str()).collect();
+    assert_eq!(
+        excluded,
+        [
+            "excluded: non_talk",
+            "excluded: too_short",
+            "excluded: excluded_session"
+        ]
+    );
+
+    // Review holds with reasons and the speaker candidates.
+    let review: BTreeMap<_, _> = report
+        .needs_review
+        .iter()
+        .map(|i| (i.source.as_str(), (i.status.as_str(), i.speaker.as_deref())))
+        .collect();
+    assert_eq!(review["vimeo 1010"].0, "needs_review: untitled");
+    assert_eq!(review["vimeo 1011"].0, "needs_review: student_voices");
+    assert_eq!(
+        review["vimeo 1013"],
+        ("needs_review: speaker_unresolved", Some("[Ada, Bo]"))
+    );
+
+    // Series coverage shows the missing parts.
+    let genjokoan = report
+        .series
+        .iter()
+        .find(|s| s.name == "Genjokoan")
+        .unwrap();
+    assert_eq!(genjokoan.parts.keys().copied().collect::<Vec<_>>(), [3, 4]);
+    assert_eq!(genjokoan.missing, [1, 2]);
+    let uji = report.series.iter().find(|s| s.name == "Uji").unwrap();
+    assert_eq!(
+        (uji.parts[&4].len(), uji.missing.clone()),
+        (1, vec![1, 2, 3]),
+        "the duplicate is not counted"
+    );
+    let bendowa = report.series.iter().find(|s| s.name == "Bendowa").unwrap();
+    assert!(
+        bendowa.parts.is_empty() && bendowa.missing.is_empty(),
+        "a series with no talks yet"
+    );
+
+    // Month by month, with the gaps between uploads.
+    assert_eq!(report.months.first().unwrap().month, "2020-05");
+    assert_eq!(report.months.last().unwrap().month, "2026-01");
+    assert_eq!(report.months.len(), 69, "every month from first to last");
+    let march_2021 = report.months.iter().find(|m| m.month == "2021-03").unwrap();
+    assert_eq!(
+        (march_2021.videos, march_2021.talks),
+        (4, 1),
+        "two clips and a duplicate drop out"
+    );
+    assert!(
+        report
+            .month_gaps
+            .contains(&("2022-03".to_owned(), "2025-12".to_owned()))
+    );
+
+    // Donation-looking links, listed for a person, and only those.
+    let links: Vec<_> = report
+        .donation_links
+        .iter()
+        .map(|l| l.url.as_str())
+        .collect();
+    assert_eq!(links, ["https://example.invalid/donate"]);
+
+    let html = report::render_html(&report);
+    for id in [
+        "duplicates",
+        "excluded",
+        "review",
+        "series",
+        "months",
+        "donation-links",
+    ] {
+        assert!(html.contains(&format!("id=\"{id}\"")), "section {id}");
+    }
+    assert!(html.contains("<tr class=\"kept\">"));
+    assert!(html.contains("2022-03 to 2025-12"));
+    let lower = html.to_lowercase();
+    assert!(
+        !lower.contains("<script") && !lower.contains(" src=") && !lower.contains("<link"),
+        "the page loads nothing from anywhere"
+    );
+
+    // Building the report changed nothing.
+    let again = wt_db::ingest::report_rows(&mut conn).await.unwrap();
+    assert_eq!(again, rows);
 }

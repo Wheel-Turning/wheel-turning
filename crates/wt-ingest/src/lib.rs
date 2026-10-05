@@ -4,6 +4,7 @@
 pub mod classify;
 pub mod config;
 pub mod pipeline;
+pub mod report;
 pub mod robots;
 pub mod source;
 pub mod vimeo;

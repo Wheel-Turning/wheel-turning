@@ -3549,6 +3549,7 @@ name = "wt-ingest"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "regex",
  "reqwest",
  "serde",

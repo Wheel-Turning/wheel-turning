@@ -15,6 +15,7 @@ wt-core.workspace = true
 wt-db.workspace = true
 wt-registry.workspace = true
 async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde.workspace = true

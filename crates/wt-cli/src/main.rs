@@ -69,6 +69,16 @@ enum IngestCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Write the review page: duplicate clusters, exclusions, review holds, series coverage,
+    /// videos by month and donation-looking links. Reads only; it changes nothing.
+    Report {
+        /// Where to write the HTML page.
+        #[arg(long)]
+        out: PathBuf,
+        /// The directory holding pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -322,6 +332,9 @@ async fn main() -> anyhow::Result<ExitCode> {
         Command::Ingest {
             command: IngestCommand::Discover { source, config_dir },
         } => ingest::discover(&pool().await?, &config, &config_dir, source.as_deref()).await?,
+        Command::Ingest {
+            command: IngestCommand::Report { out, config_dir },
+        } => ingest::report(&pool().await?, &config_dir, &out).await?,
         Command::Worker(args) => {
             ingest::worker(
                 &pool().await?,

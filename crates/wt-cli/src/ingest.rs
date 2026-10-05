@@ -162,3 +162,24 @@ async fn run_worker(
         }
     }
 }
+
+/// Writes the review page to `out`. Reads only: it changes nothing in the database.
+pub async fn report(pool: &PgPool, config_dir: &Path, out: &Path) -> anyhow::Result<()> {
+    let cfg = ClassifyConfig::load(
+        &config_dir.join("pipeline.toml"),
+        &config_dir.join("series.toml"),
+    )?;
+    let mut conn = pool.acquire().await?;
+    let rows = wt_db::ingest::report_rows(&mut conn).await?;
+    let report = wt_ingest::report::build(&rows, &cfg.series, sqlx::types::chrono::Utc::now());
+    std::fs::write(out, wt_ingest::report::render_html(&report))
+        .with_context(|| format!("writing {}", out.display()))?;
+    tracing::info!(
+        out = %out.display(),
+        talks = report.totals.talks,
+        duplicate_clusters = report.duplicate_clusters.len(),
+        needs_review = report.needs_review.len(),
+        "ingest report written"
+    );
+    Ok(())
+}

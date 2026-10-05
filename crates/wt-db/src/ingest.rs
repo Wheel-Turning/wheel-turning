@@ -396,3 +396,81 @@ pub async fn set_classification(
     }
     Ok(true)
 }
+
+/// One talk as the ingest report shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportRow {
+    /// The talk.
+    pub talk: TalkId,
+    /// Platform of its source video.
+    pub platform: String,
+    /// The platform's id.
+    pub external_id: String,
+    /// Canonical page address.
+    pub url: String,
+    /// Title.
+    pub title: String,
+    /// The source video's description.
+    pub description: Option<String>,
+    /// Publish time.
+    pub published_at: Option<DateTime<Utc>>,
+    /// Length in seconds.
+    pub duration_s: Option<i32>,
+    /// Whether its source holds captions.
+    pub has_captions: bool,
+    /// State.
+    pub state: String,
+    /// Reason for the state.
+    pub state_reason: Option<String>,
+    /// Talk type.
+    pub talk_type: String,
+    /// Series, if any.
+    pub series: Option<String>,
+    /// Part, if any.
+    pub part: Option<i32>,
+    /// The kept talk, when this one is a duplicate.
+    pub duplicate_of: Option<TalkId>,
+    /// The text the speaker was inferred from, or the candidates.
+    pub speaker_guess: Option<String>,
+    /// The resolved teacher's display name.
+    pub teacher: Option<String>,
+}
+
+/// Every talk, for the ingest report. Read-only.
+pub async fn report_rows(conn: &mut PgConnection) -> Result<Vec<ReportRow>, IngestDbError> {
+    let rows = sqlx::query!(
+        r#"select t.id, sv.platform::text as "platform!", sv.external_id, sv.url, t.title,
+                  sv.description, sv.published_at, t.duration_s,
+                  coalesce((sv.raw->>'has_captions')::boolean, false) as "has_captions!",
+                  t.state::text as "state!", t.state_reason, t.talk_type::text as "talk_type!",
+                  t.series, t.part, t.duplicate_of, t.speaker_guess, te.display_name as "teacher?"
+           from talk t
+           join source_video sv on sv.id = t.source_video_id
+           left join teacher te on te.id = t.teacher_id
+           order by sv.published_at nulls last, sv.external_id"#
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ReportRow {
+            talk: TalkId::from(r.id),
+            platform: r.platform,
+            external_id: r.external_id,
+            url: r.url,
+            title: r.title,
+            description: r.description,
+            published_at: r.published_at,
+            duration_s: r.duration_s,
+            has_captions: r.has_captions,
+            state: r.state,
+            state_reason: r.state_reason,
+            talk_type: r.talk_type,
+            series: r.series,
+            part: r.part,
+            duplicate_of: r.duplicate_of.map(TalkId::from),
+            speaker_guess: r.speaker_guess,
+            teacher: r.teacher,
+        })
+        .collect())
+}

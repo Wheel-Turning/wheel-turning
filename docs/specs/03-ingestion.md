@@ -152,10 +152,10 @@ Acceptance criteria for M3:
 - [x] Vimeo discovery against recorded fixtures (served by `wiremock`) yields the expected `source_video` rows from the API and from the talks page with oEmbed, pages past one page of results, and obeys `robots.txt`. SSZ's canonical list is Vimeo (Seattle Soto Zen sources), so M3 discovers from Vimeo (decision of October 5, 2026).
 - [ ] Deferred until a YouTube source is configured: YouTube discovery against a recorded fixture of the Data API (served by `wiremock`) yields the expected `source_video` rows, parses durations correctly, and pages past 50 items.
 - [x] A synthetic corpus with planted duplicates, an 11-second clip, a title-variant duplicate and a differently dated near-duplicate produces the expected exclusions and no false merges.
-- [ ] Series extraction handles the five named series and records part numbers. The report lists missing parts.
+- [x] Series extraction handles the five named series and records part numbers. The report lists missing parts.
 - [x] Eight concurrent workers never claim the same job. Retry backoff, `dead` after max attempts, and the stale-lock reaper each have a test. (`wt-db/tests/job.rs`; the worker loop and `wt worker` come with the first handler.)
-- [ ] With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
-- [ ] `wt ingest report` renders every section listed above from the fixture corpus.
+- [ ] Deferred to M4 with the fetch methods (decision of October 5, 2026; tracked in Spec 04's acceptance criteria): With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
+- [x] `wt ingest report` renders every section listed above from the fixture corpus.
 
 ## Licensed sources
 
