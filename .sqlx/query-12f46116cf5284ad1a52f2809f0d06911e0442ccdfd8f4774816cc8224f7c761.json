@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select te.id, te.display_name from teacher_alias a\n                   join teacher te on te.id = a.teacher_id where lower(a.alias) = lower($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "12f46116cf5284ad1a52f2809f0d06911e0442ccdfd8f4774816cc8224f7c761"
+}

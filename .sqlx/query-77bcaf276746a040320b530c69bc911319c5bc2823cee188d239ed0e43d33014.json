@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select te.id, te.display_name from teacher te\n           where lower(te.display_name) = lower($1)\n              or exists (select 1 from teacher_alias a where a.teacher_id = te.id\n                                                         and lower(a.alias) = lower($1))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "77bcaf276746a040320b530c69bc911319c5bc2823cee188d239ed0e43d33014"
+}

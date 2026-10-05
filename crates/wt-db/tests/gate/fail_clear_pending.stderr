@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/gate/fail_clear_pending.rs:7:27
+  |
+7 |     TalkRepo::clear(conn, talk).await
+  |     ---------------       ^^^^ expected `Talk<Consented>`, found `Talk<Pending>`
+  |     |
+  |     arguments to this function are incorrect
+  |
+  = note: expected struct `Talk<Consented>`
+             found struct `Talk<wt_core::gate::Pending>`
+note: associated function defined here
+ --> src/talk.rs
+  |
+  |     pub async fn clear(conn: &mut PgConnection, talk: Talk<Consented>) -> Result<(), TalkError> {
+  |                  ^^^^^

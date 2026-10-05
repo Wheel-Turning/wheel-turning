@@ -130,7 +130,7 @@ create table import_run (                 -- audit of every importer run
 
 alter table citation add column text_unit_id uuid references text_unit(id) on delete set null;
 
-create view servable_text_unit with (security_barrier = true) as
+create view servable_text_unit as
 select u.id as text_unit_id, u.text, u.locator, u.label, u.ordinal, u.embedding, u.tsv,
        e.id as edition_id, e.edition_label, e.language,
        w.id as work_id, w.title as work_title, w.link_out_url as work_url,
@@ -296,7 +296,7 @@ create table proof_check (
   created_at timestamptz not null default now()
 );
 
-create or replace view servable_text_unit with (security_barrier = true) as
+create or replace view servable_text_unit as
 select u.id as text_unit_id, u.text, u.locator, u.label, u.ordinal, u.embedding, u.tsv,
        e.id as edition_id, e.edition_label, e.language,
        w.id as work_id, w.title as work_title, w.link_out_url as work_url,
@@ -560,7 +560,7 @@ create table takedown_request (
   action_taken text
 );
 
-create or replace view servable_text_unit with (security_barrier = true) as
+create or replace view servable_text_unit as
 select u.id as text_unit_id, u.text, u.locator, u.label, u.ordinal, u.embedding, u.tsv,
        e.id as edition_id, e.edition_label, e.language,
        w.id as work_id, w.title as work_title, w.link_out_url as work_url,

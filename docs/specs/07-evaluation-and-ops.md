@@ -68,7 +68,7 @@ The notebook is also the reference for the Rust retrieval build. After M5, a par
 
 | Check | Finding | Severity |
 | --- | --- | --- |
-| Consent drift | A passage whose talk is not `ready`, has no recorded rights basis, or has an unknown rights holder | Fail |
+| Consent drift | A passage whose talk is `excluded` or `withdrawn`, has no valid rights basis (consent not granted, license not allowed), or has an unknown rights holder. The talk's pipeline state does not count, so a quarantined or partly indexed talk keeps its passages without a finding; serving parity covers what is served | Fail |
 | Serving parity | The count of rows in `servable_passage` differs from passages of ready talks with a recorded rights basis | Fail |
 | Student speech | Any `qa_student` segment, or any transcript JSON span or word attributed to a non-teacher speaker | Fail |
 | Audio residue | A scratch directory older than `scratch_resume_ttl_h`, a scratch bucket object older than 24 hours, or an audio-typed object in any other bucket | Fail |

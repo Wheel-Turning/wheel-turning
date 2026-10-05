@@ -106,7 +106,7 @@ create table glossary_term (
 );
 ```
 
-A trigger on `speaker_consent` raises an exception on `update` and `delete`, so history cannot be rewritten. The seed script `scripts/seed_registry.sql` loads the teacher aliases named in the PRD: Steve Given as Jundo, Shindo and Daiho Shindo, Kanshin alone and with her surname, and Chris Burkhart also as Nomon.
+A trigger on `speaker_consent` raises an exception on `update` and `delete`, so history cannot be rewritten. The seed `config/registry.toml`, loaded with `wt registry import`, holds the teacher aliases named in the PRD: Steve Given as Jundo, Shindo and Daiho Shindo, Chris Middleman also as Daiho, Kanshin alone and as Kanshin Allison Tait, Kanho Chris Burkhart, and Nomon Tim Burnett. A bare Daiho is not an alias, because it names two teachers.
 
 ## Source, talk and transcript tables
 
@@ -155,10 +155,12 @@ create table talk (
   constraint past_gate_requires_consent check (
     state not in ('cleared','fetching','transcribing','diarizing','segmenting',
                   'correcting','extracting','resolving','indexing','ready')
-    or ((rights_basis = 'speaker_consent' and consent_status = 'granted'
-         or rights_basis = 'license' and license_evidence_id is not null)
-        and teacher_id is not null and sangha_id is not null
-        and rights_holder is not null and lower(rights_holder) <> 'unknown')
+    or coalesce(
+      (rights_basis = 'speaker_consent' and consent_status = 'granted'
+       or rights_basis = 'license' and license_evidence_id is not null)
+      and teacher_id is not null and sangha_id is not null
+      and rights_holder is not null and lower(rights_holder) <> 'unknown',
+      false)
   )
 );
 create index talk_state_idx on talk (state);
@@ -180,7 +182,7 @@ create table transcript (
 create unique index transcript_current_uq on transcript (talk_id) where is_current;
 ```
 
-The `past_gate_requires_consent` constraint is the database half of the consent gate. A talk cannot be moved into any state at or beyond `cleared` unless consent is granted, the speaker and sangha are known, and the rights holder is known. The Rust typestate in Spec 03 is the other half. This is the M0 baseline. Spec 03's Mandated talks section adds `mandate` to `rights_basis` (migration 0015) and rewrites this constraint and `servable_passage` (migration 0016), so a talk can also clear on the owner's mandate.
+The `past_gate_requires_consent` constraint is the database half of the consent gate. A talk cannot be moved into any state at or beyond `cleared` unless consent is granted, the speaker and sangha are known, and the rights holder is known. The Rust typestate in Spec 03 is the other half. The rule is wrapped in `coalesce(..., false)` because a CHECK accepts NULL, and without it a talk with no `rights_basis` passed. Migration `0011_gate_requires_rights_basis.sql` applied that fix to the M0 baseline, and every rewrite of this constraint keeps it. Spec 03's Mandated talks section adds `mandate` to `rights_basis` (migration 0015) and rewrites this constraint and `servable_passage` (migration 0016), so a talk can also clear on the owner's mandate.
 
 ## Segment, passage, citation and work tables
 
@@ -265,10 +267,10 @@ The `work` check enforces the PRD rule that only public-domain or openly license
 
 ## Serving views and database roles
 
-The serving views are the only objects the web role may read for passage content. A view runs with its owner's privileges, so `dg_web` needs no grant on the underlying tables.
+The serving views are the only objects the web role may read for passage content. A view runs with its owner's privileges, so `dg_web` needs no grant on the underlying tables. `servable_passage` is not a `security_barrier` view: a barrier view is planned as a subquery, which keeps `order by embedding <=> $1 limit k` off the HNSW index, and the web role runs only fixed queries from application code (decision of October 5, 2026; migration `0012_servable_passage_without_barrier.sql`).
 
 ```sql
-create view servable_passage with (security_barrier = true) as
+create view servable_passage as
 select p.id as passage_id, p.text, p.start_ms, p.end_ms, p.ordinal, p.segment_kind,
        p.embedding, p.tsv,
        t.id as talk_id, t.title as talk_title, t.talk_date, t.series, t.part,
@@ -304,7 +306,7 @@ Roles are created by migration as `NOLOGIN` group roles. An ops command, `wt db 
 | --- | --- | --- |
 | `dg_owner` | Migrations from CI and a developer machine | Owns all objects |
 | `dg_pipeline` | Batch host and CLI | Read and write on source, talk, transcript, segment, passage, citation, job, glossary, registry and log tables. Insert and read on `speaker_consent`. No access to `query_log` text. |
-| `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Update on `query_log.flagged` only. |
+| `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. |
 | `dg_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`. Nothing else. |
 
 ## Operational tables
@@ -485,6 +487,20 @@ revoke all on function flagged_queries() from public;
 grant execute on function flagged_queries() to dg_analyst;
 ```
 
+The web role flags a query through a second function, so it never needs select on `query_log` to name the row (migration `0013_flag_query.sql`, decision of October 5, 2026):
+
+```sql
+create function flag_query(query_id uuid) returns boolean
+  language sql security definer set search_path = public as
+  $$ with flagged as (
+       update query_log set flagged = true, flagged_at = coalesce(flagged_at, now())
+       where id = query_id
+       returning 1)
+     select exists (select 1 from flagged) $$;
+revoke all on function flag_query(uuid) from public;
+grant execute on function flag_query(uuid) to dg_web;
+```
+
 The `eval_rating.passage_id` column carries no foreign key on purpose. After a takedown the rating row survives as a record of what was rated, and the passage is gone.
 
 ## Migration order and acceptance
@@ -504,15 +520,15 @@ Seed data lives outside migrations in `scripts/seed_registry.sql` and `scripts/s
 
 Acceptance criteria, each as a database integration test that connects as the named role where relevant:
 
-- [ ] All migrations apply to an empty database, and the runner is idempotent.
-- [ ] Moving a talk to `cleared` with consent not granted, rights holder null or `unknown`, or teacher null fails.
-- [ ] Updating or deleting a `speaker_consent` row raises.
-- [ ] Inserting a segment of kind `qa_student` fails.
-- [ ] `servable_passage` returns no rows for a talk that is not `ready`, whose consent is not `granted`, or whose rights holder is `unknown`.
-- [ ] `dg_web` cannot select from `passage`, `talk`, `segment` or `query_log`, and can update only `query_log.flagged`.
-- [ ] `dg_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows.
-- [ ] A vector query on `servable_passage` uses the HNSW index in `EXPLAIN` on a table with 10,000 synthetic rows.
-- [ ] `.sqlx` offline query data is committed and `cargo sqlx prepare --check` passes.
+- [x] All migrations apply to an empty database, and the runner is idempotent.
+- [x] Moving a talk to `cleared` with consent not granted, rights holder null or `unknown`, or teacher null fails. (`wt-db/tests/schema.rs` also covers a null rights basis, fixed in `0011`.)
+- [x] Updating or deleting a `speaker_consent` row raises.
+- [x] Inserting a segment of kind `qa_student` fails.
+- [x] `servable_passage` returns no rows for a talk that is not `ready`, whose consent is not `granted`, or whose rights holder is `unknown`.
+- [x] `dg_web` cannot select from `passage`, `talk`, `segment` or `query_log`, cannot update `query_log` directly, and `flag_query()` flags exactly the row it names. (Tested as `wt_web`, its name since `0010`.)
+- [x] `dg_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows. (Tested as `wt_analyst`, its name since `0010`.)
+- [x] A vector query on `servable_passage` uses the HNSW index in `EXPLAIN` on a table with 10,000 synthetic rows.
+- [x] `.sqlx` offline query data is committed and `cargo sqlx prepare --check` passes.
 
 ## Donation links and verification
 

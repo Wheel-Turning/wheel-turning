@@ -6,7 +6,7 @@ Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It tak
 
 Every talk has one state in `talk.state`. The pipeline states are the eight stages between `cleared` and `ready` and are listed in Spec 02.
 
-Discovered moves to Awaiting consent after classification. Awaiting consent moves to Cleared when a rights basis is recorded (consent, a verified license or the owner's mandate) and the rights holder is known. Cleared moves through fetch, transcribe, diarize, segment, correct, extract, resolve and index to Ready. Needs review holds a talk whose speaker or media is unclear and returns it to Awaiting consent or sends it to Excluded. Excluded covers duplicates, non-talks, declines and held-out talks. Quarantined takes a talk out of serving when a check fails, until it is repaired and rechecked. Withdrawn follows a takedown, and a stub row blocks re-ingest.
+Discovered moves to Awaiting consent after classification. Awaiting consent moves to Cleared when a rights basis is recorded (consent, a verified license or the owner's mandate) and the rights holder is known. Cleared moves through fetch, transcribe, diarize, segment, correct, extract, resolve and index to Ready. Needs review holds a talk whose speaker or media is unclear and returns it to Awaiting consent or sends it to Excluded. Excluded covers duplicates and non-talks. Declined and held-out talks are taken down and end in Withdrawn. Quarantined takes a talk out of serving when a check fails, until it is repaired and rechecked. Withdrawn follows a takedown, and a stub row blocks re-ingest.
 
 Only the accented arrow lets a talk into the pipeline, and each pipeline job rechecks the gate before it runs. Quarantine holds a talk out of serving without deleting anything, and a talk returns to the pipeline after repair and a passing re-check. Takedown is the only route to `withdrawn`.
 
@@ -68,7 +68,7 @@ Discovery creates a `source_video` row and a `talk` row in state `discovered` fo
 3. Duplicate detection. Two talks are duplicates when their dates are within one day, their durations differ by no more than the larger of 30 seconds and 2 percent, and the `pg_trgm` similarity of their normalized titles is at least 0.6. Identical normalized titles with durations within two minutes also match. The kept record is the one with a captions track, otherwise the earliest published. The other gets `duplicate_of`, state `excluded` and reason `duplicate`.
 4. Series and part. `config/series.toml` lists each known series with a regular expression that has a named capture `part`. It starts with Genjokoan, Uji, Bendowa, Blue Cliff Record and Song of the Grass Hut. A match sets `series` and `part`.
 5. Talk type. Title patterns map to `class`, `retreat_talk` and `service`. An unmatched video of 900 seconds or longer becomes `dharma_talk`. Anything else becomes `other` and goes to `needs_review`.
-6. Speaker. Aho-Corasick over every alias in the registry runs against the title and then the description, on word boundaries, case-insensitive. Exactly one matching teacher sets `teacher_id`, `sangha_id` from the teacher, and `speaker_guess` to the matched alias. Zero or several matches set `needs_review` with reason `speaker_unresolved`.
+6. Speaker. Aho-Corasick over every alias in the registry runs against the title and then the description, on word boundaries, case-insensitive. Exactly one matching teacher sets `teacher_id`, `sangha_id` to the sangha where the talk was given, which receives its dana, and `speaker_guess` to the matched alias. A teacher's home sangha in the registry is only their own record: Kanho Chris Burkhart's home is Red Cedar, and his talks given at SSZ credit SSZ. Zero or several matches set `needs_review` with reason `speaker_unresolved`. A talk already held in `needs_review` for another reason, such as student voices or an unclear talk type, stays there until a person decides, even if a later run resolves its speaker.
 
 A talk that survives every rule moves to `awaiting_consent`. Every merge, exclusion and reclassification writes a row to `correction_log`.
 
@@ -99,8 +99,8 @@ Rules:
 1. Only `authorize` builds a `Talk<Consented>`, and its constructor is private to `wt-core`. Every function that fetches media, writes a transcript, segments, extracts, embeds or indexes takes a `&Talk<Consented>`.
 2. Every job handler loads its talk and calls `authorize` again at the start, so a consent change between stages stops the pipeline at the next job.
 3. State changes go through `TalkRepo::advance(&Talk<Consented>, next_state)`, which exists only for consented talks. The only way into `cleared` is `TalkRepo::clear(Talk<Consented>)`.
-4. `wt consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `declined`, talks move to `excluded` with reason `declined`. With `withdrawn`, the command stops and asks for explicit confirmation, then runs the takedown routine in Spec 07 for the teacher.
-5. `wt talk set-rights --talk <id> | --teacher <name> --holder <text>` sets the rights holder and logs the change. `--holder speaker` writes the teacher's display name. A talk may also be excluded by hand with `wt talk exclude --talk <id> --reason <text>`, which is how a speaker's limits are applied in v1.
+4. `wt consent set --teacher <name> --status <status> --evidence <ref>` appends a `speaker_consent` row and then applies the change to every talk of that teacher in one transaction. With `granted`, talks whose rights holder is known and whose state is `awaiting_consent` move to `cleared`, and the rest stay with reason `rights_unknown`. With `requested` or `unknown`, talks cleared on the teacher's consent return to `awaiting_consent`, and talks cleared by a verified license stay where they are, since a license does not rest on consent. With `declined` or `withdrawn`, the same transaction runs the teacher takedown in Spec 07, so the teacher's talks move to `withdrawn` and their text is deleted, not only excluded (decision of October 4, 2026; see Mandated talks, rule 5). A decline, a withdrawal, an opt-out and a takedown request all end in that takedown. If the takedown fails, the consent row is not recorded either.
+5. `wt talk set-rights --talk <id> | --teacher <name> --holder <text>` sets the rights holder and logs the change. `--holder speaker` writes the teacher's display name. A talk may also be excluded by hand with `wt talk exclude --talk <id> --reason <text>`, which is how a speaker's limits are applied in v1. It runs the single-talk takedown in Spec 07 in the same transaction, so the talk's text is deleted and the talk ends in `withdrawn` with the given reason (decision of October 4, 2026).
 6. A teacher with no consent row is treated as `unknown`. The default is never permission.
 
 ## Job queue
@@ -141,11 +141,11 @@ Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_s
 
 Acceptance criteria for M2:
 
-- [ ] `Talk<Pending>` cannot be passed to any fetch, transcript, index or advance function. A compile-fail test (`trybuild`) proves it.
-- [ ] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
-- [ ] Consent propagation: granting moves eligible talks to `cleared`, declining moves them to `excluded`, and withdrawing requires confirmation and triggers takedown.
-- [ ] `speaker_consent` history is append-only through the CLI and the database.
-- [ ] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
+- [x] `Talk<Pending>` cannot be passed to any fetch, transcript, index or advance function. A compile-fail test (`trybuild`) proves it. (`wt-db/tests/gate/` covers `clear` and `advance` and forging a `Talk<Consented>`; fetch, transcript and index add cases when M4 adds them.)
+- [x] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
+- [x] Consent propagation: granting moves eligible talks to `cleared`, and declining or withdrawing runs the teacher takedown in the same transaction.
+- [x] `speaker_consent` history is append-only through the CLI and the database.
+- [x] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
 
 Acceptance criteria for M3:
 
@@ -295,12 +295,13 @@ alter table talk drop constraint past_gate_requires_consent;
 alter table talk add constraint past_gate_requires_consent check (
   state not in ('cleared','fetching','transcribing','diarizing','segmenting',
                 'correcting','extracting','resolving','indexing','ready')
-  or (teacher_id is not null and sangha_id is not null
+  or coalesce(teacher_id is not null and sangha_id is not null
       and rights_holder is not null and lower(rights_holder) <> 'unknown'
       and ((rights_basis = 'speaker_consent' and consent_status = 'granted')
-        or (rights_basis in ('license','mandate') and license_evidence_id is not null))));
+        or (rights_basis in ('license','mandate') and license_evidence_id is not null)),
+      false));
 
-create or replace view servable_passage with (security_barrier = true) as
+create or replace view servable_passage as
 select p.id as passage_id, p.text, p.start_ms, p.end_ms, p.ordinal, p.segment_kind,
        p.embedding, p.tsv,
        t.id as talk_id, t.title as talk_title, t.talk_date, t.series, t.part,

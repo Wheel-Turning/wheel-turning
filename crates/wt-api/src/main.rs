@@ -3,12 +3,12 @@
 use anyhow::Context;
 use wt_api::{AppState, router};
 use wt_core::Config;
-use wt_core::telemetry::init_logging;
+use wt_core::telemetry::{LogOutput, init_logging};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::from_env().context("loading configuration")?;
-    init_logging(config.env, &config.log)?;
+    init_logging(config.env, &config.log, LogOutput::Stdout)?;
 
     let pool = wt_db::lazy_pool(&config.database_url)?;
     let app = router(AppState { pool });
