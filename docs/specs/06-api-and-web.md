@@ -279,6 +279,8 @@ Acceptance criteria for texts, rights and design:
 - [ ] `GET /text/{unit_id}` shows at most two neighbors on each side and returns `404` for a unit that is not in `servable_text_unit`.
 - [ ] Snapshot tests cover the credit line for permission, license and mandate, for talks and texts, and assert that permission and licensed are absent on a mandate.
 - [ ] "Report this excerpt" opens `/rights?excerpt=<id>` with the excerpt prefilled for both talk passages and text units, and the form stores a request.
+- [ ] `GET /rights` lists each source from `v_source_rights` with its plain-language status (used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request) and uses no permission language for a mandate. (Moved from Spec 08, decision of October 5, 2026.)
+- [ ] A rendered mandated talk passage reads "Talk by" the teacher and sangha with the source link and the report link, and the words permission and licensed are absent; after a grant, a passage or text unit reads "Used with permission of" the grantor. (Moved from Spec 03, Mandated talks, and Spec 08, Rights lifecycle, decision of October 5, 2026.)
 - [ ] At 360px there is no horizontal scroll and the Menu button shows a text label. The panel opens from the button, closes from the Close button, the backdrop and Esc, and returns focus to the button. From 900px the links show inline with no Menu button.
 - [ ] The "Skip to main content" link is the first tab stop, and a test asserts that the viewport tag contains neither `user-scalable=no` nor `maximum-scale`.
 - [ ] Header links, buttons and feedback buttons have targets of at least 44px.

@@ -11,22 +11,24 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use url::Url;
 
-use crate::http::{self, MIN_DELAY, parse_url};
+use crate::http::{self, Exclusions, MIN_DELAY, parse_url};
 use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
 
 /// Reads one podcast feed.
 pub struct RssAdapter {
     client: reqwest::Client,
     feed: Url,
+    exclusions: Exclusions,
     last_request: Mutex<Option<Instant>>,
 }
 
 impl RssAdapter {
-    /// An adapter for the feed at `feed_url`.
-    pub fn new(feed_url: &str) -> Result<Self, IngestError> {
+    /// An adapter for the feed at `feed_url`, which never requests what `exclusions` covers.
+    pub fn new(feed_url: &str, exclusions: Exclusions) -> Result<Self, IngestError> {
         Ok(Self {
             client: http::client()?,
             feed: parse_url(feed_url)?,
+            exclusions,
             last_request: Mutex::new(None),
         })
     }
@@ -45,10 +47,11 @@ impl RssAdapter {
 
     /// Fetches and parses the feed.
     pub async fn episodes(&self) -> Result<Vec<DiscoveredVideo>, IngestError> {
+        let target = self.exclusions.clear(&self.feed)?;
         self.throttle().await;
-        http::check_robots(&self.client, &self.feed).await?;
+        http::check_robots(&self.client, &target).await?;
         self.throttle().await;
-        let body = http::text(&self.feed, http::get_ok(&self.client, &self.feed).await?).await?;
+        let body = http::text(&self.feed, http::get_ok(&self.client, &target).await?).await?;
         parse_feed(&self.feed, &body)
     }
 }

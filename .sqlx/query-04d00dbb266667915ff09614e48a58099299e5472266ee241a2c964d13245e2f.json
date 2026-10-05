@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"talks!\",\n                  coalesce(array_agg(distinct s.name) filter (where s.name is not null), '{}')\n                    as \"sanghas!\"\n           from talk t left join sangha s on s.id = t.sangha_id\n           where t.teacher_id = $1 and t.state not in ('excluded', 'withdrawn')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "talks!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "sanghas!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "04d00dbb266667915ff09614e48a58099299e5472266ee241a2c964d13245e2f"
+}

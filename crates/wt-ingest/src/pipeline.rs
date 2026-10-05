@@ -34,6 +34,9 @@ pub enum PipelineError {
     /// A classify job has no talk or no source in its payload.
     #[error("classify job {0} has no talk or no source")]
     BadJob(String),
+    /// The rights ledger refused.
+    #[error(transparent)]
+    Rights(#[from] wt_db::rights::RightsError),
     /// The database refused.
     #[error(transparent)]
     Db(#[from] sqlx::Error),
@@ -163,6 +166,9 @@ pub async fn discover(
         // one (Spec 03, Seattle Soto Zen sources).
         return Ok(DiscoveryReport::default());
     }
+    if let Some(key) = source.rights_source.as_deref() {
+        wt_db::rights::check_talk_source(conn, key).await?;
+    }
     let videos = adapter.discover(since).await?;
     let mut report = DiscoveryReport {
         listed: videos.len(),
@@ -186,6 +192,7 @@ pub async fn discover(
                 has_captions: v.has_captions,
                 item: &v.raw,
                 input_hash: &hash,
+                rights_source: source.rights_source.as_deref(),
             },
         )
         .await?;
@@ -194,6 +201,14 @@ pub async fn discover(
             Recorded::Changed { .. } => report.changed += 1,
             Recorded::Unchanged { .. } => report.unchanged += 1,
             Recorded::Withdrawn { .. } => report.withdrawn += 1,
+        }
+    }
+    // A talk already waiting at the gate clears once its source's mandate applies, without
+    // waiting for its next classification.
+    if let Some(key) = source.rights_source.as_deref() {
+        let cleared = wt_db::rights::clear_waiting(&mut tx, key, "wt ingest discover").await?;
+        if !cleared.is_empty() {
+            tracing::info!(source = %source.name, cleared = cleared.len(), "cleared on the source's mandate");
         }
     }
     tx.commit().await?;

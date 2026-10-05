@@ -23,6 +23,9 @@ pub enum ConsentError {
     /// A talk move failed.
     #[error(transparent)]
     Talk(#[from] TalkError),
+    /// The ledger could not record the answer.
+    #[error(transparent)]
+    Rights(#[from] crate::rights::RightsError),
     /// The database refused.
     #[error(transparent)]
     Db(#[from] DbError),
@@ -45,6 +48,8 @@ pub struct Propagation {
     pub returned_to_awaiting: Vec<TalkId>,
     /// Talks left waiting, with the gate's reason (for example a rights holder still unknown).
     pub still_waiting: Vec<(TalkId, String)>,
+    /// Exclusions a decline or withdrawal added: the person and each transcript's hash.
+    pub exclusions: Vec<sqlx::types::Uuid>,
 }
 
 /// A row of `dg consent list`.
@@ -86,11 +91,17 @@ pub async fn set_consent(
     )
     .execute(&mut *tx)
     .await?;
+    let hashes = match status {
+        ConsentStatus::Declined | ConsentStatus::Withdrawn => {
+            crate::rights::hashes_before_takedown(&mut tx, teacher_id.as_uuid()).await?
+        }
+        _ => Vec::new(),
+    };
     let propagation = match status {
         ConsentStatus::Declined | ConsentStatus::Withdrawn => {
             let report = takedown::run_in(
                 &mut tx,
-                &Scope::Teacher(display_name),
+                &Scope::Teacher(display_name.clone()),
                 actor,
                 Some(status),
                 "takedown",
@@ -102,6 +113,20 @@ pub async fn set_consent(
             }
         }
         _ => propagate(&mut tx, teacher_id, status, actor).await?,
+    };
+    let exclusions = crate::rights::record_consent_answer(
+        &mut tx,
+        teacher_id.as_uuid(),
+        &display_name,
+        status,
+        evidence_ref,
+        &hashes,
+        actor,
+    )
+    .await?;
+    let propagation = Propagation {
+        exclusions,
+        ..propagation
     };
     tx.commit().await?;
     Ok(propagation)
@@ -118,9 +143,11 @@ async fn propagate(
 
     match status {
         ConsentStatus::Granted => {
+            // A talk used on the owner's mandate is now used with the speaker's permission.
             sqlx::query!(
                 r#"update talk set consent_status = 'granted',
-                          rights_basis = coalesce(rights_basis, 'speaker_consent')
+                          rights_basis = case when rights_basis = 'license' then rights_basis
+                                              else 'speaker_consent' end
                    where teacher_id = $1 and state <> 'withdrawn'"#,
                 teacher_id.as_uuid()
             )
@@ -156,7 +183,7 @@ async fn propagate(
                          where teacher_id = $1
                            and state in ('cleared','fetching','transcribing','diarizing','segmenting',
                                          'correcting','extracting','resolving','indexing','ready')
-                           and rights_basis is distinct from 'license'
+                           and coalesce(rights_basis::text, '') not in ('license', 'mandate')
                          for update) old
                    where t.id = old.id
                    returning t.id, old.old_state as "old_state!""#,
@@ -228,6 +255,9 @@ pub fn gate_reason(gate: &GateError) -> &'static str {
         GateError::RightsUnknown => "rights_unknown",
         GateError::LicenseUnverified => "license_unverified",
         GateError::LicenseNotAllowed => "license_not_allowed",
+        GateError::MandateOff => "mandate_off",
+        GateError::TeacherOptedOut => "opted_out",
+        GateError::Excluded => "excluded_person",
     }
 }
 

@@ -100,6 +100,11 @@ pub struct SourceConfig {
     /// A podcast feed's address, set by `wt source resolve-feed` once a person confirms it.
     #[serde(default)]
     pub feed_url: Option<String>,
+    /// The talks source in the rights ledger (`wt source add --kind talks`) whose mandate the
+    /// source's talks clear on when their speaker has not answered. None means no mandate
+    /// (Spec 03, Mandated talks; decision of October 5, 2026).
+    #[serde(default)]
+    pub rights_source: Option<String>,
 }
 
 impl SourceConfig {
@@ -227,6 +232,42 @@ impl Default for IngestSettings {
             feed_match_title_similarity: 0.5,
             feed_exact_title_days: 60,
         }
+    }
+}
+
+/// `[rights]` in `config/pipeline.toml` (Spec 08, Rights lifecycle).
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct RightsSettings {
+    /// How `wt source add` uses a new source when `--basis` is not given: `mandate` by
+    /// default, or `license` or `permission` with evidence in hand.
+    pub default_basis_for_new_sources: wt_db::rights::Basis,
+}
+
+impl Default for RightsSettings {
+    fn default() -> Self {
+        Self {
+            default_basis_for_new_sources: wt_db::rights::Basis::Mandate,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RightsFile {
+    #[serde(default)]
+    rights: RightsSettings,
+}
+
+impl RightsSettings {
+    /// Reads `[rights]` from `config/pipeline.toml`. A file without the section gets the
+    /// defaults.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Self::parse(&read(pipeline)?, &pipeline.display().to_string())
+    }
+
+    /// Parses `[rights]` from the text of `config/pipeline.toml`.
+    pub fn parse(text: &str, origin: &str) -> Result<Self, ConfigError> {
+        Ok(parse::<RightsFile>(text, origin)?.rights)
     }
 }
 

@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, scope, pattern, reason, source_key from source_exclusion\n         where lifted_at is null order by created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "pattern"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "source_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a5382d00891331e79d2bfbe510221d3716a8da64ed636d79fa5576c8770c98a8"
+}

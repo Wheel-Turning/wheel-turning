@@ -261,6 +261,16 @@ How a talk is cleared under the mandate:
 4. In the gate, `authorize` gains `RightsBasis::Mandate(&MandateEvidence)`. `GateError` gains `MandateOff`, `TeacherOptedOut` and `Excluded`.
 5. A teacher's answer changes the basis. `wt consent set --status granted` moves that teacher's talks to `speaker_consent` and the page begins to say they are used with permission. `declined` or `withdrawn` runs the teacher takedown and creates exclusions, replacing the earlier behavior of only excluding talks.
 
+Decisions of October 5, 2026, made while building this section:
+
+- A configured source's talks belong to a talks source through `rights_source = "<key>"` in its `sources.toml` entry. Discovery sets `talk.source_key` from it and refuses a key that is not a talks source in the ledger. A source without `rights_source` has no mandate, so its talks still need consent or a license.
+- The switch gates clearing as well as serving. While `talks_basis` is `consent`, a talk that would clear on a mandate waits in `awaiting_consent` with reason `mandate_off`, and `set-talks-basis mandate` clears the waiting talks that then pass the gate. Discovery also retries a source's waiting talks, so adding `rights_source` takes effect on the next run.
+- The speaker's answer outranks the mandate. Granted consent clears on `speaker_consent`. Declined or withdrawn consent is never overridden, and since it also adds a person exclusion, the gate reports `Excluded`. Only a speaker with no answer, or a request still open, clears on a mandate.
+- `set-talks-basis` writes a `rights_event` with neither a source nor a teacher, using the event values `talks_basis_mandate` and `talks_basis_consent`. The `rights_event_target` check allows exactly those two to name no one.
+- `wt teacher opt-out` without `--suspend-only` needs `--yes`, like every other takedown. It writes no consent row: an opt-out is the teacher leaving, recorded in the ledger as `suspended`, then `takedown_completed` and `exclusion_added`. A person exclusion is matched on the teacher's display name, ignoring case.
+- `wt rights request`, `sent` and `no-response` take `--teacher` as well as `--source`, and `wt rights notice-draft --teacher <name> --to <address> --out <file>` records the notice as a drafted request. A grant or decline from a teacher is recorded with `wt consent set`, which now also marks the teacher's latest notice and writes the ledger event.
+- A rights holder is still required under a mandate, as above. Classification does not fill it in.
+
 Teacher controls and notice:
 
 - `wt teacher opt-out --teacher <name> --reason "<text>" --by "<name>"` sets `opted_out_at`, which removes that teacher's passages from the serving view immediately, then runs the takedown and adds permanent exclusions for the person and the content hashes of the removed transcripts. `--suspend-only` stops after the first step, for the period while a request is verified.
@@ -338,14 +348,14 @@ Audit additions: a servable passage whose teacher has `opted_out_at` set, or tha
 
 Acceptance criteria for mandated talks:
 
-- [ ] With `talks_basis = 'consent'`, a mandated, ready talk returns nothing from `servable_passage`. After `set-talks-basis mandate` it serves, and each switch writes a `rights_event`.
-- [ ] A talk from a mandated talk source with a resolved, non-opted-out teacher reaches `cleared` without a consent row, and an unresolved speaker lands in `needs_review`.
-- [ ] The constraint rejects a mandated talk with no evidence, and the typestate cannot build a `Talk<Consented>` for an opted-out teacher or an excluded one.
-- [ ] `wt teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks.
-- [ ] `--suspend-only` removes the teacher from serving and deletes nothing.
-- [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown.
-- [ ] A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
-- [ ] `wt rights notice-draft` produces a file from the template and sends nothing.
+- [x] With `talks_basis = 'consent'`, a mandated, ready talk returns nothing from `servable_passage`. After `set-talks-basis mandate` it serves, and each switch writes a `rights_event`. (`wt-db/tests/mandate.rs`.)
+- [x] A talk from a mandated talk source with a resolved, non-opted-out teacher reaches `cleared` without a consent row, and an unresolved speaker lands in `needs_review`. (`wt-ingest/tests/classify.rs`, through discovery and classification.)
+- [x] The constraint rejects a mandated talk with no evidence, and the typestate cannot build a `Talk<Consented>` for an opted-out teacher or an excluded one. (`authorize` takes the speaker's `Standing`; `wt-core` unit tests and `wt-db/tests/mandate.rs`.)
+- [x] `wt teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks. (Stored transcript objects in S3 are deleted with the transcript pipeline in M4, as for every takedown.)
+- [x] `--suspend-only` removes the teacher from serving and deletes nothing.
+- [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown. (The switch, the serving view's `rights_basis` and the takedown are tested in `wt-db/tests/mandate.rs`; the page wording is tested with the pages in Spec 06.)
+- [ ] Moved to Spec 06 with the answer page (decision of October 5, 2026), except the last sentence, which stays here: A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
+- [x] `wt rights notice-draft` produces a file from the template and sends nothing. (`wt-cli/tests/commands.rs`.)
 
 ## Seattle Soto Zen sources
 

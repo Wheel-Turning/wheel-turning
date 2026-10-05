@@ -397,6 +397,7 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
                 has_captions: false,
                 item: &item,
                 input_hash: "h",
+                rights_source: None,
             },
         )
         .await
@@ -507,6 +508,8 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    // The command reads the active exclusions before its one request.
+    let fx = start().await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/robots.txt"))
@@ -550,8 +553,7 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
         args.extend_from_slice(extra);
         Command::new(env!("CARGO_BIN_EXE_wt"))
             .args(&args)
-            // The command never connects; the loader only needs a well-formed address.
-            .env("DATABASE_URL", "postgres://wt:wt@127.0.0.1:1/wt")
+            .env("DATABASE_URL", fx.db.url().expose())
             .env("WT_LOG", "warn")
             .env_remove("WT_ENV")
             .env_remove("WT_DB_HOST")
@@ -588,5 +590,347 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
         None,
         "only the named source changes"
     );
+
+    // An excluded host is never asked.
+    let before = server.received_requests().await.unwrap().len();
+    sqlx::query(
+        "insert into source_exclusion (scope, pattern, reason, created_by)
+         values ('host', '127.0.0.1', 'fixture exclusion', 'test')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let refused = run(&[]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("fixture exclusion"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
+    let fx = start().await;
+    let dir = std::env::temp_dir().join(format!("wt-rights-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let records = dir.join("records");
+    let records = records.to_str().unwrap();
+    let draft = dir.join("draft.txt");
+    std::fs::write(&draft, "May we excerpt your texts with attribution?").unwrap();
+    let reply = dir.join("reply.txt");
+    std::fs::write(&reply, "Please do not use them.").unwrap();
+    let config = config_dir();
+    let cfg = config.to_str().unwrap();
+
+    let added = fx.json(&[
+        "source",
+        "mandate",
+        "--config-dir",
+        cfg,
+        "--key",
+        "fixturepress",
+        "--publisher",
+        "Fixture Press",
+        "--prefix",
+        "https://press.example/texts/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "free to download",
+        "--display-notice",
+        "From {title}, {publisher}.",
+        "--records-dir",
+        records,
+    ]);
+    assert_eq!(added["basis"], "mandate");
+    let refused = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        cfg,
+        "--key",
+        "nonotice",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://p.example/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "r",
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("--display-notice"),
+        "{}",
+        stderr(&refused)
+    );
+
+    let requested = fx.json(&[
+        "rights",
+        "request",
+        "--source",
+        "fixturepress",
+        "--to",
+        "rights@press.example",
+        "--channel",
+        "email",
+        "--draft-file",
+        draft.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+    ]);
+    let key = requested["draft"].as_str().unwrap();
+    let stored = std::path::Path::new(records).join(key.trim_start_matches("records/"));
+    assert_eq!(
+        std::fs::read_to_string(stored).unwrap(),
+        "May we excerpt your texts with attribution?"
+    );
+    let sent = fx.json(&[
+        "rights",
+        "sent",
+        "--source",
+        "fixturepress",
+        "--on",
+        "2026-10-06",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert_eq!(sent["follow_up_on"], "2026-10-20");
+    let due = fx.json(&["rights", "due", "--today", "2026-10-20"]);
+    assert_eq!(due[0]["why"], "follow_up_due");
+
+    let unconfirmed = fx.wt(&[
+        "rights",
+        "decline",
+        "--source",
+        "fixturepress",
+        "--statement-file",
+        reply.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+    ]);
+    assert!(!unconfirmed.status.success());
+    assert!(stderr(&unconfirmed).contains("--yes"));
+    let declined = fx.json(&[
+        "rights",
+        "decline",
+        "--source",
+        "fixturepress",
+        "--statement-file",
+        reply.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+        "--yes",
+    ]);
+    assert_eq!(declined["exclusions"].as_array().unwrap().len(), 1);
+
+    let again = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        cfg,
+        "--key",
+        "again",
+        "--publisher",
+        "Fixture Press",
+        "--prefix",
+        "https://press.example/texts/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "r",
+        "--display-notice",
+        "n",
+        "--records-dir",
+        records,
+    ]);
+    assert!(!again.status.success());
+    assert!(
+        stderr(&again).contains("refused by exclusion"),
+        "{}",
+        stderr(&again)
+    );
+
+    let ledger = fx.json(&["rights", "ledger", "--source", "fixturepress"]);
+    let events: Vec<_> = ledger
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "mandated",
+            "request_drafted",
+            "request_sent",
+            "permission_declined",
+            "disabled",
+            "exclusion_added"
+        ]
+    );
+    let listed = fx.json(&["exclusion", "list"]);
+    assert_eq!(listed[0]["pattern"], "https://press.example/texts/");
+
+    // With license or permission as the default, a new source needs its evidence.
+    std::fs::write(
+        config.join("pipeline.toml"),
+        "[rights]
+default_basis_for_new_sources = \"permission\"
+",
+    )
+    .unwrap();
+    let no_evidence = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        cfg,
+        "--key",
+        "granted",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://granted.example/",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert!(!no_evidence.status.success());
+    assert!(
+        stderr(&no_evidence).contains("--evidence"),
+        "{}",
+        stderr(&no_evidence)
+    );
+    let missing = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        dir.join("nowhere").to_str().unwrap(),
+        "--key",
+        "k",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://k.example/",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert!(
+        stderr(&missing).contains("pass --basis or --config-dir"),
+        "{}",
+        stderr(&missing)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&config);
+}
+
+#[tokio::test]
+async fn notice_draft_fills_the_template_records_it_and_sends_nothing() {
+    let fx = start().await;
+    fx.import_registry();
+    fx.talk(Some("Ada Fixture")).await;
+    fx.talk(Some("Ada Fixture")).await;
+    let dir = std::env::temp_dir().join(format!("wt-notice-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("notice-ada.md");
+    let template =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../templates/teacher_notice.md");
+    let records = dir.join("records");
+
+    let drafted = fx.json(&[
+        "rights",
+        "notice-draft",
+        "--teacher",
+        "Ada",
+        "--to",
+        "ada@example.invalid",
+        "--out",
+        out.to_str().unwrap(),
+        "--template",
+        template.to_str().unwrap(),
+        "--from-name",
+        "Owner Fixture",
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records.to_str().unwrap(),
+    ]);
+    assert_eq!(drafted["sent"], false);
+    assert_eq!(drafted["talks"], 2);
+    let text = std::fs::read_to_string(&out).unwrap();
+    assert!(text.starts_with("Subject: Your talks are in a search tool"));
+    assert!(text.contains("Dear Ada Fixture,"));
+    assert!(text.contains("2 of your talks from Fixture Mountain Zendo"));
+    assert!(text.contains("With respect,\nOwner Fixture"));
+    assert!(
+        text.contains("[How to reach you]"),
+        "an unfilled placeholder stays for the sender"
+    );
+
+    let due = fx.json(&["rights", "due"]);
+    assert_eq!(due[0]["teacher"], "Ada Fixture");
+    assert_eq!(due[0]["why"], "unsent", "drafted, not sent");
+    let sent = fx.json(&[
+        "rights",
+        "sent",
+        "--teacher",
+        "Ada",
+        "--on",
+        "2026-10-06",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert_eq!(sent["follow_up_on"], "2026-10-20");
+
+    // The switch and the opt-out, through the binary.
+    let on = fx.json(&[
+        "rights",
+        "set-talks-basis",
+        "mandate",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert_eq!(on["talks_basis"], "mandate");
+    let refused = fx.wt(&[
+        "teacher",
+        "opt-out",
+        "--teacher",
+        "Ada",
+        "--reason",
+        "asked",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert!(!refused.status.success());
+    assert!(stderr(&refused).contains("--suspend-only"));
+    let suspended = fx.json(&[
+        "teacher",
+        "opt-out",
+        "--teacher",
+        "Ada",
+        "--reason",
+        "asked",
+        "--by",
+        "Owner Fixture",
+        "--suspend-only",
+    ]);
+    assert_eq!(suspended["takedown"], serde_json::Value::Null);
+    let ledger = fx.json(&["rights", "ledger", "--teacher", "Ada"]);
+    let events: Vec<_> = ledger
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(events, ["request_drafted", "request_sent", "suspended"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

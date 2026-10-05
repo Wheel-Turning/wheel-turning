@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{ACTOR, ADA, consent, make_ready, talk};
+use common::{ACTOR, ADA, BO, consent, make_ready, talk};
 use sqlx::PgPool;
 use wt_core::Env;
 use wt_core::gate::ConsentStatus;
@@ -75,6 +75,11 @@ async fn a_clean_database_passes_every_check_in_prod() {
             "consent_staleness",
             "quarantine_age",
             "series_metadata",
+            "mandate_unrequested",
+            "request_follow_up",
+            "opted_out_served",
+            "mandate_served_while_off",
+            "teacher_unnotified",
         ]
     );
     let pending: Vec<&str> = report.not_yet_checked.iter().map(|(n, _)| *n).collect();
@@ -393,5 +398,84 @@ async fn a_hand_exclusion_leaves_nothing_for_the_audit_to_find() {
     wt_db::consent::exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
         .await
         .unwrap();
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
+}
+
+#[tokio::test]
+async fn a_mandate_without_a_request_and_an_overdue_follow_up_warn() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    // The ledger is append-only, so the old events are written with their dates.
+    sqlx::raw_sql(
+        "insert into source_policy (key, publisher, url_prefixes, basis)
+           values ('silent', 'Silent Press', '{https://silent.example/}', 'mandate'),
+                  ('recent', 'Recent Press', '{https://recent.example/}', 'mandate'),
+                  ('asked', 'Asked Press', '{https://asked.example/}', 'mandate');
+         insert into rights_event (source_key, event, actor, created_at)
+           values ('silent', 'mandated', 'test', now() - interval '15 days'),
+                  ('recent', 'mandated', 'test', now() - interval '3 days'),
+                  ('asked', 'mandated', 'test', now() - interval '40 days');
+         insert into permission_request (source_key, recipient, channel, status, sent_on, follow_up_on)
+           values ('asked', 'hello@asked.example', 'email', 'sent',
+                   current_date - 20, current_date - 6);",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+
+    only(&report, &["mandate_unrequested", "request_follow_up"]);
+    let unrequested = report
+        .checks
+        .iter()
+        .find(|c| c.name == "mandate_unrequested")
+        .unwrap();
+    assert_eq!(
+        unrequested.examples,
+        ["silent"],
+        "a recent mandate has time to ask"
+    );
+    assert_eq!(findings(&report, "request_follow_up"), 1);
+    assert!(!report.failed());
+}
+
+#[tokio::test]
+async fn a_teacher_used_on_a_mandate_without_a_notice_warns_after_fourteen_days() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    let old = talk(&fx.pool, Some(BO), Some(BO)).await;
+    // A mandated talk recorded 20 days ago, with no notice to its teacher.
+    sqlx::raw_sql(
+        "insert into license_evidence (publisher, license_code, evidence_snapshot_ref,
+           snapshot_sha256, captured_at, reviewed_by, reviewed_at, allowed, kind)
+         values ('Fixture Mountain Zendo', 'operator-mandate', 'records/x', 'x', now(),
+                 'owner', now(), true, 'mandate');",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update talk set rights_basis = 'mandate', created_at = now() - interval '20 days',
+           license_evidence_id = (select id from license_evidence where kind = 'mandate')
+         where id = $1",
+    )
+    .bind(old.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["teacher_unnotified"]);
+    assert!(!report.failed());
+
+    sqlx::query(
+        "insert into permission_request (teacher_id, recipient, channel)
+         select id, 'bo@example.invalid', 'email' from teacher where display_name = $1",
+    )
+    .bind(BO)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
 }

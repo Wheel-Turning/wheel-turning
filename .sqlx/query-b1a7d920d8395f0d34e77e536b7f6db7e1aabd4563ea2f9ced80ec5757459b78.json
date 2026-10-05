@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update rights_setting set value = $1, updated_by = $2\n         where key = 'talks_basis' and value <> $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b1a7d920d8395f0d34e77e536b7f6db7e1aabd4563ea2f9ced80ec5757459b78"
+}

@@ -15,6 +15,7 @@ pub mod feed;
 pub mod ingest;
 pub mod job;
 pub mod registry;
+pub mod rights;
 pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]

@@ -32,4 +32,5 @@ url = "2"
 [dev-dependencies]
 wt-db = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
+trybuild.workspace = true
 wiremock = "0.6"

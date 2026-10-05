@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.created_at, e.source_key, te.display_name as \"teacher?\", e.event, e.actor,\n                  e.detail, e.evidence_ref\n           from rights_event e left join teacher te on te.id = e.teacher_id\n           where ($1::text is null and $2::uuid is null)\n              or e.source_key = $1 or e.teacher_id = $2\n           order by e.created_at, e.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "source_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "teacher?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "event",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "event"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "actor",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "actor"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "detail",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "detail"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "evidence_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_event",
+            "name": "evidence_ref"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e3beff0910ec70322630385f409d4f8ad7b7df0553c63af12855c13c2b27ba6f"
+}

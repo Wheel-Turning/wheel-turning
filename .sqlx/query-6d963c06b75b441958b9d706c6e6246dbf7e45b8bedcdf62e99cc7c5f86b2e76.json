@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into rights_event (source_key, teacher_id, event, actor, detail, evidence_ref,\n                                   created_at)\n         values ($1, $2, $3, $4, $5, $6, clock_timestamp())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d963c06b75b441958b9d706c6e6246dbf7e45b8bedcdf62e99cc7c5f86b2e76"
+}

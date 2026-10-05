@@ -15,6 +15,7 @@ workspace = true
 test-support = ["dep:testcontainers"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 wt-core.workspace = true
 wt-registry.workspace = true
 serde.workspace = true

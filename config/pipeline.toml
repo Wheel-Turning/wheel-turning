@@ -41,3 +41,9 @@ type_patterns = [
   { pattern = '\bservice\b|\bceremony\b', talk_type = "service" },
   { pattern = '\bdharma talk\b', talk_type = "dharma_talk" },
 ]
+
+[rights]
+# How `wt source add` uses a new source when --basis is not given (Spec 08, Rights lifecycle):
+# "mandate", the owner's recorded decision to rely on it, or "license" or "permission" when that
+# evidence is in hand, which the command then needs as --evidence.
+default_basis_for_new_sources = "mandate"

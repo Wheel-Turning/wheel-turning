@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/fetch/fail_raw_url_get.rs:6:31
+  |
+6 |     let _ = http::get(client, url).await;
+  |             ---------         ^^^ expected `&FetchTarget`, found `&Url`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&FetchTarget`
+             found reference `&Url`
+note: function defined here
+ --> src/http.rs
+  |
+  | pub async fn get(
+  |              ^^^

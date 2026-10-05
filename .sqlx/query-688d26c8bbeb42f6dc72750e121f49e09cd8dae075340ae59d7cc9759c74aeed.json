@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into talk (source_video_id, title, talk_date, duration_s, source_key)\n                 values ($1, $2, ($3::timestamptz at time zone 'UTC')::date, $4, $5)\n                 returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "688d26c8bbeb42f6dc72750e121f49e09cd8dae075340ae59d7cc9759c74aeed"
+}

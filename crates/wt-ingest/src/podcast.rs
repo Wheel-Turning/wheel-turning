@@ -34,15 +34,20 @@ pub struct FoundFeed {
 
 /// Looks up the feed for Apple Podcasts id `apple_id` at `lookup` (normally [`APPLE_LOOKUP`]),
 /// after checking `robots.txt`.
-pub async fn resolve_feed(lookup: &str, apple_id: u64) -> Result<FoundFeed, IngestError> {
+pub async fn resolve_feed(
+    lookup: &str,
+    apple_id: u64,
+    exclusions: &http::Exclusions,
+) -> Result<FoundFeed, IngestError> {
     let client = http::client()?;
     let mut url: Url = parse_url(lookup)?;
     url.query_pairs_mut()
         .append_pair("id", &apple_id.to_string())
         .append_pair("entity", "podcast");
-    http::check_robots(&client, &url).await?;
+    let target = exclusions.clear(&url)?;
+    http::check_robots(&client, &target).await?;
     tokio::time::sleep(http::MIN_DELAY).await;
-    let response = http::get_ok(&client, &url).await?;
+    let response = http::get_ok(&client, &target).await?;
     let found: Lookup = response.json().await.map_err(|e| IngestError::Parse {
         url: url.to_string(),
         message: e.without_url().to_string(),

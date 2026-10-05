@@ -1,0 +1,12 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/fetch/fail_forge_target.rs:6:5
+  |
+6 |     FetchTarget(url)
+  |     ^^^^^^^^^^^
+  |
+  = note: a struct named `FetchTarget` exists in another namespace
+note: constructor is not visible here due to private fields
+ --> src/http.rs
+  |
+  | pub struct FetchTarget(Url);
+  |                        ^^^ private field

@@ -83,6 +83,16 @@ pub enum IngestError {
         /// The HTTP status.
         status: u16,
     },
+    /// An active exclusion covers the address, so it was not requested (Spec 08).
+    #[error("{url} is excluded by exclusion {exclusion} ({reason}), so it was not requested")]
+    Excluded {
+        /// The address.
+        url: String,
+        /// The exclusion's id.
+        exclusion: String,
+        /// Why it exists.
+        reason: String,
+    },
     /// `robots.txt` disallows the path, so it was not requested.
     #[error("robots.txt disallows {0}, so it was not requested")]
     RobotsDisallowed(String),
