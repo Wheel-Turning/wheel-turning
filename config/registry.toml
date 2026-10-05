@@ -1,0 +1,87 @@
+# The teacher, alias and sangha registry. Load it with:
+#   wt registry import --file config/registry.toml --by "<your name>"
+# Rerunning is safe: it updates fields and adds new aliases, and never removes one.
+#
+# Aliases are matched as whole words in talk titles, then descriptions, ignoring case. A title
+# that names two teachers, or none, goes to needs_review. So an alias must name one person:
+# bare "Daiho" belongs to both Steve Given and Chris Middleman, and bare "Jundo" and "Shindo"
+# are too common, so only the full forms are listed. The display name is always an alias too.
+#
+# A teacher's sangha here is their home sangha. A talk credits the sangha where it was given,
+# which receives its dana. Donation links start unverified (Spec 02, Donation links). No email
+# address belongs in this file.
+
+[[sangha]]
+name = "Seattle Soto Zen"
+donation_url = "https://seattlesotozen.org/make-a-donation/"
+
+[[sangha]]
+name = "Red Cedar Zen Community"
+donation_url = "https://www.redcedarzen.org/donations"
+
+[[sangha]]
+name = "Mountain Rain Zen Community"
+donation_url = "https://www.mountainrainzen.org/donate"
+
+[[sangha]]
+name = "Everyday Zen Foundation"
+donation_url = "https://everydayzen.org/donate/"
+
+[[sangha]]
+name = "Prairie Mountain Zen Center"
+# No donation link recorded yet.
+
+[[teacher]]
+display_name = "Kanshin Allison Tait"
+sangha = "Seattle Soto Zen"
+aliases = ["Kanshin", "Allison Tait"]
+
+[[teacher]]
+display_name = "Steve Given"
+sangha = "Seattle Soto Zen"
+# Novice priest name Jundo; now Daiho Shindo.
+aliases = ["Daiho Shindo", "Daiho Shindo Steve Given", "Shindo Steve Given", "Jundo Steve Given"]
+
+[[teacher]]
+display_name = "Chris Middleman"
+sangha = "Seattle Soto Zen"
+aliases = ["Daiho Chris Middleman"]
+
+[[teacher]]
+display_name = "Ed Cadman"
+sangha = "Seattle Soto Zen"
+aliases = ["Genzen Ed Cadman"]
+
+[[teacher]]
+display_name = "Mike Gillespie"
+sangha = "Seattle Soto Zen"
+
+[[teacher]]
+display_name = "Jeff Kelley"
+sangha = "Seattle Soto Zen"
+aliases = ["Eko Jeff Kelley"]
+
+[[teacher]]
+display_name = "Chris Burkhart"
+sangha = "Red Cedar Zen Community"
+aliases = ["Kanho Chris Burkhart"]
+
+[[teacher]]
+display_name = "Tim Burnett"
+sangha = "Red Cedar Zen Community"
+aliases = ["Nomon", "Nomon Tim Burnett"]
+
+[[teacher]]
+display_name = "Ewan Magie"
+sangha = "Prairie Mountain Zen Center"
+aliases = ["Chikyo Ryunin Ewan Magie"]
+
+[[teacher]]
+display_name = "Kate McCandless"
+sangha = "Mountain Rain Zen Community"
+aliases = ["Myoshin Kate McCandless"]
+
+[[teacher]]
+display_name = "Norman Fischer"
+sangha = "Everyday Zen Foundation"
+aliases = ["Zoketsu Norman Fischer"]

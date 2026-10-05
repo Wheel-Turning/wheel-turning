@@ -106,7 +106,7 @@ create table glossary_term (
 );
 ```
 
-A trigger on `speaker_consent` raises an exception on `update` and `delete`, so history cannot be rewritten. The seed script `scripts/seed_registry.sql` loads the teacher aliases named in the PRD: Steve Given as Jundo, Shindo and Daiho Shindo, Kanshin alone and with her surname, and Chris Burkhart also as Nomon.
+A trigger on `speaker_consent` raises an exception on `update` and `delete`, so history cannot be rewritten. The seed `config/registry.toml`, loaded with `wt registry import`, holds the teacher aliases named in the PRD: Steve Given as Jundo, Shindo and Daiho Shindo, Chris Middleman also as Daiho, Kanshin alone and as Kanshin Allison Tait, Kanho Chris Burkhart, and Nomon Tim Burnett. A bare Daiho is not an alias, because it names two teachers.
 
 ## Source, talk and transcript tables
 

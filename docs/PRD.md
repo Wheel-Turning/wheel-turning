@@ -135,7 +135,7 @@ The pipeline turns a source into rights-cleared, segmented, glossary-corrected t
 
 **Registries and fields**
 
-- Teacher registry with aliases. Steve Given appears as Jundo, Shindo and Daiho Shindo variants, Kanshin appears alone and with her surname, and Chris Burkhart now also carries the name Nomon. Named-teacher detection depends on this registry. A separate person registry holds the authors and translators of texts.
+- Teacher registry with aliases. Steve Given appears as Jundo (his novice priest name), Shindo and Daiho Shindo variants, and Chris Middleman is also Daiho, so a bare Daiho names no one. Kanshin appears alone and as Kanshin Allison Tait. Nomon is Tim Burnett and Kanho is Chris Burkhart, two people at Red Cedar. The seed is `config/registry.toml`. Named-teacher detection depends on this registry. A separate person registry holds the authors and translators of texts.
 - Sangha registry with lineage tag, affiliation, verified flag and a donation destination per sangha. A teacher may add a second destination. The default is the destination the source video points to.
 - Talk record fields: talk type, series, part, source URL, duration, rights basis, rights holder (unknown blocks indexing), source, and last-verified date.
 - Source policy and rights ledger. Each source records its basis, whether it is enabled and how noticed documents are handled, with an append-only history of requests, grants, suspensions and takedowns.
@@ -176,7 +176,7 @@ Notices go out in this order. Talks are used meanwhile if the mandate setting is
 | --- | --- | --- |
 | 1 | Kanshin | About three in four SSZ talks are hers, and she is the natural faithfulness reviewer. Her view on notice-first or consent-first comes first, and her yes carries the practice council and board. |
 | 2 | Ed Cadman, Chris Middleman, then Steve Given, Mike Gillespie, Ewan Magie, Kate McCandless | Personal contacts with several talks each, enough to build the multi-teacher test set. |
-| 3 | Chris Burkhart (Nomon) | Three SSZ talks. Dharma-transmitted at Red Cedar and a likely first v2b partner. |
+| 3 | Kanho Chris Burkhart | Three SSZ talks. Dharma-transmitted at Red Cedar and a likely first v2b partner. |
 | Later | Norman Fischer | One SSZ talk. Approached after Kanshin agrees and a working demo exists, with her view deciding who makes the introduction. The Everyday Zen Foundation site reserves all rights, so its talks are added as a source only by an explicit owner decision recorded in the ledger. |
 | With the rest | Guest speakers with one or two talks | Included on the mandate unless they opt out, and each receives a notice in turn. |
 
@@ -264,7 +264,7 @@ One more risk sits outside the table. A person in crisis may use the tool as if 
 These gate parts of the plan and are unresolved today.
 
 - [ ] Kanshin's view on notice-first versus consent-first, and on how Norman Fischer should be approached. Gates how SSZ talks are used and the Fischer introduction.
-- [ ] Notices, with an invitation to give explicit permission, to Ed Cadman, Chris Middleman, Steve Given, Mike Gillespie, Ewan Magie, Kate McCandless and Chris Burkhart (Nomon).
+- [ ] Notices, with an invitation to give explicit permission, to Ed Cadman, Chris Middleman, Steve Given, Mike Gillespie, Ewan Magie, Kate McCandless and Kanho Chris Burkhart.
 - [ ] Permission requests, recorded in the ledger, to BDK America (a draft is ready), San Francisco Zen Center (which Creative Commons variant applies, and whether guest speakers are covered), Berkeley Zen Center, Zen Community of Oregon, Shasta Abbey, Treeleaf and the Everyday Zen family.
 - [ ] Who holds rights in Everyday Zen's recorded talks. The site footer reserves all rights, the podcast feed carries a foundation copyright, and at least one talk page names Norman Fischer personally. Ask the foundation and Fischer.
 - [ ] Rights status of Norman Fischer's written work. Most of it is likely with publishers, so expect link-outs and short excerpts at most.

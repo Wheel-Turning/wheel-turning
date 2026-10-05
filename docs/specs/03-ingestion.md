@@ -145,7 +145,7 @@ Acceptance criteria for M2:
 - [x] `authorize` returns the correct `GateError` for each of: no speaker, no consent row, declined, withdrawn, rights unknown, rights `Unknown` in mixed case.
 - [x] Consent propagation: granting moves eligible talks to `cleared`, and declining or withdrawing runs the teacher takedown in the same transaction.
 - [x] `speaker_consent` history is append-only through the CLI and the database.
-- [ ] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
+- [x] The alias seed loads the PRD's variants, and ambiguous or missing speakers land in `needs_review`.
 
 Acceptance criteria for M3:
 

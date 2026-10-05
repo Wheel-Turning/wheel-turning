@@ -255,9 +255,9 @@ mod tests {
         aliases = ["Shindo Steve Given", "Daiho Shindo", "Jundo Steve Given"]
 
         [[teacher]]
-        display_name = "Chris Burkhart"
+        display_name = "Tim Burnett"
         sangha = "Red Cedar"
-        aliases = ["Nomon", "Nomon Chris Burkhart"]
+        aliases = ["Nomon", "Nomon Tim Burnett"]
     "#;
 
     fn matcher() -> AliasMatcher<String> {
@@ -286,7 +286,7 @@ mod tests {
             ("Daiho Shindo: Genjokoan 3", "Steve Given"),
             ("Jundo Steve Given - Uji", "Steve Given"),
             ("Shindo Steve Given on zazen", "Steve Given"),
-            ("Nomon: Song of the Grass Hut", "Chris Burkhart"),
+            ("Nomon: Song of the Grass Hut", "Tim Burnett"),
         ] {
             assert_eq!(
                 resolved(m.resolve(title, None)).as_deref(),
