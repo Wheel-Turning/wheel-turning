@@ -49,11 +49,11 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_ENV` | `dev` | One of `dev`, `staging`, `prod`. In `prod` the loader refuses debug flags. |
 | `DATABASE_URL` | none, required | Postgres connection string for the application role |
 | `DATABASE_URL_ANALYST` | none | Connection for the analyst role, used only by `wt report` |
-| `WT_DB_HOST` | none | Database host. When DATABASE\_URL is unset and this is set, the loader builds the URL from the DG\_DB\_\* keys, so the password never sits in a stored connection string. |
-| `WT_DB_PORT` | `5432` | Database port, used with DG\_DB\_HOST |
-| `WT_DB_NAME` | `wt` | Database name, used with DG\_DB\_HOST |
-| `WT_DB_USER` | none, required with DG\_DB\_HOST | Database login |
-| `WT_DB_PASSWORD` | none, required with DG\_DB\_HOST | Database password, secret, injected from Secrets Manager |
+| `WT_DB_HOST` | none | Database host. When DATABASE\_URL is unset and this is set, the loader builds the URL from the WT\_DB\_\* keys, so the password never sits in a stored connection string. |
+| `WT_DB_PORT` | `5432` | Database port, used with WT\_DB\_HOST |
+| `WT_DB_NAME` | `wt` | Database name, used with WT\_DB\_HOST |
+| `WT_DB_USER` | none, required with WT\_DB\_HOST | Database login |
+| `WT_DB_PASSWORD` | none, required with WT\_DB\_HOST | Database password, secret, injected from Secrets Manager |
 | `WT_BIND` | `127.0.0.1:8080` | Web listen address |
 | `WT_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
 | `WT_SCRATCH_DIR` | `./data/scratch` | The only place audio or video may exist |
