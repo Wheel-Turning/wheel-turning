@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into source_policy (key, publisher, url_prefixes, basis, license_evidence_id)\n         values ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "84d573c9ed4c9d47a31b619379858108a972f60f69848e2340201325daec6c17"
+}

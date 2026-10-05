@@ -507,6 +507,8 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    // The command reads the active exclusions before its one request.
+    let fx = start().await;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/robots.txt"))
@@ -550,8 +552,7 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
         args.extend_from_slice(extra);
         Command::new(env!("CARGO_BIN_EXE_wt"))
             .args(&args)
-            // The command never connects; the loader only needs a well-formed address.
-            .env("DATABASE_URL", "postgres://wt:wt@127.0.0.1:1/wt")
+            .env("DATABASE_URL", fx.db.url().expose())
             .env("WT_LOG", "warn")
             .env_remove("WT_ENV")
             .env_remove("WT_DB_HOST")
@@ -588,5 +589,188 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
         None,
         "only the named source changes"
     );
+
+    // An excluded host is never asked.
+    let before = server.received_requests().await.unwrap().len();
+    sqlx::query(
+        "insert into source_exclusion (scope, pattern, reason, created_by)
+         values ('host', '127.0.0.1', 'fixture exclusion', 'test')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let refused = run(&[]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("fixture exclusion"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
+    let fx = start().await;
+    let dir = std::env::temp_dir().join(format!("wt-rights-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let records = dir.join("records");
+    let records = records.to_str().unwrap();
+    let draft = dir.join("draft.txt");
+    std::fs::write(&draft, "May we excerpt your texts with attribution?").unwrap();
+    let reply = dir.join("reply.txt");
+    std::fs::write(&reply, "Please do not use them.").unwrap();
+
+    let added = fx.json(&[
+        "source",
+        "mandate",
+        "--key",
+        "fixturepress",
+        "--publisher",
+        "Fixture Press",
+        "--prefix",
+        "https://press.example/texts/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "free to download",
+        "--display-notice",
+        "From {title}, {publisher}.",
+        "--records-dir",
+        records,
+    ]);
+    assert_eq!(added["basis"], "mandate");
+    let refused = fx.wt(&[
+        "source",
+        "add",
+        "--key",
+        "nonotice",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://p.example/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "r",
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("--display-notice"),
+        "{}",
+        stderr(&refused)
+    );
+
+    let requested = fx.json(&[
+        "rights",
+        "request",
+        "--source",
+        "fixturepress",
+        "--to",
+        "rights@press.example",
+        "--channel",
+        "email",
+        "--draft-file",
+        draft.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+    ]);
+    let key = requested["draft"].as_str().unwrap();
+    let stored = std::path::Path::new(records).join(key.trim_start_matches("records/"));
+    assert_eq!(
+        std::fs::read_to_string(stored).unwrap(),
+        "May we excerpt your texts with attribution?"
+    );
+    let sent = fx.json(&[
+        "rights",
+        "sent",
+        "--source",
+        "fixturepress",
+        "--on",
+        "2026-10-06",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert_eq!(sent["follow_up_on"], "2026-10-20");
+    let due = fx.json(&["rights", "due", "--today", "2026-10-20"]);
+    assert_eq!(due[0]["why"], "follow_up_due");
+
+    let unconfirmed = fx.wt(&[
+        "rights",
+        "decline",
+        "--source",
+        "fixturepress",
+        "--statement-file",
+        reply.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+    ]);
+    assert!(!unconfirmed.status.success());
+    assert!(stderr(&unconfirmed).contains("--yes"));
+    let declined = fx.json(&[
+        "rights",
+        "decline",
+        "--source",
+        "fixturepress",
+        "--statement-file",
+        reply.to_str().unwrap(),
+        "--by",
+        "Owner Fixture",
+        "--records-dir",
+        records,
+        "--yes",
+    ]);
+    assert_eq!(declined["exclusions"].as_array().unwrap().len(), 1);
+
+    let again = fx.wt(&[
+        "source",
+        "add",
+        "--key",
+        "again",
+        "--publisher",
+        "Fixture Press",
+        "--prefix",
+        "https://press.example/texts/",
+        "--by",
+        "Owner Fixture",
+        "--rationale",
+        "r",
+        "--display-notice",
+        "n",
+        "--records-dir",
+        records,
+    ]);
+    assert!(!again.status.success());
+    assert!(
+        stderr(&again).contains("refused by exclusion"),
+        "{}",
+        stderr(&again)
+    );
+
+    let ledger = fx.json(&["rights", "ledger", "--source", "fixturepress"]);
+    let events: Vec<_> = ledger
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        events,
+        [
+            "mandated",
+            "request_drafted",
+            "request_sent",
+            "permission_declined",
+            "disabled",
+            "exclusion_added"
+        ]
+    );
+    let listed = fx.json(&["exclusion", "list"]);
+    assert_eq!(listed[0]["pattern"], "https://press.example/texts/");
+    let _ = std::fs::remove_dir_all(&dir);
 }

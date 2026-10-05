@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select source_key, recipient, status, sent_on, follow_up_on from permission_request\n         where status = 'draft' or (status = 'sent' and follow_up_on <= $1)\n         order by coalesce(follow_up_on, created_at::date), source_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_request",
+            "name": "source_key"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "recipient",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_request",
+            "name": "recipient"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "permission_request",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sent_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "permission_request",
+            "name": "sent_on"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "follow_up_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "permission_request",
+            "name": "follow_up_on"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "fe7fe84872cef08db21b0771625d7fcb6578917add81bcb8dc77f544fda3c5d9"
+}

@@ -75,6 +75,8 @@ async fn a_clean_database_passes_every_check_in_prod() {
             "consent_staleness",
             "quarantine_age",
             "series_metadata",
+            "mandate_unrequested",
+            "request_follow_up",
         ]
     );
     let pending: Vec<&str> = report.not_yet_checked.iter().map(|(n, _)| *n).collect();
@@ -394,4 +396,43 @@ async fn a_hand_exclusion_leaves_nothing_for_the_audit_to_find() {
         .await
         .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
+}
+
+#[tokio::test]
+async fn a_mandate_without_a_request_and_an_overdue_follow_up_warn() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    // The ledger is append-only, so the old events are written with their dates.
+    sqlx::raw_sql(
+        "insert into source_policy (key, publisher, url_prefixes, basis)
+           values ('silent', 'Silent Press', '{https://silent.example/}', 'mandate'),
+                  ('recent', 'Recent Press', '{https://recent.example/}', 'mandate'),
+                  ('asked', 'Asked Press', '{https://asked.example/}', 'mandate');
+         insert into rights_event (source_key, event, actor, created_at)
+           values ('silent', 'mandated', 'test', now() - interval '15 days'),
+                  ('recent', 'mandated', 'test', now() - interval '3 days'),
+                  ('asked', 'mandated', 'test', now() - interval '40 days');
+         insert into permission_request (source_key, recipient, channel, status, sent_on, follow_up_on)
+           values ('asked', 'hello@asked.example', 'email', 'sent',
+                   current_date - 20, current_date - 6);",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+
+    only(&report, &["mandate_unrequested", "request_follow_up"]);
+    let unrequested = report
+        .checks
+        .iter()
+        .find(|c| c.name == "mandate_unrequested")
+        .unwrap();
+    assert_eq!(
+        unrequested.examples,
+        ["silent"],
+        "a recent mandate has time to ask"
+    );
+    assert_eq!(findings(&report, "request_follow_up"), 1);
+    assert!(!report.failed());
 }

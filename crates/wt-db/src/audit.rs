@@ -66,6 +66,8 @@ pub struct AuditSettings {
     pub job_lock_timeout_s: i32,
     /// Days a talk may stay quarantined, default 7.
     pub quarantine_days: i32,
+    /// Days a mandated source may go without a permission request, default 14 (Spec 08).
+    pub mandate_request_days: i32,
 }
 
 impl AuditSettings {
@@ -77,6 +79,7 @@ impl AuditSettings {
             consent_review_days: 90,
             job_lock_timeout_s: 7200,
             quarantine_days: 7,
+            mandate_request_days: 14,
         }
     }
 }
@@ -265,6 +268,36 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
                 "select id::text || ' ' || title from talk
                  where state = 'ready' and series is null and title ~* '{SERIES_PATTERN}'"
             ),
+        )
+        .await?,
+    );
+
+    // Spec 08, Rights lifecycle: every mandate is followed by a request for permission, and
+    // every request that went out is followed up.
+    checks.push(
+        check(
+            pool,
+            "mandate_unrequested",
+            Severity::Warn,
+            &format!(
+                "select sp.key from source_policy sp
+                 where sp.basis = 'mandate'
+                   and not exists (select 1 from permission_request pr where pr.source_key = sp.key)
+                   and (select min(e.created_at) from rights_event e
+                        where e.source_key = sp.key and e.event = 'mandated')
+                       < now() - interval '{} days'",
+                settings.mandate_request_days
+            ),
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "request_follow_up",
+            Severity::Warn,
+            "select source_key || ' to ' || recipient || ', follow up due ' || follow_up_on::text
+             from permission_request where status = 'sent' and follow_up_on < current_date",
         )
         .await?,
     );

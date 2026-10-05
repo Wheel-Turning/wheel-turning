@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/fetch/fail_raw_url_robots.rs:6:40
+  |
+6 |     let _ = http::check_robots(client, url).await;
+  |             ------------------         ^^^ expected `&FetchTarget`, found `&Url`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&FetchTarget`
+             found reference `&Url`
+note: function defined here
+ --> src/http.rs
+  |
+  | pub async fn check_robots(
+  |              ^^^^^^^^^^^^

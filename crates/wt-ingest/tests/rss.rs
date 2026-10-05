@@ -7,6 +7,7 @@ use std::time::Instant;
 use serde_json::json;
 use wiremock::matchers::{header_regex, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+use wt_ingest::http::Exclusions;
 use wt_ingest::podcast::resolve_feed;
 use wt_ingest::rss::RssAdapter;
 use wt_ingest::{IngestError, SourceAdapter};
@@ -64,7 +65,8 @@ async fn the_feed_reads_episodes_identifies_itself_and_waits_between_requests() 
         .mount(&server)
         .await;
 
-    let adapter = RssAdapter::new(&format!("{}/feed.xml", server.uri())).unwrap();
+    let adapter =
+        RssAdapter::new(&format!("{}/feed.xml", server.uri()), Exclusions::default()).unwrap();
     let started = Instant::now();
     let episodes = adapter.discover(None).await.unwrap();
     assert!(
@@ -107,7 +109,8 @@ async fn a_feed_path_robots_txt_disallows_is_never_requested() {
         .expect(0)
         .mount(&server)
         .await;
-    let adapter = RssAdapter::new(&format!("{}/feed.xml", server.uri())).unwrap();
+    let adapter =
+        RssAdapter::new(&format!("{}/feed.xml", server.uri()), Exclusions::default()).unwrap();
     assert!(matches!(
         adapter.discover(None).await.unwrap_err(),
         IngestError::RobotsDisallowed(_)
@@ -148,11 +151,15 @@ async fn the_apple_lookup_gives_the_feed_address() {
         .await;
 
     let lookup = format!("{}/lookup", server.uri());
-    let found = resolve_feed(&lookup, 1_000_000_001).await.unwrap();
+    let found = resolve_feed(&lookup, 1_000_000_001, &Exclusions::default())
+        .await
+        .unwrap();
     assert_eq!(found.feed_url, "https://example.invalid/feed.xml");
     assert_eq!(found.name.as_deref(), Some("Fixture Zendo Dharma Talks"));
     assert!(
-        resolve_feed(&lookup, 1_000_000_002).await.is_err(),
+        resolve_feed(&lookup, 1_000_000_002, &Exclusions::default())
+            .await
+            .is_err(),
         "no such podcast"
     );
 }

@@ -12,6 +12,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 
 mod commands;
 mod ingest;
+mod rights;
 mod source;
 
 #[derive(Debug, Parser)]
@@ -19,6 +20,9 @@ mod source;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// Where statements, drafts and mandate decisions are stored, by SHA-256.
+    #[arg(long, global = true, default_value = "data/records")]
+    records_dir: PathBuf,
 }
 
 #[derive(Debug, Subcommand)]
@@ -56,15 +60,189 @@ enum Command {
     },
     /// Run queued jobs (Spec 03, Job queue).
     Worker(WorkerArgs),
-    /// Source settings (Spec 03, Seattle Soto Zen sources).
+    /// Sources and their settings (Spec 03, Seattle Soto Zen sources; Spec 08, Mandated
+    /// sources).
     Source {
         #[command(subcommand)]
         command: SourceCommand,
+    },
+    /// The rights ledger: permission requests and their answers (Spec 08, Rights lifecycle).
+    Rights {
+        #[command(subcommand)]
+        command: RightsCommand,
+    },
+    /// Permanent exclusions (Spec 08, Rights lifecycle).
+    Exclusion {
+        #[command(subcommand)]
+        command: ExclusionCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RightsCommand {
+    /// Record a drafted permission request. Nothing is sent: a person sends it by hand.
+    Request {
+        /// The source key.
+        #[arg(long)]
+        source: String,
+        /// The address or contact page it goes to.
+        #[arg(long)]
+        to: String,
+        /// email, form or other.
+        #[arg(long, value_parser = ["email", "form", "other"])]
+        channel: String,
+        /// The drafted request, stored as a record.
+        #[arg(long)]
+        draft_file: PathBuf,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Record that the latest drafted request went out, and schedule its follow-up 14 days
+    /// later.
+    Sent {
+        /// The source key.
+        #[arg(long)]
+        source: String,
+        /// The day it went out, YYYY-MM-DD.
+        #[arg(long)]
+        on: chrono::NaiveDate,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Record a grant: stores the reply as permission evidence for the source's prefixes and
+    /// switches its basis to permission.
+    Grant {
+        /// The source key.
+        #[arg(long)]
+        source: String,
+        /// The reply, for example an email pasted into a text file.
+        #[arg(long)]
+        statement_file: PathBuf,
+        /// Who gave it.
+        #[arg(long)]
+        from: String,
+        /// The day it was given, YYYY-MM-DD.
+        #[arg(long)]
+        given_on: chrono::NaiveDate,
+        /// What it covers, in the grantor's words.
+        #[arg(long)]
+        scope: String,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Record a refusal: switches the source off and excludes its prefixes permanently. Needs
+    /// --yes.
+    Decline {
+        /// The source key.
+        #[arg(long)]
+        source: String,
+        /// The reply, stored as a record.
+        #[arg(long)]
+        statement_file: PathBuf,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Confirm.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Record that the latest sent request went unanswered. The source stays on its mandate.
+    NoResponse {
+        /// The source key.
+        #[arg(long)]
+        source: String,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Print the ledger in order, for every source or one.
+    Ledger {
+        /// Only this source.
+        #[arg(long)]
+        source: Option<String>,
+    },
+    /// List requests not yet sent and requests past their follow-up date.
+    Due {
+        /// The day to check against, YYYY-MM-DD. Defaults to today (UTC).
+        #[arg(long)]
+        today: Option<chrono::NaiveDate>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ExclusionCommand {
+    /// Every active exclusion.
+    List,
+    /// Lift an exclusion. Needs the rights holder's own written grant, which is stored and
+    /// cited.
+    Lift {
+        /// The exclusion id.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// Who is lifting it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// The rights holder's written grant.
+        #[arg(long)]
+        evidence: PathBuf,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum SourceCommand {
+    /// Add a source of texts or talks. By default it is used on the owner's mandate, recorded
+    /// with a rationale and the attribution line shown on excerpts; --basis license or
+    /// permission uses approved evidence instead. Refused if an exclusion covers a prefix.
+    #[command(visible_alias = "mandate")]
+    Add {
+        /// Short key, such as bdkamerica.
+        #[arg(long)]
+        key: String,
+        /// The publisher or rights holder.
+        #[arg(long)]
+        publisher: String,
+        /// A URL prefix the source covers. Repeat for several.
+        #[arg(long = "prefix", required = true)]
+        prefixes: Vec<String>,
+        /// mandate, license or permission.
+        #[arg(long, default_value = "mandate", value_parser = parse_basis)]
+        basis: wt_db::rights::Basis,
+        /// The approved license or permission evidence, for those bases.
+        #[arg(long)]
+        evidence: Option<sqlx::types::Uuid>,
+        /// Who decided.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Why the owner relies on the source. Required for a mandate.
+        #[arg(long)]
+        rationale: Option<String>,
+        /// The attribution line on excerpts; may use {title}, {translator}, {publisher} and
+        /// {url}. Required for a mandate.
+        #[arg(long)]
+        display_notice: Option<String>,
+    },
+    /// Switch a source off. Every serving view drops it at once.
+    Disable {
+        /// The source key.
+        key: String,
+        /// Why.
+        #[arg(long)]
+        reason: String,
+        /// Who is doing it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Switch a source back on.
+    Enable {
+        /// The source key.
+        key: String,
+        /// Who is doing it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
     /// Look up a podcast's feed address from its Apple Podcasts id and print it. Saves it as
     /// feed_url on the source in sources.toml only with --yes, after you have checked it.
     ResolveFeed {
@@ -290,6 +468,11 @@ struct TakedownArgs {
     yes: bool,
 }
 
+fn parse_basis(value: &str) -> Result<wt_db::rights::Basis, String> {
+    wt_db::rights::Basis::parse(value)
+        .ok_or_else(|| format!("{value:?} is not one of mandate, license, permission"))
+}
+
 fn parse_status(value: &str) -> Result<ConsentStatus, String> {
     ConsentStatus::parse(value).ok_or_else(|| {
         format!("{value:?} is not one of granted, requested, declined, withdrawn, unknown")
@@ -302,6 +485,7 @@ async fn main() -> anyhow::Result<ExitCode> {
     let config = Config::from_env().context("loading configuration")?;
     // Reports go to stdout, so logs must not.
     init_logging(config.env, &config.log, LogOutput::Stderr)?;
+    let records = wt_core::records::LocalRecords::new(&cli.records_dir);
     let pool = || async {
         wt_db::connect(&config.database_url)
             .await
@@ -433,7 +617,120 @@ async fn main() -> anyhow::Result<ExitCode> {
                     config_dir,
                     lookup_url,
                 },
-        } => source::resolve_feed(&config_dir, &source, apple_id, &lookup_url, yes).await?,
+        } => {
+            source::resolve_feed(
+                &pool().await?,
+                &config_dir,
+                &source,
+                apple_id,
+                &lookup_url,
+                yes,
+            )
+            .await?
+        }
+        Command::Source {
+            command:
+                SourceCommand::Add {
+                    key,
+                    publisher,
+                    prefixes,
+                    basis,
+                    evidence,
+                    by,
+                    rationale,
+                    display_notice,
+                },
+        } => {
+            rights::add(
+                &pool().await?,
+                &records,
+                rights::AddArgs {
+                    key: &key,
+                    publisher: &publisher,
+                    prefixes: &prefixes,
+                    basis,
+                    evidence,
+                    by: &by,
+                    rationale: rationale.as_deref(),
+                    display_notice: display_notice.as_deref(),
+                },
+            )
+            .await?;
+        }
+        Command::Source {
+            command: SourceCommand::Disable { key, reason, by },
+        } => rights::set_enabled(&pool().await?, &key, false, Some(&reason), &by).await?,
+        Command::Source {
+            command: SourceCommand::Enable { key, by },
+        } => rights::set_enabled(&pool().await?, &key, true, None, &by).await?,
+        Command::Rights { command } => match command {
+            RightsCommand::Request {
+                source,
+                to,
+                channel,
+                draft_file,
+                by,
+            } => {
+                rights::request(
+                    &pool().await?,
+                    &records,
+                    &source,
+                    &to,
+                    &channel,
+                    &draft_file,
+                    &by,
+                )
+                .await?;
+            }
+            RightsCommand::Sent { source, on, by } => {
+                rights::sent(&pool().await?, &source, on, &by).await?;
+            }
+            RightsCommand::Grant {
+                source,
+                statement_file,
+                from,
+                given_on,
+                scope,
+                by,
+            } => {
+                rights::grant(
+                    &pool().await?,
+                    &records,
+                    &source,
+                    &statement_file,
+                    &from,
+                    given_on,
+                    &scope,
+                    &by,
+                )
+                .await?;
+            }
+            RightsCommand::Decline {
+                source,
+                statement_file,
+                by,
+                yes,
+            } => {
+                rights::decline(&pool().await?, &records, &source, &statement_file, &by, yes)
+                    .await?;
+            }
+            RightsCommand::NoResponse { source, by } => {
+                rights::no_response(&pool().await?, &source, &by).await?;
+            }
+            RightsCommand::Ledger { source } => {
+                rights::ledger(&pool().await?, source.as_deref()).await?;
+            }
+            RightsCommand::Due { today } => {
+                let today = today.unwrap_or_else(|| chrono::Utc::now().date_naive());
+                rights::due(&pool().await?, today).await?;
+            }
+        },
+        Command::Exclusion { command } => match command {
+            ExclusionCommand::List => rights::exclusions(&pool().await?).await?,
+            ExclusionCommand::Lift { id, by, evidence } => {
+                rights::lift(&pool().await?, &records, id, &by, &evidence).await?;
+            }
+        },
         Command::Worker(args) => {
             ingest::worker(
                 &pool().await?,

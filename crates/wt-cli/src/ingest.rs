@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use wt_core::Config;
 use wt_db::job::{self, Failure, JobKind};
 use wt_ingest::config::{ClassifyConfig, SourcesFile};
+use wt_ingest::http::Exclusions;
 use wt_ingest::pipeline;
 use wt_ingest::rss::RssAdapter;
 use wt_ingest::vimeo::{VimeoAdapter, VimeoEndpoints};
@@ -19,6 +20,14 @@ use crate::commands::print_json;
 const IDLE: Duration = Duration::from_secs(5);
 /// How often a worker runs the stale-lock reaper.
 const REAP_EVERY: Duration = Duration::from_secs(60);
+
+/// The active exclusions, which every request is checked against (Spec 08).
+pub async fn load_exclusions(pool: &PgPool) -> anyhow::Result<Exclusions> {
+    let mut conn = pool.acquire().await?;
+    Exclusions::load(&mut conn)
+        .await
+        .context("loading the active exclusions")
+}
 
 /// Lists each configured source (or the named one) and records new and changed videos, each
 /// queued for classification. Prints the counts per source as JSON.
@@ -33,6 +42,7 @@ pub async fn discover(
         sources.get(name)?;
     }
     let mut reports = serde_json::Map::new();
+    let exclusions = load_exclusions(pool).await?;
     // Audio-only feeds attach to talks other sources list, so they run after those sources.
     let mut chosen: Vec<_> = sources
         .sources
@@ -47,6 +57,7 @@ pub async fn discover(
                 config.vimeo_access_token.clone(),
                 source.talks_page.as_deref(),
                 VimeoEndpoints::vimeo()?,
+                exclusions.clone(),
             )?),
             SourcePlatform::Rss => {
                 let Some(feed_url) = source.feed_url.as_deref() else {
@@ -59,7 +70,7 @@ pub async fn discover(
                     tracing::info!(source = %source.name, "no feed_url yet; skipped");
                     continue;
                 };
-                let adapter = RssAdapter::new(feed_url)?;
+                let adapter = RssAdapter::new(feed_url, exclusions.clone())?;
                 if source.is_audio_only() {
                     let cfg = ClassifyConfig::load(
                         &config_dir.join("pipeline.toml"),
@@ -281,6 +292,7 @@ pub async fn completeness(
         config.vimeo_access_token.clone(),
         source.talks_page.as_deref(),
         VimeoEndpoints::vimeo()?,
+        load_exclusions(pool).await?,
     )?;
 
     let (account, from) = match adapter.account_videos().await? {

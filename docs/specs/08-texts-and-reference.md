@@ -493,6 +493,8 @@ Acceptance criteria for the source policy:
 
 ## Mandated sources
 
+Decision of October 5, 2026. Milestone M3R needs the source policy and the rights ledger before M4b's texts schema exists, so they land early in migration `0015_rights_ledger.sql`: the `license_evidence` changes from this spec's texts, URL-ingestion and mandate-rights migrations, `source_policy`, and the whole rights-ledger migration. The text-only parts of those migrations (`text_edition.source_key`, `servable_text_unit`, `takedown_request` and the `edition` and `source` takedown scopes) stay with M4b. `docs/migrations.md` records the split. The acceptance items that render a page (the rights page, report links and credit lines) are tested with the pages in Spec 06. Until the project has an S3 client, statements, drafts and mandate decisions are stored by SHA-256 in a local records directory (`--records-dir`, default `data/records`) under keys of the form `records/<sha256>`, which the records bucket takes over unchanged.
+
 The project owner has decided to use BDK America and Terebess in full unless a rights holder says otherwise, with removal made as easy as possible. A mandate is that decision, recorded as what it is: the owner's choice to rely on a source, not a license and not a permission. Two rules follow from that, and the second is not configurable.
 
 1. Reversible in seconds. Every mandated source has an `enabled` flag, and turning it off removes the source from every answer immediately.
@@ -679,16 +681,16 @@ Audit additions: a source with `basis = 'mandate'` and no recorded request after
 
 Acceptance criteria for the rights lifecycle:
 
-- [ ] `wt source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event.
-- [ ] `wt rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `wt rights ledger` prints them in order.
-- [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent.
+- [x] `wt source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event. (`wt-db/tests/rights.rs`; the mandate's evidence points to the stored record of the decision.)
+- [x] `wt rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `wt rights ledger` prints them in order. (`wt-db/tests/rights.rs` and `wt-cli/tests/commands.rs`. `wt rights no-response` records silence the same way.)
+- [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent. (The evidence and the switch are tested in `wt-db/tests/rights.rs`; the rendering moves to Spec 06's credit-line snapshot tests, decision of October 5, 2026.)
 - [ ] `decline` and a takedown remove the units and raw copies and add exclusions for the prefix, the work and each content hash.
-- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited.
-- [ ] A compile-fail test shows the fetch functions cannot be called with a raw URL.
-- [ ] `wt exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again.
-- [ ] A silent source stays a mandate, labeled as one, and `wt rights due` lists its follow-up.
-- [ ] `GET /rights` lists each source with the correct plain-language status and uses no permission language for a mandate.
-- [ ] The audit warns on a mandate with no request after 14 days, and fails on a servable unit that matches an active exclusion.
+- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited. (M3R covers `wt source add` and a direct fetch by prefix and host; the crawl, the import, works and content hashes come with M4b's text importer and M3R's opt-out.)
+- [x] A compile-fail test shows the fetch functions cannot be called with a raw URL. (`wt-ingest/tests/fetch_target.rs`: `get`, `check_robots`, and building a `FetchTarget` around `Exclusions::clear`.)
+- [x] `wt exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again. (The command requires `--evidence` and refuses an empty file.)
+- [x] A silent source stays a mandate, labeled as one, and `wt rights due` lists its follow-up.
+- [ ] Moved to Spec 06 with the rights page (decision of October 5, 2026): `GET /rights` lists each source with the correct plain-language status and uses no permission language for a mandate.
+- [ ] The audit warns on a mandate with no request after 14 days, and fails on a servable unit that matches an active exclusion. (The warning, and a warning for a request past its follow-up date, are in M3R's audit; the servable-unit check comes with `servable_text_unit` in M4b.)
 
 ## Acceptance criteria
 

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_policy set basis = 'permission', license_evidence_id = $2 where key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "903012b6104f05d669142361b7fe4587cd38563c5320b58a811b529bc256c4c5"
+}

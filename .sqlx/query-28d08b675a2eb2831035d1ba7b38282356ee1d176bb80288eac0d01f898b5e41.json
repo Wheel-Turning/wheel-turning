@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into license_evidence\n                   (publisher, license_code, evidence_snapshot_ref, snapshot_sha256, scope_note,\n                    captured_at, reviewed_by, reviewed_at, allowed, kind, url_prefixes,\n                    mandated_by, rationale, display_notice)\n                 values ($1, $2, $3, $4, 'the owner''s decision to use this source',\n                         now(), $5, now(), true, 'mandate', $6, $5, $7, $8)\n                 returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "28d08b675a2eb2831035d1ba7b38282356ee1d176bb80288eac0d01f898b5e41"
+}

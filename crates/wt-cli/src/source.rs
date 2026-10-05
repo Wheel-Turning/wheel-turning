@@ -11,6 +11,7 @@ use crate::commands::print_json;
 /// also writes it as `feed_url` on the named source in `sources.toml`, keeping the file's
 /// comments and layout; without, it saves nothing.
 pub async fn resolve_feed(
+    pool: &sqlx::PgPool,
     config_dir: &Path,
     source: &str,
     apple_id: u64,
@@ -37,7 +38,8 @@ pub async fn resolve_feed(
         .and_then(|v| v.as_str())
         .map(str::to_owned);
 
-    let found = wt_ingest::podcast::resolve_feed(lookup, apple_id)
+    let exclusions = crate::ingest::load_exclusions(pool).await?;
+    let found = wt_ingest::podcast::resolve_feed(lookup, apple_id, &exclusions)
         .await
         .with_context(|| format!("looking up Apple Podcasts id {apple_id}"))?;
 

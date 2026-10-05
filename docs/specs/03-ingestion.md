@@ -344,7 +344,7 @@ Acceptance criteria for mandated talks:
 - [ ] `wt teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks.
 - [ ] `--suspend-only` removes the teacher from serving and deletes nothing.
 - [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown.
-- [ ] A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
+- [ ] Moved to Spec 06 with the answer page (decision of October 5, 2026), except the last sentence, which stays here: A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
 - [ ] `wt rights notice-draft` produces a file from the template and sends nothing.
 
 ## Seattle Soto Zen sources

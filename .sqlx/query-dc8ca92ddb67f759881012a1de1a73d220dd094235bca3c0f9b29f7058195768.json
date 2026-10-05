@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_exclusion set lifted_at = now(), lifted_by = $2, lift_evidence_ref = $3\n         where id = $1 and lifted_at is null\n         returning scope, pattern, reason, source_key",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "pattern",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "pattern"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "reason"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_exclusion",
+            "name": "source_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "dc8ca92ddb67f759881012a1de1a73d220dd094235bca3c0f9b29f7058195768"
+}

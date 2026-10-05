@@ -8,6 +8,7 @@ use url::Url;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use wt_core::Secret;
+use wt_ingest::http::Exclusions;
 use wt_ingest::vimeo::{VimeoAdapter, VimeoEndpoints};
 use wt_ingest::{IngestError, SourceAdapter};
 
@@ -108,6 +109,7 @@ async fn api_discovery_reads_every_page_with_the_token() {
         Some(Secret::new(TOKEN)),
         None,
         endpoints(&server),
+        Exclusions::default(),
     )
     .unwrap();
     let videos = adapter.discover(None).await.unwrap();
@@ -207,8 +209,14 @@ async fn talks_page_discovery_uses_oembed_for_each_embedded_video() {
         .await;
 
     let page = format!("{}/talks-page/", server.uri());
-    let adapter =
-        VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    let adapter = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
     let videos = adapter.discover(None).await.unwrap();
 
     let ids: Vec<_> = videos.iter().map(|v| v.external_id.as_str()).collect();
@@ -240,8 +248,14 @@ async fn a_disallowed_talks_page_is_never_requested() {
         .await;
 
     let page = format!("{}/talks-page/", server.uri());
-    let adapter =
-        VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    let adapter = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
     let err = adapter.discover(None).await.unwrap_err();
     assert!(matches!(err, IngestError::RobotsDisallowed(_)), "{err}");
     // MockServer verifies `.expect(0)` when it drops.
@@ -258,11 +272,24 @@ async fn a_site_without_robots_txt_is_read_and_a_source_with_nothing_configured_
         .mount(&server)
         .await;
     let page = format!("{}/talks-page/", server.uri());
-    let adapter =
-        VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    let adapter = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
     assert!(adapter.discover(None).await.unwrap().is_empty());
 
-    let bare = VimeoAdapter::new("fixture-vimeo", None, None, endpoints(&server)).unwrap();
+    let bare = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        None,
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
     assert!(matches!(
         bare.discover(None).await.unwrap_err(),
         IngestError::Misconfigured { .. }
@@ -291,8 +318,14 @@ async fn the_completeness_check_reads_page_ids_and_needs_a_token_for_the_account
         .await;
 
     let page = format!("{}/talks-page/", server.uri());
-    let adapter =
-        VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    let adapter = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
     assert_eq!(
         adapter.talks_page_ids().await.unwrap(),
         ["400000002", "400000001"]
@@ -402,13 +435,95 @@ async fn the_api_and_the_talks_page_yield_the_same_talk_set() {
         Some(Secret::new(TOKEN)),
         None,
         endpoints(&server),
+        Exclusions::default(),
     )
     .unwrap();
     let page = format!("{}/talks-page/", server.uri());
-    let site = VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    let site = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        Exclusions::default(),
+    )
+    .unwrap();
 
     let from_api = talk_set(&api.discover(None).await.unwrap());
     let from_site = talk_set(&site.discover(None).await.unwrap());
     assert_eq!(from_api.len(), 3);
     assert_eq!(from_api, from_site);
+}
+
+fn excluding(pattern: &str) -> Exclusions {
+    Exclusions::new(vec![wt_db::rights::Exclusion {
+        id: sqlx::types::Uuid::nil(),
+        scope: "prefix".into(),
+        pattern: pattern.into(),
+        reason: "the rights holder asked".into(),
+        source_key: None,
+    }])
+}
+
+#[tokio::test]
+async fn an_excluded_page_is_never_requested_and_an_excluded_video_is_skipped() {
+    let server = MockServer::start().await;
+    mount_site(&server, Some("User-agent: *\nDisallow:\n")).await;
+    Mock::given(method("GET"))
+        .and(path("/talks-page/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"<a href="https://vimeo.com/500000001">One</a>
+               <a href="https://vimeo.com/500000002">Two</a>"#,
+        ))
+        .mount(&server)
+        .await;
+    for id in [500_000_001u64, 500_000_002] {
+        Mock::given(method("GET"))
+            .and(path("/api/oembed.json"))
+            .and(query_param(
+                "url",
+                format!("https://vimeo.com/{id}").as_str(),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(oembed(
+                id,
+                "Fixture talk",
+                2400,
+                "2021-01-01 12:00:00",
+            )))
+            .expect(u64::from(id == 500_000_001))
+            .mount(&server)
+            .await;
+    }
+    let page = format!("{}/talks-page/", server.uri());
+
+    // The whole page excluded: refused before any request, robots.txt included.
+    let blocked = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        excluding(&format!("{}/", server.uri())),
+    )
+    .unwrap();
+    match blocked.discover(None).await {
+        Err(IngestError::Excluded { url, reason, .. }) => {
+            assert_eq!(url, page);
+            assert_eq!(reason, "the rights holder asked");
+        }
+        other => panic!("{other:?}"),
+    }
+    let requests = server.received_requests().await.unwrap();
+    assert!(requests.is_empty(), "nothing was requested: {requests:?}");
+
+    // One video excluded: the rest of the page is still read, and its oEmbed is never asked.
+    let one_out = VimeoAdapter::new(
+        "fixture-vimeo",
+        None,
+        Some(&page),
+        endpoints(&server),
+        excluding("https://vimeo.com/500000002"),
+    )
+    .unwrap();
+    let videos = one_out.discover(None).await.unwrap();
+    let ids: Vec<_> = videos.iter().map(|v| v.external_id.as_str()).collect();
+    assert_eq!(ids, ["500000001"]);
 }

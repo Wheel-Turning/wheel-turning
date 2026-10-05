@@ -13,7 +13,7 @@ use sqlx::types::chrono::{DateTime, NaiveDateTime, Utc};
 use url::Url;
 use wt_core::Secret;
 
-use crate::http::{self, parse_url};
+use crate::http::{self, Exclusions, parse_url};
 use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
 
 const PAGE_SIZE: u32 = 100;
@@ -53,15 +53,18 @@ pub struct VimeoAdapter {
     token: Option<Secret>,
     talks_page: Option<Url>,
     endpoints: VimeoEndpoints,
+    exclusions: Exclusions,
 }
 
 impl VimeoAdapter {
-    /// An adapter for `source`. With `token` it uses the API, otherwise `talks_page`.
+    /// An adapter for `source`. With `token` it uses the API, otherwise `talks_page`. It never
+    /// requests an address `exclusions` covers, and skips a video whose page one covers.
     pub fn new(
         source: &str,
         token: Option<Secret>,
         talks_page: Option<&str>,
         endpoints: VimeoEndpoints,
+        exclusions: Exclusions,
     ) -> Result<Self, IngestError> {
         let client = http::client()?;
         Ok(Self {
@@ -70,6 +73,7 @@ impl VimeoAdapter {
             token,
             talks_page: talks_page.map(parse_url).transpose()?,
             endpoints,
+            exclusions,
         })
     }
 
@@ -78,17 +82,19 @@ impl VimeoAdapter {
         url: &Url,
         token: Option<&Secret>,
     ) -> Result<reqwest::Response, IngestError> {
-        let mut request = self.client.get(url.clone());
-        if let Some(token) = token {
-            request = request
-                .bearer_auth(token.expose())
-                .header("Accept", "application/vnd.vimeo.*+json;version=3.4");
+        let target = self.exclusions.clear(url)?;
+        match token {
+            Some(token) => {
+                http::get_authorized(
+                    &self.client,
+                    &target,
+                    token,
+                    "application/vnd.vimeo.*+json;version=3.4",
+                )
+                .await
+            }
+            None => http::get(&self.client, &target).await,
         }
-        let response = request.send().await.map_err(|e| IngestError::Http {
-            url: url.to_string(),
-            message: e.without_url().to_string(),
-        })?;
-        Ok(response)
     }
 
     async fn get_ok(
@@ -96,14 +102,7 @@ impl VimeoAdapter {
         url: &Url,
         token: Option<&Secret>,
     ) -> Result<reqwest::Response, IngestError> {
-        let response = self.get(url, token).await?;
-        if !response.status().is_success() {
-            return Err(IngestError::Status {
-                url: url.to_string(),
-                status: response.status().as_u16(),
-            });
-        }
-        Ok(response)
+        http::ok(url, self.get(url, token).await?)
     }
 
     async fn json<T: for<'de> Deserialize<'de>>(
@@ -156,8 +155,9 @@ impl VimeoAdapter {
                 source_name: self.source.clone(),
                 what: "a talks_page",
             })?;
-        http::check_robots(&self.client, page).await?;
-        let html = http::text(page, http::get_ok(&self.client, page).await?).await?;
+        let target = self.exclusions.clear(page)?;
+        http::check_robots(&self.client, &target).await?;
+        let html = http::text(page, http::get_ok(&self.client, &target).await?).await?;
         Ok(page_video_ids(&html))
     }
 
@@ -174,6 +174,11 @@ impl VimeoAdapter {
         let mut videos = Vec::new();
         for id in ids {
             let video_url = format!("https://vimeo.com/{id}");
+            if let Err(excluded) = parse_url(&video_url).and_then(|u| self.exclusions.clear(&u)) {
+                tracing::warn!(source = %self.source, vimeo_id = %id, %excluded,
+                               "skipping an excluded video from the talks page");
+                continue;
+            }
             let mut oembed = self
                 .endpoints
                 .oembed
