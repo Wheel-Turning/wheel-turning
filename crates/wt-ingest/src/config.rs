@@ -235,6 +235,42 @@ impl Default for IngestSettings {
     }
 }
 
+/// `[rights]` in `config/pipeline.toml` (Spec 08, Rights lifecycle).
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct RightsSettings {
+    /// How `wt source add` uses a new source when `--basis` is not given: `mandate` by
+    /// default, or `license` or `permission` with evidence in hand.
+    pub default_basis_for_new_sources: wt_db::rights::Basis,
+}
+
+impl Default for RightsSettings {
+    fn default() -> Self {
+        Self {
+            default_basis_for_new_sources: wt_db::rights::Basis::Mandate,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RightsFile {
+    #[serde(default)]
+    rights: RightsSettings,
+}
+
+impl RightsSettings {
+    /// Reads `[rights]` from `config/pipeline.toml`. A file without the section gets the
+    /// defaults.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Self::parse(&read(pipeline)?, &pipeline.display().to_string())
+    }
+
+    /// Parses `[rights]` from the text of `config/pipeline.toml`.
+    pub fn parse(text: &str, origin: &str) -> Result<Self, ConfigError> {
+        Ok(parse::<RightsFile>(text, origin)?.rights)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct PipelineFile {
     #[serde(default)]

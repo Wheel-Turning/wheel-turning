@@ -603,7 +603,7 @@ The project's purpose is to spread the teachings. Its rule for sources is theref
 
 The three steps:
 
-1. Use by default. A new source is added with `wt source add --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`, which is the mandate command with a general name and creates the same records. `[rights] default_basis_for_new_sources = "mandate"` is the setting. A source with a license or permission in hand is added with that basis instead.
+1. Use by default. A new source is added with `wt source add --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`, which is the mandate command with a general name and creates the same records. `[rights] default_basis_for_new_sources = "mandate"` in `config/pipeline.toml` is the setting, and `--basis` overrides it for one source; with `license` or `permission` the command needs `--evidence` (decision of October 5, 2026). A source with a license or permission in hand is added with that basis instead.
 2. Ask. Each mandated source gets a permission request, tracked in the ledger below. The request is the way an opt-out becomes an explicit record.
 3. Record the answer. A grant is logged and the page begins to say so truthfully. A refusal or a takedown is logged and the source is excluded permanently. No reply is logged as no reply and is never treated as permission, so the source stays on its mandate and is labeled as such.
 

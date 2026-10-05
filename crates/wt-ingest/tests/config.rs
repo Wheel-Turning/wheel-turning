@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use wt_ingest::SourcePlatform;
 use wt_ingest::classify::{self, normalize_title};
-use wt_ingest::config::{ClassifyConfig, SourcesFile};
+use wt_ingest::config::{ClassifyConfig, RightsSettings, SourcesFile};
 use wt_registry::RegistryFile;
 
 fn config(name: &str) -> PathBuf {
@@ -131,4 +131,43 @@ fn the_committed_patterns_classify_the_ssz_inventory_cases() {
     );
     let short_other = classify::talk_type(&c, &normalize_title("A brief word"), Some(860));
     assert_eq!(short_other.review.as_deref(), Some("talk_type_unclear"));
+}
+
+#[test]
+fn new_sources_default_to_a_mandate_and_the_setting_is_checked() {
+    let shipped = RightsSettings::load(&config("pipeline.toml")).unwrap();
+    assert_eq!(
+        shipped.default_basis_for_new_sources,
+        wt_db::rights::Basis::Mandate
+    );
+    assert_eq!(
+        RightsSettings::parse(
+            "[ingest]
+",
+            "no rights section"
+        )
+        .unwrap(),
+        RightsSettings::default()
+    );
+    let permission = RightsSettings::parse(
+        "[rights]
+default_basis_for_new_sources = \"permission\"
+",
+        "t",
+    )
+    .unwrap();
+    assert_eq!(
+        permission.default_basis_for_new_sources,
+        wt_db::rights::Basis::Permission
+    );
+    for bad in [
+        "[rights]
+default_basis_for_new_sources = \"consent\"
+",
+        "[rights]
+default_basis = \"mandate\"
+",
+    ] {
+        assert!(RightsSettings::parse(bad, "t").is_err(), "{bad}");
+    }
 }

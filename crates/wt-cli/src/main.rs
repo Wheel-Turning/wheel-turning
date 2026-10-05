@@ -290,9 +290,13 @@ enum SourceCommand {
         /// A URL prefix the source covers. Repeat for several.
         #[arg(long = "prefix", required = true)]
         prefixes: Vec<String>,
-        /// mandate, license or permission.
-        #[arg(long, default_value = "mandate", value_parser = parse_basis)]
-        basis: wt_db::rights::Basis,
+        /// mandate, license or permission. Defaults to [rights] default_basis_for_new_sources
+        /// in pipeline.toml.
+        #[arg(long, value_parser = parse_basis)]
+        basis: Option<wt_db::rights::Basis>,
+        /// The directory holding pipeline.toml, read when --basis is not given.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
         /// texts or talks. A talks source is named by `rights_source` in sources.toml.
         #[arg(long, default_value = "texts", value_parser = ["texts", "talks"])]
         kind: String,
@@ -721,6 +725,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                     publisher,
                     prefixes,
                     basis,
+                    config_dir,
                     kind,
                     evidence,
                     by,
@@ -728,6 +733,21 @@ async fn main() -> anyhow::Result<ExitCode> {
                     display_notice,
                 },
         } => {
+            let basis = match basis {
+                Some(basis) => basis,
+                None => {
+                    let path = config_dir.join("pipeline.toml");
+                    wt_ingest::config::RightsSettings::load(&path)
+                        .with_context(|| {
+                            format!(
+                                "reading [rights] default_basis_for_new_sources from {}; \
+                                 pass --basis or --config-dir",
+                                path.display()
+                            )
+                        })?
+                        .default_basis_for_new_sources
+                }
+            };
             rights::add(
                 &pool().await?,
                 &records,

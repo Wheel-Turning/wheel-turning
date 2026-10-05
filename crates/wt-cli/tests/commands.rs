@@ -622,10 +622,14 @@ async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
     std::fs::write(&draft, "May we excerpt your texts with attribution?").unwrap();
     let reply = dir.join("reply.txt");
     std::fs::write(&reply, "Please do not use them.").unwrap();
+    let config = config_dir();
+    let cfg = config.to_str().unwrap();
 
     let added = fx.json(&[
         "source",
         "mandate",
+        "--config-dir",
+        cfg,
         "--key",
         "fixturepress",
         "--publisher",
@@ -645,6 +649,8 @@ async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
     let refused = fx.wt(&[
         "source",
         "add",
+        "--config-dir",
+        cfg,
         "--key",
         "nonotice",
         "--publisher",
@@ -731,6 +737,8 @@ async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
     let again = fx.wt(&[
         "source",
         "add",
+        "--config-dir",
+        cfg,
         "--key",
         "again",
         "--publisher",
@@ -773,7 +781,56 @@ async fn the_rights_commands_record_a_mandate_its_request_and_a_decline() {
     );
     let listed = fx.json(&["exclusion", "list"]);
     assert_eq!(listed[0]["pattern"], "https://press.example/texts/");
+
+    // With license or permission as the default, a new source needs its evidence.
+    std::fs::write(
+        config.join("pipeline.toml"),
+        "[rights]
+default_basis_for_new_sources = \"permission\"
+",
+    )
+    .unwrap();
+    let no_evidence = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        cfg,
+        "--key",
+        "granted",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://granted.example/",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert!(!no_evidence.status.success());
+    assert!(
+        stderr(&no_evidence).contains("--evidence"),
+        "{}",
+        stderr(&no_evidence)
+    );
+    let missing = fx.wt(&[
+        "source",
+        "add",
+        "--config-dir",
+        dir.join("nowhere").to_str().unwrap(),
+        "--key",
+        "k",
+        "--publisher",
+        "P",
+        "--prefix",
+        "https://k.example/",
+        "--by",
+        "Owner Fixture",
+    ]);
+    assert!(
+        stderr(&missing).contains("pass --basis or --config-dir"),
+        "{}",
+        stderr(&missing)
+    );
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&config);
 }
 
 #[tokio::test]

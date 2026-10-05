@@ -80,7 +80,7 @@ impl From<sqlx::Error> for RightsError {
 }
 
 /// The basis a source is used on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Basis {
     /// A license the source states, reviewed and approved by a person.
