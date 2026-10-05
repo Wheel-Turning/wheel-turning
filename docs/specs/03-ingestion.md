@@ -125,7 +125,7 @@ Behavior:
 2. The idempotency key is `{kind}:{talk_id}:{input_hash}`, where the input hash covers the stage's inputs (for example the current transcript hash and the glossary version). Enqueue uses `on conflict do nothing`, so re-enqueueing unchanged work is a no-op and changed inputs produce a new job.
 3. On failure with attempts left, the job returns to `queued` with `run_at` pushed back by an exponential delay of 30 seconds doubled per attempt and capped at one hour, and `last_error` is stored. After `max_attempts` the job becomes `dead` and the talk keeps its stage state with `state_reason` set to the error summary.
 4. A reaper returns `running` jobs whose `locked_at` is older than `job_lock_timeout_s` (default 7200) to `queued`. Long jobs such as ASR refresh `locked_at` every minute.
-5. `wt worker --kinds audio --concurrency 1` runs only the named kinds, so the GPU host takes the heavy stages and any other machine takes the rest.
+5. `wt worker --kinds audio --concurrency 1` runs only the named kinds, so the owner's PC takes the audio stages and any other machine takes the rest.
 6. `wt pipeline retry --talk <id>` re-enqueues the failed stage. `wt pipeline advance` enqueues `audio` for every talk in `cleared`.
 
 ## Commands, configuration and acceptance
@@ -158,7 +158,7 @@ Acceptance criteria for M3:
 
 ## Licensed sources
 
-This section amends the PRD, which lists open-license material and other sanghas as out of scope for v1. Talks that a Soto sangha itself publishes under a license we may rely on can enter the v1 corpus beside consented SSZ talks, which gives the evaluation more voices. Speaker consent remains the basis for SSZ talks. A licensed talk is cleared by license evidence instead. The demo stays private.
+This section implements the PRD's inclusion of other Soto sanghas' talks under a license. Talks that a Soto sangha itself publishes under a license we may rely on can enter the v1 corpus beside SSZ talks, which gives the evaluation more voices. SSZ talks are cleared by speaker consent or by the owner's mandate, as the Mandated talks section describes. A licensed talk is cleared by license evidence instead. The demo stays private.
 
 What counts as evidence. A publisher's statement of a named license, on a page, in a feed or in a video's license flag. Being downloadable, or having no terms of service, is not a license, because copyright applies by default and silence is not permission. The Everyday Zen Foundation is already an open item in the PRD. The first license read found the opposite of a license: the site footer reserves all rights, so that source stays gated until the foundation or Norman Fischer grants permission in writing. The same check found that the San Francisco Zen Center archive says its talks are published under a Creative Commons license without naming the variant in what was visible, and that Dharma Seed states Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 across its site. The capture step below records exactly what each page says.
 
@@ -244,7 +244,7 @@ Read from public pages by Claude, not yet captured with `wt license capture` and
 
 ## Mandated talks
 
-Decision of October 3, 2026. Recorded talks from teachers who have not replied are used by default on the project owner's mandate, and a teacher can leave at any time. This amends the PRD, whose rule is that no talk is indexed without its speaker's consent, and it turns the consent invitation into a notice that also invites explicit permission. Kanshin's view is being sought and may change the decision, so the behavior sits behind one switch that can be turned back with a single command.
+Decision of October 3, 2026. Recorded talks from teachers who have not replied are used by default on the project owner's mandate, and a teacher can leave at any time. This is the PRD's use, ask, record and leave model, confirmed by the owner on October 4, 2026: talks are used first, and each teacher then receives a notice that asks for formal permission and offers a one-message way out. Kanshin's view is being sought and may change the decision, so the behavior sits behind one switch that can be turned back with a single command.
 
 What does not change. Student speech is never stored, indexed or shown, whatever the basis. A talk still needs a resolved speaker, a known rights holder and a registered sangha. A speaker who has declined or withdrawn is never used. Honest labeling holds: the page never says a mandated talk is used with the teacher's permission.
 

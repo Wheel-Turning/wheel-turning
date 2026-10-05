@@ -27,7 +27,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 
 ## Planned, not yet numbered
 
-These come from the October 3 and 4 specs. Each gets its number at merge.
+These come from the October 3 to 5 specs. Each gets its number at merge.
 
 | Spec | Spec's number | Description | Notes |
 |---|---|---|---|
@@ -43,3 +43,4 @@ These come from the October 3 and 4 specs. Each gets its number at merge.
 | 08 | 0018 | retention and legal text: `text_edition.legal_text`, `legal_pages`, `source_deleted_at`, `source_policy.source_retention` | Alters Spec 08's `text_edition` and `source_policy`, so it merges after the migrations that create them |
 | 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
 | 04 | 0020 | `llm_usage` table and its monthly index | New table |
+| 02 | 0021 | donation links: `sangha.donation_kind`, `donation_note`, `donation_checked_at`, `donation_checked_by` and the `donation_verified_needs_page` check | Alters `sangha` from 0002 |
