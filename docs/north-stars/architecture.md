@@ -56,7 +56,7 @@ These settle design arguments. When two options both satisfy the invariants, the
 
 A talk moves down through four zones, and the consent gate is the first thing any talk meets.
 
-&#91;embedded content: target architecture · 4 zones, 1 gate\]
+In short: consent gate → scratch zone (audio and video, only during transcription and diarization) → processing zone (text only) → core store (consented, segmented text) → serving zone (reads the core store through one view and writes only query logs).
 
 Rust carries every stage that enforces an invariant or sits on the serving path: domain types, the gate, glossary correction, segmentation post-processing, citation resolution, chunking, retrieval, selection, synthesis validation, the dana calculator, the web server and the admin command line. Python is confined to evaluation notebooks and, unless sherpa-onnx proves adequate, a diarization sidecar. Embedding and reranking run locally through ONNX Runtime.
 

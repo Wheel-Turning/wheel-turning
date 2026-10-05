@@ -154,3 +154,5 @@ Items that are decided but deliberately not built or enabled in v1.
 - Language-model cap: 25 dollars a month, with 60 in the first ingestion month, set out in the transcript pipeline spec.
 - Question privacy: a tester chooses whether questions are kept, and can delete them, set out in the web spec.
 - Alerts: an AWS notification to the owner's address for removal requests, accessibility reports and failures.
+
+Development machine: a Windows PC with WSL 2, an Intel Arc integrated GPU and 16 GB of RAM, and no Mac or NVIDIA card. The Windows notes in the platform spec and the hardware section in the transcript pipeline spec set the consequences: Unix-style tooling inside WSL 2, line-ending rules for the repository, a transcription worker built natively on Windows, and a measured decision between running locally and renting a GPU machine.

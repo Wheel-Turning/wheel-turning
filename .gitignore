@@ -12,6 +12,7 @@ tests/deny-fixture/Cargo.lock
 /data/
 /models/
 /scratch/
+/data-inbox/
 *.wav
 *.mp3
 *.m4a

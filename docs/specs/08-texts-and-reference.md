@@ -257,7 +257,7 @@ min_dictionary_share = 0.85
 max_suspect_share = 0.10
 ```
 
-The importer calls `pdftotext` and `pdftoppm` from poppler-utils and Tesseract 5 with its `eng` data as subprocesses. They are installed in the batch host image and through Homebrew locally. No Python is needed.
+The importer calls `pdftotext` and `pdftoppm` from poppler-utils and Tesseract 5 with its `eng` data as subprocesses. They are installed in the batch host image and through the local package manager (apt in WSL 2, or winget or Scoop on Windows). No Python is needed.
 
 Steps for a PDF edition:
 

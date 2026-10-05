@@ -41,7 +41,16 @@ Ten dimensions cover the five properties. Where a line is numeric it is a starti
 
 Checks sit at the stage where an error is cheapest to catch, and the earliest ones keep bad data from ever becoming text.
 
-&#91;embedded content: quality gates by pipeline stage · 8 checks\]
+| Stage | Check | On failure |
+| --- | --- | --- |
+| Ingest | Duplicates merged on title, date and duration; non-talks dropped | Merge or drop is logged and listed for review |
+| Rights gate | A recorded rights basis (consent, verified license or mandate) and a known rights holder | Talk stops, no media pulled |
+| Transcribe | Timestamps present; link offset within tolerance on the sample | Talk held out of the index until repaired |
+| Correct | Glossary terms and teacher names match the registry | Fix glossary or alias, rerun affected talks |
+| Segment | No student speech; chant and sitting text excluded | Quarantine the whole talk and recheck |
+| Extract and resolve | Teacher, series and part present; citations graded at three levels | Doubtful citations shown as unresolved |
+| Index | Required fields complete; typed proof of rights at indexing | Write rejected, talk not indexed |
+| Serve | Read only through the serving view; donation link verified | Shown with no give button, out of the dana split |
 
 Read each row left to right: the stage, the check it must pass, and where a failing talk goes. The consent gate comes first because nothing downstream should exist for a talk that fails it. Blocking failures follow the quarantine rules in the failure handling section.
 

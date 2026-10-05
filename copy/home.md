@@ -1,0 +1,7 @@
+- Tagline: What have Zen teachers said about the question you are living with?
+- Question label: Your question
+- Help text under the box: Write it the way you would say it. For example: I keep judging myself during zazen.
+- Button: Ask
+- Line under the button: Everything you see is a short excerpt, with a link to where it came from.
+- Privacy line: Your questions are kept so the project can improve. Only totals are read, and one question is opened only if you flag it. You can switch this off or delete your questions at any time. Read how this works
+- Example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
