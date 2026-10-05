@@ -1,0 +1,47 @@
+# Weekly dependency updates. Minor and patch bumps are grouped into one PR per ecosystem so the
+# queue stays short; major bumps arrive one per PR. Security updates are not grouped and arrive as
+# soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /sidecars/diarize
+    schedule:
+      interval: weekly
+    groups:
+      diarize-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: terraform
+    directories:
+      - /infra/terraform/account
+      - /infra/terraform/bootstrap
+      - /infra/terraform/github-oidc
+      - /infra/terraform/envs/*
+    schedule:
+      interval: weekly
+    groups:
+      terraform-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /sidecars/diarize
+    schedule:
+      interval: weekly

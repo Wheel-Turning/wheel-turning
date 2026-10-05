@@ -6,12 +6,16 @@
 # - The RDS master password is owned by RDS itself (see the database module).
 
 terraform {
+  required_version = ">= 1.10"
+
   required_providers {
     aws = {
-      source = "hashicorp/aws"
+      source  = "hashicorp/aws"
+      version = ">= 6.0"
     }
     random = {
-      source = "hashicorp/random"
+      source  = "hashicorp/random"
+      version = ">= 3.7"
     }
   }
 }

@@ -121,7 +121,7 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 
 Three GitHub Actions workflows cover the lifecycle.
 
-1. `ci.yml` runs on every pull request and push. Jobs: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` with Docker available for Postgres containers, `cargo sqlx prepare --check` against a migrated database, `cargo deny check`, Terraform `fmt -check` and `validate`, and `ruff` on the Python sidecar and scripts. Cargo and target directories are cached.
+1. `ci.yml` runs on every pull request and every push to `main`. Jobs: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` with Docker available for Postgres containers, `cargo sqlx prepare --check` against a migrated database, `cargo deny check`, `cargo machete` for unused dependencies, Terraform `fmt -check`, `validate` and `tflint`, `ruff` on the Python sidecar and scripts, `gitleaks` over the full history, `actionlint` and `zizmor` on the workflows, and `typos`. Cargo commands run with `--locked`, third-party actions are pinned to commit SHAs, and Cargo and target directories are cached. A final `ci ok` job passes only when every other job passes, and it is the one check the `main` ruleset requires.
 2. `deploy.yml` runs on a version tag or by hand. It builds the container image, pushes it to ECR, runs `terraform plan` and holds for manual approval, applies, then runs migrations as a one-off ECS task under `dg_owner` before the new service revision starts taking traffic.
 3. `nightly.yml` runs `wt audit` as a one-off task against the live database and fails loudly if any audit check fails. Spec 07 lists the checks.
 

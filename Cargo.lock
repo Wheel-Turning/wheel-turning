@@ -3181,7 +3181,6 @@ dependencies = [
  "testcontainers",
  "thiserror",
  "tokio",
- "tracing",
  "wt-core",
  "wt-db",
 ]

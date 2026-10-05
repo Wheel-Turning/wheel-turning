@@ -33,7 +33,6 @@ data "aws_caller_identity" "current" {}
 locals {
   account = data.aws_caller_identity.current.account_id
   region  = var.region
-  n       = var.name
   path    = "/${var.name}/"
 
   # Owner and repo names are wildcards; the numeric ids are what pin the repository.
