@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update job set state = 'dead', finished_at = now(), last_error = $2,\n                        locked_by = null, locked_at = null\n         where state = 'running' and locked_at < now() - make_interval(secs => $1)\n           and attempts >= max_attempts\n         returning kind, talk_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "talk_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "talk_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "b53bf64c167b3370a33c07923734a11a5712ea3e59a81b83d6f650d14752fe5d"
+}

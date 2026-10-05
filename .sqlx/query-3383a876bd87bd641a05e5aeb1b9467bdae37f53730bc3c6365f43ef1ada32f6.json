@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "with next as (\n             select id from job\n             where state = 'queued' and run_at <= now() and kind = any($1)\n             order by run_at\n             for update skip locked\n             limit 1)\n           update job set state = 'running', locked_by = $2, locked_at = now(),\n                          attempts = attempts + 1\n           from next where job.id = next.id\n           returning job.id, job.kind, job.talk_id, job.payload, job.attempts, job.max_attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "talk_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "talk_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "max_attempts",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "job",
+            "name": "max_attempts"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3383a876bd87bd641a05e5aeb1b9467bdae37f53730bc3c6365f43ef1ada32f6"
+}

@@ -152,7 +152,7 @@ Acceptance criteria for M3:
 - [ ] YouTube discovery against a recorded fixture of the Data API (served by `wiremock`) yields the expected `source_video` rows, parses durations correctly, and pages past 50 items.
 - [ ] A synthetic corpus with planted duplicates, an 11-second clip, a title-variant duplicate and a differently dated near-duplicate produces the expected exclusions and no false merges.
 - [ ] Series extraction handles the five named series and records part numbers. The report lists missing parts.
-- [ ] Eight concurrent workers never claim the same job. Retry backoff, `dead` after max attempts, and the stale-lock reaper each have a test.
+- [x] Eight concurrent workers never claim the same job. Retry backoff, `dead` after max attempts, and the stale-lock reaper each have a test. (`wt-db/tests/job.rs`; the worker loop and `wt worker` come with the first handler.)
 - [ ] With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
 - [ ] `wt ingest report` renders every section listed above from the fixture corpus.
 

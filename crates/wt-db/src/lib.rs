@@ -11,6 +11,7 @@ use wt_core::Secret;
 pub mod audit;
 pub mod consent;
 pub mod correction;
+pub mod job;
 pub mod registry;
 pub mod takedown;
 pub mod talk;
