@@ -11,6 +11,8 @@ use wt_core::ids::TalkId;
 use wt_core::telemetry::{LogOutput, init_logging};
 
 mod commands;
+mod ingest;
+mod source;
 
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
@@ -47,6 +49,127 @@ enum Command {
     /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
     /// fail has findings.
     Audit,
+    /// Discovery from the configured sources (Spec 03).
+    Ingest {
+        #[command(subcommand)]
+        command: IngestCommand,
+    },
+    /// Run queued jobs (Spec 03, Job queue).
+    Worker(WorkerArgs),
+    /// Source settings (Spec 03, Seattle Soto Zen sources).
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SourceCommand {
+    /// Look up a podcast's feed address from its Apple Podcasts id and print it. Saves it as
+    /// feed_url on the source in sources.toml only with --yes, after you have checked it.
+    ResolveFeed {
+        /// The Apple Podcasts id, such as 1472964846 for Seattle Soto Zen.
+        #[arg(long)]
+        apple_id: u64,
+        /// The feed source in sources.toml.
+        #[arg(long, default_value = "ssz-podcast")]
+        source: String,
+        /// Save the address. Without it nothing is written.
+        #[arg(long)]
+        yes: bool,
+        /// The directory holding sources.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+        /// The lookup API address. For tests.
+        #[arg(long, hide = true, default_value = wt_ingest::podcast::APPLE_LOOKUP)]
+        lookup_url: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IngestCommand {
+    /// List each source, or the named one, record new and changed videos and queue them for
+    /// classification. Prints counts per source as JSON. Lists metadata only; fetches no media.
+    Discover {
+        /// Only this source from sources.toml.
+        #[arg(long)]
+        source: Option<String>,
+        /// The directory holding sources.toml, pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Queue classification again after pipeline.toml, series.toml or the registry's aliases
+    /// change: for talks before the gate, and talks classification itself excluded (reopened
+    /// when their job runs). Unchanged rules queue nothing. Prints counts as JSON; `wt worker`
+    /// runs the jobs. Cleared, pipeline and withdrawn talks are never touched.
+    Reclassify {
+        /// Only this talk.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Count what would be queued, and queue nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// The directory holding pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Compare the Vimeo account list with the talks page and with what discovery recorded,
+    /// and write the completeness page. Without WT_VIMEO_ACCESS_TOKEN the account list comes
+    /// from account pages saved in a browser (--vimeo-list); the Vimeo site is never fetched.
+    /// Prints counts and the ids on the talks page but not in the account list as JSON.
+    Completeness {
+        /// The Vimeo source in sources.toml.
+        #[arg(long, default_value = "ssz-vimeo")]
+        source: String,
+        /// A saved Vimeo account videos page. Repeat for several pages.
+        #[arg(long = "vimeo-list")]
+        vimeo_list: Vec<PathBuf>,
+        /// Where to write the HTML page.
+        #[arg(long)]
+        out: PathBuf,
+        /// The directory holding sources.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Write the review page: duplicate clusters, exclusions, review holds, series coverage,
+    /// videos by month and donation-looking links. Reads only; it changes nothing.
+    Report {
+        /// Where to write the HTML page.
+        #[arg(long)]
+        out: PathBuf,
+        /// The directory holding pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct WorkerArgs {
+    /// Job kinds to run, comma separated. This build runs classify.
+    #[arg(long, value_delimiter = ',', value_parser = parse_kind, default_value = "classify")]
+    kinds: Vec<wt_db::job::JobKind>,
+    /// Workers in this process.
+    #[arg(long, default_value_t = 1)]
+    concurrency: usize,
+    /// Exit once no job is due instead of waiting for more.
+    #[arg(long)]
+    drain: bool,
+    /// The directory holding sources.toml, pipeline.toml and series.toml.
+    #[arg(long, default_value = "config")]
+    config_dir: PathBuf,
+}
+
+fn parse_kind(value: &str) -> Result<wt_db::job::JobKind, String> {
+    wt_db::job::JobKind::parse(value).ok_or_else(|| {
+        let known: Vec<_> = wt_db::job::JobKind::ALL
+            .iter()
+            .map(|k| k.as_str())
+            .collect();
+        format!(
+            "unknown job kind {value:?}; known kinds are {}",
+            known.join(", ")
+        )
+    })
 }
 
 #[derive(Debug, Subcommand)]
@@ -268,6 +391,59 @@ async fn main() -> anyhow::Result<ExitCode> {
             .await?;
         }
         Command::Audit => return commands::audit(&pool().await?, config.env).await,
+        Command::Ingest {
+            command: IngestCommand::Discover { source, config_dir },
+        } => ingest::discover(&pool().await?, &config, &config_dir, source.as_deref()).await?,
+        Command::Ingest {
+            command: IngestCommand::Report { out, config_dir },
+        } => ingest::report(&pool().await?, &config_dir, &out).await?,
+        Command::Ingest {
+            command:
+                IngestCommand::Completeness {
+                    source,
+                    vimeo_list,
+                    out,
+                    config_dir,
+                },
+        } => {
+            ingest::completeness(
+                &pool().await?,
+                &config,
+                &config_dir,
+                &source,
+                &vimeo_list,
+                &out,
+            )
+            .await?;
+        }
+        Command::Ingest {
+            command:
+                IngestCommand::Reclassify {
+                    talk,
+                    dry_run,
+                    config_dir,
+                },
+        } => ingest::reclassify(&pool().await?, &config_dir, talk, dry_run).await?,
+        Command::Source {
+            command:
+                SourceCommand::ResolveFeed {
+                    apple_id,
+                    source,
+                    yes,
+                    config_dir,
+                    lookup_url,
+                },
+        } => source::resolve_feed(&config_dir, &source, apple_id, &lookup_url, yes).await?,
+        Command::Worker(args) => {
+            ingest::worker(
+                &pool().await?,
+                &args.config_dir,
+                &args.kinds,
+                args.concurrency,
+                args.drain,
+            )
+            .await?;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }

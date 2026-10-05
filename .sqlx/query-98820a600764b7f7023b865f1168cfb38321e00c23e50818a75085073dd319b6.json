@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select external_id, title, duration_s, raw->'match'->>'vimeo_id' as matched\n           from source_video where platform = 'rss' and raw->>'source' = $1\n           order by published_at desc nulls last, external_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "duration_s",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "duration_s"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "matched",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "98820a600764b7f7023b865f1168cfb38321e00c23e50818a75085073dd319b6"
+}

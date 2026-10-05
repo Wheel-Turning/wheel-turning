@@ -15,6 +15,7 @@ publish = false
 wt-core = { path = "crates/wt-core" }
 wt-db = { path = "crates/wt-db" }
 wt-registry = { path = "crates/wt-registry" }
+wt-ingest = { path = "crates/wt-ingest" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"

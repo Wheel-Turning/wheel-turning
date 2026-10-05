@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set talk_date = $2\n         where id = $1 and talk_date is distinct from $2\n           and state in ('discovered', 'needs_review', 'awaiting_consent')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "471674f19e89df1809c1d90b820b730e28dd89d0b23294a8551c7a90b267cd4a"
+}

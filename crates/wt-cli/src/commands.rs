@@ -17,7 +17,7 @@ use wt_registry::RegistryFile;
 
 use crate::Target;
 
-fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
+pub(crate) fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(value).context("rendering the report")?

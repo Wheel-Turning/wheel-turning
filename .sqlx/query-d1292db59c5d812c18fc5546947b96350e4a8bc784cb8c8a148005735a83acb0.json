@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select teacher_id::text as \"teacher!\", alias from teacher_alias order by 1, 2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teacher!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "alias",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher_alias",
+            "name": "alias"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "d1292db59c5d812c18fc5546947b96350e4a8bc784cb8c8a148005735a83acb0"
+}

@@ -355,3 +355,238 @@ async fn audit_exits_zero_when_clean_and_one_when_a_fail_check_has_findings() {
         .unwrap();
     assert_eq!(check["findings"], 1);
 }
+
+/// A config directory with the committed pipeline and series files and a fixture source.
+fn config_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wt-config-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    for file in ["pipeline.toml", "series.toml"] {
+        std::fs::copy(repo.join(file), dir.join(file)).unwrap();
+    }
+    std::fs::write(
+        dir.join("sources.toml"),
+        "[[source]]\nname = \"fixture-vimeo\"\nplatform = \"vimeo\"\ndefault_sangha = \"Fixture Mountain Zendo\"\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
+    let fx = start().await;
+    fx.import_registry();
+    let item = serde_json::json!({});
+    let mut conn = fx.pool.acquire().await.unwrap();
+    for (id, title, seconds) in [
+        ("9001", "Ada: Uji, Part 2", 2400),
+        ("9002", "Buddhist Quote", 11),
+    ] {
+        wt_db::ingest::record_video(
+            &mut conn,
+            &wt_db::ingest::NewVideo {
+                source: "fixture-vimeo",
+                platform: "vimeo",
+                external_id: id,
+                url: "https://example.invalid/v",
+                title,
+                description: None,
+                published_at: None,
+                duration_s: Some(seconds),
+                channel_ref: None,
+                has_captions: false,
+                item: &item,
+                input_hash: "h",
+            },
+        )
+        .await
+        .unwrap();
+    }
+    drop(conn);
+    let dir = config_dir();
+    let dir_arg = dir.to_str().unwrap();
+
+    let refused = fx.wt(&[
+        "worker",
+        "--kinds",
+        "audio",
+        "--drain",
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("no handler for audio jobs"),
+        "{}",
+        stderr(&refused)
+    );
+    let unknown = fx.wt(&["worker", "--kinds", "discover", "--drain"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("unknown job kind"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    let out = fx.wt(&[
+        "worker",
+        "--kinds",
+        "classify",
+        "--concurrency",
+        "2",
+        "--drain",
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(out.status.success(), "worker failed: {}", stderr(&out));
+    let states: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "select sv.external_id, t.state::text, t.state_reason
+         from talk t join source_video sv on sv.id = t.source_video_id order by 1",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        states,
+        [
+            (
+                "9001".to_owned(),
+                "awaiting_consent".to_owned(),
+                Some("consent_missing".to_owned())
+            ),
+            (
+                "9002".to_owned(),
+                "excluded".to_owned(),
+                Some("non_talk".to_owned())
+            ),
+        ]
+    );
+    let done: i64 = sqlx::query_scalar("select count(*) from job where state = 'succeeded'")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(done, 2);
+
+    let page = dir.join("report.html");
+    let out = fx.wt(&[
+        "ingest",
+        "report",
+        "--out",
+        page.to_str().unwrap(),
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(out.status.success(), "report failed: {}", stderr(&out));
+    let html = std::fs::read_to_string(&page).unwrap();
+    assert!(html.contains("<h1>Ingest review</h1>"));
+    assert!(
+        html.contains("excluded: non_talk"),
+        "the clip is listed with its reason"
+    );
+
+    // Discovery queued these talks under a metadata key, so the first reclassify queues both
+    // once under the rules version, and a second run with the same rules queues nothing.
+    let dry = fx.json(&["ingest", "reclassify", "--dry-run", "--config-dir", dir_arg]);
+    assert_eq!(
+        (dry["eligible"].as_u64(), dry["queued"].as_u64()),
+        (Some(2), Some(2))
+    );
+    let first = fx.json(&["ingest", "reclassify", "--config-dir", dir_arg]);
+    assert_eq!(first["queued"], 2);
+    assert_eq!(first["rules_version"], dry["rules_version"]);
+    let second = fx.json(&["ingest", "reclassify", "--config-dir", dir_arg]);
+    assert_eq!(
+        (second["queued"].as_u64(), second["already_done"].as_u64()),
+        (Some(0), Some(2))
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("User-agent: *\nDisallow: /*/lookup?\n"),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/lookup"))
+        .and(query_param("id", "1000000001"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "resultCount": 1,
+            "results": [{ "collectionName": "Fixture Zendo Talks", "feedUrl": "https://example.invalid/feed.xml" }],
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = std::env::temp_dir().join(format!("wt-feed-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sources = dir.join("sources.toml");
+    let original = "# Fixture sources. This comment must survive.\n\n\
+                    [[source]]\nname = \"fixture-vimeo\"\nplatform = \"vimeo\"\ndefault_sangha = \"Fixture Mountain Zendo\"\n\n\
+                    # The feed, once resolved.\n[[source]]\nname = \"fixture-podcast\"\nplatform = \"rss\"\n\
+                    default_sangha = \"Fixture Mountain Zendo\"\nrole = \"audio_only\"\n";
+    std::fs::write(&sources, original).unwrap();
+    let lookup = format!("{}/lookup", server.uri());
+    let run = |extra: &[&str]| {
+        let mut args = vec![
+            "source",
+            "resolve-feed",
+            "--apple-id",
+            "1000000001",
+            "--source",
+            "fixture-podcast",
+            "--config-dir",
+            dir.to_str().unwrap(),
+            "--lookup-url",
+            &lookup,
+        ];
+        args.extend_from_slice(extra);
+        Command::new(env!("CARGO_BIN_EXE_wt"))
+            .args(&args)
+            // The command never connects; the loader only needs a well-formed address.
+            .env("DATABASE_URL", "postgres://wt:wt@127.0.0.1:1/wt")
+            .env("WT_LOG", "warn")
+            .env_remove("WT_ENV")
+            .env_remove("WT_DB_HOST")
+            .output()
+            .unwrap()
+    };
+
+    let printed = run(&[]);
+    assert!(printed.status.success(), "{}", stderr(&printed));
+    let json: serde_json::Value = serde_json::from_slice(&printed.stdout).unwrap();
+    assert_eq!(json["feed_url"], "https://example.invalid/feed.xml");
+    assert_eq!(json["podcast"], "Fixture Zendo Talks");
+    assert_eq!(json["saved"], false);
+    assert!(stderr(&printed).contains("--yes"));
+    assert_eq!(
+        std::fs::read_to_string(&sources).unwrap(),
+        original,
+        "nothing saved without --yes"
+    );
+
+    let saved = run(&["--yes"]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let text = std::fs::read_to_string(&sources).unwrap();
+    assert!(text.contains("feed_url = \"https://example.invalid/feed.xml\""));
+    assert!(text.contains("# Fixture sources. This comment must survive."));
+    assert!(text.contains("# The feed, once resolved."));
+    let file = wt_ingest::config::SourcesFile::parse(&text, "saved").unwrap();
+    assert_eq!(
+        file.get("fixture-podcast").unwrap().feed_url.as_deref(),
+        Some("https://example.invalid/feed.xml")
+    );
+    assert_eq!(
+        file.get("fixture-vimeo").unwrap().feed_url,
+        None,
+        "only the named source changes"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

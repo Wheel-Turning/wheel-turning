@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk t set state = 'discovered', state_reason = null, duplicate_of = null\n           from talk before\n           where t.id = $1 and before.id = t.id\n             and t.state = 'excluded' and t.state_reason = any($2)\n           returning before.state_reason, before.duplicate_of",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "duplicate_of",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "duplicate_of"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "06297cdf073019964bd1f288358e798897bd6d0043b6c64087518dfa9c41b4c4"
+}

@@ -178,6 +178,7 @@ M5, retrieval and assembly
 - [ ] Named mode filters to the named teacher, suspends the three-teacher target, produces the `NamedNone` and `NamedFew` notices from fixtures, and never returns another teacher's passage.
 - [ ] The ranking invariance test shuffles sangha, donation, profile and volume fields in the fixture database and asserts identical passage order out of retrieval and selection.
 - [ ] Assembly tests cover source link formats for both platforms, the lead-in offset, no give button for unlisted or unverified sanghas, footnote numbering across passages, and texts excluded from the teacher count.
+- [ ] Each `link_style` of Spec 03 (Seattle Soto Zen sources item 4) renders the right link: `vimeo` gives the page address with `#t=<seconds>s`, and `none` gives the "starts at h:mm:ss" text. (Moved from M3, decision of October 5, 2026.)
 - [ ] The 50-question set runs end to end on the target host, and per-stage timings are recorded in the eval run. Latency is reported and not a pass or fail.
 
 M6, synthesis

@@ -109,6 +109,8 @@ pub struct Config {
     pub llm_real_data_ok: bool,
     /// `YOUTUBE_API_KEY`.
     pub youtube_api_key: Option<Secret>,
+    /// `WT_VIMEO_ACCESS_TOKEN`. With it, Vimeo discovery uses the API; without it, the talks page.
+    pub vimeo_access_token: Option<Secret>,
     /// `WT_ALLOW_THIRD_PARTY_FETCH`. Enables the yt-dlp fetch mode.
     pub allow_third_party_fetch: bool,
     /// `WT_DIARIZE_URL`, the base URL of the diarization sidecar.
@@ -197,6 +199,7 @@ impl Config {
             anthropic_api_key: get("ANTHROPIC_API_KEY").map(Secret::new),
             llm_real_data_ok: parse_bool("WT_LLM_REAL_DATA_OK", get("WT_LLM_REAL_DATA_OK"))?,
             youtube_api_key: get("YOUTUBE_API_KEY").map(Secret::new),
+            vimeo_access_token: get("WT_VIMEO_ACCESS_TOKEN").map(Secret::new),
             allow_third_party_fetch: parse_bool(
                 "WT_ALLOW_THIRD_PARTY_FETCH",
                 get("WT_ALLOW_THIRD_PARTY_FETCH"),

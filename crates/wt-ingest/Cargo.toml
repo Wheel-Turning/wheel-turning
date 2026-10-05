@@ -1,6 +1,6 @@
 [package]
 name = "wt-ingest"
-description = "The SourceAdapter trait, the YouTube and storage adapters, and deduplication."
+description = "The SourceAdapter trait, the Vimeo adapter, deduplication and talk classification."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,3 +11,25 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wt-core.workspace = true
+wt-db.workspace = true
+wt-registry.workspace = true
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+regex = "1"
+rss = { version = "2", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+toml = "1"
+tracing.workspace = true
+unicode-normalization = "0.1"
+url = "2"
+
+[dev-dependencies]
+wt-db = { workspace = true, features = ["test-support"] }
+tokio.workspace = true
+wiremock = "0.6"

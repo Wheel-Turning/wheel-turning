@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, title, published_at, duration_s,\n                  raw->'item'->'enclosure'->>'url' as enclosure_url,\n                  trim(regexp_replace(lower(normalize(title, NFKC)), '[^[:alnum:]]+', ' ', 'g'))\n                    as \"norm!\"\n           from source_video\n           where platform = 'rss' and raw->>'source' = $1 and raw->'match' is null\n           order by published_at nulls last, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "duration_s",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "duration_s"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "enclosure_url",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "norm!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "1aba1c241edf08e9c2d7c49105d8f4a2ba4d678e6daf249b8fc0bb8841111b30"
+}

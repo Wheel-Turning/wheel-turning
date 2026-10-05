@@ -1,0 +1,20 @@
+# Sources (Spec 03). Vimeo is SSZ's canonical list (Seattle Soto Zen sources). With
+# WT_VIMEO_ACCESS_TOKEN set, discovery lists the account through the API; without it, it reads
+# the talks page, obeying robots.txt, and asks Vimeo's oEmbed endpoint for each video.
+
+[[source]]
+name = "ssz-vimeo"
+platform = "vimeo"
+talks_page = "https://seattlesotozen.org/talks-page/"
+default_sangha = "Seattle Soto Zen"
+link_style = "vimeo"
+
+# Attaches audio to talks Vimeo lists and never creates a talk. The feed address is set by
+# `wt source resolve-feed` after the owner confirms it.
+[[source]]
+name = "ssz-podcast"
+platform = "rss"
+default_sangha = "Seattle Soto Zen"
+link_style = "none"
+role = "audio_only"
+feed_url = "https://feeds.feedburner.com/SeattleSotoZen"

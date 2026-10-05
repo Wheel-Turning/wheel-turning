@@ -272,7 +272,7 @@ These gate parts of the plan and are unresolved today.
 - [ ] YouTube license flags for each Soto channel in the source list, read through the Data API, and lineage checks for the roughly 50 channels that cannot be placed from their names.
 - [ ] Language-model provider terms with zero retention confirmed before real transcripts are sent.
 - [ ] A teacher reviewer scheduled before any code is written, with the explicit brief to rate unflatteringly.
-- [ ] SSZ's own permission note and a speaker-release line for future talks, which becomes the template for later sanghas. Ask SSZ in the same conversation for a Vimeo access token, or for downloads to be enabled on the talks, so they can be transcribed.
+- [ ] SSZ's own permission note and a speaker-release line for future talks, which becomes the template for later sanghas. Ask SSZ in the same conversation for a Vimeo access token, or for downloads to be enabled on the talks, so they can be transcribed, and whether a current podcast feed exists: the feed Apple lists stopped in January 2021 and gives no episode lengths, so it supplies audio for only about a dozen talks from 2019 to 2021.
 - [ ] Corpus cleanup: duplicate talks, teacher name variants, non-talk entries, missing Genjokoan paragraphs 5 and 6, the gap between April 2022 and February 2023, and whether the Spotify feed adds or cross-checks anything.
 - [ ] Domain email enabled, which unlocks automated notices and removal alerts.
 - [ ] Translation license conversations, started during v1 because publisher timelines run in months and their answers decide what v3 can contain.

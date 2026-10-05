@@ -1,0 +1,210 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.id, sv.platform::text as \"platform!\", sv.external_id, sv.url, t.title,\n                  sv.description, sv.published_at, t.talk_date, t.duration_s,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\",\n                  t.state::text as \"state!\", t.state_reason, t.talk_type::text as \"talk_type!\",\n                  t.series, t.part, t.duplicate_of, t.speaker_guess, te.display_name as \"teacher?\"\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           left join teacher te on te.id = t.teacher_id\n           order by sv.published_at nulls last, sv.external_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "platform!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "talk_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "talk_date"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "duration_s",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "duration_s"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "has_captions!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "state_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "talk_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 13,
+        "name": "series",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "series"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "part",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "duplicate_of",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "duplicate_of"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "speaker_guess",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "speaker_guess"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "teacher?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4ec578cd8b7bd11bb1af5e3227701060c5131d0e3a2f693166241f81424df11b"
+}

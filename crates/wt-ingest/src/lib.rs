@@ -1,4 +1,18 @@
-//! The `SourceAdapter` trait, the YouTube and storage adapters, and deduplication.
-//!
-//! Placeholder created in M0 so the workspace layout from Spec 00 exists. The milestone that
-//! needs this crate fills it in.
+//! The `SourceAdapter` trait, the Vimeo adapter, deduplication and talk classification
+//! (Spec 03). Discovery records metadata only; nothing here fetches media.
+
+pub mod classify;
+pub mod completeness;
+pub mod config;
+pub mod dates;
+pub mod feedmatch;
+pub mod http;
+pub mod pipeline;
+pub mod podcast;
+pub mod report;
+pub mod robots;
+pub mod rss;
+pub mod source;
+pub mod vimeo;
+
+pub use source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};

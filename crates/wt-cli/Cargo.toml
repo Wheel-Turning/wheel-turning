@@ -23,8 +23,11 @@ sqlx.workspace = true
 wt-core.workspace = true
 wt-db.workspace = true
 wt-registry.workspace = true
+wt-ingest.workspace = true
+toml_edit = "0.23"
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 wt-db = { workspace = true, features = ["test-support"] }
+wiremock = "0.6"

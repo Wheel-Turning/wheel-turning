@@ -90,15 +90,16 @@ Milestones are ordered so the riskiest PRD hypotheses are tested before the inte
 | M0, foundation | Workspace, CI, local Postgres with pgvector in Docker, migration runner, config loader, structured logging | None | CI is green and `wt db migrate` applies every migration to an empty database |
 | M1, AWS baseline | Terraform for network, RDS, S3 buckets, container registry, Fargate service, secrets, and an on-demand batch host | M0 | A deployed `/healthz` answers, and the scratch bucket lifecycle rule is verified by a test object expiring |
 | M2, registry, consent, gate | Teacher, sangha and alias registries, consent records, typestate gate, `servable_passage` view, `wt consent`, `wt audit`, takedown skeleton | M0 | Gate and view tests pass, including a talk with no rights basis failing to index and to appear in the view |
-| M3, discovery and ingestion | Job queue, source adapters, YouTube metadata discovery, deduplication, talk classification, review report | M2 | Discovery on the configured channel yields a deduplicated talk list with states up to `awaiting_consent` |
-| M4, transcript pipeline | Media fetch for cleared talks, captions or ASR, diarization, segmentation, glossary correction, extraction, citation resolution, chunking, embedding, indexing, transcript export | M3 | One cleared talk goes from discovered to ready, and the ten-video segmentation sample report exists |
+| M3, discovery and ingestion | Job queue, source adapters, Vimeo metadata discovery (YouTube once a YouTube source is configured), deduplication, talk classification, review report | M2 | Discovery on the configured channel yields a deduplicated talk list with states up to `awaiting_consent` |
+| M3R, rights ledger and mandated talks | Spec 08's source policy and rights lifecycle (`source_policy`, `rights_event`, `permission_request`, `source_exclusion` and the exclusion checks), then Spec 03's mandated talks: the `talks_basis` switch, mandate clearing in classification, `wt teacher opt-out` with suspension, takedown and person and content-hash exclusions, and notice drafts | M3 | Spec 03's mandated-talks acceptance items pass, with the Spec 08 mandated-sources and rights-lifecycle items they rely on |
+| M4, transcript pipeline | Media fetch for cleared talks, captions or ASR, diarization, segmentation, glossary correction, extraction, citation resolution, chunking, embedding, indexing, transcript export | M3, and M3R before talks of teachers who have not replied are processed | One cleared talk goes from discovered to ready, and the ten-video segmentation sample report exists |
 | Gate A | Python notebook retrieval test over the available cleaned transcripts, rated by the teacher reviewer | M4 | The reviewer rates a majority of test questions faithful and relevant, or the build stops and the PRD is revisited |
 | M5, retrieval and answer page | Query parsing, hybrid retrieval, reranking, selection, answer page without synthesis, timestamped links, texts section | Gate A | The 50-question set runs end to end and teacher counts are recorded per answer |
 | M6, synthesis | Theme generation, deterministic filters, verifier, answer assembly with themes | M5 | The synthesis validator test suite passes and no invented claim survives on the audit sample |
 | M7, dana, access, logging | Dana calculator and panel, invite access, query and answer logging, tester feedback, role-separated log access | M5 | Property tests pass and a tester can follow a dana link from an answer |
 | M8, evaluation and hardening | Evaluation harness, review export and import, nightly audit, complete takedown, runbook | M6, M7 | The 50-question run and a 20-answer claim audit complete without code changes, and takedown leaves zero rows in every store |
 
-M1 can proceed in parallel with M2 and M3. M6 and M7 can proceed in parallel once M5 is done.
+M1 can proceed in parallel with M2 and M3. M3R follows M3's discovery and classification (decision of October 5, 2026): until it lands the system is consent-only, so M4 can start on talks of teachers who have granted consent. M6 and M7 can proceed in parallel once M5 is done.
 
 ## Spec index
 
@@ -108,7 +109,7 @@ Each spec below is a tab here and a file under `docs/specs/` in the repository. 
 | --- | --- | --- |
 | 01 Platform | Local environment, configuration keys, AWS resources in Terraform, CI and deployment | M0, M1 |
 | 02 Data model | Full schema, enums, the serving view, database roles | M0, M2, and every later milestone |
-| 03 Ingestion | Talk state machine, source adapters including YouTube, deduplication, classification, the consent gate, the job queue | M2, M3 |
+| 03 Ingestion | Talk state machine, source adapters including YouTube, deduplication, classification, the consent gate, the job queue, mandated talks | M2, M3, M3R |
 | 04 Transcript pipeline | Transcription, diarization, segmentation, glossary, extraction, citation resolution, chunking, embedding, indexing | M4 |
 | 05 Retrieval and answers | Query parsing, hybrid retrieval, reranking, selection, synthesis, validation, answer assembly, dana | M5, M6, M7 |
 | 06 API and web | Routes, invite access, page structure, logging, feedback | M5, M7 |

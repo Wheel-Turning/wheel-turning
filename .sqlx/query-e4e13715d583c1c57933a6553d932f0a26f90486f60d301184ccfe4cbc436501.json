@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_video set raw = raw || jsonb_build_object('match', $2::jsonb) where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e4e13715d583c1c57933a6553d932f0a26f90486f60d301184ccfe4cbc436501"
+}

@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select external_id, title, published_at,\n                  raw->'item'->'enclosure'->>'url' as enclosure_url,\n                  raw->'match'->>'vimeo_id' as \"vimeo_id!\"\n           from source_video\n           where platform = 'rss' and raw->>'source' = $1 and raw->'match' is not null\n           order by published_at nulls last, external_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "enclosure_url",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "vimeo_id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "9de464279e426ae5944f7625f64319c48d6a22c5330c1b6e0849ac1fe1429f1d"
+}

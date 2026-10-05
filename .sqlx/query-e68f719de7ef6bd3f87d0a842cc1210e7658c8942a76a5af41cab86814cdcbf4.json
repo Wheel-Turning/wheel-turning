@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.id, sv.external_id, t.title, t.state::text as \"state!\", sv.published_at,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\",\n                  exists (select 1 from source_video e where e.platform = 'rss'\n                          and e.raw->'match'->>'vimeo_id' = sv.external_id) as \"matched!\"\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where sv.platform = 'vimeo' and sv.raw->>'source' = any($1)\n             and t.state not in ('excluded', 'withdrawn')\n             and trim(regexp_replace(lower(normalize(t.title, NFKC)), '[^[:alnum:]]+', ' ', 'g')) = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "has_captions!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "matched!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "e68f719de7ef6bd3f87d0a842cc1210e7658c8942a76a5af41cab86814cdcbf4"
+}
