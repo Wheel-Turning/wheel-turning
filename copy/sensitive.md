@@ -1,0 +1,5 @@
+**Acute, full page.** Heading: Please reach out for help now. Text: If you are thinking about hurting yourself or someone else, please contact someone right away. In the United States you can call 988 or text 988, or chat at 988lifeline.org, at any time. If you are in danger now, call 911. Outside the United States, you can find a local line at findahelpline.com. You can also tell a person you trust, a teacher or a doctor today. This site shows what teachers have said. It is not counseling, medical advice or emergency help. Links: Show teachings on facing difficult feelings. Ask something else.
+
+**Distress, banner.** If you are going through something painful, you do not have to carry it alone. In the United States you can call or text 988 at any time. This site shows what teachers have said. It is not counseling.
+
+**Medical, banner.** This site shows what teachers have said. It is not medical advice. For symptoms, medicines or a diagnosis, please talk with a doctor or pharmacist. In an emergency in the United States, call 911.

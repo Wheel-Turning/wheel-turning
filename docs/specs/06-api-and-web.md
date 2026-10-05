@@ -315,3 +315,18 @@ Acceptance criteria for question privacy:
 - [ ] A purge leaves `dana_event` rows with a null `answer_id`, and the daily click count does not change.
 - [ ] `POST /about/delete-my-data` removes every row that belongs to the tester after a confirmation, and does not touch another tester's rows.
 - [ ] `wt report topics` folds any cluster of fewer than 3 questions into "other" and prints no individual question text, and `wt report gaps` lists only cluster-level counts.
+
+## Rendering sensitive questions
+
+- The notice is a labeled region with a heading. On the acute page it is the `h1` and takes focus on load. A banner sits inside the main landmark above the question, is never collapsible or dismissed by a timer, and uses the body text size.
+- `POST /ask` for an acute question responds `200` with the notice page and `Cache-Control: no-store`, not a `303` to a permalink, because no answer exists. The page has no giving panel, no feedback buttons, no "Flag this query" and no permalink.
+- The numbers are links, so "call 988" is a `tel:988` link, "text 988" is an `sms:988` link, and the web addresses are plain links with names that say where they lead.
+- The notices make no claim about confidentiality or outcomes.
+- Nothing on these pages animates, counts down or asks for anything.
+
+Acceptance criteria:
+
+- [ ] The acute page has the notice as its `h1`, focus lands on it, and axe passes with no giving panel or feedback controls present.
+- [ ] The response carries `Cache-Control: no-store`, and no permalink or `answer` row is created.
+- [ ] Banners render inside the main landmark above the question and cannot be dismissed.
+- [ ] The `tel:` and `sms:` links and the two web links exist and are named in the page text.

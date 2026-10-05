@@ -89,7 +89,7 @@ Deterministic filters then run in this order, and each drop is counted and logge
 5. It contains no quotation marks and no teacher alias from the registry.
 6. Grounding. After stopword removal and simple stemming, at least `min_grounding_ratio` (default 0.4) of its content words appear in the union of its cited passages. This ratio is tuned on the claim audit and is a coarse guard against drift, not a proof.
 
-Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_VERIFIER_MODEL` may name a different model and defaults to `WT_LLM_MODEL`.
+Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_MODEL_VERIFY` may name a different model and defaults to `WT_LLM_MODEL`.
 
 Outcomes:
 
@@ -194,3 +194,46 @@ M7, dana calculator
 - [ ] All property tests in the dana section pass with at least 1,000 cases each.
 - [ ] URL template validation rejects a non-HTTPS template and a template whose host differs from the donation URL.
 - [ ] `cargo deny` still passes with no payment dependency in `wt-dana`.
+
+## Sensitive questions
+
+People may bring pain to this tool. A question about despair, a wish to die, a health emergency or harm to others needs a clear pointer to help, and it is not a retrieval problem to optimize. These rules run before retrieval and never affect ranking.
+
+Categories:
+
+- `acute`: stated intent, a plan or means to harm oneself or someone else, or an emergency in progress.
+- `distress`: despair, hopelessness, grief or thoughts of death without stated intent.
+- `medical`: symptoms, medicines, doses, diagnoses or a health emergency.
+- `none`.
+
+Detection runs locally in `wt-retrieve` as `Sensitivity::classify` and works in layers:
+
+1. Rules. A phrase list per category in `config/sensitive.toml`, matched on word boundaries without regard to case, with common misspellings.
+2. Embedding check. The query embedding is compared with exemplar sentences per category in `config/sensitive_exemplars.toml`, written by the owner and, if possible, reviewed by a clinician. Thresholds are `acute_sim`, `distress_sim` and `medical_sim`.
+3. Optional model check. Only when the first two layers disagree, and only if the spend cap allows, a Haiku-class call classifies the query as JSON. It can raise the level and never lower it.
+4. The highest level any layer returns wins. If a layer fails, the result cannot go down. If the embedder is down, the rules decide alone and `sensitivity_degraded` is logged.
+
+| Level | Retrieval | Notice | Summary line | Giving panel | What is stored |
+| --- | --- | --- | --- | --- | --- |
+| acute | Not run | A full page with the support notice | None | None | Counts only. No question text and no answer row |
+| distress | Runs | A banner above the answer | Omitted | Omitted | As the tester's privacy mode says |
+| medical | Runs | A banner above the answer | Omitted | Shown | As the tester's privacy mode says |
+| none | Runs | None | As usual | As usual | As usual |
+
+The acute page offers one link, "Show teachings on facing difficult feelings", which runs the fixed query in `sensitive.curated_query` with the notice on top, no summary line and no giving panel. The page never says a question was detected as anything. Copy is in Spec 09.
+
+Migration `0022_sensitive_questions.sql`:
+
+```sql
+alter table query_log add column sensitive_category text not null default 'none'
+  check (sensitive_category in ('none','distress','medical','acute'));
+```
+
+Acceptance criteria:
+
+- [ ] On a labeled fixture of synthetic questions, acute recall is 100 percent, distress recall is at least 90 percent, and fewer than 5 percent of ordinary practice questions are flagged.
+- [ ] An acute question runs no retrieval, writes a `query_log` row with counts and category only, and writes no question text and no `answer` row, even in `share` mode.
+- [ ] Acute and distress questions never reach topic clusters or the evaluation sets.
+- [ ] A failure in any detection layer never lowers the level, and a down embedder logs `sensitivity_degraded` and falls back to rules.
+- [ ] Distress and medical answers omit the summary line, and distress answers omit the giving panel.
+- [ ] The curated query runs with the notice on top, no summary line and no giving panel.

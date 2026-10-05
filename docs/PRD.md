@@ -108,6 +108,8 @@ The credit line follows the rights basis and never claims more than it has. Wher
 - When a query names a teacher, as in "what has Norman Fischer said about grief," retrieval filters to that teacher and the three-teacher rule is suspended. If the corpus holds little or nothing from them, the system says so and does not substitute someone else. The synthesis line is minimal or absent in this mode, and the dana split collapses to that teacher's sangha.
 - When a query names the author of a loaded text, such as Dogen, the Texts section filters to that author's works and talks retrieve normally with the name removed, so teachers' commentary on that author still appears.
 
+**Sensitive questions.** A question that shows crisis or a health emergency gets a pointer to help before anything else. The most serious cases get a notice instead of results, with no summary line and no giving panel, and their text is never stored. Milder distress and medical questions run normally with a short notice above the answer, and distress answers have no summary line and no giving panel. The site says plainly that it shows what teachers have said and is not counseling or medical advice.
+
 ## Data pipeline and model
 
 The pipeline turns a source into rights-cleared, segmented, glossary-corrected text with metadata. Audio and video are discarded after transcription, and student speech is dropped before anything is stored.
@@ -254,6 +256,8 @@ Risks are ordered by how much they can sink the product and how cheaply they can
 | A named-teacher answer reads as that teacher's position | Verbatim passages carry the answer, and synthesis is minimal or absent in this mode |
 | Fetching media or captions at scale conflicts with platform terms | Official APIs for metadata, third-party fetching off by default, media from SSZ storage or the owner's authorized route, polite fetching, and counsel review |
 | Warm relationships make an honest no hard to give | Make declining a one-line reply and ask reviewers for unflattering critique |
+
+One more risk sits outside the table. A person in crisis may use the tool as if it were care. The sensitive-question rules lead with places to find help, leave out the summary line and the giving panel, and keep the text of the most serious cases out of the logs.
 
 ## Open items and dependencies
 
