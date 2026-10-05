@@ -377,12 +377,12 @@ role = "audio_only"
 
 Acceptance criteria for the SSZ sources:
 
-- [ ] Vimeo discovery returns the same talk set from a recorded API fixture and from a recorded talks-page fixture with oEmbed responses.
+- [x] Vimeo discovery returns the same talk set from a recorded API fixture and from a recorded talks-page fixture with oEmbed responses. (`wt-ingest/tests/vimeo.rs` compares id, title, length, upload time and address; captions are left out, since oEmbed cannot see them.)
 - [x] Talks-page discovery obeys `robots.txt` and makes no request to a disallowed path.
 - [x] Feed episodes match Vimeo talks by title, date and duration, an `audio_only` source never creates a talk, and a matched talk uses the enclosure with no Vimeo download. (`wt-ingest/tests/feed.rs`: the matched talk's media route is the enclosure; downloading it is M4's fetch.)
-- [ ] With no usable media route a talk stays at `needs_review` with reason `no_media` and nothing is fetched.
+- [ ] Deferred to M4 with the fetch methods (decision of October 5, 2026; tracked in Spec 04's acceptance criteria): With no usable media route a talk stays at `needs_review` with reason `no_media` and nothing is fetched.
 - [x] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation. (Confirmation is `--yes`.)
-- [ ] Each `link_style` renders the right link, and `none` renders the "starts at" text.
+- [ ] Deferred to M5 with answer assembly (decision of October 5, 2026; tracked in Spec 05's acceptance criteria): Each `link_style` renders the right link, and `none` renders the "starts at" text.
 - [x] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.
 
 Feed finding of October 5, 2026. The feed Apple lists for SSZ (id 1472964846) is `https://feeds.feedburner.com/SeattleSotoZen`. It was last built on February 15, 2021 and holds 50 episodes from September 2019 to January 17, 2021, with no `itunes:duration` and enclosure lengths of zero, though the audio file names carry recording dates. Matched by recording date it supplies audio for 13 talks. Route (a) therefore covers little of the archive, and most SSZ audio needs route (b) or (c); whether a current feed exists is asked in the same conversation as the Vimeo token (PRD open items).
@@ -404,7 +404,7 @@ Read from the full list of the SSZ Vimeo account after loading every page, and c
 
 Acceptance criteria:
 
-- [ ] The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all.
+- [ ] Waiting on SSZ's Vimeo token with the private scope (decision of October 5, 2026; not part of M3's exit): The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all. Without the token, discovery and the saved account page give the 278 and the completeness check names the 6.
 - [x] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
 - [x] Clips under 5 minutes arrive as excluded with the reason `too_short`.
 - [x] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs. (`wt ingest completeness` with a saved account page, run on October 5, 2026: 807610906, 805297241, 802789038, 802348391, 802312541 and 672974907.)

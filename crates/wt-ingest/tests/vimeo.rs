@@ -303,3 +303,112 @@ async fn the_completeness_check_reads_page_ids_and_needs_a_token_for_the_account
         "no token, no account list"
     );
 }
+
+/// What both discovery modes must agree on for a talk. Captions are left out: oEmbed cannot see
+/// them, so only the API reports them.
+fn talk_set(
+    videos: &[wt_ingest::DiscoveredVideo],
+) -> Vec<(String, String, Option<i32>, String, String)> {
+    let mut set: Vec<_> = videos
+        .iter()
+        .map(|v| {
+            (
+                v.external_id.clone(),
+                v.title.clone(),
+                v.duration_s,
+                v.published_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                v.url.clone(),
+            )
+        })
+        .collect();
+    set.sort();
+    set
+}
+
+#[tokio::test]
+async fn the_api_and_the_talks_page_yield_the_same_talk_set() {
+    let talks: [(u64, &str, i32, &str); 3] = [
+        (
+            400_000_001,
+            "Fixture talk: Uji, Part 1",
+            2400,
+            "2021-10-17T18:00:00+00:00",
+        ),
+        (
+            400_000_002,
+            "10-24-21 Fixture Sunday Talk",
+            2700,
+            "2021-10-24T18:00:00+00:00",
+        ),
+        (
+            400_000_003,
+            "Fixture Zazenkai Talk",
+            1980,
+            "2021-11-06T18:00:00+00:00",
+        ),
+    ];
+    let server = MockServer::start().await;
+
+    // The account list through the API, on one page.
+    let items: Vec<_> = talks
+        .iter()
+        .map(|(id, title, secs, at)| api_item(*id, title, *secs, at, 0))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/me/videos"))
+        .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "total": 3, "page": 1, "per_page": 100,
+            "paging": { "next": null, "previous": null },
+            "data": items,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // The talks page embedding the same videos, in another order, described by oEmbed.
+    mount_site(&server, Some("User-agent: *\nDisallow: /wp-admin/\n")).await;
+    Mock::given(method("GET"))
+        .and(path("/talks-page/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"<html><body>
+                 <div class="cvm-playlist-item" data-video_id="400000003"></div>
+                 <iframe src="https://player.vimeo.com/video/400000001?h=x"></iframe>
+                 <a href="https://vimeo.com/400000002">Sunday</a>
+               </body></html>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    for (id, title, secs, at) in talks {
+        // oEmbed gives the upload time without a zone, in UTC.
+        let uploaded = at.replace('T', " ").replace("+00:00", "");
+        Mock::given(method("GET"))
+            .and(path("/api/oembed.json"))
+            .and(query_param(
+                "url",
+                format!("https://vimeo.com/{id}").as_str(),
+            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(oembed(id, title, secs, &uploaded)),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let api = VimeoAdapter::new(
+        "fixture-vimeo",
+        Some(Secret::new(TOKEN)),
+        None,
+        endpoints(&server),
+    )
+    .unwrap();
+    let page = format!("{}/talks-page/", server.uri());
+    let site = VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+
+    let from_api = talk_set(&api.discover(None).await.unwrap());
+    let from_site = talk_set(&site.discover(None).await.unwrap());
+    assert_eq!(from_api.len(), 3);
+    assert_eq!(from_api, from_site);
+}

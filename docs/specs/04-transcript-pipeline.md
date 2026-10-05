@@ -189,6 +189,7 @@ After a batch, run `ANALYZE passage`. HNSW search settings are applied per query
 M4 is done when every item below passes in CI with fakes, and one synthetic talk has run through a real worker, a real Postgres and real ONNX models.
 
 - [ ] `SourceAdapter` gains `fetch_media` and `fetch_captions`, taking a `&Talk<Consented>` (Spec 03). With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts. (Moved from M3, decision of October 5, 2026.)
+- [ ] With no usable media route (Spec 03, Seattle Soto Zen sources item 2), a talk stays at `needs_review` with reason `no_media` and nothing is fetched. (Moved from M3, decision of October 5, 2026.)
 - [ ] `ScratchGuard` deletes scratch on success, on a returned error and on panic. A test injects each failure.
 - [ ] After an `audio` job finishes in any outcome, nothing remains under `WT_SCRATCH_DIR` for that talk.
 - [ ] The stored transcript JSON contains no words from a non-teacher speaker. A test with a `FakeDiarizer` that returns a student turn proves it, and also checks no `qa_student` row can exist.
