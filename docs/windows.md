@@ -43,7 +43,7 @@ Run these in PowerShell.
 | Vulkan SDK | `winget install KhronosGroup.VulkanSDK` | The Vulkan build of whisper.cpp | Tested (1.4.363.0) |
 | Python 3.12 and uv | `winget install astral-sh.uv`, then `uv python install 3.12` | OpenVINO runtime and encoder conversion | Tested. If uv reports a missing version link, use `uv python install 3.12 --reinstall` and point `uv venv` at the full path of the downloaded `python.exe`. |
 | ffmpeg | `winget install Gyan.FFmpeg` | Audio conversion for the worker | Tested (9.0.2) |
-| AWS CLI v2 and the Session Manager plugin | `winget install Amazon.AWSCLI`, `winget install Amazon.SessionManagerPlugin` | Signing in, and the SSM port forward the worker uses to reach the database | Installed. The port forward is not tested yet. |
+| AWS CLI v2 and the Session Manager plugin | `winget install Amazon.AWSCLI`, `winget install Amazon.SessionManagerPlugin` | Signing in, and the SSM port forward the worker uses to reach the database | Installed: AWS CLI 2.34.36, Session Manager plugin 1.2.814.0 (`session-manager-plugin --version`, October 4, 2026). The port forward against AWS is not tested yet. |
 | Rust | `winget install Rustlang.Rustup` | Building `wt` natively for the worker | Installed |
 
 Scoop works too. There is no Homebrew on Windows.
@@ -86,7 +86,31 @@ Terraform, the AWS CLI v2, the Session Manager plugin and the GitHub CLI come fr
 | `scripts/check-deny-bans.sh` | `bash scripts/check-deny-bans.sh` | Run it in WSL 2 or Git Bash |
 | Paths in docs and manifests | Forward slashes | Forward slashes work in PowerShell and the tools used here |
 
+## Worker setup and the port forward
+
+The worker on the PC reaches the database through an SSM port forward via the batch host (Spec 01). `scripts/worker-setup.ps1` sets it up from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\worker-setup.ps1
+```
+
+1. **Tools.** It stops with an install command if the Session Manager plugin or the AWS CLI is missing. `-CheckOnly` runs only this step.
+2. **Sign-in.** It stops if the `wheel-turning` profile is not signed in. Run `aws sso login --profile wheel-turning` first.
+3. **Batch host and database.** It finds the running instance tagged `dg-v1-batch` and the `dg-v1` database. It stops if the batch host is not running.
+4. **Forward.** It opens the forward in its own PowerShell window, from `localhost:5433` to the database's port 5432. Port 5432 stays free for the dev database in Docker; `-LocalPort` picks another.
+5. **Connection string.** It prints the `DATABASE_URL` for `.env`, with `sslmode=require`, because the database requires TLS. The password is the secret `dg-v1/db_dg_pipeline_login`, which the script never reads.
+
+The command in the forward window:
+
+```powershell
+aws ssm start-session --profile wheel-turning --region us-east-2 --target <batch host instance id> --document-name AWS-StartPortForwardingSessionToRemoteHost --parameters host=<database address>,portNumber=5432,localPortNumber=5433
+```
+
+Close that window to end the forward, then stop the batch host (Spec 07 runbook).
+
+Status: the tool checks and the window launch were tested on October 4, 2026. The forward has not been run against AWS.
+
 ## Open points
 
 - **Clone layout.** Spec 01 puts the clone inside WSL 2, and Spec 04 builds the worker natively, so the owner keeps two clones. Spec 01 does not yet say how the two share `.env` and models.
-- **Port forward.** The worker reaches the database through an SSM port forward using the owner's SSO profile. The command belongs here once it is tested.
+- **Port forward.** `scripts/worker-setup.ps1` is not yet run against AWS. Mark it tested once a forward has opened and the worker has connected.
