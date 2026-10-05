@@ -81,14 +81,21 @@ impl AuditSettings {
     }
 }
 
-/// The servable predicate, the same one `servable_passage` uses. Kept here once so consent
-/// drift and serving parity test the view against an independent statement of the rule.
-const CONSENTED_READY: &str = "t.state = 'ready'
+/// A talk whose rights still allow its text to be stored: a valid basis, a known holder, a
+/// speaker and a sangha, and not excluded or withdrawn. It says nothing about the pipeline
+/// state, so quarantined and partly indexed talks keep their passages without drifting.
+const RIGHTS_VALID: &str = "t.state not in ('excluded', 'withdrawn')
   and ((t.rights_basis = 'speaker_consent' and t.consent_status = 'granted')
     or (t.rights_basis = 'license' and exists (
           select 1 from license_evidence le where le.id = t.license_evidence_id and le.allowed)))
   and t.rights_holder is not null and lower(t.rights_holder) <> 'unknown'
   and t.teacher_id is not null and t.sangha_id is not null";
+
+/// The servable predicate, stated independently of `servable_passage` so serving parity tests
+/// the view against the rule: a ready talk with valid rights.
+fn consented_ready() -> String {
+    format!("t.state = 'ready' and {RIGHTS_VALID}")
+}
 
 /// The five series named in the PRD; a ready talk whose title names one but has no series set
 /// is a metadata gap. M3 replaces this with `config/series.toml`.
@@ -105,7 +112,7 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
             Severity::Fail,
             &format!(
                 "select p.id::text from passage p join talk t on t.id = p.talk_id
-                 where not ({CONSENTED_READY})"
+                 where not ({RIGHTS_VALID})"
             ),
         )
         .await?,
@@ -115,7 +122,8 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         .fetch_one(pool)
         .await?;
     let expected: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "select count(*) from passage p join talk t on t.id = p.talk_id where {CONSENTED_READY}"
+        "select count(*) from passage p join talk t on t.id = p.talk_id where {}",
+        consented_ready()
     )))
     .fetch_one(pool)
     .await?;

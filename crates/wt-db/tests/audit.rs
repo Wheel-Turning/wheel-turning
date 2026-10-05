@@ -343,3 +343,42 @@ async fn warn_thresholds_come_from_settings() {
     .unwrap();
     only(&strict, &["donation_links", "consent_staleness"]);
 }
+
+#[tokio::test]
+async fn quarantined_and_partly_indexed_talks_keep_passages_without_drift() {
+    let fx = common::start().await;
+    let quarantined = clean(&fx.pool).await;
+    let indexing = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    make_ready(&fx.pool, indexing).await;
+
+    sqlx::query(
+        "update talk set state = 'quarantined', quarantine_reason = 'fixture' where id = $1",
+    )
+    .bind(quarantined.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query("update talk set state = 'indexing' where id = $1")
+        .bind(indexing.as_uuid())
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &[]);
+    assert_eq!(common::servable(&fx.pool).await, 0, "neither is served");
+}
+
+#[tokio::test]
+async fn consent_drift_fails_for_an_excluded_talk_that_kept_its_passages() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    wt_db::consent::exclude_talk(&fx.pool, t, "held out by the speaker", ACTOR)
+        .await
+        .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["consent_drift"]);
+    assert!(report.failed());
+}
