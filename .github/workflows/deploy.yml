@@ -253,6 +253,8 @@ jobs:
 
       # The circuit breaker rolls a failed revision back on its own, and the service is then
       # stable again on the old image, so a stable service alone does not prove the deploy.
+      # services-stable returns once the task count settles, a little before ECS marks the
+      # rollout COMPLETED, so this polls the rollout state for up to 10 minutes.
       - name: The service runs the new image
         working-directory: ${{ env.TF_DIR }}
         env:
@@ -261,15 +263,22 @@ jobs:
           set -euo pipefail
           cluster="$(terraform output -raw cluster_name)"
           service="$(terraform output -raw service_name)"
-          primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
-            --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
-          rollout="$(jq -r .rolloutState <<<"$primary")"
+          for attempt in $(seq 1 60); do
+            primary="$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+              --query "services[0].deployments[?status=='PRIMARY'] | [0]" --output json)"
+            rollout="$(jq -r .rolloutState <<<"$primary")"
+            if [[ "$rollout" == "COMPLETED" || "$rollout" == "FAILED" ]]; then
+              break
+            fi
+            echo "primary deployment is $rollout (check $attempt of 60), waiting"
+            sleep 10
+          done
           task_def="$(jq -r .taskDefinition <<<"$primary")"
           image="$(aws ecs describe-task-definition --task-definition "$task_def" \
             --query "taskDefinition.containerDefinitions[?name=='web'] | [0].image" --output text)"
           echo "primary deployment: $task_def ($rollout), image $image"
           if [[ "$rollout" != "COMPLETED" ]]; then
-            echo "::error::the primary deployment is $rollout, not COMPLETED"
+            echo "::error::the primary deployment is $rollout, not COMPLETED: $(jq -r .rolloutStateReason <<<"$primary")"
             exit 1
           fi
           if [[ "$image" != *":${NEW_TAG}" ]]; then
