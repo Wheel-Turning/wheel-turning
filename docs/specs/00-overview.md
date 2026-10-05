@@ -6,7 +6,7 @@ Oct 2, 2026 · @Alex
 
 v1 is a private, text-only retrieval demo over about 225 SSZ talks (roughly 140 hours, an estimated 8,000 to 15,000 passages) that exists to answer three questions fast: does retrieval return passages a teacher would stand behind, does synthesis stay inside what teachers said, and does anyone follow a dana link. Everything in this spec set serves those three tests and nothing else.
 
-The build is done when a tester can open an invite link, ask a situational question, and get a page with grouped verbatim passages, a verified synthesis line, source links that land on the right moment, a dana panel, and a logged answer, all drawn only from talks whose speakers have consented. It is also done only when the evaluation harness can run the 50-question set and the claim audit without code changes.
+The build is done when a tester can open an invite link, ask a situational question, and get a page with grouped verbatim passages, a verified synthesis line, source links that land on the right moment, a dana panel, and a logged answer, all drawn only from talks with a recorded rights basis: the teacher's permission, a verified license, or the owner's mandate for a teacher who has not opted out. It is also done only when the evaluation harness can run the 50-question set and the claim audit without code changes.
 
 This document set is written to be executed by Claude Code. Each spec tab maps to a file under `docs/specs/` in the repository, states what it implements, and ends with acceptance criteria written as checkable items. Where the PRD or the architectural north star already fixes a rule, the spec points to it and does not restate the reasoning.
 
@@ -22,10 +22,10 @@ Claude Code builds to these defaults without asking. Each has an escape hatch be
 | Job queue | A Postgres table with `FOR UPDATE SKIP LOCKED` and a small custom worker | No extra infrastructure | `apalis` if the custom worker grows |
 | Embeddings | bge-m3, 1024 dimensions, int8 ONNX through `ort`, run locally | Transcripts do not leave the infrastructure for retrieval | `Embedder` trait allows a hosted API |
 | Reranker | bge-reranker-v2-m3 in ONNX through `ort`, with a smaller model as a latency fallback | A per-passage relevance threshold is needed | `Reranker` trait |
-| Transcription | Existing captions when present, otherwise whisper large-v3 through `whisper-rs` on a batch host | Audio is transient and 140 hours is small | `Transcriber` trait |
+| Transcription | Existing captions when present, otherwise whisper large-v3 through `whisper-rs` on the owner's Windows PC | Audio is transient and 140 hours is small | `Transcriber` trait |
 | Diarization | pyannote in a Python HTTP sidecar behind a `Diarizer` trait | No mature Rust equivalent | sherpa-onnx in process after the ten-video sample decides it |
 | Language model | Claude API through `reqwest`, structured JSON output, temperature 0, model name read from `DG_LLM_MODEL` | Extraction, classification help, synthesis and verification | `LlmClient` trait |
-| Hosting | AWS with Terraform: RDS Postgres, ECS Fargate for the web service, S3, Secrets Manager. GPU work runs on an on-demand EC2 batch host or the founder's machine. | The builder wants AWS skills and the footprint is small | Any Postgres host works, since nothing else is AWS-specific |
+| Hosting | AWS with Terraform: RDS Postgres, ECS Fargate for the web service, S3, Secrets Manager. Transcription runs on the owner's Windows PC, which reaches RDS through an SSM port forward via an on-demand EC2 batch host. | The builder wants AWS skills and the footprint is small | Any Postgres host works, since nothing else is AWS-specific |
 | Tester access | Invite tokens issued by the CLI, stored hashed, exchanged for a session cookie | Accounts are out of scope | Identity-aware proxy later |
 | Units | Money in integer US cents. Media offsets in integer milliseconds. Timestamps in UTC. | Avoids rounding and timezone bugs | None |
 
@@ -88,10 +88,10 @@ Milestones are ordered so the riskiest PRD hypotheses are tested before the inte
 | Milestone | Deliverable | Depends on | Done when |
 | --- | --- | --- | --- |
 | M0, foundation | Workspace, CI, local Postgres with pgvector in Docker, migration runner, config loader, structured logging | None | CI is green and `dg db migrate` applies every migration to an empty database |
-| M1, AWS baseline | Terraform for network, RDS, S3 buckets, container registry, Fargate service, secrets, and an on-demand GPU batch host | M0 | A deployed `/healthz` answers, and the scratch bucket lifecycle rule is verified by a test object expiring |
-| M2, registry, consent, gate | Teacher, sangha and alias registries, consent records, typestate gate, `servable_passage` view, `dg consent`, `dg audit`, takedown skeleton | M0 | Gate and view tests pass, including an unconsented talk failing to index and to appear in the view |
+| M1, AWS baseline | Terraform for network, RDS, S3 buckets, container registry, Fargate service, secrets, and an on-demand batch host | M0 | A deployed `/healthz` answers, and the scratch bucket lifecycle rule is verified by a test object expiring |
+| M2, registry, consent, gate | Teacher, sangha and alias registries, consent records, typestate gate, `servable_passage` view, `dg consent`, `dg audit`, takedown skeleton | M0 | Gate and view tests pass, including a talk with no rights basis failing to index and to appear in the view |
 | M3, discovery and ingestion | Job queue, source adapters, YouTube metadata discovery, deduplication, talk classification, review report | M2 | Discovery on the configured channel yields a deduplicated talk list with states up to `awaiting_consent` |
-| M4, transcript pipeline | Media fetch for cleared talks, captions or ASR, diarization, segmentation, glossary correction, extraction, citation resolution, chunking, embedding, indexing, transcript export | M3 | One consented talk goes from discovered to ready, and the ten-video segmentation sample report exists |
+| M4, transcript pipeline | Media fetch for cleared talks, captions or ASR, diarization, segmentation, glossary correction, extraction, citation resolution, chunking, embedding, indexing, transcript export | M3 | One cleared talk goes from discovered to ready, and the ten-video segmentation sample report exists |
 | Gate A | Python notebook retrieval test over the available cleaned transcripts, rated by the teacher reviewer | M4 | The reviewer rates a majority of test questions faithful and relevant, or the build stops and the PRD is revisited |
 | M5, retrieval and answer page | Query parsing, hybrid retrieval, reranking, selection, answer page without synthesis, timestamped links, texts section | Gate A | The 50-question set runs end to end and teacher counts are recorded per answer |
 | M6, synthesis | Theme generation, deterministic filters, verifier, answer assembly with themes | M5 | The synthesis validator test suite passes and no invented claim survives on the audit sample |
@@ -120,7 +120,7 @@ Several PRD open items gate real data, not software. The code is built so each o
 
 | Blocker | Owner | What the code does while it is open |
 | --- | --- | --- |
-| Speaker consent, Kanshin first | Founder | Gate refuses to fetch, transcribe or index any talk whose teacher lacks a granted consent record. Development runs on synthetic fixtures. |
+| Speaker consent, Kanshin first | Founder | Gate refuses to fetch, transcribe or index any talk without a recorded rights basis: granted consent, a verified license, or the owner's mandate for a teacher who has not opted out. Development runs on synthetic fixtures. |
 | Rights holder per talk | Founder | `rights_holder` null or `unknown` blocks the cleared state and indexing |
 | Counsel review of YouTube caption ingestion, text-only storage, excerpt display, dana routing | Founder with counsel | Third-party fetching (`yt-dlp`) is disabled by default behind `DG_ALLOW_THIRD_PARTY_FETCH`. Metadata comes from the official YouTube Data API. Media comes from SSZ storage or the channel owner's authorized route. |
 | Language-model provider terms with zero retention confirmed | Founder | `DG_LLM_REAL_DATA_OK` defaults to false, and any call carrying real transcript text is refused until it is set. Extraction and synthesis run on fixtures only. |
@@ -129,7 +129,7 @@ Several PRD open items gate real data, not software. The code is built so each o
 
 A manual look at ten SSZ videos to check whether files are trimmed is an inspection by a person. It produces notes, not stored text, and does not need the gate.
 
-Licensed corpus. The PRD lists open-license material and other sanghas as out of scope for v1, and this build amends that. Soto sanghas that publish talks under a license the project may rely on can be added beside consented SSZ talks, cleared by license evidence instead of speaker consent. The rules, commands and tests are in the Licensed sources section of the ingestion spec. Two items need a person: reading each sangha's license statement before approving it, and counsel's answer on noncommercial and no-derivatives variants, which the build rejects by default.
+Licensed corpus. The PRD includes other Soto sanghas' talks in v1, under a license or the owner's mandate. Soto sanghas that publish talks under a license the project may rely on can be added beside SSZ talks, cleared by license evidence instead of speaker consent. The rules, commands and tests are in the Licensed sources section of the ingestion spec. Two items need a person: reading each sangha's license statement before approving it, and counsel's answer on noncommercial and no-derivatives variants, which the build rejects by default.
 
 Texts and reference assets. Foundational texts such as the Dhammapada and the Platform Sutra, and background material such as glossaries and lineage charts, are specified in 08 Texts and reference. Texts are searchable in their own section and never count as teachers. Reference assets feed the pipeline and are never shown as results.
 
@@ -154,3 +154,5 @@ Items that are decided but deliberately not built or enabled in v1.
 - Language-model cap: 25 dollars a month, with 60 in the first ingestion month, set out in the transcript pipeline spec.
 - Question privacy: a tester chooses whether questions are kept, and can delete them, set out in the web spec.
 - Alerts: an AWS notification to the owner's address for removal requests, accessibility reports and failures.
+
+Development machine: a Windows PC with WSL 2, an Intel Arc integrated GPU and 16 GB of RAM, and no Mac or NVIDIA card. The Windows notes in the platform spec and the hardware section in the transcript pipeline spec set the consequences: Unix-style tooling inside WSL 2, line-ending rules for the repository, a transcription worker built natively on Windows, and a measured decision between running locally and renting a GPU machine.

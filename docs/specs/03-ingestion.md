@@ -6,7 +6,7 @@ Implements M2 (registry, consent, gate) and M3 (discovery and ingestion). It tak
 
 Every talk has one state in `talk.state`. The pipeline states are the eight stages between `cleared` and `ready` and are listed in Spec 02.
 
-&#91;embedded content: talk state machine · 10 states, 1 gate\]
+Discovered moves to Awaiting consent after classification. Awaiting consent moves to Cleared when a rights basis is recorded (consent, a verified license or the owner's mandate) and the rights holder is known. Cleared moves through fetch, transcribe, diarize, segment, correct, extract, resolve and index to Ready. Needs review holds a talk whose speaker or media is unclear and returns it to Awaiting consent or sends it to Excluded. Excluded covers duplicates, non-talks, declines and held-out talks. Quarantined takes a talk out of serving when a check fails, until it is repaired and rechecked. Withdrawn follows a takedown, and a stub row blocks re-ingest.
 
 Only the accented arrow lets a talk into the pipeline, and each pipeline job rechecks the gate before it runs. Quarantine holds a talk out of serving without deleting anything, and a talk returns to the pipeline after repair and a passing re-check. Takedown is the only route to `withdrawn`.
 
@@ -125,7 +125,7 @@ Behavior:
 2. The idempotency key is `{kind}:{talk_id}:{input_hash}`, where the input hash covers the stage's inputs (for example the current transcript hash and the glossary version). Enqueue uses `on conflict do nothing`, so re-enqueueing unchanged work is a no-op and changed inputs produce a new job.
 3. On failure with attempts left, the job returns to `queued` with `run_at` pushed back by an exponential delay of 30 seconds doubled per attempt and capped at one hour, and `last_error` is stored. After `max_attempts` the job becomes `dead` and the talk keeps its stage state with `state_reason` set to the error summary.
 4. A reaper returns `running` jobs whose `locked_at` is older than `job_lock_timeout_s` (default 7200) to `queued`. Long jobs such as ASR refresh `locked_at` every minute.
-5. `dg worker --kinds audio --concurrency 1` runs only the named kinds, so the GPU host takes the heavy stages and any other machine takes the rest.
+5. `dg worker --kinds audio --concurrency 1` runs only the named kinds, so the owner's PC takes the audio stages and any other machine takes the rest.
 6. `dg pipeline retry --talk <id>` re-enqueues the failed stage. `dg pipeline advance` enqueues `audio` for every talk in `cleared`.
 
 ## Commands, configuration and acceptance
@@ -158,7 +158,7 @@ Acceptance criteria for M3:
 
 ## Licensed sources
 
-This section amends the PRD, which lists open-license material and other sanghas as out of scope for v1. Talks that a Soto sangha itself publishes under a license we may rely on can enter the v1 corpus beside consented SSZ talks, which gives the evaluation more voices. Speaker consent remains the basis for SSZ talks. A licensed talk is cleared by license evidence instead. The demo stays private.
+This section implements the PRD's inclusion of other Soto sanghas' talks under a license. Talks that a Soto sangha itself publishes under a license we may rely on can enter the v1 corpus beside SSZ talks, which gives the evaluation more voices. SSZ talks are cleared by speaker consent or by the owner's mandate, as the Mandated talks section describes. A licensed talk is cleared by license evidence instead. The demo stays private.
 
 What counts as evidence. A publisher's statement of a named license, on a page, in a feed or in a video's license flag. Being downloadable, or having no terms of service, is not a license, because copyright applies by default and silence is not permission. The Everyday Zen Foundation is already an open item in the PRD. The first license read found the opposite of a license: the site footer reserves all rights, so that source stays gated until the foundation or Norman Fischer grants permission in writing. The same check found that the San Francisco Zen Center archive says its talks are published under a Creative Commons license without naming the variant in what was visible, and that Dharma Seed states Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 across its site. The capture step below records exactly what each page says.
 
@@ -244,7 +244,7 @@ Read from public pages by Claude, not yet captured with `dg license capture` and
 
 ## Mandated talks
 
-Decision of October 3, 2026. Recorded talks from teachers who have not replied are used by default on the project owner's mandate, and a teacher can leave at any time. This amends the PRD, whose rule is that no talk is indexed without its speaker's consent, and it turns the consent invitation into a notice that also invites explicit permission. Kanshin's view is being sought and may change the decision, so the behavior sits behind one switch that can be turned back with a single command.
+Decision of October 3, 2026. Recorded talks from teachers who have not replied are used by default on the project owner's mandate, and a teacher can leave at any time. This is the PRD's use, ask, record and leave model, confirmed by the owner on October 4, 2026: talks are used first, and each teacher then receives a notice that asks for formal permission and offers a one-message way out. Kanshin's view is being sought and may change the decision, so the behavior sits behind one switch that can be turned back with a single command.
 
 What does not change. Student speech is never stored, indexed or shown, whatever the basis. A talk still needs a resolved speaker, a known rights holder and a registered sangha. A speaker who has declined or withdrawn is never used. Honest labeling holds: the page never says a mandated talk is used with the teacher's permission.
 
@@ -380,3 +380,25 @@ Acceptance criteria for the SSZ sources:
 - [ ] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation.
 - [ ] Each `link_style` renders the right link, and `none` renders the "starts at" text.
 - [ ] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.
+
+## SSZ inventory of October 5, 2026
+
+Read from the full list of the SSZ Vimeo account after loading every page, and compared with the SSZ talks page. The importer's completeness report must reproduce these figures within a small tolerance, and any change is explained.
+
+- The account's public list shows 278 videos, 171.2 hours. The SSZ site embeds 6 more Vimeo videos that this list lacks, so at least 284 exist, 175.1 hours. The count of 280 on the Vimeo page may include 2 of them.
+- 258 are talk-class and 257 are distinct, because Uji Part 4 was uploaded twice. They total about 160 hours. Kanshin gave 158 of them, 62 percent, and 38 have no speaker named, which would raise her share toward 75 percent if most are hers.
+- 14 recordings need review before any is used: 11 untitled `zoom_0` recordings (8.4 hours, all from 2020 and January 2021), and 3 Q&A sessions (1.8 hours) that include student voices.
+- 5 are not talks: the 11-second Buddhist Quote, a 28-second clip, two Zen Protocols clips and Part 2 of a guest talk, all under 5 minutes. One more, the Antiracist 12 Steps session, is excluded by decision.
+- 58 videos are on Vimeo and not on the SSZ talks page. All date from May 2017 to January 2021. They are 40 talk-class recordings, the 11 untitled recordings, 3 Q&As and 4 short clips, about 36.6 hours.
+- 5 talks play on the SSZ site but are missing from the account's public list: February 12 to March 12, 2023, with Vimeo IDs 802312541, 802348391, 802789038, 805297241 and 807610906. They are probably set to hide from the account page, and a token with the private scope should list them. They bring the talk count to 262 distinct talks and about 163 hours.
+- The archive has no uploads from May 2022 to February 2023. The gap is in Vimeo itself, not just on the website.
+- The talks page lists 3 exact duplicate rows. Discrimination and Suffering exists as two separate Vimeo uploads, 672990540 in the public list and 672974907 on the SSZ site only.
+- 3 talks are audio only.
+- Possible duplicates to check: two recordings on May 31, 2020 (35:03 and 37:23) and two on June 14, 2020 (41:09 and 46:22), and two titled Facing the Jewel Mirror on January 18 and 25, 2026.
+
+Acceptance criteria:
+
+- [ ] The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all.
+- [ ] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
+- [ ] Clips under 5 minutes arrive as excluded with the reason `too_short`.
+- [ ] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs.

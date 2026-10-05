@@ -180,7 +180,7 @@ create table transcript (
 create unique index transcript_current_uq on transcript (talk_id) where is_current;
 ```
 
-The `past_gate_requires_consent` constraint is the database half of the consent gate. A talk cannot be moved into any state at or beyond `cleared` unless consent is granted, the speaker and sangha are known, and the rights holder is known. The Rust typestate in Spec 03 is the other half.
+The `past_gate_requires_consent` constraint is the database half of the consent gate. A talk cannot be moved into any state at or beyond `cleared` unless consent is granted, the speaker and sangha are known, and the rights holder is known. The Rust typestate in Spec 03 is the other half. This is the M0 baseline. Spec 03's Mandated talks section adds `mandate` to `rights_basis` (migration 0015) and rewrites this constraint and `servable_passage` (migration 0016), so a talk can also clear on the owner's mandate.
 
 ## Segment, passage, citation and work tables
 
@@ -513,3 +513,125 @@ Acceptance criteria, each as a database integration test that connects as the na
 - [ ] `dg_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows.
 - [ ] A vector query on `servable_passage` uses the HNSW index in `EXPLAIN` on a table with 10,000 synthetic rows.
 - [ ] `.sqlx` offline query data is committed and `cargo sqlx prepare --check` passes.
+
+## Donation links and verification
+
+The give button and the dana split rely on a donation page that belongs to the sangha and accepts gifts, so the registry treats every link as something to check now and recheck later.
+
+Migration `0021_donation_links.sql`:
+
+```sql
+alter table sangha add column donation_kind text not null default 'none'
+  check (donation_kind in ('page','contact','none'));
+alter table sangha add column donation_note text;
+alter table sangha add column donation_checked_at timestamptz;
+alter table sangha add column donation_checked_by text;
+alter table sangha add constraint donation_verified_needs_page
+  check (not donation_verified or (donation_kind = 'page' and donation_url is not null));
+```
+
+Procedure:
+
+1. The registry is seeded from `registry/sanghas.toml`, below. Every link starts unverified.
+2. `wt sangha check-links` checks each link automatically. It requires HTTPS, a final host that matches the registered host, a success status within three redirects, no password field on the page, and page text that contains one of give, donate, dana, support or contribute. It prints a table, writes `reports/donation_links.csv`, and never sets `donation_verified`.
+3. A person opens each page and decides. `wt sangha verify --key <key> --by "<name>"` sets the flag with the date and name when the kind is `page`. `wt sangha unverify --key <key> --reason "<text>"` clears it.
+4. The registry stores organization pages and never a personal email address. A sangha that takes gifts only through a person's email gets kind `contact`, is never verified, shows no give button, and the dana panel explains why. A contact page is kind `contact`, and a homepage is not a donation page. The owner may send that sangha the notice and ask it to publish a giving page.
+5. Every `link_review_days` (default 90) the audit warns and `check-links` reruns. A link that fails two checks in a row becomes unverified, with the reason in `donation_note`.
+6. None of the seeded pages is known to accept an amount in its address, so `donation_url_template` stays empty and the suggested amount appears as text.
+7. A page that looks like a teacher's own dana page is stored as that teacher's `second_donation_url` until the owner confirms it also takes gifts for the sangha.
+
+```toml
+# registry/sanghas.toml. All start with donation_verified = false.
+
+[[sangha]]
+key = "ssz"
+name = "Seattle Soto Zen"
+donation_url = "https://seattlesotozen.org/make-a-donation/"
+donation_kind = "page"
+
+[[sangha]]
+key = "red-cedar"
+name = "Red Cedar Zen Community"
+donation_url = "https://www.redcedarzen.org/donations"
+donation_kind = "page"
+
+[[sangha]]
+key = "everyday-zen"
+name = "Everyday Zen Foundation"
+donation_url = "https://everydayzen.org/donate/"
+donation_kind = "page"
+
+[[sangha]]
+key = "atlanta-soto"
+name = "Atlanta Soto Zen Center"
+donation_url = "https://www.aszc.org/giving"
+donation_kind = "page"
+
+[[sangha]]
+key = "mountain-rain"
+name = "Mountain Rain Zen Community"
+donation_url = "https://www.mountainrainzen.org/donate"
+donation_kind = "page"
+# The teacher dana page https://www.mountainrainzen.org/teacher-dana goes on the teacher record as second_donation_url.
+
+[[sangha]]
+key = "salt-spring"
+name = "Salt Spring Zen Circle"
+donation_url = "https://saltspringzencircle.org/donate/"
+donation_kind = "page"
+
+[[sangha]]
+key = "calgary-soto"
+name = "Calgary Soto Zen"
+donation_url = "https://calgarysotozen.org/support-us"
+donation_kind = "page"
+
+[[sangha]]
+key = "heart-of-compassion"
+name = "Heart of Compassion Zen Sangha"
+donation_url = "https://www.heartofcompassionzen.org/donate"
+donation_kind = "page"
+
+[[sangha]]
+key = "dharma-heart"
+name = "Dharma Heart Zen"
+donation_url = "https://www.dharmaheartzen.com/dana"
+donation_kind = "page"
+# Full name confirmed by the owner.
+
+[[sangha]]
+key = "kannon-do"
+name = "Kannon Do Zen Meditation Center"
+donation_url = "https://kannondo.org/helping-out/financial-support/"
+donation_kind = "page"
+
+[[sangha]]
+key = "one-heart"
+name = "One Heart Zen"
+donation_url = "https://oneheartzen.org/about-dana/"
+donation_kind = "page"
+
+[[sangha]]
+key = "oak-street"
+name = "Oak Street Zendo"
+donation_url = "https://www.oakstreetzendo.org/copy-of-contact"
+donation_kind = "contact"
+donation_note = "The address is a contact page, not a giving page. No give button until the zendo publishes one."
+
+[[sangha]]
+key = "occidental-laguna"
+name = "Occidental Laguna Sangha"
+donation_url = "https://occidentallagunasangha.org/"
+donation_kind = "contact"
+donation_note = "The site asks people to email a named individual and has no giving page. The address is deliberately not stored. No give button until a page exists."
+```
+
+Acceptance criteria:
+
+- [ ] The seed loads 13 sanghas, all unverified, with 2 of kind `contact`.
+- [ ] The constraint rejects `donation_verified` on a sangha whose kind is not `page`.
+- [ ] `check-links` prints the table and writes the CSV, and a test proves it never sets the verified flag.
+- [ ] `verify` requires `--by` and records the date and name.
+- [ ] Two failed checks in a row unverify a link, and the audit warns when a link is older than `link_review_days`.
+- [ ] A sangha of kind `contact` produces no give button, appears in `excluded` in the split, and the dana panel shows its note.
+- [ ] A grep test finds no `@` in any registry seed file.

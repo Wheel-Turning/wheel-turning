@@ -257,7 +257,7 @@ min_dictionary_share = 0.85
 max_suspect_share = 0.10
 ```
 
-The importer calls `pdftotext` and `pdftoppm` from poppler-utils and Tesseract 5 with its `eng` data as subprocesses. They are installed in the batch host image and through Homebrew locally. No Python is needed.
+The importer calls `pdftotext` and `pdftoppm` from poppler-utils and Tesseract 5 with its `eng` data as subprocesses. They are installed in the batch host image and through the local package manager (apt in WSL 2, or winget or Scoop on Windows). No Python is needed.
 
 Steps for a PDF edition:
 
@@ -616,7 +616,7 @@ Never use it again. A takedown, a decline or a rights holder's removal request c
 
 Transparency. `GET /rights` also lists every source with its status, in plain words: used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request. It never uses permission language for a mandate.
 
-This section covers texts. Talks by living teachers remain under the consent gate in Spec 03 until the project owner decides otherwise.
+This section covers texts. Talks follow Spec 03's Mandated talks section: they are used on the owner's mandate unless the teacher opts out, and each teacher receives a notice that asks for formal permission.
 
 Migration `0014_rights_ledger.sql`:
 

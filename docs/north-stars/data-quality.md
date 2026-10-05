@@ -10,7 +10,7 @@ Data quality here carries more weight than in most retrieval products. A mislabe
 
 ## North star
 
-Every passage shown is a faithful, correctly attributed, rightfully held and current rendering of what a consenting teacher said, and a record that cannot be shown to be so is withheld, not shown with a caveat.
+Every passage shown is a faithful, correctly attributed, rightfully held and current rendering of what a teacher said under a recorded rights basis, and a record that cannot be shown to be so is withheld, not shown with a caveat.
 
 Five properties follow, and every quality check traces back to one of them.
 
@@ -41,7 +41,16 @@ Ten dimensions cover the five properties. Where a line is numeric it is a starti
 
 Checks sit at the stage where an error is cheapest to catch, and the earliest ones keep bad data from ever becoming text.
 
-&#91;embedded content: quality gates by pipeline stage · 8 checks\]
+| Stage | Check | On failure |
+| --- | --- | --- |
+| Ingest | Duplicates merged on title, date and duration; non-talks dropped | Merge or drop is logged and listed for review |
+| Rights gate | A recorded rights basis (consent, verified license or mandate) and a known rights holder | Talk stops, no media pulled |
+| Transcribe | Timestamps present; link offset within tolerance on the sample | Talk held out of the index until repaired |
+| Correct | Glossary terms and teacher names match the registry | Fix glossary or alias, rerun affected talks |
+| Segment | No student speech; chant and sitting text excluded | Quarantine the whole talk and recheck |
+| Extract and resolve | Teacher, series and part present; citations graded at three levels | Doubtful citations shown as unresolved |
+| Index | Required fields complete; typed proof of rights at indexing | Write rejected, talk not indexed |
+| Serve | Read only through the serving view; donation link verified | Shown with no give button, out of the dana split |
 
 Read each row left to right: the stage, the check it must pass, and where a failing talk goes. The consent gate comes first because nothing downstream should exist for a talk that fails it. Blocking failures follow the quarantine rules in the failure handling section.
 
@@ -73,7 +82,7 @@ The PRD already names the main hazards in the v1 corpus. Each has a treatment th
 | Genjokoan paragraphs 5 and 6 appear to be missing from the series | Series ground truth has a hole, and the interface cannot say what a talk presupposes | Check the series list against the text, and record the result in series metadata |
 | Gap between April 2022 and February 2023 | Topics from that stretch look absent when they are only unrecorded | Record the gap as a known coverage hole, so a thin answer is not read as teacher silence |
 | About three in four talks come from one teacher | Answers tilt toward one voice and the three-teacher rule cannot hold | Relax and display the rule in v1, diversify retrieval, and log teacher counts per answer |
-| Held-out and excluded material: guest speakers who have not responded, and the Antiracist 12 Steps session | Absence looks like a retrieval failure | Mark each as held out or excluded with the reason, so coverage reports separate it from missing data |
+| Held-out and excluded material: guest speakers who have opted out, and the Antiracist 12 Steps session | Absence looks like a retrieval failure | Mark each as held out or excluded with the reason, so coverage reports separate it from missing data |
 | The Spotify feed may add talks or only duplicate existing ones | Unknown overlap with the video archive | Cross-check against the deduplicated set before deciding whether it joins the corpus |
 
 ## Provenance and ownership
@@ -118,7 +127,7 @@ The metrics below are the ones that change a decision. A metric with no decision
 | Share of the 50 questions rated faithful and relevant | Teacher reviewer | Any change to chunking, embeddings, reranking or glossary | v1 pass or fail: fewer than half is a fail |
 | Invented claims surviving the synthesis filter | 50-answer sample and the 20-answer claim audit | Any change to synthesis | Any survivor is a v1 fail |
 | Student speech found in the index | Scan of indexed segments | Every ingest | Must be zero, otherwise quarantine |
-| Indexed talks without consent or a known rights holder | Consent records against the index | Nightly | Must be zero, otherwise quarantine |
+| Indexed talks without a rights basis or a known rights holder | Rights records against the index | Nightly | Must be zero, otherwise quarantine |
 | Speakers awaiting a reply, by speaker | Consent records | Weekly | Order of outreach and corpus size |
 | Share of citations unresolved | Resolver output on series-labeled talks | Every ingest | Whether the hand-listed set needs to grow |
 | Cited sanghas with a verified donation link | Sangha registry | Weekly | Whether the dana panel is meaningful for the answers shown |
@@ -138,5 +147,5 @@ None of these changes the north star. Each has a trigger that forces it.
 | Who produces the hand-corrected sample | Founder, volunteers from the sangha, or paid help | Before the first scoring run |
 | Review interval for consent and donation links | Fixed schedule, or on any change at the source | Before the first tester sees the page |
 | Whether the Spotify feed joins the corpus | Join, cross-check only, or leave out | After comparison with the deduplicated archive |
-| Treatment of guest speakers who never reply | Stay excluded, or revisit after the first demo | After the first round of speaker replies |
+| Treatment of guest speakers who never reply | Decided October 4, 2026: included on the owner's mandate unless they opt out | Decided |
 | Scope of a teacher's corrections from v2a | Transcript wording and context, or context only | Before the teacher track begins |

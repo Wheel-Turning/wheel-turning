@@ -1,5 +1,6 @@
 # LF everywhere, on every OS. sqlx checksums migration files, so a CRLF checkout on Windows
 # would otherwise look like an edited migration.
 * text=auto eol=lf
+*.sql text eol=lf
 *.png binary
 *.onnx binary

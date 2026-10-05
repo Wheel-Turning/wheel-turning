@@ -252,12 +252,42 @@ Acceptance criteria for the spend cap:
 Decision of October 3, 2026, following the GPU quota refusal in Spec 01.
 
 1. The default model stays `large-v3`. The SSZ talks are in English, so `distil-large-v3` is allowed through `asr.model_path`. Its model card describes it as MIT licensed, over 5 times faster than large-v3 on a Mac M1, and within 0.8 points of word error rate on long-form audio.
-2. The first full run uses `distil-large-v3` on the owner's Apple Silicon Mac, built with whisper.cpp's Metal support, with `wt worker --kinds audio --concurrency 1`. Expect it to run in the background for days, not hours, and measure the real speed on the sample before planning.
+2. The first full run uses `large-v3` on the owner's Windows PC, built with whisper.cpp's Vulkan support on the Arc GPU and run with `GGML_VK_DISABLE_COOPMAT=1`, the setup the owner chose below, with `wt worker --kinds audio --concurrency 1`. The speed figures on the model card are for a Mac M1, so measure the real speed on this PC with the sample before planning. A CPU-only run could take weeks, and then renting a GPU machine by the hour is the better route.
 3. `wt asr benchmark --talks <ids>` runs both models over the ten-talk sample and compares each with a manual caption or a hand-corrected passage where one exists, and prints word error rate on the glossary terms, on teacher names and overall. Keep `large-v3` for the full run if `distil-large-v3` misses core vocabulary.
 4. Whichever model runs, the transcript JSON records its name and version, so a later switch to a better model can reprocess only the affected talks.
 
 Acceptance criteria:
 
-- [ ] A worker on the owner's Mac transcribes a synthetic audio fixture end to end with the Metal build and records the model name in the transcript.
+- [ ] A worker on the owner's Windows PC transcribes a synthetic audio fixture end to end with the build that matches its hardware and records the model name in the transcript.
 - [ ] `wt asr benchmark` prints the three error rates for both models on a fixture with known text.
 - [ ] Changing `asr.model_path` changes the recorded model name and requeues only talks transcribed with the old one when asked.
+
+## Owner's hardware and the decision rule
+
+The owner's PC has an Intel Arc 140V integrated graphics chip with 8 GB of shared memory, an Intel NPU, 16 GB of RAM and no NVIDIA card, so CUDA is not available. The worker that uses the graphics chip is built natively on Windows and not inside WSL 2, because WSL 2 may reach Intel graphics for compute only through slower translation layers or not at all. The rest of the stack can live in WSL 2.
+
+Measure these setups with `wt asr benchmark`, in this order: whisper.cpp with Vulkan, whisper.cpp with the OpenVINO encoder, and CPU only with 8 threads. Measure `large-v3` and `distil-large-v3`. The benchmark reports the real-time factor, which is seconds of audio transcribed per second of compute, and peak memory.
+
+Decision rule from the best measured real-time factor on the sample:
+
+- 3 or more: run the whole corpus on this PC.
+- Between 1 and 3: run the first 20 to 30 talks on this PC for Gate A and rent a GPU machine by the hour for the rest.
+- Below 1: rent a GPU machine for everything.
+
+Result of October 4, 2026, recorded in `docs/asr-benchmark.md`: `distil-large-v3` was fastest, at 11.53 times real time with whisper.cpp's OpenVINO encoder on the Arc GPU, but it misheard core vocabulary (Atman, Anatman and Dharmakaya), so item 3's rule keeps `large-v3`. Against the book text of the sample, `large-v3` scored 1.12 to 1.48 percent word error rate. It ran at 3.17 to 3.26 times real time on Vulkan with `GGML_VK_DISABLE_COOPMAT=1`, which clears the threshold of 3. The owner chose `large-v3` on Vulkan on October 4, 2026, so the whole corpus runs on this PC, at about 51 hours of compute for the roughly 163 hours of SSZ talks in the PRD's inventory. Vulkan with its default settings produces garbage on this GPU, so the variable is required. On the sample this setup dropped one 8-word clause, so a dropped passage is a known risk for the claim audit and the timestamp checks. The worker reaches the database through an SSM port forward via the batch host, which runs as a small CPU instance for the length of each run, and writes to the transcripts bucket with the owner's SSO profile.
+
+With 16 GB of RAM in use by other programs, close them during a run and expect `large-v3` on Vulkan to use about 4.3 GB of RAM and 3.9 GB of shared GPU memory, as it did on the sample. The benchmark clip is a public-domain or CC0 recording, never a talk from a teacher.
+
+Acceptance criteria:
+
+- [ ] `wt asr benchmark` runs each available setup on a 10-minute clip and prints the real-time factor and peak memory.
+- [ ] The benchmark output names the setup chosen under the decision rule and records it in `docs/asr-benchmark.md` with the date and the hardware.
+
+## Model license record
+
+`docs/model-licenses.md` lists every model the system can load: Whisper or distil-large-v3, bge-m3, bge-reranker-v2-m3, the pyannote segmentation and diarization models, and each language model by name. For each it gives the license name, the license URL, the revision or commit hash downloaded, the date checked and who checked. A stage refuses to start when its configured model is missing from the file or has no recorded revision, and CI fails when a configuration file names a model the record lacks. The record is rechecked whenever a model or its revision changes.
+
+Acceptance criteria:
+
+- [ ] A stage with an unlisted model refuses to start with a message naming the model.
+- [ ] CI fails when `config/` names a model that `docs/model-licenses.md` does not list with a revision.

@@ -10,7 +10,7 @@ Readers are the founder, any engineer or contractor who joins, and counsel revie
 
 ## North star
 
-Dharma Gates returns only what a consenting teacher said, exactly as said, with the route to the source and to the giving attached, and its structure makes the opposite impossible rather than merely discouraged.
+Dharma Gates returns only what a teacher said under a recorded rights basis, never after an opt-out, exactly as said, with the route to the source and to the giving attached, and its structure makes the opposite impossible rather than merely discouraged.
 
 Six properties follow from that sentence, and every design choice is checked against them.
 
@@ -27,7 +27,7 @@ Each PRD rule is enforced by a mechanism that does not depend on anyone remember
 
 | PRD rule | Mechanism | Guard |
 | --- | --- | --- |
-| No indexing without consent and a known rights holder | Indexing accepts only a type built from a consented talk. Retrieval reads one database view that filters on consent and rights holder. | Nightly check that no indexed passage belongs to a non-consented talk. Test that indexing a pending talk fails. |
+| No indexing without a rights basis and a known rights holder | Indexing accepts only a type built from a cleared talk. Retrieval reads one database view that filters on rights basis and rights holder. | Nightly check that no indexed passage belongs to a talk with no rights basis. Test that indexing a pending talk fails. |
 | Passages are verbatim | The model receives passage IDs and returns IDs. Pages are assembled from database rows. | Test that every displayed quotation is a substring of a stored passage. |
 | Synthesis states nothing unsupported | The schema has no free-text field. Code drops themes with fewer than two distinct passages. A verifier pass drops unsupported descriptions. | 50-answer audit. Any surviving invented claim fails v1. |
 | Relevance alone ranks | The ranker input type has no field for sangha, profile status, upload volume or donation link. | CI test permutes that metadata and asserts identical ordering. |
@@ -56,7 +56,7 @@ These settle design arguments. When two options both satisfy the invariants, the
 
 A talk moves down through four zones, and the consent gate is the first thing any talk meets.
 
-&#91;embedded content: target architecture · 4 zones, 1 gate\]
+In short: consent gate → scratch zone (audio and video, only during transcription and diarization) → processing zone (text only) → core store (cleared, segmented text) → serving zone (reads the core store through one view and writes only query logs).
 
 Rust carries every stage that enforces an invariant or sits on the serving path: domain types, the gate, glossary correction, segmentation post-processing, citation resolution, chunking, retrieval, selection, synthesis validation, the dana calculator, the web server and the admin command line. Python is confined to evaluation notebooks and, unless sherpa-onnx proves adequate, a diarization sidecar. Embedding and reranking run locally through ONNX Runtime.
 
@@ -64,13 +64,13 @@ Stages run as idempotent jobs from a Postgres queue. Postgres with pgvector and 
 
 ## Trust and data boundaries
 
-Data moves through four zones behind one gate, and each crossing has one owner and one rule. Nothing is pulled or transcribed until the consent gate passes, so unconsented talks exist only as metadata. Audio and video exist only in the scratch zone. The processing zone holds text only. Consented, segmented text lives in the core store. The serving zone reads the core store through one view and writes only query logs.
+Data moves through four zones behind one gate, and each crossing has one owner and one rule. Nothing is pulled or transcribed until the consent gate passes, so talks without a rights basis exist only as metadata. Audio and video exist only in the scratch zone. The processing zone holds text only. Cleared, segmented text lives in the core store. The serving zone reads the core store through one view and writes only query logs.
 
 The audio boundary sits at the end of transcription and diarization. Scratch storage has a lifecycle rule that expires objects within a day, and the pipeline deletes explicitly on success and on failure. Nothing downstream has a place to put audio.
 
-The consent boundary sits at the front of the pipeline, before any media is pulled, and is checked again at indexing by a type that only a consented talk can satisfy. It is the same code path for a v1 SSZ talk and a v2b partner upload. Student segments are removed at the segmentation stage, before chunking and embedding.
+The consent boundary sits at the front of the pipeline, before any media is pulled, and is checked again at indexing by a type that only a cleared talk can satisfy. It is the same code path for a v1 SSZ talk and a v2b partner upload. Student segments are removed at the segmentation stage, before chunking and embedding.
 
-The model-provider boundary governs what leaves the infrastructure. Embedding and reranking run locally so retrieval never sends transcripts out. Extraction, classification assistance, synthesis and verification call a hosted model, and only consented talks reach those calls. The consent invitation names this step, and zero-retention terms are confirmed on the provider account before the first speaker's transcript is sent. Counsel reviews this alongside caption ingestion and dana routing.
+The model-provider boundary governs what leaves the infrastructure. Embedding and reranking run locally so retrieval never sends transcripts out. Extraction, classification assistance, synthesis and verification call a hosted model, and only cleared talks reach those calls. The notice to each teacher names this step, and zero-retention terms are confirmed on the provider account before the first speaker's transcript is sent. Counsel reviews this alongside caption ingestion and dana routing.
 
 The log boundary is two database roles. Analysts see aggregate views. Raw query text is readable only through a function that returns queries a tester has flagged, which makes the stated policy mechanically true.
 
@@ -104,7 +104,7 @@ The architecture deliberately will not do the following, even if a later request
 - Index or display student speech in any form.
 - Train or fine-tune models on teachers' words.
 - Add a second system of record. Caches and search engines are derived and rebuildable.
-- Ingest public sources before the consent route and counsel review are settled.
+- Open the demo beyond its private testers before counsel has reviewed the mandate model.
 - Hard-code a sangha, lineage or teacher into application logic.
 
 ## Fitness functions
@@ -114,7 +114,7 @@ These checks run continuously so the architecture drifts loudly, not silently. T
 | Check | Asserts | When it runs |
 | --- | --- | --- |
 | Ranker invariance | Shuffling sangha, profile, volume and donation metadata leaves result order unchanged | Every CI run |
-| Consent drift | No indexed passage belongs to a talk that is non-consented or has an unknown rights holder | Nightly |
+| Consent drift | No indexed passage belongs to a talk with no rights basis, an opt-out or an unknown rights holder | Nightly |
 | Takedown completeness | After a takedown, zero rows for that teacher remain in any store in the registry | CI on fixtures, and after every real takedown |
 | Audio residue | Scratch is empty after each pipeline run, and no audio object exists outside scratch | Nightly |
 | Stage reproducibility | Rerunning a stage on unchanged input yields identical content hashes | Every CI run |
@@ -132,7 +132,7 @@ None of these decisions touches an invariant. Each one has a trigger that forces
 | Speaker diarization | Python sidecar with pyannote, or sherpa-onnx in Rust | Result of the ten-video segmentation sample |
 | Embedding location | Local through ONNX, or a hosted API | Consent wording is final and provider terms are confirmed |
 | Synthesis verifier | Second language-model call, or a local entailment model | First claim-by-claim review of 20 answers |
-| ASR hosting | Spot GPU instance, or the founder's own hardware | Before the first full ingest of the 140 hours |
+| ASR hosting | Decided October 4, 2026: the owner's Windows PC, running large-v3 through Vulkan on its Intel GPU, reaching the database through an SSM port forward | Decided; see docs/asr-benchmark.md |
 | Tester access | Invite-link allowlist, or an identity-aware proxy | Before the first tester sees the page |
 | Model provider terms | Zero-retention agreement and its scope | Before any speaker's transcript is sent for extraction |
 
