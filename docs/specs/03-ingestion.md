@@ -380,3 +380,25 @@ Acceptance criteria for the SSZ sources:
 - [ ] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation.
 - [ ] Each `link_style` renders the right link, and `none` renders the "starts at" text.
 - [ ] The completeness report lists Vimeo talks missing from the feed, feed episodes with no Vimeo match, and talks-page items missing from Vimeo.
+
+## SSZ inventory of October 5, 2026
+
+Read from the full list of the SSZ Vimeo account after loading every page, and compared with the SSZ talks page. The importer's completeness report must reproduce these figures within a small tolerance, and any change is explained.
+
+- The account's public list shows 278 videos, 171.2 hours. The SSZ site embeds 6 more Vimeo videos that this list lacks, so at least 284 exist, 175.1 hours. The count of 280 on the Vimeo page may include 2 of them.
+- 258 are talk-class and 257 are distinct, because Uji Part 4 was uploaded twice. They total about 160 hours. Kanshin gave 158 of them, 62 percent, and 38 have no speaker named, which would raise her share toward 75 percent if most are hers.
+- 14 recordings need review before any is used: 11 untitled `zoom_0` recordings (8.4 hours, all from 2020 and January 2021), and 3 Q&A sessions (1.8 hours) that include student voices.
+- 5 are not talks: the 11-second Buddhist Quote, a 28-second clip, two Zen Protocols clips and Part 2 of a guest talk, all under 5 minutes. One more, the Antiracist 12 Steps session, is excluded by decision.
+- 58 videos are on Vimeo and not on the SSZ talks page. All date from May 2017 to January 2021. They are 40 talk-class recordings, the 11 untitled recordings, 3 Q&As and 4 short clips, about 36.6 hours.
+- 5 talks play on the SSZ site but are missing from the account's public list: February 12 to March 12, 2023, with Vimeo IDs 802312541, 802348391, 802789038, 805297241 and 807610906. They are probably set to hide from the account page, and a token with the private scope should list them. They bring the talk count to 262 distinct talks and about 163 hours.
+- The archive has no uploads from May 2022 to February 2023. The gap is in Vimeo itself, not just on the website.
+- The talks page lists 3 exact duplicate rows. Discrimination and Suffering exists as two separate Vimeo uploads, 672990540 in the public list and 672974907 on the SSZ site only.
+- 3 talks are audio only.
+- Possible duplicates to check: two recordings on May 31, 2020 (35:03 and 37:23) and two on June 14, 2020 (41:09 and 46:22), and two titled Facing the Jewel Mirror on January 18 and 25, 2026.
+
+Acceptance criteria:
+
+- [ ] The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all.
+- [ ] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
+- [ ] Clips under 5 minutes arrive as excluded with the reason `too_short`.
+- [ ] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs.
