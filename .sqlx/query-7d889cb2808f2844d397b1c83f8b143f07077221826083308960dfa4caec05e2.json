@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk t set talk_type = $2::text::talk_type, series = $3, part = $4,\n                  state = case when $5::text is null then t.state\n                               when t.state = 'needs_review' and t.state_reason is distinct from 'speaker_unresolved'\n                                 then t.state\n                               else 'needs_review' end,\n                  state_reason = case when $5::text is null then t.state_reason\n                               when t.state = 'needs_review' and t.state_reason is distinct from 'speaker_unresolved'\n                                 then t.state_reason\n                               else $5 end\n           from talk before\n           where t.id = $1 and before.id = t.id\n             and t.state in ('discovered', 'needs_review', 'awaiting_consent')\n           returning before.talk_type::text as \"old_type!\", before.series as old_series,\n                     before.part as old_part, before.state::text as \"old_state!\",\n                     before.state_reason as old_reason,\n                     t.state::text as \"new_state!\", t.state_reason as new_reason",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "old_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "old_series",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "series"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "old_part",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "old_state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "old_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "new_state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "new_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true,
+      null,
+      true,
+      null,
+      true
+    ]
+  },
+  "hash": "7d889cb2808f2844d397b1c83f8b143f07077221826083308960dfa4caec05e2"
+}

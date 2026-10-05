@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "with c as (\n             select t.id, t.state::text as state, t.duration_s, sv.published_at,\n                    coalesce((sv.raw->>'has_captions')::boolean, false) as has_captions,\n                    trim(regexp_replace(\n                      regexp_replace(lower(normalize(t.title, NFKC)), '[^[:alnum:][:space:]]+', '', 'g'),\n                      '[[:space:]]+', ' ', 'g')) as norm\n             from talk t join source_video sv on sv.id = t.source_video_id\n             where t.id <> $1 and t.duplicate_of is null\n               and t.state not in ('excluded', 'withdrawn')\n               and t.duration_s between $3::int - $4::int and $3::int + $4::int)\n           select id as \"id!\", state as \"state!\", duration_s, published_at,\n                  has_captions as \"has_captions!\", norm as \"norm!\",\n                  similarity(norm, $2) as \"similarity!\"\n           from c",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "duration_s",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "duration_s"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "has_captions!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "norm!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "similarity!",
+        "type_info": "Float4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "dfa16573d3a29e070919df4cd5bfbec578d1b5ee078d032bff4cae80b8256b68"
+}

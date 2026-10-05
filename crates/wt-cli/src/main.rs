@@ -11,6 +11,7 @@ use wt_core::ids::TalkId;
 use wt_core::telemetry::{LogOutput, init_logging};
 
 mod commands;
+mod ingest;
 
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
@@ -47,6 +48,56 @@ enum Command {
     /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
     /// fail has findings.
     Audit,
+    /// Discovery from the configured sources (Spec 03).
+    Ingest {
+        #[command(subcommand)]
+        command: IngestCommand,
+    },
+    /// Run queued jobs (Spec 03, Job queue).
+    Worker(WorkerArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum IngestCommand {
+    /// List each source, or the named one, record new and changed videos and queue them for
+    /// classification. Prints counts per source as JSON. Lists metadata only; fetches no media.
+    Discover {
+        /// Only this source from sources.toml.
+        #[arg(long)]
+        source: Option<String>,
+        /// The directory holding sources.toml, pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+}
+
+#[derive(Debug, Args)]
+struct WorkerArgs {
+    /// Job kinds to run, comma separated. This build runs classify.
+    #[arg(long, value_delimiter = ',', value_parser = parse_kind, default_value = "classify")]
+    kinds: Vec<wt_db::job::JobKind>,
+    /// Workers in this process.
+    #[arg(long, default_value_t = 1)]
+    concurrency: usize,
+    /// Exit once no job is due instead of waiting for more.
+    #[arg(long)]
+    drain: bool,
+    /// The directory holding sources.toml, pipeline.toml and series.toml.
+    #[arg(long, default_value = "config")]
+    config_dir: PathBuf,
+}
+
+fn parse_kind(value: &str) -> Result<wt_db::job::JobKind, String> {
+    wt_db::job::JobKind::parse(value).ok_or_else(|| {
+        let known: Vec<_> = wt_db::job::JobKind::ALL
+            .iter()
+            .map(|k| k.as_str())
+            .collect();
+        format!(
+            "unknown job kind {value:?}; known kinds are {}",
+            known.join(", ")
+        )
+    })
 }
 
 #[derive(Debug, Subcommand)]
@@ -268,6 +319,19 @@ async fn main() -> anyhow::Result<ExitCode> {
             .await?;
         }
         Command::Audit => return commands::audit(&pool().await?, config.env).await,
+        Command::Ingest {
+            command: IngestCommand::Discover { source, config_dir },
+        } => ingest::discover(&pool().await?, &config, &config_dir, source.as_deref()).await?,
+        Command::Worker(args) => {
+            ingest::worker(
+                &pool().await?,
+                &args.config_dir,
+                &args.kinds,
+                args.concurrency,
+                args.drain,
+            )
+            .await?;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }

@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.title, sv.description, sv.published_at, t.duration_s,\n                  t.state::text as \"state!\", t.state_reason,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\"\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "duration_s",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "duration_s"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "state_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "has_captions!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "f5bc9a1ca9f779d3a5625413913392d1bff99615b73480cf77556745a11b3d36"
+}

@@ -355,3 +355,116 @@ async fn audit_exits_zero_when_clean_and_one_when_a_fail_check_has_findings() {
         .unwrap();
     assert_eq!(check["findings"], 1);
 }
+
+/// A config directory with the committed pipeline and series files and a fixture source.
+fn config_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wt-config-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    for file in ["pipeline.toml", "series.toml"] {
+        std::fs::copy(repo.join(file), dir.join(file)).unwrap();
+    }
+    std::fs::write(
+        dir.join("sources.toml"),
+        "[[source]]\nname = \"fixture-vimeo\"\nplatform = \"vimeo\"\ndefault_sangha = \"Fixture Mountain Zendo\"\n",
+    )
+    .unwrap();
+    dir
+}
+
+#[tokio::test]
+async fn the_worker_drains_classify_jobs_and_refuses_kinds_it_cannot_run() {
+    let fx = start().await;
+    fx.import_registry();
+    let item = serde_json::json!({});
+    let mut conn = fx.pool.acquire().await.unwrap();
+    for (id, title, seconds) in [
+        ("9001", "Ada: Uji, Part 2", 2400),
+        ("9002", "Buddhist Quote", 11),
+    ] {
+        wt_db::ingest::record_video(
+            &mut conn,
+            &wt_db::ingest::NewVideo {
+                source: "fixture-vimeo",
+                platform: "vimeo",
+                external_id: id,
+                url: "https://example.invalid/v",
+                title,
+                description: None,
+                published_at: None,
+                duration_s: Some(seconds),
+                channel_ref: None,
+                has_captions: false,
+                item: &item,
+                input_hash: "h",
+            },
+        )
+        .await
+        .unwrap();
+    }
+    drop(conn);
+    let dir = config_dir();
+    let dir_arg = dir.to_str().unwrap();
+
+    let refused = fx.wt(&[
+        "worker",
+        "--kinds",
+        "audio",
+        "--drain",
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("no handler for audio jobs"),
+        "{}",
+        stderr(&refused)
+    );
+    let unknown = fx.wt(&["worker", "--kinds", "discover", "--drain"]);
+    assert!(!unknown.status.success());
+    assert!(
+        stderr(&unknown).contains("unknown job kind"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    let out = fx.wt(&[
+        "worker",
+        "--kinds",
+        "classify",
+        "--concurrency",
+        "2",
+        "--drain",
+        "--config-dir",
+        dir_arg,
+    ]);
+    assert!(out.status.success(), "worker failed: {}", stderr(&out));
+    let states: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "select sv.external_id, t.state::text, t.state_reason
+         from talk t join source_video sv on sv.id = t.source_video_id order by 1",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        states,
+        [
+            (
+                "9001".to_owned(),
+                "awaiting_consent".to_owned(),
+                Some("consent_missing".to_owned())
+            ),
+            (
+                "9002".to_owned(),
+                "excluded".to_owned(),
+                Some("non_talk".to_owned())
+            ),
+        ]
+    );
+    let done: i64 = sqlx::query_scalar("select count(*) from job where state = 'succeeded'")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(done, 2);
+    std::fs::remove_dir_all(dir).unwrap();
+}

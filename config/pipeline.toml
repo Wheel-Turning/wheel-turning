@@ -1,0 +1,33 @@
+# Pipeline settings (Spec 03, Spec 04). The defaults are starting points to adjust against the
+# corpus review. Title patterns are regular expressions matched, ignoring case, against the
+# normalized title: NFKC, lowercase, punctuation removed, spaces collapsed. So "Q&A" is "qa"
+# and "zoom_0" is "zoom0".
+
+[ingest]
+min_talk_seconds = 300
+dedupe_title_similarity = 0.6
+dedupe_duration_tolerance_pct = 2
+dedupe_duration_tolerance_min_s = 30
+dedupe_title_identical_tolerance_s = 120
+long_talk_seconds = 900
+job_lock_timeout_s = 7200
+
+# Clips, quotes and trailers are not talks: excluded with reason non_talk.
+exclude_title_patterns = ['\bquote\b', '\bclip\b', '\btrailer\b']
+
+# Excluded by decision, whatever the consent: reason excluded_session.
+exclude_session_patterns = ['\bantiracist 12 steps\b']
+
+# Held in needs_review until a person decides, whatever the length.
+review_title_patterns = [
+  { pattern = '^zoom ?\d+$', reason = "untitled" },
+  { pattern = '^\s*$', reason = "untitled" },
+  { pattern = '\bq ?a\b|\bquestions and answers\b', reason = "student_voices" },
+]
+
+# Title patterns for the talk types other than dharma_talk.
+type_patterns = [
+  { pattern = '\bclass\b', talk_type = "class" },
+  { pattern = '\bsesshin\b|\bretreat\b', talk_type = "retreat_talk" },
+  { pattern = '\bservice\b|\bceremony\b', talk_type = "service" },
+]

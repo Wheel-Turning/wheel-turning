@@ -26,6 +26,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0011 | `0011_gate_requires_rights_basis.sql` | M2 (#23) | none; rewrites `past_gate_requires_consent` with `coalesce(..., false)` so a talk with no `rights_basis` cannot pass the gate | none |
 | 0012 | `0012_servable_passage_without_barrier.sql` | M2 (#23) | none; resets `security_barrier` on `servable_passage` so vector search uses the HNSW index | none |
 | 0013 | `0013_flag_query.sql` | M2 (#23) | function `flag_query(uuid)` | execute on `flag_query` to `wt_web`; revokes `update (flagged)` on `query_log` from `wt_web` |
+| 0014 | `0014_vimeo_platform.sql` | M3 (#26) | `vimeo` value on `source_platform` | none |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 

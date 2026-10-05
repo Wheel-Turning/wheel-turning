@@ -64,10 +64,10 @@ The storage adapter lists files under its root with name, size, modified time an
 Discovery creates a `source_video` row and a `talk` row in state `discovered` for every new video, then a `classify` job runs these rules in order. Tunable values live in `config/pipeline.toml` and the defaults below are starting points to adjust against the corpus review.
 
 1. Normalize the title: Unicode NFKC, lowercase, strip punctuation, collapse spaces.
-2. Non-talk filter. A video shorter than `min_talk_seconds` (default 300) or matching any pattern in `exclude_title_patterns` (such as `quote`, `clip`, `trailer`) becomes `talk_type = non_talk`, state `excluded`, reason `non_talk`. The 11-second quote clip in the SSZ archive is the test case. A separate `exclude_session_patterns` list holds the Antiracist 12 Steps session, which the PRD excludes regardless of consent.
-3. Duplicate detection. Two talks are duplicates when their dates are within one day, their durations differ by no more than the larger of 30 seconds and 2 percent, and the `pg_trgm` similarity of their normalized titles is at least 0.6. Identical normalized titles with durations within two minutes also match. The kept record is the one with a captions track, otherwise the earliest published. The other gets `duplicate_of`, state `excluded` and reason `duplicate`.
+2. Non-talk filter. A video matching any pattern in `exclude_title_patterns` (such as `quote`, `clip`, `trailer`) becomes `talk_type = non_talk`, state `excluded`, reason `non_talk`. Otherwise a video shorter than `min_talk_seconds` (default 300) becomes `talk_type = non_talk`, state `excluded`, reason `too_short`, so the report shows which rule dropped it (decision of October 5, 2026). The 11-second quote clip in the SSZ archive is the test case. A separate `exclude_session_patterns` list holds the Antiracist 12 Steps session, which the PRD excludes regardless of consent, with reason `excluded_session`.
+3. Duplicate detection. Two talks are duplicates when their dates are within one day, their durations differ by no more than the larger of 30 seconds and 2 percent, and the `pg_trgm` similarity of their normalized titles is at least 0.6. Identical normalized titles with durations within two minutes also match. Two different parts of one series never match, so parts recorded the same day at similar lengths stay separate (decision of October 5, 2026). The kept record is the one with a captions track, otherwise the earliest published. The other gets `duplicate_of`, state `excluded` and reason `duplicate`.
 4. Series and part. `config/series.toml` lists each known series with a regular expression that has a named capture `part`. It starts with Genjokoan, Uji, Bendowa, Blue Cliff Record and Song of the Grass Hut. A match sets `series` and `part`.
-5. Talk type. Title patterns map to `class`, `retreat_talk` and `service`. An unmatched video of 900 seconds or longer becomes `dharma_talk`. Anything else becomes `other` and goes to `needs_review`.
+5. Talk type. Title patterns map to `class`, `retreat_talk` and `service`. An unmatched video of 900 seconds or longer becomes `dharma_talk`. Anything else becomes `other` and goes to `needs_review` with reason `talk_type_unclear`. Before that, `review_title_patterns` sends a matching video to `needs_review` with the pattern's reason, whatever its length: untitled recordings such as `zoom_0` with reason `untitled`, and Q&A sessions with reason `student_voices` (decision of October 5, 2026).
 6. Speaker. Aho-Corasick over every alias in the registry runs against the title and then the description, on word boundaries, case-insensitive. Exactly one matching teacher sets `teacher_id`, `sangha_id` to the sangha where the talk was given, which receives its dana, and `speaker_guess` to the matched alias. A teacher's home sangha in the registry is only their own record: Kanho Chris Burkhart's home is Red Cedar, and his talks given at SSZ credit SSZ. Zero or several matches set `needs_review` with reason `speaker_unresolved`. A talk already held in `needs_review` for another reason, such as student voices or an unclear talk type, stays there until a person decides, even if a later run resolves its speaker.
 
 A talk that survives every rule moves to `awaiting_consent`. Every merge, exclusion and reclassification writes a row to `correction_log`.
@@ -137,7 +137,7 @@ Commands added by this spec:
 - `wt ingest discover [--source <name>]`, `wt ingest match-storage`, `wt ingest report --out <path>`.
 - `wt pipeline advance`, `wt pipeline retry --talk <id>`, `wt worker --kinds <list> --concurrency <n>`.
 
-Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `job_lock_timeout_s = 7200`.
+Ingest keys in `config/pipeline.toml`: `min_talk_seconds = 300`, `dedupe_title_similarity = 0.6`, `dedupe_duration_tolerance_pct = 2`, `dedupe_duration_tolerance_min_s = 30`, `dedupe_title_identical_tolerance_s = 120`, `long_talk_seconds = 900`, `exclude_title_patterns`, `exclude_session_patterns`, `review_title_patterns`, `job_lock_timeout_s = 7200`.
 
 Acceptance criteria for M2:
 
@@ -149,8 +149,9 @@ Acceptance criteria for M2:
 
 Acceptance criteria for M3:
 
-- [ ] YouTube discovery against a recorded fixture of the Data API (served by `wiremock`) yields the expected `source_video` rows, parses durations correctly, and pages past 50 items.
-- [ ] A synthetic corpus with planted duplicates, an 11-second clip, a title-variant duplicate and a differently dated near-duplicate produces the expected exclusions and no false merges.
+- [x] Vimeo discovery against recorded fixtures (served by `wiremock`) yields the expected `source_video` rows from the API and from the talks page with oEmbed, pages past one page of results, and obeys `robots.txt`. SSZ's canonical list is Vimeo (Seattle Soto Zen sources), so M3 discovers from Vimeo (decision of October 5, 2026).
+- [ ] Deferred until a YouTube source is configured: YouTube discovery against a recorded fixture of the Data API (served by `wiremock`) yields the expected `source_video` rows, parses durations correctly, and pages past 50 items.
+- [x] A synthetic corpus with planted duplicates, an 11-second clip, a title-variant duplicate and a differently dated near-duplicate produces the expected exclusions and no false merges.
 - [ ] Series extraction handles the five named series and records part numbers. The report lists missing parts.
 - [x] Eight concurrent workers never claim the same job. Retry backoff, `dead` after max attempts, and the stale-lock reaper each have a test. (`wt-db/tests/job.rs`; the worker loop and `wt worker` come with the first handler.)
 - [ ] With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts.
@@ -375,7 +376,7 @@ role = "audio_only"
 Acceptance criteria for the SSZ sources:
 
 - [ ] Vimeo discovery returns the same talk set from a recorded API fixture and from a recorded talks-page fixture with oEmbed responses.
-- [ ] Talks-page discovery obeys `robots.txt` and makes no request to a disallowed path.
+- [x] Talks-page discovery obeys `robots.txt` and makes no request to a disallowed path.
 - [ ] Feed episodes match Vimeo talks by title, date and duration, an `audio_only` source never creates a talk, and a matched talk uses the enclosure with no Vimeo download.
 - [ ] With no usable media route a talk stays at `needs_review` with reason `no_media` and nothing is fetched.
 - [ ] `resolve-feed` prints the `feedUrl` from a fixture lookup response and saves it only after confirmation.
@@ -400,6 +401,6 @@ Read from the full list of the SSZ Vimeo account after loading every page, and c
 Acceptance criteria:
 
 - [ ] The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all.
-- [ ] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
-- [ ] Clips under 5 minutes arrive as excluded with the reason `too_short`.
+- [x] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
+- [x] Clips under 5 minutes arrive as excluded with the reason `too_short`.
 - [ ] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs.
