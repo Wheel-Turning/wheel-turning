@@ -16,7 +16,7 @@ variable "retention_mode" {
 }
 
 variable "retention_days" {
-  description = "Default retention for every record written. 2555 days is seven years."
+  description = "Default retention under the legal hold every record carries. The hold keeps records permanently; this period only matters if a hold is lifted. 2555 days is seven years."
   type        = number
   default     = 2555
 }

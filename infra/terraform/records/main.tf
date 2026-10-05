@@ -1,11 +1,16 @@
-# An append-only record of takedown and exclusion events (Spec 07 takedown, Spec 03 exclusions,
-# Spec 08 rights ledger): one object per event, written once and kept for the retention period.
-# S3 Object Lock makes each object version undeletable and unchangeable until it expires, so the
-# record survives a database restore, a mistaken script or a compromised workload role.
+# A permanent, append-only copy of every exclusion, opt-out and takedown (Spec 03 exclusions,
+# Spec 07 takedown), so `wt takedown --replay` can restore them after a database restore, a bad
+# migration or a mistaken script. Exclusion and opt-out records carry the teacher's name, aliases,
+# content hashes and reason, because discovery matches new talks by name; takedown receipts carry
+# IDs, per-store counts and the actor. Neither ever carries a teacher's words.
+#
+# Every object is written with an Object Lock legal hold, which has no expiry, so records are kept
+# permanently; the bucket policy refuses any write without one. The GOVERNANCE default retention
+# is a second lock that still holds an object for retention_days if its hold is ever lifted.
 #
 # It lives in its own stack, apart from envs/v1, so destroying and rebuilding v1 never touches it.
-# No workload writes to it yet: the takedown routine (M2, finished in M8) gains s3:PutObject on
-# this bucket, and nothing ever gains delete or bypass permissions.
+# No workload writes to it yet: the takedown routine (M2, finished in M8) gains s3:PutObject and
+# s3:PutObjectLegalHold on this bucket, and nothing ever gains delete or bypass permissions.
 
 provider "aws" {
   region = var.region
@@ -92,6 +97,23 @@ data "aws_iam_policy_document" "records" {
     }
   }
 
+  # Records are kept permanently, so every write must place a legal hold. A request without the
+  # header fails too, because StringNotEquals matches when the key is absent.
+  statement {
+    sid       = "DenyWriteWithoutLegalHold"
+    effect    = "Deny"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.records.arn}/*"]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "StringNotEquals"
+      variable = "s3:object-lock-legal-hold"
+      values   = ["ON"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "records" {
