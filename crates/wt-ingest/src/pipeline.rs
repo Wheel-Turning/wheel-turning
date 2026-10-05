@@ -80,7 +80,7 @@ fn fnv64(bytes: &[u8]) -> String {
 
 /// The version of the classification rules in code. Raise it whenever a rule's code changes,
 /// so `reclassify` applies the change to talks already classified.
-pub const CLASSIFIER_VERSION: &str = "2026-10-05.recording-dates";
+pub const CLASSIFIER_VERSION: &str = "2026-10-05.carried-recording-dates";
 
 /// The version of everything classification reads besides the video: the rule code, the
 /// pipeline and series files as written, and every alias with its teacher. A change to any of
@@ -233,7 +233,13 @@ pub async fn classify_talk(
         return Ok(Classified::Skipped);
     }
     let title = classify::normalize_title(&facts.title);
-    let date = dates::talk_date(&facts.title, facts.published_at.map(|t| t.date_naive()));
+    let date = talk_date_of(
+        conn,
+        talk,
+        &facts.title,
+        facts.published_at.map(|t| t.date_naive()),
+    )
+    .await?;
     ingest::set_talk_date(conn, talk, date).await?;
 
     if let Some(ex) = classify::exclusion(cfg, &title, facts.duration_s) {
@@ -671,6 +677,15 @@ pub async fn discover_feed(
         .await?
         {
             report.duplicate_uploads += 1;
+            // The kept copy may be the one whose title gives no date.
+            let uploaded = keeper.published_at.map(|t| t.date_naive());
+            if dates::recording_date(&keeper.title, uploaded).is_none()
+                && let Some(date) =
+                    talk_date_of(&mut tx, keeper.talk, &keeper.title, uploaded).await?
+                && Some(date) != uploaded
+            {
+                ingest::carry_talk_date(&mut tx, keeper.talk, date, actor).await?;
+            }
             if keeper.vimeo_id != matched.vimeo_id {
                 let id = feed::episode_row(&mut tx, &episode.external_id).await?;
                 feed::set_match(&mut tx, id, &keeper.vimeo_id, "duplicate_upload", actor).await?;
@@ -679,6 +694,28 @@ pub async fn discover_feed(
     }
     tx.commit().await?;
     Ok(report)
+}
+
+/// A talk's date: the recording date its title states; else the one stated by the uploads
+/// merged into it as other copies of its recording, when they agree; else its upload date.
+async fn talk_date_of(
+    conn: &mut PgConnection,
+    talk: TalkId,
+    title: &str,
+    uploaded: Option<NaiveDate>,
+) -> Result<Option<NaiveDate>, PipelineError> {
+    if let Some(date) = dates::recording_date(title, uploaded) {
+        return Ok(Some(date));
+    }
+    let carried: std::collections::BTreeSet<NaiveDate> = ingest::merged_uploads(conn, talk)
+        .await?
+        .into_iter()
+        .filter_map(|u| dates::recording_date(&u.title, u.published_at.map(|t| t.date_naive())))
+        .collect();
+    Ok(match carried.len() {
+        1 => carried.into_iter().next(),
+        _ => uploaded,
+    })
 }
 
 /// Whether a Vimeo upload is within `feed_exact_title_days` of an episode's publish time.

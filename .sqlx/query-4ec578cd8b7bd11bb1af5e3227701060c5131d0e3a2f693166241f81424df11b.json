@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select t.id, sv.platform::text as \"platform!\", sv.external_id, sv.url, t.title,\n                  sv.description, sv.published_at, t.duration_s,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\",\n                  t.state::text as \"state!\", t.state_reason, t.talk_type::text as \"talk_type!\",\n                  t.series, t.part, t.duplicate_of, t.speaker_guess, te.display_name as \"teacher?\"\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           left join teacher te on te.id = t.teacher_id\n           order by sv.published_at nulls last, sv.external_id",
+  "query": "select t.id, sv.platform::text as \"platform!\", sv.external_id, sv.url, t.title,\n                  sv.description, sv.published_at, t.talk_date, t.duration_s,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\",\n                  t.state::text as \"state!\", t.state_reason, t.talk_type::text as \"talk_type!\",\n                  t.series, t.part, t.duplicate_of, t.speaker_guess, te.display_name as \"teacher?\"\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           left join teacher te on te.id = t.teacher_id\n           order by sv.published_at nulls last, sv.external_id",
   "describe": {
     "columns": [
       {
@@ -77,6 +77,17 @@
       },
       {
         "ordinal": 7,
+        "name": "talk_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "talk_date"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
         "name": "duration_s",
         "type_info": "Int4",
         "origin": {
@@ -87,19 +98,19 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "has_captions!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "state!",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "state_reason",
         "type_info": "Text",
         "origin": {
@@ -110,13 +121,13 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "talk_type!",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "series",
         "type_info": "Text",
         "origin": {
@@ -127,7 +138,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "part",
         "type_info": "Int4",
         "origin": {
@@ -138,7 +149,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "duplicate_of",
         "type_info": "Uuid",
         "origin": {
@@ -149,7 +160,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "speaker_guess",
         "type_info": "Text",
         "origin": {
@@ -160,7 +171,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "teacher?",
         "type_info": "Text",
         "origin": {
@@ -183,6 +194,7 @@
       true,
       true,
       true,
+      true,
       null,
       null,
       true,
@@ -194,5 +206,5 @@
       false
     ]
   },
-  "hash": "60f48147c295b874cdf890aaf1b3bae36006083dcbbd14f043a3279c81fc0b94"
+  "hash": "4ec578cd8b7bd11bb1af5e3227701060c5131d0e3a2f693166241f81424df11b"
 }

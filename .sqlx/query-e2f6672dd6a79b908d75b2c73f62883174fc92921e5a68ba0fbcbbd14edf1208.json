@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk t set talk_date = $2\n         from talk before\n         where t.id = $1 and before.id = t.id and t.talk_date is distinct from $2\n           and t.state in ('discovered', 'needs_review', 'awaiting_consent')\n         returning before.talk_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "talk_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "talk_date"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "e2f6672dd6a79b908d75b2c73f62883174fc92921e5a68ba0fbcbbd14edf1208"
+}

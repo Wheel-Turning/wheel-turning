@@ -7,7 +7,7 @@
 //! alone, and a withdrawn talk's stub row is never re-queued, so a takedown blocks re-ingest.
 
 use sqlx::PgConnection;
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use wt_core::ids::{JobId, TalkId};
 
 use crate::DbError;
@@ -156,12 +156,11 @@ pub async fn record_video(
     }
     if !video.inserted {
         sqlx::query!(
-            "update talk set title = $2, talk_date = ($3::timestamptz at time zone 'UTC')::date,
-                             duration_s = $4
-             where id = $1",
+            // Not the date: classification derives it, and an unchanged video queues no job to
+            // put back a recording date the upload date would overwrite.
+            "update talk set title = $2, duration_s = $3 where id = $1",
             talk.as_uuid(),
             v.title,
-            v.published_at,
             v.duration_s
         )
         .execute(&mut *conn)
@@ -416,6 +415,8 @@ pub struct ReportRow {
     pub description: Option<String>,
     /// Publish time.
     pub published_at: Option<DateTime<Utc>>,
+    /// The talk's date: its recording date where known, else the upload date.
+    pub talk_date: Option<NaiveDate>,
     /// Length in seconds.
     pub duration_s: Option<i32>,
     /// Whether its source holds captions.
@@ -442,7 +443,7 @@ pub struct ReportRow {
 pub async fn report_rows(conn: &mut PgConnection) -> Result<Vec<ReportRow>, IngestDbError> {
     let rows = sqlx::query!(
         r#"select t.id, sv.platform::text as "platform!", sv.external_id, sv.url, t.title,
-                  sv.description, sv.published_at, t.duration_s,
+                  sv.description, sv.published_at, t.talk_date, t.duration_s,
                   coalesce((sv.raw->>'has_captions')::boolean, false) as "has_captions!",
                   t.state::text as "state!", t.state_reason, t.talk_type::text as "talk_type!",
                   t.series, t.part, t.duplicate_of, t.speaker_guess, te.display_name as "teacher?"
@@ -463,6 +464,7 @@ pub async fn report_rows(conn: &mut PgConnection) -> Result<Vec<ReportRow>, Inge
             title: r.title,
             description: r.description,
             published_at: r.published_at,
+            talk_date: r.talk_date,
             duration_s: r.duration_s,
             has_captions: r.has_captions,
             state: r.state,
@@ -584,4 +586,72 @@ pub async fn set_talk_date(
     .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+/// Another upload merged into a talk on a feed episode's evidence (reason `duplicate_upload`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedUpload {
+    /// Its title.
+    pub title: String,
+    /// When its source video was published.
+    pub published_at: Option<DateTime<Utc>>,
+}
+
+/// The uploads merged into `keeper` as other copies of its recording.
+pub async fn merged_uploads(
+    conn: &mut PgConnection,
+    keeper: TalkId,
+) -> Result<Vec<MergedUpload>, IngestDbError> {
+    let rows = sqlx::query!(
+        "select t.title, sv.published_at
+         from talk t join source_video sv on sv.id = t.source_video_id
+         where t.duplicate_of = $1 and t.state = 'excluded' and t.state_reason = 'duplicate_upload'
+         order by sv.published_at nulls last, sv.external_id",
+        keeper.as_uuid()
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| MergedUpload {
+            title: r.title,
+            published_at: r.published_at,
+        })
+        .collect())
+}
+
+/// Gives a talk before the gate the recording date another upload of it states, logged since
+/// it comes from that upload rather than the talk's own title. Returns whether it changed.
+pub async fn carry_talk_date(
+    conn: &mut PgConnection,
+    talk: TalkId,
+    date: NaiveDate,
+    actor: &str,
+) -> Result<bool, IngestDbError> {
+    let old = sqlx::query!(
+        "update talk t set talk_date = $2
+         from talk before
+         where t.id = $1 and before.id = t.id and t.talk_date is distinct from $2
+           and t.state in ('discovered', 'needs_review', 'awaiting_consent')
+         returning before.talk_date",
+        talk.as_uuid(),
+        date
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(old) = old else {
+        return Ok(false);
+    };
+    log_change(
+        conn,
+        "talk",
+        talk.as_uuid(),
+        "talk_date",
+        Some(serde_json::json!(old.talk_date.map(|d| d.to_string()))),
+        Some(serde_json::json!(date.to_string())),
+        actor,
+        "recording date stated by another upload of the same recording",
+    )
+    .await?;
+    Ok(true)
 }

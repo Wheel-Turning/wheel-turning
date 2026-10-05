@@ -48,8 +48,10 @@ pub struct Item {
     pub url: String,
     /// Title.
     pub title: String,
-    /// Publish date, `YYYY-MM-DD`.
+    /// The talk's date, `YYYY-MM-DD`: its recording date where known, else the upload date.
     pub date: Option<String>,
+    /// Publish date, `YYYY-MM-DD`.
+    pub uploaded: Option<String>,
     /// Length as `h:mm:ss`.
     pub duration: Option<String>,
     /// Whether the source holds captions.
@@ -159,7 +161,8 @@ fn item(r: &ReportRow) -> Item {
         source: format!("{} {}", r.platform, r.external_id),
         url: r.url.clone(),
         title: r.title.clone(),
-        date: r.published_at.map(|t| t.format("%Y-%m-%d").to_string()),
+        date: r.talk_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        uploaded: r.published_at.map(|t| t.format("%Y-%m-%d").to_string()),
         duration: r
             .duration_s
             .map(|s| format!("{}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)),
@@ -391,7 +394,7 @@ fn items_table(out: &mut String, items: &[Item], empty: &str) {
         let _ = writeln!(out, r#"<p class="muted">{}</p>"#, escape(empty));
         return;
     }
-    out.push_str("<table><tr><th>Title</th><th>Status</th><th>Type</th><th>Speaker</th><th>Date</th><th>Length</th><th>Source</th></tr>\n");
+    out.push_str("<table><tr><th>Title</th><th>Status</th><th>Type</th><th>Speaker</th><th>Recorded</th><th>Uploaded</th><th>Length</th><th>Source</th></tr>\n");
     for i in items {
         item_row(out, i, "");
     }
@@ -401,12 +404,13 @@ fn items_table(out: &mut String, items: &[Item], empty: &str) {
 fn item_row(out: &mut String, i: &Item, class: &str) {
     let _ = writeln!(
         out,
-        r#"<tr class="{class}"><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>"#,
+        r#"<tr class="{class}"><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>"#,
         link(&i.url, &i.title),
         escape(&i.status),
         escape(&i.talk_type),
         escape(i.speaker.as_deref().unwrap_or("")),
         escape(i.date.as_deref().unwrap_or("")),
+        escape(i.uploaded.as_deref().unwrap_or("")),
         escape(i.duration.as_deref().unwrap_or("")),
         escape(&i.source),
         if i.captions { " · captions" } else { "" },
@@ -451,7 +455,7 @@ pub fn render_html(r: &IngestReport) -> String {
         out.push_str(
             "<p class=\"muted\">The first row of each cluster, in bold, is the record kept.</p>\n",
         );
-        out.push_str("<table><tr><th>Title</th><th>Status</th><th>Type</th><th>Speaker</th><th>Date</th><th>Length</th><th>Source</th></tr>\n");
+        out.push_str("<table><tr><th>Title</th><th>Status</th><th>Type</th><th>Speaker</th><th>Recorded</th><th>Uploaded</th><th>Length</th><th>Source</th></tr>\n");
         for c in &r.duplicate_clusters {
             item_row(&mut out, &c.kept, "kept");
             for d in &c.duplicates {

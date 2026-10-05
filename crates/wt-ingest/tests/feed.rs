@@ -357,6 +357,17 @@ async fn state_of(pool: &PgPool, vimeo_id: &str) -> (String, Option<String>, Opt
     .unwrap()
 }
 
+async fn date_of(pool: &PgPool, vimeo_id: &str) -> Option<chrono::NaiveDate> {
+    sqlx::query_scalar(
+        "select t.talk_date from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.platform = 'vimeo' and sv.external_id = $1",
+    )
+    .bind(vimeo_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titles() {
     let fx = start().await;
@@ -431,6 +442,22 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
                 "2020-06-14T19:00:00Z",
                 None,
             ),
+            // The titled copy first and the dated one later: the kept copy has no date of its
+            // own, so it takes the dated copy's.
+            item(
+                "710000010",
+                "Birthday Fixture",
+                2160,
+                "2020-06-07T18:00:00Z",
+                None,
+            ),
+            item(
+                "710000011",
+                "Ada 2020-05-31",
+                2200,
+                "2020-06-20T18:00:00Z",
+                None,
+            ),
         ]),
     );
     {
@@ -485,6 +512,12 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
                 "2020-06-14T18:00:00Z",
                 "2020_06_14_Ada.mp3",
             ),
+            no_length(
+                "ep-f",
+                "Birthday Fixture (Ada Fixture)",
+                "2020-05-31T18:00:00Z",
+                "2020_05_31_Ada.mp3",
+            ),
         ]),
     );
 
@@ -492,11 +525,11 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
     assert_eq!(
         report,
         FeedReport {
-            listed: 5,
-            new: 5,
-            matched: 4,
+            listed: 6,
+            new: 6,
+            matched: 5,
             unmatched: 1,
-            duplicate_uploads: 2
+            duplicate_uploads: 3
         }
     );
     // The dated copies were uploaded first, so rule 3's ranking keeps them.
@@ -536,6 +569,28 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
         "a title two talks share matches neither"
     );
     assert_eq!(matched("ep-e").as_deref(), Some("710000009"));
+    assert_eq!(
+        matched("ep-f").as_deref(),
+        Some("710000010"),
+        "the kept copy"
+    );
+    assert_eq!(
+        state_of(&fx.pool, "710000011").await,
+        (
+            "excluded".into(),
+            Some("duplicate_upload".into()),
+            Some("710000010".into())
+        )
+    );
+    let may_31 = chrono::NaiveDate::from_ymd_opt(2020, 5, 31);
+    assert_eq!(date_of(&fx.pool, "710000010").await, may_31, "carried over");
+    let logged: i64 = sqlx::query_scalar(
+        "select count(*) from correction_log where field = 'talk_date' and new_value = '\"2020-05-31\"'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, 1);
     for id in [
         "710000005",
         "710000006",
@@ -555,7 +610,7 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
         .await
         .unwrap();
     assert_eq!(
-        report.eligible, 7,
+        report.eligible, 8,
         "the two feed-proven duplicates are not eligible"
     );
     while let Some(j) = job::claim(&mut conn, &[JobKind::Classify], "w")
@@ -566,7 +621,17 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
             .await
             .unwrap();
     }
+    // Neither classification nor an unchanged rediscovery puts the upload date back.
+    pipeline::discover(
+        &mut conn,
+        fx.sources.get("fixture-vimeo").unwrap(),
+        &vimeo,
+        None,
+    )
+    .await
+    .unwrap();
     drop(conn);
+    assert_eq!(date_of(&fx.pool, "710000010").await, may_31);
     assert_eq!(
         state_of(&fx.pool, "710000003").await.1.as_deref(),
         Some("duplicate_upload")
@@ -574,7 +639,7 @@ async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titl
     assert_eq!(
         run_feed(&fx, &podcast).await,
         FeedReport {
-            listed: 5,
+            listed: 6,
             new: 0,
             matched: 0,
             unmatched: 1,
