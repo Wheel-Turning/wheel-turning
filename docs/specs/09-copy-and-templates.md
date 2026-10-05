@@ -248,3 +248,20 @@ Then record the permission request for BDK America that was drafted earlier, and
 wt rights request --source bdkamerica --to "https://www.bdkamerica.org/contact/" --channel form --draft-file data-inbox/notices/bdk-request.md
 wt rights sent --source bdkamerica --on [date]
 ```
+
+## Sensitive question notices
+
+File: `copy/sensitive.md`. The tone is plain and kind and makes no claims it cannot keep.
+
+**Acute, full page.** Heading: Please reach out for help now. Text: If you are thinking about hurting yourself or someone else, please contact someone right away. In the United States you can call 988 or text 988, or chat at 988lifeline.org, at any time. If you are in danger now, call 911. Outside the United States, you can find a local line at findahelpline.com. You can also tell a person you trust, a teacher or a doctor today. This site shows what teachers have said. It is not counseling, medical advice or emergency help. Links: Show teachings on facing difficult feelings. Ask something else.
+
+**Distress, banner.** If you are going through something painful, you do not have to carry it alone. In the United States you can call or text 988 at any time. This site shows what teachers have said. It is not counseling.
+
+**Medical, banner.** This site shows what teachers have said. It is not medical advice. For symptoms, medicines or a diagnosis, please talk with a doctor or pharmacist. In an emergency in the United States, call 911.
+
+## About page additions
+
+Add to the Your questions section of `copy/about.md`:
+
+- To write the short summary line and to check for sensitive topics, the text of your question may be sent to a language model provider. \[Confirm before launch that the provider's zero-retention terms are in place, and say so here in one sentence.\]
+- If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.

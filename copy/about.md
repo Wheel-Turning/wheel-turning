@@ -10,6 +10,9 @@
 
 **Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time. Student questions and student voices from recorded classes are never stored.
 
+- To write the short summary line and to check for sensitive topics, the text of your question may be sent to a language model provider. \[Confirm before launch that the provider's zero-retention terms are in place, and say so here in one sentence.\]
+- If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.
+
 **Who runs this.** Wheel Turning is run by \[name\], an individual, as a free project with no advertising and no fees. The plan is to form a nonprofit. The site uses a single cookie to keep you signed in for 30 days.
 
 **Leaving.** If you hold rights in anything shown here, you can have it removed at any time, and we will remove it without argument. Rights and removal
