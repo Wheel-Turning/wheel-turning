@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select t.title, sv.description, t.state::text as \"state!\"\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
+  "query": "select t.title, sv.description, t.state::text as \"state!\", t.state_reason\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
   "describe": {
     "columns": [
       {
@@ -30,6 +30,17 @@
         "name": "state!",
         "type_info": "Text",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "state_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
       }
     ],
     "parameters": {
@@ -40,8 +51,9 @@
     "nullable": [
       false,
       true,
-      null
+      null,
+      true
     ]
   },
-  "hash": "ab3757f9c1f7a46d1e12282f4cfd7e77148bb2e40c29e71524d5d6733791aa2e"
+  "hash": "bd62839cdbbd2e2ee6ecb5ec6fcbac03c89ab42540c956c1b8a7f38066b26ed7"
 }

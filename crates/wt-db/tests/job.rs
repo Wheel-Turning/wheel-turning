@@ -329,6 +329,84 @@ async fn the_reaper_requeues_stale_locks_and_leaves_fresh_ones() {
 }
 
 #[tokio::test]
+async fn the_reaper_retires_a_stale_job_on_its_last_attempt() {
+    let fx = common::start().await;
+    let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let id = job::enqueue(&mut conn, JobKind::Audio, Some(t), "h", &NO_PAYLOAD)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("update job set max_attempts = 2 where id = $1")
+        .bind(id.as_uuid())
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let expire = || async {
+        sqlx::query("update job set locked_at = now() - interval '3 hours' where id = $1")
+            .bind(id.as_uuid())
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+    };
+
+    // The worker dies on each attempt, as one killed by running out of memory would.
+    let first = job::claim(&mut conn, &[JobKind::Audio], "pc")
+        .await
+        .unwrap()
+        .unwrap();
+    expire().await;
+    let reaped = job::reap(&mut conn, job::DEFAULT_LOCK_TIMEOUT)
+        .await
+        .unwrap();
+    assert_eq!(
+        reaped,
+        Reaped {
+            requeued: 1,
+            dead: 0
+        },
+        "attempt 1 of 2 retries"
+    );
+
+    let second = job::claim(&mut conn, &[JobKind::Audio], "pc")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((first.attempt, second.attempt), (1, 2));
+    expire().await;
+    let reaped = job::reap(&mut conn, job::DEFAULT_LOCK_TIMEOUT)
+        .await
+        .unwrap();
+    assert_eq!(
+        reaped,
+        Reaped {
+            requeued: 0,
+            dead: 1
+        },
+        "attempt 2 of 2 is the last"
+    );
+
+    assert_eq!(job_state(&fx.pool, id).await, "dead");
+    assert!(
+        job::claim(&mut conn, &[JobKind::Audio], "pc")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let error: Option<String> = sqlx::query_scalar("select last_error from job where id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(error.as_deref(), Some(job::LOCK_EXPIRED));
+    assert_eq!(state(&fx.pool, t).await, "awaiting_consent");
+    assert_eq!(
+        state_reason(&fx.pool, t).await.as_deref(),
+        Some("audio job dead: worker lock expired on the last attempt")
+    );
+}
+
+#[tokio::test]
 async fn finishing_a_stage_and_enqueueing_the_next_commit_together() {
     let fx = common::start().await;
     let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;

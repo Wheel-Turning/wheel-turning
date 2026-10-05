@@ -200,7 +200,9 @@ pub enum SpeakerOutcome {
 /// Classification rule 6 (Spec 03, as amended): resolve the speaker from the title and then the
 /// description. Exactly one teacher sets `teacher_id`, and `sangha_id` is the sangha where the
 /// talk was given (`venue`), which receives its dana. Zero or several matches send the talk to
-/// `needs_review` with reason `speaker_unresolved`. Applies only to talks not yet past the gate.
+/// `needs_review` with reason `speaker_unresolved`. Applies only to talks not yet past the gate,
+/// and leaves alone a talk held in `needs_review` for any other reason, such as student voices
+/// or an unclear talk type: only a person releases those.
 pub async fn assign_speaker(
     conn: &mut PgConnection,
     matcher: &AliasMatcher<TeacherId>,
@@ -209,16 +211,21 @@ pub async fn assign_speaker(
     actor: &str,
 ) -> Result<SpeakerOutcome, RegistryDbError> {
     let talk = sqlx::query!(
-        r#"select t.title, sv.description, t.state::text as "state!"
+        r#"select t.title, sv.description, t.state::text as "state!", t.state_reason
            from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1"#,
         talk_id.as_uuid()
     )
     .fetch_one(&mut *conn)
     .await?;
-    if !matches!(
-        talk.state.as_str(),
-        "discovered" | "needs_review" | "awaiting_consent"
-    ) {
+    let open = match talk.state.as_str() {
+        "discovered" | "awaiting_consent" => true,
+        "needs_review" => matches!(
+            talk.state_reason.as_deref(),
+            None | Some("speaker_unresolved")
+        ),
+        _ => false,
+    };
+    if !open {
         return Ok(SpeakerOutcome::NeedsReview);
     }
 

@@ -147,7 +147,8 @@ async fn propagate(
         }
         ConsentStatus::Requested | ConsentStatus::Unknown => {
             // The database forbids a talk past the gate without granted consent, so any talk
-            // already cleared or in the pipeline goes back to wait.
+            // cleared on that consent goes back to wait. A talk cleared by a verified license
+            // does not rest on consent and stays where it is.
             let returned = sqlx::query!(
                 r#"update talk t set state = 'awaiting_consent', state_reason = $2,
                           consent_status = $3::text::consent_status
@@ -155,6 +156,7 @@ async fn propagate(
                          where teacher_id = $1
                            and state in ('cleared','fetching','transcribing','diarizing','segmenting',
                                          'correcting','extracting','resolving','indexing','ready')
+                           and rights_basis is distinct from 'license'
                          for update) old
                    where t.id = old.id
                    returning t.id, old.old_state as "old_state!""#,
