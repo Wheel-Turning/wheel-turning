@@ -261,3 +261,28 @@ async fn the_committed_seed_imports_and_is_idempotent() {
         "every seeded donation link starts unverified"
     );
 }
+
+#[tokio::test]
+async fn a_talk_held_in_review_for_another_reason_stays_there() {
+    let fx = common::start().await;
+    // Spec 03: Q&A sessions with student voices wait in needs_review until a person decides,
+    // even when the title names a teacher whose consent is granted.
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    let t = discovered(&fx.pool, "Q&A with Ada", None, Some(ADA)).await;
+    sqlx::query(
+        "update talk set state = 'needs_review', state_reason = 'student_voices' where id = $1",
+    )
+    .bind(t.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(assign(&fx.pool, t).await, SpeakerOutcome::NeedsReview);
+
+    assert_eq!(state(&fx.pool, t).await, "needs_review");
+    assert_eq!(
+        state_reason(&fx.pool, t).await.as_deref(),
+        Some("student_voices")
+    );
+    assert_eq!(teacher_and_guess(&fx.pool, t).await, (None, None));
+}

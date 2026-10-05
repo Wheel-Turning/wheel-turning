@@ -252,6 +252,61 @@ async fn consent_falling_back_to_requested_returns_talks_past_the_gate() {
     assert_eq!(servable(&fx.pool).await, 0);
 }
 
+/// A ready talk by Ada cleared by a reviewed, allowed license rather than her consent.
+async fn licensed_ready_talk(pool: &sqlx::PgPool) -> wt_core::ids::TalkId {
+    let evidence: sqlx::types::Uuid = sqlx::query_scalar(
+        "insert into license_evidence (sangha_id, license_code, license_url, evidence_url,
+                                       evidence_snapshot_ref, snapshot_sha256, captured_at,
+                                       reviewed_by, reviewed_at, allowed)
+         select id, 'cc-by-4.0', 'https://example.invalid/l', 'https://example.invalid/e',
+                'license-evidence/fixture.txt', 'h', now(), 'reviewer', now(), true
+         from sangha where name = 'Fixture Mountain Zendo' returning id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let t = talk(pool, Some(ADA), Some("Fixture Mountain Zendo")).await;
+    sqlx::query(
+        "update talk set rights_basis = 'license', license_evidence_id = $2, state = 'cleared'
+         where id = $1",
+    )
+    .bind(t.as_uuid())
+    .bind(evidence)
+    .execute(pool)
+    .await
+    .unwrap();
+    common::make_ready(pool, t).await;
+    t
+}
+
+#[tokio::test]
+async fn consent_falling_back_leaves_licensed_talks_but_a_decline_takes_them_down() {
+    let fx = common::start().await;
+    let licensed = licensed_ready_talk(&fx.pool).await;
+    let consented = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    common::make_ready(&fx.pool, consented).await;
+    assert_eq!(servable(&fx.pool).await, 2);
+
+    let out = set_consent(&fx.pool, ADA, ConsentStatus::Requested, None, None, ACTOR)
+        .await
+        .unwrap();
+
+    assert_eq!(out.returned_to_awaiting, vec![consented]);
+    assert_eq!(state(&fx.pool, consented).await, "awaiting_consent");
+    assert_eq!(
+        state(&fx.pool, licensed).await,
+        "ready",
+        "a license does not rest on consent"
+    );
+    assert_eq!(servable(&fx.pool).await, 1);
+
+    // A speaker who declines is never used, whatever the basis (Spec 03, Mandated talks).
+    consent(&fx.pool, ADA, ConsentStatus::Declined).await;
+    assert_eq!(state(&fx.pool, licensed).await, "withdrawn");
+    assert_eq!(servable(&fx.pool).await, 0);
+}
+
 #[tokio::test]
 async fn consent_history_is_append_only() {
     let fx = common::start().await;
