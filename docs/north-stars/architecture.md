@@ -1,16 +1,16 @@
-# Dharma Gates: Architectural North Star
+# Wheel Turning: Architectural North Star
 
 Oct 1, 2026 · @Alex
 
 ## Purpose
 
-This document fixes what must stay true about Dharma Gates' architecture as the product grows from a private SSZ demo to a multi-sangha platform. The PRD says what the product promises. This document says which structures keep those promises from being broken by a later change, a new contributor, or a convenient shortcut.
+This document fixes what must stay true about Wheel Turning's architecture as the product grows from a private SSZ demo to a multi-sangha platform. The PRD says what the product promises. This document says which structures keep those promises from being broken by a later change, a new contributor, or a convenient shortcut.
 
 Readers are the founder, any engineer or contractor who joins, and counsel reviewing consent and rights handling. The v1 technical design (Rust workspace, Postgres with pgvector, Axum) is one realization of this direction and can be replaced without touching anything below. A proposal that conflicts with the invariants needs an amendment to this document first, with the reason recorded.
 
 ## North star
 
-Dharma Gates returns only what a teacher said under a recorded rights basis, never after an opt-out, exactly as said, with the route to the source and to the giving attached, and its structure makes the opposite impossible rather than merely discouraged.
+Wheel Turning returns only what a teacher said under a recorded rights basis, never after an opt-out, exactly as said, with the route to the source and to the giving attached, and its structure makes the opposite impossible rather than merely discouraged.
 
 Six properties follow from that sentence, and every design choice is checked against them.
 

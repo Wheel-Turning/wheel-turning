@@ -159,14 +159,14 @@ left join servable_text_unit stu on stu.text_unit_id = c.text_unit_id;
 
 Grants in `0010`: `dg_pipeline` gets read and write on every new table. `dg_web` gets select on `servable_text_unit`, `person` and `person_alias` and nothing on `text_unit`, `text_edition` or `reference_asset`. `dg_analyst` gets no access to the new tables.
 
-Because `license_evidence` now serves texts, the default `allowed_license_codes` in Spec 03 also includes `public-domain`. For a public-domain edition, the evidence is the page that supports the claim, such as the translator's death date or the publisher's public-domain statement, captured with `dg license capture` and approved by a person like any other evidence.
+Because `license_evidence` now serves texts, the default `allowed_license_codes` in Spec 03 also includes `public-domain`. For a public-domain edition, the evidence is the page that supports the claim, such as the translator's death date or the publisher's public-domain statement, captured with `wt license capture` and approved by a person like any other evidence.
 
 ## Import pipeline
 
 Every import is driven by a manifest, a small TOML file that sits beside the source files. Two commands read manifests, and both run as a dry run unless given `--apply`.
 
-- `dg text import --manifest <path> [--apply]` for corpus texts.
-- `dg reference import --manifest <path> [--apply]` for reference assets.
+- `wt text import --manifest <path> [--apply]` for corpus texts.
+- `wt reference import --manifest <path> [--apply]` for reference assets.
 
 A corpus text manifest:
 
@@ -184,7 +184,7 @@ translator = "REPLACE_ME"
 language = "en"
 source_url = "https://REPLACE_ME"
 rights_holder = "public domain"    # or the translator or publisher
-license_evidence_id = "REPLACE_ME" # from dg license capture and approve
+license_evidence_id = "REPLACE_ME" # from wt license capture and approve
 
 [source]
 files = ["dhammapada.epub"]
@@ -224,14 +224,14 @@ Steps for a corpus text:
 4. Cut units by scheme: `verse` splits on blank-line stanzas, `numbered` on the number pattern, `paragraph` on blank lines, `heading` takes each heading's body. A unit longer than `max_words` splits at sentence boundaries into `locator.a`, `locator.b` and so on. A fragment under 5 words merges into its neighbor.
 5. Assign locators as `<prefix>:<n>`, or `<prefix>:<chapter>:<n>` when the scheme has chapters. A duplicate locator fails the import.
 6. In one transaction, upsert `person`, `work` and `text_edition`, replace the edition's units with new rows and embeddings from the same `Embedder` that indexes talks, set `excerptable` from the evidence, and mark the edition `ready`. Upload the original source files to S3 under `texts-source/<work>/<edition>/` with their SHA-256 so the import can be repeated. Write an `import_run` row.
-7. Sync locators. Upsert a `work_locator` for every unit, with aliases from an optional `[aliases]` table in the manifest, so the citation resolver can match them. Then `dg reindex --citations` reruns resolution over talks and sets `citation.text_unit_id` where a resolved locator maps to a unit in a ready, excerptable edition.
+7. Sync locators. Upsert a `work_locator` for every unit, with aliases from an optional `[aliases]` table in the manifest, so the citation resolver can match them. Then `wt reindex --citations` reruns resolution over talks and sets `citation.text_unit_id` where a resolved locator maps to a unit in a ready, excerptable edition.
 
 An import is idempotent. The key is the SHA-256 of the source files plus the manifest hash, and an unchanged key makes the run a no-op.
 
 Reference assets feed the pipeline and nothing else:
 
 - A glossary file becomes `glossary_term` rows with `source_asset_id`. New variants merge into an existing canonical term. A conflict in canonical form or kind is reported and never overwritten silently. The glossary version hash then changes and the existing mechanism requeues the affected talks.
-- An alias list becomes `person` and `person_alias` rows. These are not teacher aliases, which come only from `dg registry import`.
+- An alias list becomes `person` and `person_alias` rows. These are not teacher aliases, which come only from `wt registry import`.
 - A lineage file becomes `person` rows and `lineage_edge` rows. Teachers link to a person only when the display names match exactly or `--link-teachers` is given.
 - A locator list becomes `work` and `work_locator` rows, the hand-listed citation locators of Spec 04.
 - A chant metadata file is stored in S3 and recorded in `reference_asset` with no downstream table in v1, since the PRD puts chant tooling in the backlog.
@@ -265,15 +265,15 @@ Steps for a PDF edition:
 2. Render and OCR. Render the page to PNG at `dpi` in scratch, then run Tesseract with `--oem 1` and automatic page segmentation, asking for TSV output so each word has a confidence and each block has geometry. Deskew when the detected angle is over 0.5 degrees.
 3. Rebuild the text. Join lines into paragraphs, remove hyphenation at line breaks, drop page numbers and running heads (lines repeated at the same position on many pages), fold ligatures and the long s, and keep diacritics in NFC. Blocks in clearly smaller type at the foot of a page are treated as footnotes and excluded. The dry run lists every excluded block so you can check the heuristic.
 4. Flag suspect units. A unit is `suspect` when its mean word confidence is under `min_unit_confidence`, or when fewer than `min_dictionary_share` of its tokens appear in the English word list plus the glossary. If more than `max_suspect_share` of the units are suspect, the import stops with a report, since the scan probably needs better settings or a better copy.
-5. Optional vision pass. With `vision_pass = "flagged"`, each page holding a suspect unit is sent as an image to the Claude API under a strict prompt: transcribe exactly, do not correct or modernize, keep diacritics, mark illegible text as `[?]`. This runs under a new `DataClass::PublicText`, which requires approved license evidence for the edition and does not need `DG_LLM_REAL_DATA_OK`, since the text is openly licensed and public. The vision text replaces the OCR text for a page only when the two agree at a character-level similarity of at least 0.75, which guards against a model inventing text. Otherwise the page keeps its OCR text and goes to the proofread.
+5. Optional vision pass. With `vision_pass = "flagged"`, each page holding a suspect unit is sent as an image to the Claude API under a strict prompt: transcribe exactly, do not correct or modernize, keep diacritics, mark illegible text as `[?]`. This runs under a new `DataClass::PublicText`, which requires approved license evidence for the edition and does not need `WT_LLM_REAL_DATA_OK`, since the text is openly licensed and public. The vision text replaces the OCR text for a page only when the two agree at a character-level similarity of at least 0.75, which guards against a model inventing text. Otherwise the page keeps its OCR text and goes to the proofread.
 6. Record the origin. `text_edition.extraction` becomes `text_layer`, `ocr` or `ocr_vision`, with the engine and mean confidence. Each unit keeps its `source_page` and `confidence`, and the page shows the page number when it is known.
 
 The proofread gate:
 
-1. `dg text proof --edition <id>` writes a standalone HTML proof sheet to `data-inbox/_proof/`. For each sampled unit it shows the extracted text beside a crop of the page image, with controls for correct or error and a note field. The sample is 24 units: 12 chosen at random across the book, with at least one from each tenth of the pages where the book is long enough, and the 12 with the lowest OCR confidence. A native or text-layer edition uses 10 random units. Reading a unit against its page crop takes a few seconds, so a normal edition takes about ten minutes.
-2. `dg text proof-import --edition <id> --file proof.json --reviewer <name>` records a `proof_check` row. An error is any wrong, missing or extra word in a unit. The edition passes when the random 12 hold at most `proof_random_max_errors` errors (default 1) and the 12 lowest-confidence units hold at most `proof_worst_max_errors` (default 3). The counts in `proof_check` are the number sampled and the number of errors in each group.
+1. `wt text proof --edition <id>` writes a standalone HTML proof sheet to `data-inbox/_proof/`. For each sampled unit it shows the extracted text beside a crop of the page image, with controls for correct or error and a note field. The sample is 24 units: 12 chosen at random across the book, with at least one from each tenth of the pages where the book is long enough, and the 12 with the lowest OCR confidence. A native or text-layer edition uses 10 random units. Reading a unit against its page crop takes a few seconds, so a normal edition takes about ten minutes.
+2. `wt text proof-import --edition <id> --file proof.json --reviewer <name>` records a `proof_check` row. An error is any wrong, missing or extra word in a unit. The edition passes when the random 12 hold at most `proof_random_max_errors` errors (default 1) and the 12 lowest-confidence units hold at most `proof_worst_max_errors` (default 3). The counts in `proof_check` are the number sampled and the number of errors in each group.
 3. Until a passing check exists the edition stays `imported` and does not serve. The serving view enforces this.
-4. After a failure, the report lists the error patterns. The options are to change the OCR settings, run the vision pass, or correct units with `dg text fix --unit <id> --text "<text>"`, which writes to `correction_log`. Then run the proofread again.
+4. After a failure, the report lists the error patterns. The options are to change the OCR settings, run the vision pass, or correct units with `wt text fix --unit <id> --text "<text>"`, which writes to `correction_log`. Then run the proofread again.
 
 Page images are working files in scratch and on the proof sheet only, and are never stored in the database. Migration `0011_ocr_proof.sql`:
 
@@ -320,12 +320,12 @@ The grants in `0010` extend to `proof_check` for `dg_pipeline` only.
 
 A 2,500-page scan is a batch job, not a single import. These rules keep it resumable, bounded and checkable.
 
-1. Look for existing text first. Before OCR, check whether the work already has a born-digital edition, and let `dg intake` record the answer. Internet Archive items usually carry their own OCR text, and many open texts exist as epub or html. An existing text layer or archive OCR text can be imported as `text_layer`, and it goes through the same quality checks and proofreading. OCR the scan yourself only when nothing usable exists.
-2. Chunked jobs. The importer splits the PDF into page ranges of `pdf_chunk_pages` (default 50) and queues one `ocr_chunk` job per range on the same queue as talks, with idempotency key `ocr:<edition>:<pdf sha256>:<first>-<last>`. Each job renders and OCRs its pages one at a time, writes the results (text, word confidences and block geometry, never images) to S3 under `texts-work/<edition>/pages/`, and deletes its images. A final `text_assemble` job runs when every chunk is done. A crash or restart reruns only the unfinished chunks, and workers on several machines can share the queue. Run `dg worker --kinds ocr_chunk --concurrency <cores>`.
-3. Estimate before committing. `dg text import --estimate` samples the first pages and prints total pages, pages needing OCR, measured pages per minute, projected wall time at the chosen concurrency, and the worst-case number of vision calls. Nothing is queued until you add `--apply`.
+1. Look for existing text first. Before OCR, check whether the work already has a born-digital edition, and let `wt intake` record the answer. Internet Archive items usually carry their own OCR text, and many open texts exist as epub or html. An existing text layer or archive OCR text can be imported as `text_layer`, and it goes through the same quality checks and proofreading. OCR the scan yourself only when nothing usable exists.
+2. Chunked jobs. The importer splits the PDF into page ranges of `pdf_chunk_pages` (default 50) and queues one `ocr_chunk` job per range on the same queue as talks, with idempotency key `ocr:<edition>:<pdf sha256>:<first>-<last>`. Each job renders and OCRs its pages one at a time, writes the results (text, word confidences and block geometry, never images) to S3 under `texts-work/<edition>/pages/`, and deletes its images. A final `text_assemble` job runs when every chunk is done. A crash or restart reruns only the unfinished chunks, and workers on several machines can share the queue. Run `wt worker --kinds ocr_chunk --concurrency <cores>`.
+3. Estimate before committing. `wt text import --estimate` samples the first pages and prints total pages, pages needing OCR, measured pages per minute, projected wall time at the chosen concurrency, and the worst-case number of vision calls. Nothing is queued until you add `--apply`.
 4. Bound the vision pass. `vision_max_pages` (default 200) caps how many pages go to the vision pass. Flagged pages beyond the cap are ordered by lowest confidence, and the ones past the cap go straight to proofreading.
 5. Split compilations. A manifest can list several parts with page ranges, such as separate volumes or texts bound together. Each part becomes its own work or edition, with its own locators, license evidence line and proofread.
-6. Check the whole book automatically. Scan quality often drifts across a long book, so the importer measures each tenth of the pages. A range whose mean OCR confidence is below `range_min_confidence` (default 0.85) is re-read once at 400 dpi, and if it is still below, you spot-check 6 units from that range only. `dg text reocr --edition <id> --pages <a-b> --dpi 400` also redoes a range by hand.
+6. Check the whole book automatically. Scan quality often drifts across a long book, so the importer measures each tenth of the pages. A range whose mean OCR confidence is below `range_min_confidence` (default 0.85) is re-read once at 400 dpi, and if it is still below, you spot-check 6 units from that range only. `wt text reocr --edition <id> --pages <a-b> --dpi 400` also redoes a range by hand.
 7. Memory and disk. Pages are processed one at a time and the document is never loaded whole. Scratch needs room for one chunk of page images only.
 8. Hardware. OCR is CPU work and needs no GPU. Wall time scales with pages divided by cores, so use the estimate instead of guessing.
 
@@ -343,7 +343,7 @@ Acceptance criteria for large documents:
 
 Texts get their own retrieval path and their own section on the page. The talk path in Spec 05 is untouched.
 
-1. Text search. `dg-retrieve` gains a `TextRetriever` that runs the same hybrid pipeline (full-text, vector, fusion, rerank) over `servable_text_unit` and nothing else. Its settings sit under `[texts]` in `config/retrieval.toml`: `fts_top_k = 20`, `vector_top_k = 20`, `fuse_top_k = 15`, `rerank_min_score = 0.40` (calibrate on the evaluation set), `max_units = 4`, `max_works = 3`, `per_work_cap = 2`.
+1. Text search. `wt-retrieve` gains a `TextRetriever` that runs the same hybrid pipeline (full-text, vector, fusion, rerank) over `servable_text_unit` and nothing else. Its settings sit under `[texts]` in `config/retrieval.toml`: `fts_top_k = 20`, `vector_top_k = 20`, `fuse_top_k = 15`, `rerank_min_score = 0.40` (calibrate on the evaluation set), `max_units = 4`, `max_works = 3`, `per_work_cap = 2`.
 2. When it runs. It runs in standard mode in parallel with talk retrieval, and in named-author mode. It does not run in named-teacher mode, where the page is about one teacher.
 3. Named-author mode. A second Aho-Corasick automaton covers `person_alias` for people who are authors of at least one ready work. A query that matches exactly one such author and no teacher alias restricts text search to that author's works. Talk retrieval still runs in standard mode with the author's name removed from the query, so "what does Dogen say about time" returns Dogen's text units plus teachers who speak to time. A teacher match always takes precedence, and the usual alias length and common-word rules apply.
 4. Logging. Add to migration `0009`: `alter table query_log add column named_author_id uuid references person(id); alter table query_log add column text_count integer not null default 0;`.
@@ -380,7 +380,7 @@ data-inbox/
 
 After `--apply`, the importer uploads the originals to S3 (`texts-source/` or `reference-assets/`) with their hashes and moves the folder to `_done/`, so the local copy can be deleted. Nothing in `data-inbox/` is ever committed. `.gitignore` excludes it and a guard test fails if git tracks any file under it.
 
-`dg intake` is an interactive walkthrough that builds the manifests so you never write TOML by hand.
+`wt intake` is an interactive walkthrough that builds the manifests so you never write TOML by hand.
 
 1. It scans `data-inbox/` for folders with no manifest or an incomplete one, and lists each file with its size and the first lines of its extracted text.
 2. For each folder it asks in order whether the role is corpus or reference. For a corpus text it asks for the work title, author, tradition, edition label, translator and language. For a reference asset it asks for the kind and title.
@@ -389,11 +389,11 @@ After `--apply`, the importer uploads the originals to S3 (`texts-source/` or `r
 5. It writes `manifest.toml`, runs the dry run, shows the report, and asks whether to apply.
 6. After applying, it prints a summary: units loaded, locators synced, citations relinked and where the originals went.
 
-`dg intake --manifest-only` writes manifests with `REPLACE_ME` fields for you to fill later. The walkthrough never makes a legal judgment. It records evidence, requires a person to approve it, and defaults to blocked.
+`wt intake --manifest-only` writes manifests with `REPLACE_ME` fields for you to fill later. The walkthrough never makes a legal judgment. It records evidence, requires a person to approve it, and defaults to blocked.
 
 What may be loaded through this path:
 
-- Only editions and assets with approved evidence. A restricted translation is not loaded. `dg text link-out --work <title> --url <url> [--locators <file>]` creates the `work` and its locators with no text, so talks can still cite it and the footnote links out.
+- Only editions and assets with approved evidence. A restricted translation is not loaded. `wt text link-out --work <title> --url <url> [--locators <file>]` creates the `work` and its locators with no text, so talks can still cite it and the footnote links out.
 - No talks. Audio or transcripts of talks go through the ingestion path in Spec 03, because they carry the consent and licensing rules for teachers.
 - Nothing from a paywalled source, and nothing whose terms forbid compiling or redistributing it.
 
@@ -403,16 +403,16 @@ You can hand the importer web addresses instead of files. It fetches each docume
 
 Commands:
 
-- `dg text fetch --url <url> [--url <url>]` or `dg text fetch --urls-file urls.txt`, with one URL per line and `#` comments allowed.
-- `dg text fetch --crawl <index-url> --depth 1 --follow-pattern '<regex>' --max-pages 50` for an index page that lists documents.
-- `dg text refresh --edition <id>` to refetch and detect changes.
-- `dg license record-permission` to record a permission (below).
+- `wt text fetch --url <url> [--url <url>]` or `wt text fetch --urls-file urls.txt`, with one URL per line and `#` comments allowed.
+- `wt text fetch --crawl <index-url> --depth 1 --follow-pattern '<regex>' --max-pages 50` for an index page that lists documents.
+- `wt text refresh --edition <id>` to refetch and detect changes.
+- `wt license record-permission` to record a permission (below).
 
 Permission as evidence. Evidence for a text can be a license the source states, which is preferred, or a recorded permission from an organization.
 
-`dg license record-permission --grantor "<organization>" --scope-urls <prefix> [--scope-urls <prefix>] --covers "excerpting with attribution" --statement-file permission.txt --given-on <date> --recorded-by <name>`
+`wt license record-permission --grantor "<organization>" --scope-urls <prefix> [--scope-urls <prefix>] --covers "excerpting with attribution" --statement-file permission.txt --given-on <date> --recorded-by <name>`
 
-This saves the statement to S3 (an email pasted into a text file is enough) and creates a `license_evidence` row of kind `permission`, code `permission-excerpt`, listing the URL prefixes it covers. A person then approves it with `dg license approve`, as for any evidence. A permission is only as broad as what the grantor can authorize. It covers works the grantor owns or republishes with rights, and it does not cover a third party's translation just because the grantor links to it. The dry run therefore shows the host, the grantor and the scope the evidence claims, and each edition keeps its own `rights_holder`.
+This saves the statement to S3 (an email pasted into a text file is enough) and creates a `license_evidence` row of kind `permission`, code `permission-excerpt`, listing the URL prefixes it covers. A person then approves it with `wt license approve`, as for any evidence. A permission is only as broad as what the grantor can authorize. It covers works the grantor owns or republishes with rights, and it does not cover a third party's translation just because the grantor links to it. The dry run therefore shows the host, the grantor and the scope the evidence claims, and each edition keeps its own `rights_holder`.
 
 The gate. A URL must fall under the prefixes of approved evidence before the importer downloads its body. For any other URL the importer sends only a `HEAD` request, reports the content type and size, says that no evidence covers the URL, and stops. The importer also looks for license signs on the page, such as `rel="license"` links, Creative Commons footer links and PDF rights metadata, and lists them as hints in the report. Hints never approve anything.
 
@@ -432,11 +432,11 @@ Conversion, chosen by content type and file signature rather than extension:
 - EPUB, TXT and MD. As in the manifest path.
 - Anything else is reported and skipped.
 
-The manifest draft. The importer drafts the manifest from what it finds. Title comes from `og:title`, `<title>` or PDF metadata. Author comes from `author` or `citation_author` meta tags or PDF metadata. The edition label comes from the publication date or the host, `source_url` from the final URL, and the rights holder from the evidence's grantor unless the page says otherwise. The translator is never guessed, so it is asked. The unit scheme is sniffed and shown with five sample units, and `dg intake --url <url>` walks you through confirming it. With `--yes`, a born-digital HTML page that has a clear title uses the paragraph scheme with no questions. Anything that needs OCR, or whose extraction looks suspect, still stops for confirmation, and OCR editions still need the proofread.
+The manifest draft. The importer drafts the manifest from what it finds. Title comes from `og:title`, `<title>` or PDF metadata. Author comes from `author` or `citation_author` meta tags or PDF metadata. The edition label comes from the publication date or the host, `source_url` from the final URL, and the rights holder from the evidence's grantor unless the page says otherwise. The translator is never guessed, so it is asked. The unit scheme is sniffed and shown with five sample units, and `wt intake --url <url>` walks you through confirming it. With `--yes`, a born-digital HTML page that has a clear title uses the paragraph scheme with no questions. Anything that needs OCR, or whose extraction looks suspect, still stops for confirmation, and OCR editions still need the proofread.
 
 Source links. Each unit stores a `source_anchor`, and the page shows a link back to the original beside the license or permission notice. For HTML the link is the page URL with a text fragment (`#:~:text=`) built from the unit's opening words, so a browser highlights the excerpt. For a PDF it is `#page=N`. For a permission, the notice reads "Used with permission of \<grantor>" instead of a license link.
 
-Refreshing. `dg text refresh --edition <id>` makes a conditional request. An unchanged document is a no-op. A changed one is imported as a new version with a diff report of units added, removed and changed, and serving continues with the current edition until you approve the replacement with `--apply`, with a new proofread if it needed OCR. The nightly audit gains a warning for any source URL that is unreachable or whose content changed.
+Refreshing. `wt text refresh --edition <id>` makes a conditional request. An unchanged document is a no-op. A changed one is imported as a new version with a diff report of units added, removed and changed, and serving continues with the current edition until you approve the replacement with `--apply`, with a new proofread if it needed OCR. The nightly audit gains a warning for any source URL that is unreachable or whose content changed.
 
 Schema, migration `0012_url_ingest.sql`:
 
@@ -500,20 +500,20 @@ The project owner has decided to use BDK America and Terebess in full unless a r
 
 How it works:
 
-- `dg source mandate --key <key> --publisher "<name>" --prefix <url> [--prefix <url>] --by "<your name>" --rationale "<text>" --display-notice "<line>"` records the owner's decision. It creates a `license_evidence` row of kind `mandate`, code `operator-mandate`, approved by the named person, and a `source_policy` row. The display notice may use `{title}`, `{translator}`, `{publisher}` and `{url}`, for example "Excerpted with attribution from {title}, {publisher}. Free to download at the source: {url}". The two starting keys are `bdkamerica` (prefixes `https://www.bdkamerica.org/` and `https://bdkamerica.org/`) and `terebess` (prefix `https://terebess.hu/`).
+- `wt source mandate --key <key> --publisher "<name>" --prefix <url> [--prefix <url>] --by "<your name>" --rationale "<text>" --display-notice "<line>"` records the owner's decision. It creates a `license_evidence` row of kind `mandate`, code `operator-mandate`, approved by the named person, and a `source_policy` row. The display notice may use `{title}`, `{translator}`, `{publisher}` and `{url}`, for example "Excerpted with attribution from {title}, {publisher}. Free to download at the source: {url}". The two starting keys are `bdkamerica` (prefixes `https://www.bdkamerica.org/` and `https://bdkamerica.org/`) and `terebess` (prefix `https://terebess.hu/`).
 - A URL under a mandated prefix needs no per-URL evidence. The importer attaches the mandate and clears the edition. Everything else in the pipeline is unchanged, including `robots.txt` obedience, the polite fetch rules, OCR proofreading and the large-document jobs.
 - Only English is loaded in v1. Language is detected per document and a non-English one is skipped and reported, which matters for a multilingual site like Terebess.
-- To collect a mandated source, crawl its indexes in batches, for example `dg text fetch --crawl https://www.bdkamerica.org/tripitaka-list/ --depth 2 --max-pages 50` and `dg text fetch --crawl https://terebess.hu/zen/textindex.html --depth 2 --max-pages 50`. BDK's download links redirect to the PDF, and the fetcher follows them within the prefix.
-- The notice scan from the source policy applies. Each source has `notice_action` of `flag`, `hold` or `block`, and under the mandate it starts as `flag`. A flagged document loads and appears in `dg source report` with its notice text, and `dg text quarantine --edition <id> --reason "<text>"` pulls any one document. `hold` quarantines noticed documents on arrival until released one at a time. `block` refuses them. Setting `hold` for explicit no-reproduction notices is the safer choice.
+- To collect a mandated source, crawl its indexes in batches, for example `wt text fetch --crawl https://www.bdkamerica.org/tripitaka-list/ --depth 2 --max-pages 50` and `wt text fetch --crawl https://terebess.hu/zen/textindex.html --depth 2 --max-pages 50`. BDK's download links redirect to the PDF, and the fetcher follows them within the prefix.
+- The notice scan from the source policy applies. Each source has `notice_action` of `flag`, `hold` or `block`, and under the mandate it starts as `flag`. A flagged document loads and appears in `wt source report` with its notice text, and `wt text quarantine --edition <id> --reason "<text>"` pulls any one document. `hold` quarantines noticed documents on arrival until released one at a time. `block` refuses them. Setting `hold` for explicit no-reproduction notices is the safer choice.
 - `[deployment] exposure = "private"` is the default. With `exposure = "public"` and any mandated source enabled, startup logs a warning and the nightly audit warns, because the exposure of a mandated source grows once the tool is public. Nothing blocks.
 
 Easy removal:
 
-1. Switch off a source: `dg source disable <key> --reason "<text>"`, and `dg source enable <key>` to restore it. The serving view checks the flag, so the effect is immediate.
-2. Delete a source, edition or URL prefix: `dg takedown --source <key>`, `--edition <id>` or `--url <prefix>`. This removes the text units, embeddings, S3 raw copies and work files, keeps a stub so a refetch does not recreate the document, and writes `takedown_log`.
-3. A public "Rights and removal" page. `GET /rights` needs no session and says: "If you hold rights in any text shown here and want it removed, tell us and we will remove it." It has one short form, `POST /rights/request`, rate limited to 5 per hour per address, with a honeypot field and no CAPTCHA, that writes a `takedown_request` row and is read through the CLI. Email notification is in the backlog, under the name `DG_RIGHTS_NOTIFY_EMAIL`. Every text hit on the answer page carries a "Report this excerpt" link to the form with the excerpt prefilled. These are the only routes reachable without a session.
-4. Handling. `dg takedown requests list|show|suspend|remove|decline`. The stated practice is to suspend the named source or document within one business day without argument, before verifying who is asking, and to restore it only if the requester turns out not to hold the rights. A suspension is reversible. A removal is permanent.
-5. If BDK America or Terebess answers no to anything, disable and take down that scope at once. If either answers yes, record it with `dg license record-permission` and switch the source's `basis` from `mandate` to `permission`, so the page can then truthfully say so. The BDK request already drafted is the way to make that happen.
+1. Switch off a source: `wt source disable <key> --reason "<text>"`, and `wt source enable <key>` to restore it. The serving view checks the flag, so the effect is immediate.
+2. Delete a source, edition or URL prefix: `wt takedown --source <key>`, `--edition <id>` or `--url <prefix>`. This removes the text units, embeddings, S3 raw copies and work files, keeps a stub so a refetch does not recreate the document, and writes `takedown_log`.
+3. A public "Rights and removal" page. `GET /rights` needs no session and says: "If you hold rights in any text shown here and want it removed, tell us and we will remove it." It has one short form, `POST /rights/request`, rate limited to 5 per hour per address, with a honeypot field and no CAPTCHA, that writes a `takedown_request` row and is read through the CLI. Email notification is in the backlog, under the name `WT_RIGHTS_NOTIFY_EMAIL`. Every text hit on the answer page carries a "Report this excerpt" link to the form with the excerpt prefilled. These are the only routes reachable without a session.
+4. Handling. `wt takedown requests list|show|suspend|remove|decline`. The stated practice is to suspend the named source or document within one business day without argument, before verifying who is asking, and to restore it only if the requester turns out not to hold the rights. A suspension is reversible. A removal is permanent.
+5. If BDK America or Terebess answers no to anything, disable and take down that scope at once. If either answers yes, record it with `wt license record-permission` and switch the source's `basis` from `mandate` to `permission`, so the page can then truthfully say so. The BDK request already drafted is the way to make that happen.
 
 Migration `0013_mandate_rights.sql`:
 
@@ -585,9 +585,9 @@ Grants: `dg_web` may insert into `takedown_request` and select `source_policy`, 
 
 Acceptance criteria for mandated sources:
 
-- [ ] `dg source mandate` creates the evidence and `source_policy` rows, and a URL under a mandated prefix is fetched and cleared with no per-URL evidence.
-- [ ] `dg source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them.
-- [ ] `dg takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left.
+- [ ] `wt source mandate` creates the evidence and `source_policy` rows, and a URL under a mandated prefix is fetched and cleared with no per-URL evidence.
+- [ ] `wt source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them.
+- [ ] `wt takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left.
 - [ ] `GET /rights` works with no session, `POST /rights/request` stores a row, rate limits at 5 per hour per address and rejects a filled honeypot, and no other route is reachable without a session.
 - [ ] Each text hit carries a "Report this excerpt" link whose form arrives prefilled.
 - [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent.
@@ -601,18 +601,18 @@ The project's purpose is to spread the teachings. Its rule for sources is theref
 
 The three steps:
 
-1. Use by default. A new source is added with `dg source add --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`, which is the mandate command with a general name and creates the same records. `[rights] default_basis_for_new_sources = "mandate"` is the setting. A source with a license or permission in hand is added with that basis instead.
+1. Use by default. A new source is added with `wt source add --key <key> --publisher "<name>" --prefix <url> --by "<name>" --rationale "<text>" --display-notice "<line>"`, which is the mandate command with a general name and creates the same records. `[rights] default_basis_for_new_sources = "mandate"` is the setting. A source with a license or permission in hand is added with that basis instead.
 2. Ask. Each mandated source gets a permission request, tracked in the ledger below. The request is the way an opt-out becomes an explicit record.
 3. Record the answer. A grant is logged and the page begins to say so truthfully. A refusal or a takedown is logged and the source is excluded permanently. No reply is logged as no reply and is never treated as permission, so the source stays on its mandate and is labeled as such.
 
 The ledger. Every step writes an append-only `rights_event`, so the history of each source can be read in order.
 
-- `dg rights request --source <key> --to <address or contact URL> --channel email|form|other --draft-file <path>` records a drafted request. `dg rights sent --source <key> --on <date>` records that it went out and schedules a follow-up 14 days later.
-- `dg rights grant --source <key> --statement-file <path> --from "<name>" --given-on <date> --scope "<text>"` stores the reply, creates permission evidence for the named prefixes, and switches the source's `basis` to `permission`. From then on the page says "Used with permission of \<publisher>".
-- `dg rights decline --source <key> --statement-file <path>` logs the refusal, runs the takedown for the source, and adds the exclusions below.
-- `dg rights ledger [--source <key>]` prints the timeline, and `dg rights due` lists requests that are unsent or past their follow-up date.
+- `wt rights request --source <key> --to <address or contact URL> --channel email|form|other --draft-file <path>` records a drafted request. `wt rights sent --source <key> --on <date>` records that it went out and schedules a follow-up 14 days later.
+- `wt rights grant --source <key> --statement-file <path> --from "<name>" --given-on <date> --scope "<text>"` stores the reply, creates permission evidence for the named prefixes, and switches the source's `basis` to `permission`. From then on the page says "Used with permission of \<publisher>".
+- `wt rights decline --source <key> --statement-file <path>` logs the refusal, runs the takedown for the source, and adds the exclusions below.
+- `wt rights ledger [--source <key>]` prints the timeline, and `wt rights due` lists requests that are unsent or past their follow-up date.
 
-Never use it again. A takedown, a decline or a rights holder's removal request creates active rows in `source_exclusion` covering the source prefix, the work, and the SHA-256 of each removed source file and text unit. Every path that could bring text in checks them first: the fetcher, the crawler, `dg source add`, `dg text import`, `dg intake` and the unit writer. A URL, work, edition, person or content hash that matches an active exclusion is refused with the exclusion cited, including an identical document found at a different URL. In code, the fetch functions accept only a `FetchTarget`, a type that can be built only by `Exclusions::clear(url)`, so an unchecked URL cannot be fetched. An exclusion is lifted only by `dg exclusion lift --id <id> --by "<name>" --evidence <statement file>`, which requires the rights holder's own written grant and is itself logged.
+Never use it again. A takedown, a decline or a rights holder's removal request creates active rows in `source_exclusion` covering the source prefix, the work, and the SHA-256 of each removed source file and text unit. Every path that could bring text in checks them first: the fetcher, the crawler, `wt source add`, `wt text import`, `wt intake` and the unit writer. A URL, work, edition, person or content hash that matches an active exclusion is refused with the exclusion cited, including an identical document found at a different URL. In code, the fetch functions accept only a `FetchTarget`, a type that can be built only by `Exclusions::clear(url)`, so an unchecked URL cannot be fetched. An exclusion is lifted only by `wt exclusion lift --id <id> --by "<name>" --evidence <statement file>`, which requires the rights holder's own written grant and is itself logged.
 
 Transparency. `GET /rights` also lists every source with its status, in plain words: used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request. It never uses permission language for a mandate.
 
@@ -679,14 +679,14 @@ Audit additions: a source with `basis = 'mandate'` and no recorded request after
 
 Acceptance criteria for the rights lifecycle:
 
-- [ ] `dg source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event.
-- [ ] `dg rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `dg rights ledger` prints them in order.
+- [ ] `wt source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event.
+- [ ] `wt rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `wt rights ledger` prints them in order.
 - [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent.
 - [ ] `decline` and a takedown remove the units and raw copies and add exclusions for the prefix, the work and each content hash.
-- [ ] After a takedown, `dg source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited.
+- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited.
 - [ ] A compile-fail test shows the fetch functions cannot be called with a raw URL.
-- [ ] `dg exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again.
-- [ ] A silent source stays a mandate, labeled as one, and `dg rights due` lists its follow-up.
+- [ ] `wt exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again.
+- [ ] A silent source stays a mandate, labeled as one, and `wt rights due` lists its follow-up.
 - [ ] `GET /rights` lists each source with the correct plain-language status and uses no permission language for a mandate.
 - [ ] The audit warns on a mandate with no request after 14 days, and fails on a servable unit that matches an active exclusion.
 
@@ -704,12 +704,12 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [ ] An import with evidence that is missing, not approved, or outside `allowed_license_codes` is refused, and a public-domain edition with approved evidence is accepted.
 - [ ] A glossary import merges variants, reports a conflicting canonical form without overwriting it, and changes the glossary version so affected talks requeue.
 - [ ] An alias list creates `person` rows and never creates teacher aliases. A lineage file creates edges, and `--link-teachers` links only exact name matches.
-- [ ] After a locator sync and `dg reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text".
+- [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text".
 - [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present.
 - [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search.
 - [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
-- [ ] `dg intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end.
-- [ ] `dg text link-out` creates a `work` and locators with no text rows.
+- [ ] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end.
+- [ ] `wt text link-out` creates a `work` and locators with no text rows.
 - [ ] A guard test fails if git tracks any file under `data-inbox/`.
 
 Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthetic scanned PDF rendered from known text with planted noise, and a mixed one:
@@ -722,7 +722,7 @@ Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthe
 - [ ] `DataClass::PublicText` is refused without approved license evidence for the edition.
 - [ ] The proof sheet shows each sampled unit beside its page crop, the sample is 12 random and 12 lowest-confidence units, and `proof-import` computes pass or fail correctly from at most 1 error in the random 12 and at most 3 in the worst 12.
 - [ ] An edition with no passing `proof_check` returns nothing from `servable_text_unit`, and one with a passing check serves.
-- [ ] `dg text fix` changes the unit, writes `correction_log` and requires a new proofread before the edition serves again.
+- [ ] `wt text fix` changes the unit, writes `correction_log` and requires a new proofread before the edition serves again.
 - [ ] Units from a PDF edition show their page number, and no page image is stored in the database.
 
 ## Source copies and legal pages

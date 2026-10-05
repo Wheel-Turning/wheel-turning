@@ -2,13 +2,13 @@ services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: dg
-      POSTGRES_PASSWORD: dg
-      POSTGRES_DB: dg
+      POSTGRES_USER: wt
+      POSTGRES_PASSWORD: wt
+      POSTGRES_DB: wt
     ports: ["5432:5432"]
     volumes: ["dgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dg"]
+      test: ["CMD-SHELL", "pg_isready -U wt"]
       interval: 5s
       retries: 10
   diarize:

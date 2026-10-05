@@ -3,9 +3,9 @@
 #
 # Two task definitions run the same image:
 # - web: the always-on service, connecting as dg_web_login
-# - migrate: a one-off task for `dg db migrate`, connecting as dg_owner_login
+# - migrate: a one-off task for `wt db migrate`, connecting as dg_owner_login
 # - admin: a one-off task connecting as the RDS master user, used only to bootstrap migrations
-#   and create login roles (`dg db create-login`)
+#   and create login roles (`wt db create-login`)
 #
 # DNS for the domain lives at Cloudflare and is managed by hand: the certificate's validation
 # record and the app's CNAME are outputs to copy there.
@@ -103,14 +103,14 @@ locals {
   region      = data.aws_region.current.region
 
   db_env = [
-    { name = "DG_DB_HOST", value = var.db.host },
-    { name = "DG_DB_PORT", value = tostring(var.db.port) },
-    { name = "DG_DB_NAME", value = var.db.name },
+    { name = "WT_DB_HOST", value = var.db.host },
+    { name = "WT_DB_PORT", value = tostring(var.db.port) },
+    { name = "WT_DB_NAME", value = var.db.name },
   ]
   common_env = [
-    { name = "DG_ENV", value = "prod" },
-    { name = "DG_LOG", value = "info" },
-    { name = "DG_TRANSCRIPT_BUCKET", value = var.bucket_names["transcripts"] },
+    { name = "WT_ENV", value = "prod" },
+    { name = "WT_LOG", value = "info" },
+    { name = "WT_TRANSCRIPT_BUCKET", value = var.bucket_names["transcripts"] },
   ]
 }
 
@@ -175,15 +175,15 @@ resource "aws_ecs_task_definition" "web" {
     name         = "web"
     image        = "${aws_ecr_repository.this.repository_url}:${coalesce(local.web_tag, "none")}"
     essential    = true
-    command      = ["dg-api"]
+    command      = ["wt-api"]
     portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
     environment = concat(local.common_env, local.db_env, [
-      { name = "DG_BIND", value = "0.0.0.0:${var.web_port}" },
-      { name = "DG_DB_USER", value = "dg_web_login" },
+      { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
+      { name = "WT_DB_USER", value = "dg_web_login" },
     ])
     secrets = [
-      { name = "DG_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_web_login"] },
-      { name = "DG_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_web_login"] },
+      { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -213,13 +213,13 @@ resource "aws_ecs_task_definition" "migrate" {
     name      = "migrate"
     image     = "${aws_ecr_repository.this.repository_url}:${local.migrate_tag}"
     essential = true
-    command   = ["dg", "db", "migrate"]
+    command   = ["wt", "db", "migrate"]
     environment = concat(local.common_env, local.db_env, [
-      { name = "DG_DB_USER", value = "dg_owner_login" },
+      { name = "WT_DB_USER", value = "dg_owner_login" },
     ])
     secrets = [
-      { name = "DG_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_owner_login"] },
-      { name = "DG_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_dg_owner_login"] },
+      { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"
@@ -249,18 +249,18 @@ resource "aws_ecs_task_definition" "admin" {
     name      = "admin"
     image     = "${aws_ecr_repository.this.repository_url}:${local.migrate_tag}"
     essential = true
-    # Overridden per run, for example ["dg", "db", "create-login", "--role", "dg_web", ...].
-    command = ["dg", "db", "migrate"]
+    # Overridden per run, for example ["wt", "db", "create-login", "--role", "dg_web", ...].
+    command = ["wt", "db", "migrate"]
     environment = concat(local.common_env, local.db_env, [
-      { name = "DG_DB_USER", value = var.db.master_username },
+      { name = "WT_DB_USER", value = var.db.master_username },
     ])
     secrets = [
       # RDS stores the master credentials as JSON; ECS extracts one key.
-      { name = "DG_DB_PASSWORD", valueFrom = "${var.db.master_secret_arn}:password::" },
-      { name = "DG_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
-      { name = "DG_LOGIN_PASSWORD_DG_OWNER_LOGIN", valueFrom = var.secret_arns["db_dg_owner_login"] },
-      { name = "DG_LOGIN_PASSWORD_DG_WEB_LOGIN", valueFrom = var.secret_arns["db_dg_web_login"] },
-      { name = "DG_LOGIN_PASSWORD_DG_PIPELINE_LOGIN", valueFrom = var.secret_arns["db_dg_pipeline_login"] },
+      { name = "WT_DB_PASSWORD", valueFrom = "${var.db.master_secret_arn}:password::" },
+      { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+      { name = "WT_LOGIN_PASSWORD_DG_OWNER_LOGIN", valueFrom = var.secret_arns["db_dg_owner_login"] },
+      { name = "WT_LOGIN_PASSWORD_DG_WEB_LOGIN", valueFrom = var.secret_arns["db_dg_web_login"] },
+      { name = "WT_LOGIN_PASSWORD_DG_PIPELINE_LOGIN", valueFrom = var.secret_arns["db_dg_pipeline_login"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"

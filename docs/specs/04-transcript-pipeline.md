@@ -4,14 +4,14 @@ Implements M4. It takes a `cleared` talk to `ready`: media in, passages and embe
 
 | Step | Crate and trait | Reads | Writes | Talk state |
 | --- | --- | --- | --- | --- |
-| Fetch | `dg-ingest` `SourceAdapter` | SSZ storage object | Audio in scratch | `fetching` |
-| Transcribe | `dg-asr` `Transcriber` | Scratch audio | Raw ASR words in scratch | `transcribing` |
-| Diarize | `dg-segment` `Diarizer` | Scratch audio | Speaker turns in scratch | `diarizing` |
-| Segment | `dg-segment` `Segmenter` | Words and turns | Teacher-only transcript JSON in S3, `transcript` and `segment` rows, scratch deleted | `segmenting` |
-| Correct | `dg-registry` glossary | Segments | Corrected segment text | `correcting` |
-| Extract | `dg-extract` `LlmClient` | Corrected segments | Talk facts and raw citations as staging JSON in S3 | `extracting` |
-| Resolve | `dg-extract` resolver | Raw citations | Resolved citations in staging JSON | `resolving` |
-| Index | `dg-index` chunker, `dg-ml` `Embedder` | Segments, staging JSON | `passage` and `citation` rows, state `ready` | `indexing` |
+| Fetch | `wt-ingest` `SourceAdapter` | SSZ storage object | Audio in scratch | `fetching` |
+| Transcribe | `wt-asr` `Transcriber` | Scratch audio | Raw ASR words in scratch | `transcribing` |
+| Diarize | `wt-segment` `Diarizer` | Scratch audio | Speaker turns in scratch | `diarizing` |
+| Segment | `wt-segment` `Segmenter` | Words and turns | Teacher-only transcript JSON in S3, `transcript` and `segment` rows, scratch deleted | `segmenting` |
+| Correct | `wt-registry` glossary | Segments | Corrected segment text | `correcting` |
+| Extract | `wt-extract` `LlmClient` | Corrected segments | Talk facts and raw citations as staging JSON in S3 | `extracting` |
+| Resolve | `wt-extract` resolver | Raw citations | Resolved citations in staging JSON | `resolving` |
+| Index | `wt-index` chunker, `wt-ml` `Embedder` | Segments, staging JSON | `passage` and `citation` rows, state `ready` | `indexing` |
 
 The four audio steps share scratch space and run as consecutive steps inside one job of kind `audio`, so audio never leaves one process or one machine and cleanup has a single `finally`. Each step still advances the talk state. Correct, extract, resolve and index are separate jobs and can run on any worker.
 
@@ -19,12 +19,12 @@ The four audio steps share scratch space and run as consecutive steps inside one
 
 Audio is the most sensitive artifact in the system, so its handling is strict.
 
-1. `ScratchDir` is a type in `dg-core` that owns `DG_SCRATCH_DIR/<talk_id>/`. Its guard deletes the directory on drop, on error and on panic, and `finish()` verifies the directory is gone and returns an error if not. The `audio` handler wraps all four steps in one guard.
+1. `ScratchDir` is a type in `wt-core` that owns `WT_SCRATCH_DIR/<talk_id>/`. Its guard deletes the directory on drop, on error and on panic, and `finish()` verifies the directory is gone and returns an error if not. The `audio` handler wraps all four steps in one guard.
 2. After fetch, `ffmpeg` extracts mono 16 kHz WAV (`-vn -ac 1 -ar 16000`) and the original video file is deleted at once. Only audio stays, and only until the end of the segment step.
 3. The worker checks free disk before fetch and refuses the job unless free space is at least twice the source file size.
 4. The raw ASR output contains every speaker's words, so it stays in scratch and is never uploaded. Only the filtered, teacher-only transcript is persisted. This is how student speech is kept out of every store.
 5. A failed attempt leaves its scratch directory in place for the retry to reuse if the intermediate files match the input hash, with a time limit of `scratch_resume_ttl_h` (default 6) after which the reaper deletes it. A job that goes `dead` deletes its scratch directory.
-6. Nothing in the code base writes audio or video anywhere else. A CI test greps for audio file extensions in write paths outside `dg-core::scratch`.
+6. Nothing in the code base writes audio or video anywhere else. A CI test greps for audio file extensions in write paths outside `wt-core::scratch`.
 
 ## Transcription
 
@@ -38,13 +38,13 @@ pub struct RawTranscript { pub model: String, pub audio_ms: i64, pub words: Vec<
 pub struct Word { pub text: String, pub start_ms: i32, pub end_ms: i32, pub prob: f32 }
 ```
 
-The default implementation wraps whisper.cpp through `whisper-rs` with the large-v3 model. Defaults live in `config/pipeline.toml` under `[asr]`: `model_path` from `DG_WHISPER_MODEL`, `language = "en"`, `beam_size = 5`, word-level timestamps on, `use_gpu = true`, `threads = 8`. The glossary prompt is the canonical glossary terms joined by commas, truncated to about 200 tokens, passed as the initial prompt so Dogen, shikantaza, Genjokoan and similar terms are spelled consistently from the start. Tests use a `FakeTranscriber` that returns a scripted word list.
+The default implementation wraps whisper.cpp through `whisper-rs` with the large-v3 model. Defaults live in `config/pipeline.toml` under `[asr]`: `model_path` from `WT_WHISPER_MODEL`, `language = "en"`, `beam_size = 5`, word-level timestamps on, `use_gpu = true`, `threads = 8`. The glossary prompt is the canonical glossary terms joined by commas, truncated to about 200 tokens, passed as the initial prompt so Dogen, shikantaza, Genjokoan and similar terms are spelled consistently from the start. Tests use a `FakeTranscriber` that returns a scripted word list.
 
 Captions. The PRD says to use existing captions where a source has them. v1 defaults to transcribing from audio anyway, for two reasons. Student-speech removal needs diarization over audio, and passage links need word-level timestamps that cue-level captions lack. Manual captions are still valuable, so when `fetch_captions` returns a track with `is_auto_generated = false`, the handler stores it in scratch and uses it as a reference to compute word error rate against the ASR output, which gives the data quality tests free ground truth. Auto-generated captions are never used.
 
 The setting `prefer_captions = false` flips this. When true and a manual track exists, the cue text becomes the transcript text, cue times are spread evenly across the words of each cue, and diarization and segmentation still run on the audio.
 
-Caption parsers in `dg-asr` handle WebVTT, SRT and YouTube `json3`, normalize to the same word list, and are covered by fixtures.
+Caption parsers in `wt-asr` handle WebVTT, SRT and YouTube `json3`, normalize to the same word list, and are covered by fixtures.
 
 The persisted transcript is one JSON object in S3 under `transcripts/<talk_id>/v<version>.json`, written only after student words are removed.
 
@@ -81,7 +81,7 @@ pub struct Turn { pub speaker: String, pub start_ms: i32, pub end_ms: i32 }   //
 
 The default `Diarizer` calls the Python sidecar in `sidecars/diarize/`, a small FastAPI service. `POST /diarize` takes a WAV upload and returns `{"turns": [{"speaker": "S1", "start_ms": 0, "end_ms": 5400}], "speaker_count": 2}`. It runs the pyannote speaker-diarization pipeline. That model needs a Hugging Face access token and acceptance of its terms on the Hugging Face site, and the sidecar reads the token from `HF_TOKEN`. The sidecar writes nothing to disk beyond a temporary file it deletes before responding. A `FakeDiarizer` serves tests.
 
-The segmenter in `dg-segment` turns words and turns into labeled spans. It is deterministic given its inputs and the classifier's outputs.
+The segmenter in `wt-segment` turns words and turns into labeled spans. It is deterministic given its inputs and the classifier's outputs.
 
 1. Align. Each word takes the speaker of the turn it overlaps most. Words with no overlapping turn take the nearest turn within 500 ms and otherwise are dropped.
 2. Teacher speaker. Over the talk, the teacher is the speaker with the largest share of speaking time outside chanting. All other speakers are treated as students. If a second speaker holds at least `multi_speaker_share` (default 0.35) of speaking time, the talk goes to `needs_review` with reason `multi_speaker` and the job stops. The segmenter never guesses between two possible teachers.
@@ -91,11 +91,11 @@ The segmenter in `dg-segment` turns words and turns into labeled spans. It is de
 6. Persist. Only `talk` and `qa_teacher` spans become `segment` rows. Chant, announcement, sitting and other spans are recorded in the `spans` array of the transcript JSON for the audit and are not stored as text rows. `question_note` is always null in v1. The PRD allows omitting the question and that is the safer choice.
 7. Cleanup. The `audio` handler writes the filtered transcript JSON, inserts the `transcript` and `segment` rows in one transaction, and then `finish()` deletes scratch.
 
-`dg segment sample --count 10 --out report.html` picks ten cleared talks, runs steps 1 to 5 without persisting, and writes an HTML timeline per talk showing labeled spans with the first words of each. It is the tool for the PRD's ten-video segmentation check on talks that have passed the gate.
+`wt segment sample --count 10 --out report.html` picks ten cleared talks, runs steps 1 to 5 without persisting, and writes an HTML timeline per talk showing labeled spans with the first words of each. It is the tool for the PRD's ten-video segmentation check on talks that have passed the gate.
 
 ## Glossary correction
 
-The glossary is a standing asset in the `glossary_term` table, loaded from `scripts/seed_glossary.toml` and maintained with `dg glossary import` and `dg glossary add`. Each term has a canonical spelling, a kind (`term`, `name` or `text_title`) and a list of known variants, which are mis-hearings and alternate spellings. The seed file starts with the terms the PRD names (Dogen, shikantaza, Genjokoan) plus the series titles and common practice vocabulary, and grows from the suggestions file below.
+The glossary is a standing asset in the `glossary_term` table, loaded from `scripts/seed_glossary.toml` and maintained with `wt glossary import` and `wt glossary add`. Each term has a canonical spelling, a kind (`term`, `name` or `text_title`) and a list of known variants, which are mis-hearings and alternate spellings. The seed file starts with the terms the PRD names (Dogen, shikantaza, Genjokoan) plus the series titles and common practice vocabulary, and grows from the suggestions file below.
 
 The correction function is pure: `apply_glossary(words, glossary) -> corrected words`.
 
@@ -109,7 +109,7 @@ Teacher aliases are not rewritten in text. Aliases serve named-teacher detection
 
 ## Extraction and citation resolution
 
-`LlmClient` in `dg-extract` is the only code that calls the Claude API.
+`LlmClient` in `wt-extract` is the only code that calls the Claude API.
 
 ```rust
 #[async_trait]
@@ -123,9 +123,9 @@ pub enum DataClass { Synthetic, Real }
 Rules for the client:
 
 1. It calls the Messages API at `https://api.anthropic.com/v1/messages` with `x-api-key`, an `anthropic-version` header, and temperature 0. It forces structured output by defining one tool whose `input_schema` is the JSON Schema of `T` and setting `tool_choice` to that tool. The tool input is parsed with `serde`. A parse failure gets one repair retry and then fails the job.
-2. A request with `DataClass::Real` is refused unless `DG_LLM_REAL_DATA_OK=true`. Talks loaded by the fixture loader carry `raw.synthetic = true` in `source_video` and use `Synthetic`.
+2. A request with `DataClass::Real` is refused unless `WT_LLM_REAL_DATA_OK=true`. Talks loaded by the fixture loader carry `raw.synthetic = true` in `source_video` and use `Synthetic`.
 3. Logs record the stage, model, token counts and a hash of the request. They never contain transcript text.
-4. Rate limits and 5xx responses retry with exponential backoff up to three times inside the call. The model name comes only from `DG_LLM_MODEL`.
+4. Rate limits and 5xx responses retry with exponential backoff up to three times inside the call. The model name comes only from `WT_LLM_MODEL`.
 
 Extraction runs over the corrected segments in windows of up to 6,000 words with 200 words of overlap and returns this per window:
 
@@ -161,9 +161,9 @@ pub trait Embedder: Send + Sync {
 }
 ```
 
-`dg-ml` implements `Embedder` for bge-m3 and `Reranker` for bge-reranker-v2-m3 over `ort`, with the `tokenizers` crate for tokenization. `scripts/export_models.py` converts both models to ONNX with int8 quantization and writes them with their tokenizers to `DG_MODEL_DIR`. That script is the only place Python touches the models, and exported files go to the models bucket, never into git.
+`wt-ml` implements `Embedder` for bge-m3 and `Reranker` for bge-reranker-v2-m3 over `ort`, with the `tokenizers` crate for tokenization. `scripts/export_models.py` converts both models to ONNX with int8 quantization and writes them with their tokenizers to `WT_MODEL_DIR`. That script is the only place Python touches the models, and exported files go to the models bucket, never into git.
 
-The chunker in `dg-index` is a pure function from corrected words to passages. Defaults live under `[chunk]` in `config/pipeline.toml`.
+The chunker in `wt-index` is a pure function from corrected words to passages. Defaults live under `[chunk]` in `config/pipeline.toml`.
 
 1. Input is the corrected word list of one `talk` or `qa_teacher` segment. Passages never cross a segment boundary.
 2. Sentences come from Unicode sentence segmentation over the corrected text, and a pause of `sentence_pause_ms` (default 1200) between words also ends a sentence.
@@ -182,24 +182,24 @@ The index step, per talk, in one transaction:
 3. Map each staged citation to the passage that contains its first word, compute span offsets relative to the passage text, and insert `citation` rows with the resolved confidence.
 4. Set `talk.content_hash` to a hash of the passage hashes, `last_verified_at` to now, and state to `ready`.
 
-After a batch, run `ANALYZE passage`. HNSW search settings are applied per query in Spec 05. `dg reindex --talk <id> | --all [--model <name>]` reruns the index step from stored segments and the transcript JSON, which is how a new glossary version or embedding model is applied.
+After a batch, run `ANALYZE passage`. HNSW search settings are applied per query in Spec 05. `wt reindex --talk <id> | --all [--model <name>]` reruns the index step from stored segments and the transcript JSON, which is how a new glossary version or embedding model is applied.
 
 ## Acceptance criteria
 
 M4 is done when every item below passes in CI with fakes, and one synthetic talk has run through a real worker, a real Postgres and real ONNX models.
 
 - [ ] `ScratchGuard` deletes scratch on success, on a returned error and on panic. A test injects each failure.
-- [ ] After an `audio` job finishes in any outcome, nothing remains under `DG_SCRATCH_DIR` for that talk.
+- [ ] After an `audio` job finishes in any outcome, nothing remains under `WT_SCRATCH_DIR` for that talk.
 - [ ] The stored transcript JSON contains no words from a non-teacher speaker. A test with a `FakeDiarizer` that returns a student turn proves it, and also checks no `qa_student` row can exist.
 - [ ] Segmenter tests on synthetic timelines cover: silence of 120 seconds or more becomes `sitting`; a chant window is labeled `chant`; a student turn is dropped and the following teacher turn is `qa_teacher` with a null `question_note`; a second speaker at 35 percent or more sends the talk to `needs_review`.
 - [ ] The glossary replaces known variants with canonical forms, preserves timestamps across multi-word replacements, writes near misses to the suggestions file without applying them, and a glossary change requeues `correct` and `index` for the affected talks only.
-- [ ] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `DG_LLM_REAL_DATA_OK` is not `true`.
+- [ ] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `WT_LLM_REAL_DATA_OK` is not `true`.
 - [ ] The resolver gives `resolved` only for hand-list matches, gives `probable` for series-label and fuzzy model hints, and gives `unresolved` when a model hint matches no hand-listed locator. Precision of `resolved` is 100 percent on the fixture set.
 - [ ] Chunker golden tests: every passage is within `min_words` and `max_words` except an unmergeable tail, none crosses a segment boundary, timestamps are monotone, and output is identical across runs.
 - [ ] The embedder returns 1024-dimension unit vectors that are identical across repeated runs on CPU within 1e-5.
-- [ ] A synthetic talk goes from `cleared` to `ready` through `dg worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
-- [ ] `dg export transcripts --format jsonl --out <dir>` writes the corrected segments of every consented `ready` talk for the Gate A notebook.
-- [ ] `dg segment sample --count 10` renders the segmentation report.
+- [ ] A synthetic talk goes from `cleared` to `ready` through `wt worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
+- [ ] `wt export transcripts --format jsonl --out <dir>` writes the corrected segments of every consented `ready` talk for the Gate A notebook.
+- [ ] `wt segment sample --count 10` renders the segmentation report.
 
 ## Language-model spend cap
 

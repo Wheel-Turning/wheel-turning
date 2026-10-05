@@ -27,7 +27,7 @@ variable "recovery_window_in_days" {
 }
 
 variable "rotation_version" {
-  description = "Increment to generate and write new generated passwords. Existing logins must then be updated with `dg db create-login`."
+  description = "Increment to generate and write new generated passwords. Existing logins must then be updated with `wt db create-login`."
   type        = number
   default     = 1
 }

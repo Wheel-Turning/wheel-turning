@@ -12,8 +12,8 @@ publish = false
 
 [workspace.dependencies]
 # internal crates
-dg-core = { path = "crates/dg-core" }
-dg-db = { path = "crates/dg-db" }
+wt-core = { path = "crates/wt-core" }
+wt-db = { path = "crates/wt-db" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"
