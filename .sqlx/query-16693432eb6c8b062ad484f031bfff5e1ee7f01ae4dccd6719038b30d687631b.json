@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select source_key, recipient, status, sent_on, follow_up_on from permission_request\n         where status = 'draft' or (status = 'sent' and follow_up_on <= $1)\n         order by coalesce(follow_up_on, created_at::date), source_key",
+  "query": "select pr.source_key, te.display_name as \"teacher?\", pr.recipient, pr.status,\n                  pr.sent_on, pr.follow_up_on\n           from permission_request pr left join teacher te on te.id = pr.teacher_id\n           where pr.status = 'draft' or (pr.status = 'sent' and pr.follow_up_on <= $1)\n           order by coalesce(pr.follow_up_on, pr.created_at::date), pr.source_key, te.display_name",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "teacher?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "recipient",
         "type_info": "Text",
         "origin": {
@@ -26,7 +37,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "sent_on",
         "type_info": "Date",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "follow_up_on",
         "type_info": "Date",
         "origin": {
@@ -65,6 +76,7 @@
       ]
     },
     "nullable": [
+      true,
       false,
       false,
       false,
@@ -72,5 +84,5 @@
       true
     ]
   },
-  "hash": "fe7fe84872cef08db21b0771625d7fcb6578917add81bcb8dc77f544fda3c5d9"
+  "hash": "16693432eb6c8b062ad484f031bfff5e1ee7f01ae4dccd6719038b30d687631b"
 }

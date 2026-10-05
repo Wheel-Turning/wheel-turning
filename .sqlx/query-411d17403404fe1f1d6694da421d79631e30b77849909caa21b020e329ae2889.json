@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update permission_request set status = 'no_response'\n         where id = (select id from permission_request\n                     where (source_key = $1 or teacher_id = $2) and status = 'sent'\n                     order by created_at desc, id desc limit 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "411d17403404fe1f1d6694da421d79631e30b77849909caa21b020e329ae2889"
+}

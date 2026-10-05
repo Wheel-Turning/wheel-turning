@@ -12,6 +12,11 @@ use sqlx::{PgConnection, PgPool};
 use wt_core::records::StoredRecord;
 
 use crate::DbError;
+use crate::correction::log_change;
+use crate::registry::{RegistryDbError, find_teacher};
+use crate::takedown::{self, Scope, TakedownError, TakedownReport};
+use wt_core::gate::ConsentStatus;
+use wt_core::ids::TalkId;
 
 /// Days from a request going out to its follow-up (Spec 08, the ledger).
 pub const FOLLOW_UP_DAYS: u64 = 14;
@@ -51,6 +56,18 @@ pub enum RightsError {
     /// The license or permission evidence for a non-mandate source is missing or not approved.
     #[error("evidence {0} is not approved {1} evidence")]
     EvidenceNotUsable(Uuid, &'static str),
+    /// The teacher could not be found.
+    #[error(transparent)]
+    Registry(#[from] RegistryDbError),
+    /// The takedown a decline or opt-out runs failed, so nothing was recorded.
+    #[error(transparent)]
+    Takedown(#[from] TakedownError),
+    /// A sources.toml `rights_source` names no talks source in the ledger.
+    #[error("rights_source {0:?} is not a talks source; add it with `wt source add --kind talks`")]
+    NotTalkSource(String),
+    /// `talks_basis` takes `mandate` or `consent`.
+    #[error("talks_basis is mandate or consent, not {0:?}")]
+    BadBasis(String),
     /// The database refused.
     #[error(transparent)]
     Db(#[from] DbError),
@@ -127,6 +144,8 @@ pub struct NewSource<'a> {
     pub publisher: &'a str,
     /// The URL prefixes the source covers.
     pub prefixes: &'a [String],
+    /// `texts` or `talks`.
+    pub kind: &'a str,
     /// How it is used.
     pub basis: NewBasis<'a>,
 }
@@ -151,8 +170,10 @@ pub struct Exclusion {
 pub struct LedgerEntry {
     /// When it happened.
     pub at: DateTime<Utc>,
-    /// The source.
-    pub source_key: String,
+    /// The source, for a source's event.
+    pub source_key: Option<String>,
+    /// The teacher's display name, for a teacher's event.
+    pub teacher: Option<String>,
     /// What happened.
     pub event: String,
     /// Who did it.
@@ -166,8 +187,10 @@ pub struct LedgerEntry {
 /// A permission request that needs action.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DueRequest {
-    /// The source.
-    pub source_key: String,
+    /// The source, for a source's request.
+    pub source_key: Option<String>,
+    /// The teacher's display name, for a notice to a teacher.
+    pub teacher: Option<String>,
     /// Who it goes to.
     pub recipient: String,
     /// `draft` or `sent`.
@@ -183,8 +206,10 @@ pub struct DueRequest {
 /// What `wt rights decline` did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Declined {
-    /// Exclusions added, one per URL prefix.
+    /// Exclusions added: one per URL prefix, and one per transcript of a talk taken down.
     pub exclusions: Vec<Uuid>,
+    /// The source's talks taken down, for a talks source.
+    pub talks_taken_down: Vec<TalkId>,
 }
 
 /// The URL with its scheme and host lowercased, which is how prefixes compare.
@@ -265,16 +290,19 @@ pub async fn active_exclusions(conn: &mut PgConnection) -> Result<Vec<Exclusion>
 
 async fn event(
     conn: &mut PgConnection,
-    key: &str,
+    key: Option<&str>,
+    teacher: Option<Uuid>,
     event: &str,
     actor: &str,
     detail: Option<&str>,
     evidence_ref: Option<&str>,
 ) -> Result<(), RightsError> {
     sqlx::query!(
-        "insert into rights_event (source_key, event, actor, detail, evidence_ref, created_at)
-         values ($1, $2, $3, $4, $5, clock_timestamp())",
+        "insert into rights_event (source_key, teacher_id, event, actor, detail, evidence_ref,
+                                   created_at)
+         values ($1, $2, $3, $4, $5, $6, clock_timestamp())",
         key,
+        teacher,
         event,
         actor,
         detail,
@@ -374,13 +402,14 @@ pub async fn add_source(pool: &PgPool, new: &NewSource<'_>) -> Result<Uuid, Righ
         }
     };
     sqlx::query!(
-        "insert into source_policy (key, publisher, url_prefixes, basis, license_evidence_id)
-         values ($1, $2, $3, $4, $5)",
+        "insert into source_policy (key, publisher, url_prefixes, basis, license_evidence_id, kind)
+         values ($1, $2, $3, $4, $5, $6)",
         new.key,
         new.publisher,
         &prefixes,
         basis.as_str(),
-        evidence
+        evidence,
+        new.kind
     )
     .execute(&mut *tx)
     .await?;
@@ -388,7 +417,8 @@ pub async fn add_source(pool: &PgPool, new: &NewSource<'_>) -> Result<Uuid, Righ
         NewBasis::Mandate { decision, .. } => {
             event(
                 &mut tx,
-                new.key,
+                Some(new.key),
+                None,
                 "mandated",
                 actor,
                 Some(&format!(
@@ -402,7 +432,8 @@ pub async fn add_source(pool: &PgPool, new: &NewSource<'_>) -> Result<Uuid, Righ
         NewBasis::Evidence { basis, evidence } => {
             event(
                 &mut tx,
-                new.key,
+                Some(new.key),
+                None,
                 "enabled",
                 "wt source add",
                 Some(&format!("added on {} evidence {evidence}", basis.as_str())),
@@ -454,26 +485,60 @@ async fn set_enabled_in(
         > 0;
     if changed {
         let name = if enabled { "enabled" } else { "disabled" };
-        event(conn, key, name, actor, reason, None).await?;
+        event(conn, Some(key), None, name, actor, reason, None).await?;
     }
     Ok(changed)
 }
 
-/// `wt rights request`: records a drafted permission request.
+/// A source or a teacher, resolved: what ledger rows and requests point at.
+#[derive(Debug, Clone)]
+pub struct Target {
+    /// The source key, for a source.
+    pub key: Option<String>,
+    /// The teacher, for a teacher.
+    pub teacher: Option<Uuid>,
+    /// How to name it in messages.
+    pub label: String,
+}
+
+async fn target(conn: &mut PgConnection, subject: Subject<'_>) -> Result<Target, RightsError> {
+    Ok(match subject {
+        Subject::Source(key) => {
+            source_prefixes(conn, key).await?;
+            Target {
+                key: Some(key.to_owned()),
+                teacher: None,
+                label: format!("source {key}"),
+            }
+        }
+        Subject::Teacher(name) => {
+            let (id, display) = find_teacher(conn, name).await?;
+            Target {
+                key: None,
+                teacher: Some(id.as_uuid()),
+                label: format!("teacher {display}"),
+            }
+        }
+    })
+}
+
+/// `wt rights request` and `wt rights notice-draft`: records a drafted permission request or
+/// teacher notice. Nothing is sent; a person sends it by hand.
 pub async fn request(
     pool: &PgPool,
-    key: &str,
+    subject: Subject<'_>,
     recipient: &str,
     channel: &str,
     draft: &StoredRecord,
     actor: &str,
 ) -> Result<Uuid, RightsError> {
     let mut tx = pool.begin().await?;
-    source_prefixes(&mut tx, key).await?;
+    let to = target(&mut tx, subject).await?;
     let id = sqlx::query_scalar!(
-        "insert into permission_request (source_key, recipient, channel, draft_ref)
-         values ($1, $2, $3, $4) returning id",
-        key,
+        "insert into permission_request (source_key, teacher_id, recipient, channel, draft_ref)
+         values ($1, $2, $3, $4, $5) returning id",
+        to.key,
+        to.teacher,
         recipient,
         channel,
         draft.key
@@ -482,7 +547,8 @@ pub async fn request(
     .await?;
     event(
         &mut tx,
-        key,
+        to.key.as_deref(),
+        to.teacher,
         "request_drafted",
         actor,
         Some(&format!("to {recipient} by {channel}")),
@@ -493,11 +559,11 @@ pub async fn request(
     Ok(id)
 }
 
-/// `wt rights sent`: the latest drafted request went out on `on`. Returns the follow-up date,
-/// `FOLLOW_UP_DAYS` later.
+/// `wt rights sent`: the latest drafted request or notice went out on `on`. Returns the
+/// follow-up date, `FOLLOW_UP_DAYS` later.
 pub async fn sent(
     pool: &PgPool,
-    key: &str,
+    subject: Subject<'_>,
     on: NaiveDate,
     actor: &str,
 ) -> Result<NaiveDate, RightsError> {
@@ -505,26 +571,28 @@ pub async fn sent(
         .checked_add_days(Days::new(FOLLOW_UP_DAYS))
         .unwrap_or(NaiveDate::MAX);
     let mut tx = pool.begin().await?;
-    source_prefixes(&mut tx, key).await?;
+    let to = target(&mut tx, subject).await?;
     let row = sqlx::query!(
-        "update permission_request set status = 'sent', sent_on = $2, follow_up_on = $3
+        "update permission_request set status = 'sent', sent_on = $3, follow_up_on = $4
          where id = (select id from permission_request
-                     where source_key = $1 and status = 'draft'
+                     where (source_key = $1 or teacher_id = $2) and status = 'draft'
                      order by created_at desc, id desc limit 1)
          returning recipient",
-        key,
+        to.key,
+        to.teacher,
         on,
         follow_up
     )
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| RightsError::NoRequest {
-        key: key.to_owned(),
+        key: to.label.clone(),
         wanted: "drafted",
     })?;
     event(
         &mut tx,
-        key,
+        to.key.as_deref(),
+        to.teacher,
         "request_sent",
         actor,
         Some(&format!(
@@ -546,14 +614,26 @@ async fn answer_request(
     status: &str,
     reply: &StoredRecord,
 ) -> Result<bool, RightsError> {
+    answer_request_for(conn, Some(key), None, status, Some(&reply.key)).await
+}
+
+async fn answer_request_for(
+    conn: &mut PgConnection,
+    key: Option<&str>,
+    teacher: Option<Uuid>,
+    status: &str,
+    reply_ref: Option<&str>,
+) -> Result<bool, RightsError> {
     Ok(sqlx::query!(
-        "update permission_request set status = $2, reply_ref = $3
+        "update permission_request set status = $3, reply_ref = coalesce($4, reply_ref)
          where id = (select id from permission_request
-                     where source_key = $1 and status in ('draft','sent','replied','no_response')
+                     where (source_key = $1 or teacher_id = $2)
+                       and status in ('draft','sent','replied','no_response')
                      order by created_at desc, id desc limit 1)",
         key,
+        teacher,
         status,
-        reply.key
+        reply_ref
     )
     .execute(&mut *conn)
     .await?
@@ -606,7 +686,8 @@ pub async fn grant(
     answer_request(&mut tx, key, "granted", statement).await?;
     event(
         &mut tx,
-        key,
+        Some(key),
+        None,
         "permission_granted",
         actor,
         Some(&format!("from {from}, given on {given_on}: {scope}")),
@@ -631,7 +712,8 @@ pub async fn decline(
     answer_request(&mut tx, key, "declined", statement).await?;
     event(
         &mut tx,
-        key,
+        Some(key),
+        None,
         "permission_declined",
         actor,
         None,
@@ -640,6 +722,48 @@ pub async fn decline(
     .await?;
     set_enabled_in(&mut tx, key, false, Some("permission declined"), actor).await?;
     let mut out = Declined::default();
+    let talks = sqlx::query_scalar!(
+        "select id from talk where source_key = $1 and state <> 'withdrawn' order by id",
+        key
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let hashes = transcript_hashes(&mut tx, &talks).await?;
+    for talk in &talks {
+        let report = takedown::run_in(
+            &mut tx,
+            &Scope::Talk(TalkId::from(*talk)),
+            actor,
+            None,
+            "source_declined",
+        )
+        .await?;
+        out.talks_taken_down.extend(report.talks);
+    }
+    if !talks.is_empty() {
+        event(
+            &mut tx,
+            Some(key),
+            None,
+            "takedown_completed",
+            actor,
+            Some(&format!("{} talks", talks.len())),
+            None,
+        )
+        .await?;
+    }
+    for hash in hashes {
+        let id = add_exclusion_in(
+            &mut tx,
+            "content",
+            &hash,
+            "the rights holder declined",
+            Some(key),
+            actor,
+        )
+        .await?;
+        out.exclusions.push(id);
+    }
     for prefix in prefixes {
         let id = add_exclusion_in(
             &mut tx,
@@ -656,28 +780,42 @@ pub async fn decline(
     Ok(out)
 }
 
-/// `wt rights no-response`: logs that a request went unanswered. Silence is never permission,
-/// so the source stays on its mandate and is labeled as one.
-pub async fn no_response(pool: &PgPool, key: &str, actor: &str) -> Result<(), RightsError> {
+/// `wt rights no-response`: logs that a request or notice went unanswered. Silence is never
+/// permission, so a source stays on its mandate and a teacher's talks stay as they are.
+pub async fn no_response(
+    pool: &PgPool,
+    subject: Subject<'_>,
+    actor: &str,
+) -> Result<(), RightsError> {
     let mut tx = pool.begin().await?;
-    source_prefixes(&mut tx, key).await?;
+    let to = target(&mut tx, subject).await?;
     let marked = sqlx::query!(
         "update permission_request set status = 'no_response'
          where id = (select id from permission_request
-                     where source_key = $1 and status = 'sent'
+                     where (source_key = $1 or teacher_id = $2) and status = 'sent'
                      order by created_at desc, id desc limit 1)",
-        key
+        to.key,
+        to.teacher
     )
     .execute(&mut *tx)
     .await?
     .rows_affected();
     if marked == 0 {
         return Err(RightsError::NoRequest {
-            key: key.to_owned(),
+            key: to.label,
             wanted: "sent",
         });
     }
-    event(&mut tx, key, "no_response_noted", actor, None, None).await?;
+    event(
+        &mut tx,
+        to.key.as_deref(),
+        to.teacher,
+        "no_response_noted",
+        actor,
+        None,
+        None,
+    )
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -704,7 +842,8 @@ async fn add_exclusion_in(
     if let Some(key) = source_key {
         event(
             conn,
-            key,
+            Some(key),
+            None,
             "exclusion_added",
             actor,
             Some(&format!("{scope} {pattern}: {reason} (exclusion {id})")),
@@ -750,7 +889,8 @@ pub async fn lift_exclusion(
     if let Some(key) = &row.source_key {
         event(
             &mut tx,
-            key,
+            Some(key),
+            None,
             "exclusion_lifted",
             by,
             Some(&format!("{} {} (exclusion {id})", row.scope, row.pattern)),
@@ -768,21 +908,47 @@ pub async fn lift_exclusion(
     })
 }
 
-/// `wt rights ledger`: every event, or one source's, in the order they happened.
-pub async fn ledger(pool: &PgPool, key: Option<&str>) -> Result<Vec<LedgerEntry>, RightsError> {
+/// Whose history: a source's or a teacher's.
+#[derive(Debug, Clone, Copy)]
+pub enum Subject<'a> {
+    /// A source, by key.
+    Source(&'a str),
+    /// A teacher, by display name or alias.
+    Teacher(&'a str),
+}
+
+/// `wt rights ledger`: every event, or one source's or teacher's, in the order they happened.
+pub async fn ledger(
+    pool: &PgPool,
+    subject: Option<Subject<'_>>,
+) -> Result<Vec<LedgerEntry>, RightsError> {
+    let mut conn = pool.acquire().await?;
+    let (key, teacher) = match subject {
+        None => (None, None),
+        Some(Subject::Source(key)) => (Some(key.to_owned()), None),
+        Some(Subject::Teacher(name)) => {
+            let (id, _) = find_teacher(&mut conn, name).await?;
+            (None, Some(id.as_uuid()))
+        }
+    };
     let rows = sqlx::query!(
-        "select created_at, source_key, event, actor, detail, evidence_ref from rights_event
-         where $1::text is null or source_key = $1
-         order by created_at, id",
-        key
+        r#"select e.created_at, e.source_key, te.display_name as "teacher?", e.event, e.actor,
+                  e.detail, e.evidence_ref
+           from rights_event e left join teacher te on te.id = e.teacher_id
+           where ($1::text is null and $2::uuid is null)
+              or e.source_key = $1 or e.teacher_id = $2
+           order by e.created_at, e.id"#,
+        key,
+        teacher
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *conn)
     .await?;
     Ok(rows
         .into_iter()
         .map(|r| LedgerEntry {
             at: r.created_at,
             source_key: r.source_key,
+            teacher: r.teacher,
             event: r.event,
             actor: r.actor,
             detail: r.detail,
@@ -791,12 +957,15 @@ pub async fn ledger(pool: &PgPool, key: Option<&str>) -> Result<Vec<LedgerEntry>
         .collect())
 }
 
-/// `wt rights due`: requests not yet sent, and sent requests at or past their follow-up date.
+/// `wt rights due`: requests and notices not yet sent, and sent ones at or past their
+/// follow-up date.
 pub async fn due(pool: &PgPool, today: NaiveDate) -> Result<Vec<DueRequest>, RightsError> {
     let rows = sqlx::query!(
-        "select source_key, recipient, status, sent_on, follow_up_on from permission_request
-         where status = 'draft' or (status = 'sent' and follow_up_on <= $1)
-         order by coalesce(follow_up_on, created_at::date), source_key",
+        r#"select pr.source_key, te.display_name as "teacher?", pr.recipient, pr.status,
+                  pr.sent_on, pr.follow_up_on
+           from permission_request pr left join teacher te on te.id = pr.teacher_id
+           where pr.status = 'draft' or (pr.status = 'sent' and pr.follow_up_on <= $1)
+           order by coalesce(pr.follow_up_on, pr.created_at::date), pr.source_key, te.display_name"#,
         today
     )
     .fetch_all(pool)
@@ -810,12 +979,367 @@ pub async fn due(pool: &PgPool, today: NaiveDate) -> Result<Vec<DueRequest>, Rig
                 "follow_up_due"
             },
             source_key: r.source_key,
+            teacher: r.teacher,
             recipient: r.recipient,
             status: r.status,
             sent_on: r.sent_on,
             follow_up_on: r.follow_up_on,
         })
         .collect())
+}
+
+/// Refuses a `rights_source` that names no talks source.
+pub async fn check_talk_source(conn: &mut PgConnection, key: &str) -> Result<(), RightsError> {
+    let found = sqlx::query_scalar!(
+        r#"select exists (select 1 from source_policy where key = $1 and kind = 'talks') as "f!""#,
+        key
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if found {
+        Ok(())
+    } else {
+        Err(RightsError::NotTalkSource(key.to_owned()))
+    }
+}
+
+/// Runs the gate again for the talks of a talks source that wait in `awaiting_consent`, and
+/// returns those that cleared. Talks still blocked keep their state with the gate's reason.
+pub async fn clear_waiting(
+    conn: &mut PgConnection,
+    key: &str,
+    actor: &str,
+) -> Result<Vec<TalkId>, RightsError> {
+    let waiting = sqlx::query_scalar!(
+        "select id from talk where source_key = $1 and state = 'awaiting_consent' order by id",
+        key
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    clear_these(conn, waiting, actor, &format!("mandate of {key}")).await
+}
+
+async fn clear_these(
+    conn: &mut PgConnection,
+    waiting: Vec<Uuid>,
+    actor: &str,
+    reason: &str,
+) -> Result<Vec<TalkId>, RightsError> {
+    let mut cleared = Vec::new();
+    for id in waiting {
+        let talk = TalkId::from(id);
+        if crate::consent::try_clear(conn, talk)
+            .await
+            .map_err(|e| RightsError::Db(talk_db_error(e)))?
+            .is_ok()
+        {
+            log_change(
+                conn,
+                "talk",
+                id,
+                "state",
+                Some(serde_json::json!("awaiting_consent")),
+                Some(serde_json::json!("cleared")),
+                actor,
+                reason,
+            )
+            .await?;
+            cleared.push(talk);
+        }
+    }
+    Ok(cleared)
+}
+
+/// The `talks_basis` setting, `mandate` or `consent`.
+pub async fn talks_basis(conn: &mut PgConnection) -> Result<String, RightsError> {
+    Ok(
+        sqlx::query_scalar!("select value from rights_setting where key = 'talks_basis'")
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
+/// What `wt rights set-talks-basis` did.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct BasisSwitch {
+    /// The setting now.
+    pub talks_basis: String,
+    /// Whether it changed.
+    pub changed: bool,
+    /// Talks waiting at the gate that cleared on their mandate once it was switched on.
+    pub cleared: Vec<TalkId>,
+}
+
+/// `wt rights set-talks-basis`: turns mandated talks on (`mandate`) or off (`consent`) and
+/// writes a `rights_event`. Switching on clears every waiting talk that now passes the gate.
+/// Switching off deletes nothing: the serving view stops returning mandated talks and every
+/// job stops at the gate.
+pub async fn set_talks_basis(
+    pool: &PgPool,
+    basis: &str,
+    actor: &str,
+) -> Result<BasisSwitch, RightsError> {
+    if !matches!(basis, "mandate" | "consent") {
+        return Err(RightsError::BadBasis(basis.to_owned()));
+    }
+    let mut tx = pool.begin().await?;
+    let changed = sqlx::query!(
+        "update rights_setting set value = $1, updated_by = $2
+         where key = 'talks_basis' and value <> $1",
+        basis,
+        actor
+    )
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        > 0;
+    if changed {
+        event(
+            &mut tx,
+            None,
+            None,
+            &format!("talks_basis_{basis}"),
+            actor,
+            None,
+            None,
+        )
+        .await?;
+    }
+    let cleared = if basis == "mandate" {
+        let waiting =
+            sqlx::query_scalar!("select id from talk where state = 'awaiting_consent' order by id")
+                .fetch_all(&mut *tx)
+                .await?;
+        clear_these(&mut tx, waiting, actor, "talks_basis mandate").await?
+    } else {
+        Vec::new()
+    };
+    tx.commit().await?;
+    Ok(BasisSwitch {
+        talks_basis: basis.to_owned(),
+        changed,
+        cleared,
+    })
+}
+
+fn talk_db_error(e: crate::talk::TalkError) -> DbError {
+    match e {
+        crate::talk::TalkError::Db(db) => db,
+        other => DbError::Sqlx(sqlx::Error::Protocol(other.to_string())),
+    }
+}
+
+/// The content hashes of the transcripts of `talks`, kept as exclusions before a takedown
+/// deletes them.
+async fn transcript_hashes(
+    conn: &mut PgConnection,
+    talks: &[Uuid],
+) -> Result<Vec<String>, RightsError> {
+    Ok(sqlx::query_scalar!(
+        "select distinct content_hash from transcript where talk_id = any($1) order by 1",
+        talks
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
+/// Excludes a teacher permanently: the person, and the content hash of each transcript of
+/// theirs that a takedown is about to remove (Spec 03, Mandated talks).
+async fn exclude_teacher(
+    conn: &mut PgConnection,
+    teacher: Uuid,
+    display: &str,
+    hashes: &[String],
+    reason: &str,
+    actor: &str,
+) -> Result<Vec<Uuid>, RightsError> {
+    let mut ids = vec![add_exclusion_in(conn, "person", display, reason, None, actor).await?];
+    for hash in hashes {
+        ids.push(add_exclusion_in(conn, "content", hash, reason, None, actor).await?);
+    }
+    for id in &ids {
+        event(
+            conn,
+            None,
+            Some(teacher),
+            "exclusion_added",
+            actor,
+            Some(&format!("exclusion {id}: {reason}")),
+            None,
+        )
+        .await?;
+    }
+    Ok(ids)
+}
+
+/// The teacher's talks and their transcripts' hashes, before a takedown removes them.
+async fn teacher_hashes(
+    conn: &mut PgConnection,
+    teacher: Uuid,
+) -> Result<Vec<String>, RightsError> {
+    let talks = sqlx::query_scalar!("select id from talk where teacher_id = $1", teacher)
+        .fetch_all(&mut *conn)
+        .await?;
+    transcript_hashes(conn, &talks).await
+}
+
+/// What `wt teacher opt-out` did.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OptOut {
+    /// The teacher's display name.
+    pub teacher: String,
+    /// The takedown, unless only suspended.
+    pub takedown: Option<TakedownReport>,
+    /// Exclusions added: the person and each transcript's content hash.
+    pub exclusions: Vec<Uuid>,
+}
+
+/// `wt teacher opt-out`: sets `opted_out_at`, which removes the teacher's passages from the
+/// serving view at once and stops every job at the gate. Unless `suspend_only`, it then runs
+/// the teacher takedown and adds permanent exclusions for the person and the content hashes
+/// of the removed transcripts, all in one transaction.
+pub async fn opt_out(
+    pool: &PgPool,
+    teacher: &str,
+    reason: &str,
+    actor: &str,
+    suspend_only: bool,
+) -> Result<OptOut, RightsError> {
+    let mut tx = pool.begin().await?;
+    let (id, display) = find_teacher(&mut tx, teacher).await?;
+    let teacher = id.as_uuid();
+    sqlx::query!(
+        "update teacher set opted_out_at = coalesce(opted_out_at, now()), opted_out_reason = $2
+         where id = $1",
+        teacher,
+        reason
+    )
+    .execute(&mut *tx)
+    .await?;
+    event(
+        &mut tx,
+        None,
+        Some(teacher),
+        "suspended",
+        actor,
+        Some(reason),
+        None,
+    )
+    .await?;
+    let mut out = OptOut {
+        teacher: display.clone(),
+        takedown: None,
+        exclusions: Vec::new(),
+    };
+    if !suspend_only {
+        let hashes = teacher_hashes(&mut tx, teacher).await?;
+        let report = takedown::run_in(
+            &mut tx,
+            &Scope::Teacher(display.clone()),
+            actor,
+            None,
+            "opted_out",
+        )
+        .await?;
+        event(
+            &mut tx,
+            None,
+            Some(teacher),
+            "takedown_completed",
+            actor,
+            Some(&format!("{} talks", report.talks.len())),
+            None,
+        )
+        .await?;
+        out.exclusions =
+            exclude_teacher(&mut tx, teacher, &display, &hashes, reason, actor).await?;
+        out.takedown = Some(report);
+    }
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// Records a teacher's consent answer in the ledger and on their latest notice, inside the
+/// transaction that records the consent itself (`wt consent set`). A decline or withdrawal
+/// also excludes the person and the transcripts its takedown removes; `hashes` are those
+/// transcripts, read before the takedown.
+pub(crate) async fn record_consent_answer(
+    conn: &mut PgConnection,
+    teacher: Uuid,
+    display: &str,
+    status: ConsentStatus,
+    evidence_ref: Option<&str>,
+    hashes: &[String],
+    actor: &str,
+) -> Result<Vec<Uuid>, RightsError> {
+    let (request_status, event_name) = match status {
+        ConsentStatus::Granted => ("granted", "permission_granted"),
+        ConsentStatus::Declined | ConsentStatus::Withdrawn => ("declined", "permission_declined"),
+        ConsentStatus::Requested | ConsentStatus::Unknown => return Ok(Vec::new()),
+    };
+    answer_request_for(conn, None, Some(teacher), request_status, evidence_ref).await?;
+    event(
+        conn,
+        None,
+        Some(teacher),
+        event_name,
+        actor,
+        Some(&format!("consent {status}")),
+        evidence_ref,
+    )
+    .await?;
+    if request_status == "declined" {
+        return exclude_teacher(
+            conn,
+            teacher,
+            display,
+            hashes,
+            &format!("consent {status}"),
+            actor,
+        )
+        .await;
+    }
+    Ok(Vec::new())
+}
+
+/// The teacher's transcripts' hashes, for a consent change about to run the takedown.
+pub(crate) async fn hashes_before_takedown(
+    conn: &mut PgConnection,
+    teacher: Uuid,
+) -> Result<Vec<String>, RightsError> {
+    teacher_hashes(conn, teacher).await
+}
+
+/// What a teacher notice needs to say (Spec 03, Mandated talks).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NoticeFacts {
+    /// The teacher's display name.
+    pub teacher: String,
+    /// Talks of theirs in the corpus, neither excluded nor withdrawn.
+    pub talks: i64,
+    /// Where they come from: the sanghas of those talks.
+    pub sanghas: Vec<String>,
+}
+
+/// The facts `wt rights notice-draft` fills the template with.
+pub async fn notice_facts(pool: &PgPool, teacher: &str) -> Result<NoticeFacts, RightsError> {
+    let mut conn = pool.acquire().await?;
+    let (id, display) = find_teacher(&mut conn, teacher).await?;
+    let row = sqlx::query!(
+        r#"select count(*) as "talks!",
+                  coalesce(array_agg(distinct s.name) filter (where s.name is not null), '{}')
+                    as "sanghas!"
+           from talk t left join sangha s on s.id = t.sangha_id
+           where t.teacher_id = $1 and t.state not in ('excluded', 'withdrawn')"#,
+        id.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(NoticeFacts {
+        teacher: display,
+        talks: row.talks,
+        sanghas: row.sanghas,
+    })
 }
 
 #[cfg(test)]

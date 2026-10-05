@@ -100,6 +100,11 @@ pub struct SourceConfig {
     /// A podcast feed's address, set by `wt source resolve-feed` once a person confirms it.
     #[serde(default)]
     pub feed_url: Option<String>,
+    /// The talks source in the rights ledger (`wt source add --kind talks`) whose mandate the
+    /// source's talks clear on when their speaker has not answered. None means no mandate
+    /// (Spec 03, Mandated talks; decision of October 5, 2026).
+    #[serde(default)]
+    pub rights_source: Option<String>,
 }
 
 impl SourceConfig {

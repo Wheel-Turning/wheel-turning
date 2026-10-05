@@ -1,0 +1,154 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.rights_holder, t.rights_basis::text as rights_basis,\n                      le.id as \"license_id?\", le.license_code as \"license_code?\",\n                      le.reviewed_at is not null as \"license_reviewed?\", le.allowed as \"license_allowed?\",\n                      cc.status::text as consent_status,\n                      te.opted_out_at is not null as \"opted_out?\",\n                      exists (select 1 from source_exclusion x\n                              where x.scope = 'person' and x.lifted_at is null\n                                and lower(x.pattern) = lower(te.display_name)) as \"excluded!\",\n                      sp.basis as \"source_basis?\", sp.enabled as \"source_enabled?\",\n                      sp.license_evidence_id as \"source_evidence?\",\n                      sle.allowed as \"source_evidence_allowed?\",\n                      (select value from rights_setting where key = 'talks_basis') = 'mandate'\n                        as \"talks_basis_mandate!\"\n               from talk t\n               left join license_evidence le on le.id = t.license_evidence_id\n               left join current_consent cc on cc.teacher_id = t.teacher_id\n               left join teacher te on te.id = t.teacher_id\n               left join source_policy sp on sp.key = t.source_key and sp.kind = 'talks'\n               left join license_evidence sle on sle.id = sp.license_evidence_id\n               where t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rights_holder",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "rights_holder"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "rights_basis",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "license_id?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "license_code?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "license_code"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "license_reviewed?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "license_allowed?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "allowed"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "consent_status",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "opted_out?",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "excluded!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "source_basis?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "basis"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "source_enabled?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "source_evidence?",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "license_evidence_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "source_evidence_allowed?",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "allowed"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "talks_basis_mandate!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      true,
+      true,
+      null,
+      true,
+      null,
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "7baedd4714f41a09992494c257275009094d7e6f699cb0c9941cb1b1e5f16998"
+}

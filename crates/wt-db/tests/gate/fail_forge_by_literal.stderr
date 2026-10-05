@@ -1,8 +1,10 @@
-error[E0451]: field `_s` of struct `Talk` is private
-  --> tests/gate/fail_forge_by_literal.rs:12:9
+error: cannot construct `Talk<_>` with struct literal syntax due to private fields
+  --> tests/gate/fail_forge_by_literal.rs:7:36
    |
  7 |     let _forged: Talk<Consented> = Talk {
-   |                                    ---- in this type
+   |                                    ^^^^
 ...
 12 |         _s: PhantomData,
-   |         ^^ private field
+   |         --------------- private field
+   |
+   = note: ...and other private field `granted` that was not provided

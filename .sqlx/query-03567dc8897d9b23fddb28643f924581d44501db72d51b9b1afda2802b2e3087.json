@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update permission_request set status = $3, reply_ref = coalesce($4, reply_ref)\n         where id = (select id from permission_request\n                     where (source_key = $1 or teacher_id = $2)\n                       and status in ('draft','sent','replied','no_response')\n                     order by created_at desc, id desc limit 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03567dc8897d9b23fddb28643f924581d44501db72d51b9b1afda2802b2e3087"
+}

@@ -28,6 +28,8 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0013 | `0013_flag_query.sql` | M2 (#23) | function `flag_query(uuid)` | execute on `flag_query` to `wt_web`; revokes `update (flagged)` on `query_log` from `wt_web` |
 | 0014 | `0014_vimeo_platform.sql` | M3 (#26) | `vimeo` value on `source_platform` | none |
 | 0015 | `0015_rights_ledger.sql` | M3R | the rights parts of Spec 08's texts, URL-ingestion and mandate-rights migrations on `license_evidence` (nullable `sangha_id`, `publisher`, `kind` with `mandate`, `grantor`, `url_prefixes`, nullable `license_url` and `evidence_url`, `mandated_by`, `rationale`, `display_notice`, the `license_evidence_owner` and `permission_has_scope` checks); `source_policy`; the rights ledger `rights_event` (append-only), `permission_request`, `source_exclusion`, view `v_source_rights` | select, insert, update on `source_policy`, `permission_request`, `source_exclusion` and select, insert on `rights_event` to `wt_pipeline`; select on `v_source_rights` to both; select on `source_policy` and `v_source_rights` to `wt_web` |
+| 0016 | `0016_mandate_basis.sql` | M3R | `mandate` value on `rights_basis` (its own migration: a new enum value cannot be used in the transaction that adds it) | none |
+| 0017 | `0017_mandated_talks.sql` | M3R | `rights_setting` with `talks_basis = consent`; `source_policy.kind`; `talk.source_key`; `teacher.opted_out_at`, `opted_out_reason`; `teacher_id` on `rights_event` and `permission_request` with their target checks (global events only for the `talks_basis` switch); new `past_gate_requires_consent`; `servable_passage` with the mandate basis, opt-out and the switch, and `rights_basis` and `display_notice` columns | select on `rights_setting` to `wt_web` and `wt_pipeline`, update to `wt_pipeline` |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 
@@ -43,8 +45,6 @@ These come from the October 3 to 5 specs. Each gets its number at merge.
 | 08 | 0012 | URL ingestion | Its `license_evidence` changes landed in 0015; the text columns remain |
 | 08 | 0013 | mandate rights | Its `license_evidence` columns and `source_policy` landed in 0015; `text_edition.source_key`, `servable_text_unit`, `takedown_request` and the `edition` and `source` takedown scopes remain |
 | 08 | 0014 | rights ledger | Landed whole in 0015 |
-| 03 | 0015 | `mandate` value on `rights_basis` | Must be its own migration: a new enum value cannot be used in the transaction that adds it |
-| 03 | 0016 | mandated talks: `rights_setting`, opt-out, new `past_gate_requires_consent` and `servable_passage` | Depends on objects from Spec 08's migrations, so it merges after them |
 | 06 | 0017 | `accessibility_report` table | New table |
 | 08 | 0018 | retention and legal text: `text_edition.legal_text`, `legal_pages`, `source_deleted_at`, `source_policy.source_retention` | Alters Spec 08's `text_edition` and `source_policy`, so it merges after the migrations that create them |
 | 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |

@@ -64,6 +64,8 @@ pub struct NewVideo<'a> {
     pub item: &'a serde_json::Value,
     /// Hash of the metadata classification reads, so changed metadata queues a new run.
     pub input_hash: &'a str,
+    /// The talks source in the rights ledger, from `rights_source` in sources.toml.
+    pub rights_source: Option<&'a str>,
 }
 
 /// What [`record_video`] did.
@@ -135,13 +137,14 @@ pub async fn record_video(
         Some(row) => (TalkId::from(row.id), row.state),
         None => {
             let id = sqlx::query_scalar!(
-                "insert into talk (source_video_id, title, talk_date, duration_s)
-                 values ($1, $2, ($3::timestamptz at time zone 'UTC')::date, $4)
+                "insert into talk (source_video_id, title, talk_date, duration_s, source_key)
+                 values ($1, $2, ($3::timestamptz at time zone 'UTC')::date, $4, $5)
                  returning id",
                 video.id,
                 v.title,
                 v.published_at,
-                v.duration_s
+                v.duration_s,
+                v.rights_source
             )
             .fetch_one(&mut *conn)
             .await?;
@@ -158,10 +161,11 @@ pub async fn record_video(
         sqlx::query!(
             // Not the date: classification derives it, and an unchanged video queues no job to
             // put back a recording date the upload date would overwrite.
-            "update talk set title = $2, duration_s = $3 where id = $1",
+            "update talk set title = $2, duration_s = $3, source_key = $4 where id = $1",
             talk.as_uuid(),
             v.title,
-            v.duration_s
+            v.duration_s,
+            v.rights_source
         )
         .execute(&mut *conn)
         .await?;

@@ -249,13 +249,59 @@ pub struct LicenseEvidence {
     pub allowed: bool,
 }
 
-/// What clears a talk: its speaker's consent, or a verified license.
+/// The owner's mandate for a talk source (Spec 03, Mandated talks), with the switches it
+/// depends on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateEvidence {
+    /// The mandate's evidence row.
+    pub id: LicenseEvidenceId,
+    /// Whether the evidence is allowed, which a mandate is when recorded.
+    pub allowed: bool,
+    /// Whether `talks_basis` is `mandate`. While it is `consent` no talk clears on a mandate.
+    pub talks_basis_mandate: bool,
+    /// Whether the talk source is enabled.
+    pub source_enabled: bool,
+}
+
+/// What clears a talk: its speaker's consent, a verified license, or the owner's mandate.
 #[derive(Debug, Clone, Copy)]
 pub enum RightsBasis<'a> {
     /// Speaker consent, the basis for SSZ talks.
     Consent(&'a CurrentConsent),
     /// A license the publisher states, reviewed and allowed by a person.
     License(&'a LicenseEvidence),
+    /// The owner's mandate for the talk's source. Never permission.
+    Mandate(&'a MandateEvidence),
+}
+
+/// The speaker's standing, checked whatever the basis: a teacher who opted out, or one an
+/// active exclusion names, never clears (Spec 03, Mandated talks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Standing {
+    /// The teacher has opted out (`teacher.opted_out_at` is set).
+    pub opted_out: bool,
+    /// An active person exclusion names the teacher.
+    pub excluded: bool,
+}
+
+impl Standing {
+    /// Neither opted out nor excluded.
+    pub const GOOD: Standing = Standing {
+        opted_out: false,
+        excluded: false,
+    };
+}
+
+/// The basis a talk passed the gate on, carried by `Talk<Consented>` so the clearing step
+/// records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Granted {
+    /// The speaker's granted consent.
+    Consent,
+    /// An allowed license.
+    License(LicenseEvidenceId),
+    /// The owner's mandate.
+    Mandate(LicenseEvidenceId),
 }
 
 /// A known rights holder. The constructor rejects blank values and "unknown" in any case, so a
@@ -308,6 +354,16 @@ pub enum GateError {
     /// The license evidence was reviewed and is not allowed.
     #[error("the license is not allowed")]
     LicenseNotAllowed,
+    /// The talk would clear on the owner's mandate, but `talks_basis` is `consent`, the talk
+    /// source is switched off, or the mandate is not allowed.
+    #[error("the mandate for talks is off")]
+    MandateOff,
+    /// The teacher opted out.
+    #[error("the teacher opted out")]
+    TeacherOptedOut,
+    /// An active exclusion names the teacher.
+    #[error("an active exclusion names the teacher")]
+    Excluded,
 }
 
 /// A talk in a typestate. `S` is [`Pending`] or [`Consented`].
@@ -321,7 +377,15 @@ pub struct Talk<S> {
     pub sangha_id: Option<SanghaId>,
     /// The state when the talk was loaded.
     pub state: TalkState,
+    granted: Option<Granted>,
     _s: PhantomData<S>,
+}
+
+impl<S> Talk<S> {
+    /// The basis the talk passed the gate on; `None` for a `Talk<Pending>`.
+    pub fn granted(&self) -> Option<Granted> {
+        self.granted
+    }
 }
 
 impl Talk<Pending> {
@@ -337,17 +401,20 @@ impl Talk<Pending> {
             teacher_id,
             sangha_id,
             state,
+            granted: None,
             _s: PhantomData,
         }
     }
 
     /// The gate. Returns a `Talk<Consented>` only when the talk has a speaker and a sangha, the
-    /// rights holder is known, and the basis allows it: the speaker's current consent is
-    /// `granted`, or the license evidence was reviewed and allowed.
+    /// speaker has neither opted out nor been excluded, the rights holder is known, and the
+    /// basis allows it: the speaker's current consent is `granted`, the license evidence was
+    /// reviewed and allowed, or the mandate is allowed, switched on and its source enabled.
     pub fn authorize(
         self,
         basis: RightsBasis<'_>,
         rights: Option<&RightsHolder>,
+        standing: Standing,
     ) -> Result<Talk<Consented>, GateError> {
         let Some(teacher_id) = self.teacher_id else {
             return Err(GateError::NoSpeaker);
@@ -355,7 +422,13 @@ impl Talk<Pending> {
         if self.sangha_id.is_none() {
             return Err(GateError::NoSangha);
         }
-        match basis {
+        if standing.opted_out {
+            return Err(GateError::TeacherOptedOut);
+        }
+        if standing.excluded {
+            return Err(GateError::Excluded);
+        }
+        let granted = match basis {
             RightsBasis::Consent(consent) => {
                 if consent.teacher_id != teacher_id {
                     return Err(GateError::ConsentMissing);
@@ -368,6 +441,7 @@ impl Talk<Pending> {
                     ConsentStatus::Declined => return Err(GateError::ConsentDeclined),
                     ConsentStatus::Withdrawn => return Err(GateError::ConsentWithdrawn),
                 }
+                Granted::Consent
             }
             RightsBasis::License(evidence) => {
                 if !evidence.reviewed {
@@ -376,8 +450,15 @@ impl Talk<Pending> {
                 if !evidence.allowed {
                     return Err(GateError::LicenseNotAllowed);
                 }
+                Granted::License(evidence.id)
             }
-        }
+            RightsBasis::Mandate(mandate) => {
+                if !(mandate.allowed && mandate.talks_basis_mandate && mandate.source_enabled) {
+                    return Err(GateError::MandateOff);
+                }
+                Granted::Mandate(mandate.id)
+            }
+        };
         if rights.is_none() {
             return Err(GateError::RightsUnknown);
         }
@@ -386,6 +467,7 @@ impl Talk<Pending> {
             teacher_id: self.teacher_id,
             sangha_id: self.sangha_id,
             state: self.state,
+            granted: Some(granted),
             _s: PhantomData,
         })
     }
@@ -413,6 +495,86 @@ mod tests {
         CurrentConsent { teacher_id, status }
     }
 
+    impl Talk<Pending> {
+        fn authorize_in_good_standing(
+            self,
+            basis: RightsBasis<'_>,
+            rights: Option<&RightsHolder>,
+        ) -> Result<Talk<Consented>, GateError> {
+            self.authorize(basis, rights, Standing::GOOD)
+        }
+    }
+
+    fn mandate(talks_basis_mandate: bool, source_enabled: bool) -> MandateEvidence {
+        MandateEvidence {
+            id: LicenseEvidenceId::from(Uuid::new_v4()),
+            allowed: true,
+            talks_basis_mandate,
+            source_enabled,
+        }
+    }
+
+    #[test]
+    fn a_mandate_clears_only_when_switched_on_and_its_source_enabled() {
+        let t = teacher();
+        let on = mandate(true, true);
+        let cleared = talk(Some(t))
+            .authorize_in_good_standing(RightsBasis::Mandate(&on), Some(&holder()))
+            .unwrap();
+        assert_eq!(cleared.granted(), Some(Granted::Mandate(on.id)));
+        for (basis_on, enabled) in [(false, true), (true, false)] {
+            assert_eq!(
+                talk(Some(t))
+                    .authorize_in_good_standing(
+                        RightsBasis::Mandate(&mandate(basis_on, enabled)),
+                        Some(&holder())
+                    )
+                    .unwrap_err(),
+                GateError::MandateOff
+            );
+        }
+        let not_allowed = MandateEvidence {
+            allowed: false,
+            ..on
+        };
+        assert_eq!(
+            talk(Some(t))
+                .authorize_in_good_standing(RightsBasis::Mandate(&not_allowed), Some(&holder()))
+                .unwrap_err(),
+            GateError::MandateOff
+        );
+    }
+
+    #[test]
+    fn an_opted_out_or_excluded_teacher_never_clears_on_any_basis() {
+        let t = teacher();
+        let granted = consent(t, ConsentStatus::Granted);
+        let on = mandate(true, true);
+        for basis in [RightsBasis::Consent(&granted), RightsBasis::Mandate(&on)] {
+            let opted_out = Standing {
+                opted_out: true,
+                excluded: false,
+            };
+            let excluded = Standing {
+                opted_out: false,
+                excluded: true,
+            };
+            assert_eq!(
+                talk(Some(t))
+                    .authorize(basis, Some(&holder()), opted_out)
+                    .unwrap_err(),
+                GateError::TeacherOptedOut
+            );
+            assert_eq!(
+                talk(Some(t))
+                    .authorize(basis, Some(&holder()), excluded)
+                    .unwrap_err(),
+                GateError::Excluded
+            );
+        }
+        assert_eq!(talk(Some(t)).granted(), None, "a pending talk has no basis");
+    }
+
     fn holder() -> RightsHolder {
         RightsHolder::new("Kanshin").unwrap()
     }
@@ -421,7 +583,7 @@ mod tests {
     fn granted_consent_and_a_known_rights_holder_pass() {
         let t = teacher();
         let consented = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Granted)),
                 Some(&holder()),
             )
@@ -433,7 +595,7 @@ mod tests {
     fn no_speaker() {
         let t = teacher();
         let err = talk(None)
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Granted)),
                 Some(&holder()),
             )
@@ -451,7 +613,7 @@ mod tests {
             TalkState::AwaitingConsent,
         );
         let err = pending
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Granted)),
                 Some(&holder()),
             )
@@ -463,7 +625,7 @@ mod tests {
     fn no_consent_row_is_never_permission() {
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&CurrentConsent::none_recorded(t)),
                 Some(&holder()),
             )
@@ -475,7 +637,7 @@ mod tests {
     fn requested_is_not_consent() {
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Requested)),
                 Some(&holder()),
             )
@@ -486,7 +648,7 @@ mod tests {
     #[test]
     fn someone_elses_consent_does_not_count() {
         let err = talk(Some(teacher()))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(teacher(), ConsentStatus::Granted)),
                 Some(&holder()),
             )
@@ -498,7 +660,7 @@ mod tests {
     fn declined() {
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Declined)),
                 Some(&holder()),
             )
@@ -510,7 +672,7 @@ mod tests {
     fn withdrawn() {
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Withdrawn)),
                 Some(&holder()),
             )
@@ -522,7 +684,7 @@ mod tests {
     fn rights_unknown() {
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Granted)),
                 None,
             )
@@ -541,7 +703,7 @@ mod tests {
         }
         let t = teacher();
         let err = talk(Some(t))
-            .authorize(
+            .authorize_in_good_standing(
                 RightsBasis::Consent(&consent(t, ConsentStatus::Granted)),
                 RightsHolder::new("UnKnown").as_ref(),
             )
@@ -560,7 +722,7 @@ mod tests {
         let t = teacher();
         assert_eq!(
             talk(Some(t))
-                .authorize(
+                .authorize_in_good_standing(
                     RightsBasis::License(&evidence(false, false)),
                     Some(&holder())
                 )
@@ -569,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             talk(Some(t))
-                .authorize(
+                .authorize_in_good_standing(
                     RightsBasis::License(&evidence(true, false)),
                     Some(&holder())
                 )
@@ -578,7 +740,10 @@ mod tests {
         );
         assert!(
             talk(Some(t))
-                .authorize(RightsBasis::License(&evidence(true, true)), Some(&holder()))
+                .authorize_in_good_standing(
+                    RightsBasis::License(&evidence(true, true)),
+                    Some(&holder())
+                )
                 .is_ok()
         );
     }

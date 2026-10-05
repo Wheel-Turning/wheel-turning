@@ -76,6 +76,47 @@ enum Command {
         #[command(subcommand)]
         command: ExclusionCommand,
     },
+    /// A teacher's standing (Spec 03, Mandated talks).
+    Teacher {
+        #[command(subcommand)]
+        command: TeacherCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TeacherCommand {
+    /// Take a teacher out. Their passages leave the serving view at once and no job of theirs
+    /// passes the gate. Unless --suspend-only, it then deletes their passages, embeddings,
+    /// segments and transcripts and excludes the person and the transcripts' content hashes
+    /// for good, which needs --yes.
+    OptOut {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// Why, in their words or yours.
+        #[arg(long)]
+        reason: String,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Only suspend, while a request is verified. Deletes nothing.
+        #[arg(long, conflicts_with = "yes")]
+        suspend_only: bool,
+        /// Confirm the takedown and exclusions.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct SourceOrTeacher {
+    /// A source, by key.
+    #[arg(long)]
+    source: Option<String>,
+    /// A teacher's notice, by display name or alias.
+    #[arg(long)]
+    teacher: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -98,12 +139,11 @@ enum RightsCommand {
         #[arg(long, visible_alias = "actor")]
         by: String,
     },
-    /// Record that the latest drafted request went out, and schedule its follow-up 14 days
-    /// later.
+    /// Record that the latest drafted request or teacher notice went out, and schedule its
+    /// follow-up 14 days later.
     Sent {
-        /// The source key.
-        #[arg(long)]
-        source: String,
+        #[command(flatten)]
+        to: SourceOrTeacher,
         /// The day it went out, YYYY-MM-DD.
         #[arg(long)]
         on: chrono::NaiveDate,
@@ -149,20 +189,63 @@ enum RightsCommand {
         #[arg(long)]
         yes: bool,
     },
-    /// Record that the latest sent request went unanswered. The source stays on its mandate.
+    /// Record that the latest sent request or notice went unanswered. Silence is never
+    /// permission: a source stays on its mandate.
     NoResponse {
-        /// The source key.
-        #[arg(long)]
-        source: String,
+        #[command(flatten)]
+        to: SourceOrTeacher,
         /// Who is recording it.
         #[arg(long, visible_alias = "actor")]
         by: String,
     },
-    /// Print the ledger in order, for every source or one.
+    /// Print the ledger in order: everything, one source's, or one teacher's.
     Ledger {
         /// Only this source.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "teacher")]
         source: Option<String>,
+        /// Only this teacher, by display name or alias.
+        #[arg(long)]
+        teacher: Option<String>,
+    },
+    /// Turn mandated talks on (mandate) or off (consent). Off deletes nothing: the serving
+    /// view drops mandated talks and their jobs stop at the gate. On clears waiting talks that
+    /// now pass.
+    SetTalksBasis {
+        /// mandate or consent.
+        #[arg(value_parser = ["mandate", "consent"])]
+        basis: String,
+        /// Who decided.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Draft the notice to a teacher from templates/teacher_notice.md and record it as a
+    /// drafted request. Nothing is sent: a person sends it by hand, then runs `rights sent
+    /// --teacher`.
+    NoticeDraft {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// Where it will go: an address or a contact page.
+        #[arg(long)]
+        to: String,
+        /// email, form or other.
+        #[arg(long, value_parser = ["email", "form", "other"], default_value = "email")]
+        channel: String,
+        /// Where to write the drafted notice.
+        #[arg(long)]
+        out: PathBuf,
+        /// The sender's name, for the signature.
+        #[arg(long)]
+        from_name: Option<String>,
+        /// How to reach the sender, for the signature.
+        #[arg(long)]
+        contact: Option<String>,
+        /// The template.
+        #[arg(long, default_value = "templates/teacher_notice.md")]
+        template: PathBuf,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
     },
     /// List requests not yet sent and requests past their follow-up date.
     Due {
@@ -210,6 +293,9 @@ enum SourceCommand {
         /// mandate, license or permission.
         #[arg(long, default_value = "mandate", value_parser = parse_basis)]
         basis: wt_db::rights::Basis,
+        /// texts or talks. A talks source is named by `rights_source` in sources.toml.
+        #[arg(long, default_value = "texts", value_parser = ["texts", "talks"])]
+        kind: String,
         /// The approved license or permission evidence, for those bases.
         #[arg(long)]
         evidence: Option<sqlx::types::Uuid>,
@@ -635,6 +721,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                     publisher,
                     prefixes,
                     basis,
+                    kind,
                     evidence,
                     by,
                     rationale,
@@ -649,6 +736,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                     publisher: &publisher,
                     prefixes: &prefixes,
                     basis,
+                    kind: &kind,
                     evidence,
                     by: &by,
                     rationale: rationale.as_deref(),
@@ -682,8 +770,15 @@ async fn main() -> anyhow::Result<ExitCode> {
                 )
                 .await?;
             }
-            RightsCommand::Sent { source, on, by } => {
-                rights::sent(&pool().await?, &source, on, &by).await?;
+            RightsCommand::Sent { to, on, by } => {
+                rights::sent(
+                    &pool().await?,
+                    to.source.as_deref(),
+                    to.teacher.as_deref(),
+                    on,
+                    &by,
+                )
+                .await?;
             }
             RightsCommand::Grant {
                 source,
@@ -714,17 +809,62 @@ async fn main() -> anyhow::Result<ExitCode> {
                 rights::decline(&pool().await?, &records, &source, &statement_file, &by, yes)
                     .await?;
             }
-            RightsCommand::NoResponse { source, by } => {
-                rights::no_response(&pool().await?, &source, &by).await?;
+            RightsCommand::NoResponse { to, by } => {
+                rights::no_response(
+                    &pool().await?,
+                    to.source.as_deref(),
+                    to.teacher.as_deref(),
+                    &by,
+                )
+                .await?;
             }
-            RightsCommand::Ledger { source } => {
-                rights::ledger(&pool().await?, source.as_deref()).await?;
+            RightsCommand::SetTalksBasis { basis, by } => {
+                rights::set_talks_basis(&pool().await?, &basis, &by).await?;
+            }
+            RightsCommand::NoticeDraft {
+                teacher,
+                to,
+                channel,
+                out,
+                from_name,
+                contact,
+                template,
+                by,
+            } => {
+                rights::notice_draft(
+                    &pool().await?,
+                    &records,
+                    rights::NoticeArgs {
+                        teacher: &teacher,
+                        to: &to,
+                        channel: &channel,
+                        out: &out,
+                        from_name: from_name.as_deref(),
+                        contact: contact.as_deref(),
+                        template: &template,
+                        by: &by,
+                    },
+                )
+                .await?;
+            }
+            RightsCommand::Ledger { source, teacher } => {
+                rights::ledger(&pool().await?, source.as_deref(), teacher.as_deref()).await?;
             }
             RightsCommand::Due { today } => {
                 let today = today.unwrap_or_else(|| chrono::Utc::now().date_naive());
                 rights::due(&pool().await?, today).await?;
             }
         },
+        Command::Teacher {
+            command:
+                TeacherCommand::OptOut {
+                    teacher,
+                    reason,
+                    by,
+                    suspend_only,
+                    yes,
+                },
+        } => rights::opt_out(&pool().await?, &teacher, &reason, &by, suspend_only, yes).await?,
         Command::Exclusion { command } => match command {
             ExclusionCommand::List => rights::exclusions(&pool().await?).await?,
             ExclusionCommand::Lift { id, by, evidence } => {

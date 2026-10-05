@@ -19,6 +19,7 @@ pub struct AddArgs<'a> {
     pub publisher: &'a str,
     pub prefixes: &'a [String],
     pub basis: Basis,
+    pub kind: &'a str,
     pub evidence: Option<Uuid>,
     pub by: &'a str,
     pub rationale: Option<&'a str>,
@@ -67,6 +68,7 @@ pub async fn add(pool: &PgPool, records: &LocalRecords, args: AddArgs<'_>) -> an
             key: args.key,
             publisher: args.publisher,
             prefixes: args.prefixes,
+            kind: args.kind,
             basis,
         },
     )
@@ -75,6 +77,7 @@ pub async fn add(pool: &PgPool, records: &LocalRecords, args: AddArgs<'_>) -> an
     print_json(&serde_json::json!({
         "source": args.key,
         "basis": args.basis,
+        "kind": args.kind,
         "evidence": evidence,
     }))
 }
@@ -102,14 +105,30 @@ pub async fn request(
     by: &str,
 ) -> anyhow::Result<()> {
     let stored = records.store_file(draft)?;
-    let id = rights::request(pool, key, to, channel, &stored, by).await?;
+    let id = rights::request(pool, rights::Subject::Source(key), to, channel, &stored, by).await?;
     print_json(&serde_json::json!({ "source": key, "request": id, "draft": stored.key }))
 }
 
+/// A source or, failing that, a teacher; clap makes exactly one present.
+fn subject<'a>(key: Option<&'a str>, teacher: Option<&'a str>) -> rights::Subject<'a> {
+    match key {
+        Some(key) => rights::Subject::Source(key),
+        None => rights::Subject::Teacher(teacher.unwrap_or_default()),
+    }
+}
+
 /// `wt rights sent`.
-pub async fn sent(pool: &PgPool, key: &str, on: NaiveDate, by: &str) -> anyhow::Result<()> {
-    let follow_up = rights::sent(pool, key, on, by).await?;
-    print_json(&serde_json::json!({ "source": key, "sent_on": on, "follow_up_on": follow_up }))
+pub async fn sent(
+    pool: &PgPool,
+    key: Option<&str>,
+    teacher: Option<&str>,
+    on: NaiveDate,
+    by: &str,
+) -> anyhow::Result<()> {
+    let follow_up = rights::sent(pool, subject(key, teacher), on, by).await?;
+    print_json(
+        &serde_json::json!({ "source": key, "teacher": teacher, "sent_on": on, "follow_up_on": follow_up }),
+    )
 }
 
 /// `wt rights grant`.
@@ -159,14 +178,28 @@ pub async fn decline(
 }
 
 /// `wt rights no-response`.
-pub async fn no_response(pool: &PgPool, key: &str, by: &str) -> anyhow::Result<()> {
-    rights::no_response(pool, key, by).await?;
-    print_json(&serde_json::json!({ "source": key, "basis": "mandate", "noted": "no_response" }))
+pub async fn no_response(
+    pool: &PgPool,
+    key: Option<&str>,
+    teacher: Option<&str>,
+    by: &str,
+) -> anyhow::Result<()> {
+    rights::no_response(pool, subject(key, teacher), by).await?;
+    print_json(&serde_json::json!({ "source": key, "teacher": teacher, "noted": "no_response" }))
 }
 
 /// `wt rights ledger`.
-pub async fn ledger(pool: &PgPool, key: Option<&str>) -> anyhow::Result<()> {
-    print_json(&rights::ledger(pool, key).await?)
+pub async fn ledger(
+    pool: &PgPool,
+    source: Option<&str>,
+    teacher: Option<&str>,
+) -> anyhow::Result<()> {
+    let subject = match (source, teacher) {
+        (Some(key), _) => Some(rights::Subject::Source(key)),
+        (None, Some(name)) => Some(rights::Subject::Teacher(name)),
+        (None, None) => None,
+    };
+    print_json(&rights::ledger(pool, subject).await?)
 }
 
 /// `wt rights due`.
@@ -191,4 +224,94 @@ pub async fn lift(
     let stored = records.store_file(evidence)?;
     let lifted = rights::lift_exclusion(pool, id, by, &stored).await?;
     print_json(&serde_json::json!({ "lifted": lifted, "evidence": stored.key }))
+}
+
+/// `wt rights set-talks-basis`.
+pub async fn set_talks_basis(pool: &PgPool, basis: &str, by: &str) -> anyhow::Result<()> {
+    print_json(&rights::set_talks_basis(pool, basis, by).await?)
+}
+
+/// `wt teacher opt-out`. The takedown and exclusions need --yes; --suspend-only does not.
+pub async fn opt_out(
+    pool: &PgPool,
+    teacher: &str,
+    reason: &str,
+    by: &str,
+    suspend_only: bool,
+    yes: bool,
+) -> anyhow::Result<()> {
+    if !suspend_only && !yes {
+        anyhow::bail!(
+            "an opt-out deletes {teacher}'s passages, segments and transcripts and excludes \
+             them for good; rerun with --yes, or with --suspend-only to stop serving only"
+        );
+    }
+    print_json(&rights::opt_out(pool, teacher, reason, by, suspend_only).await?)
+}
+
+/// What `wt rights notice-draft` needs.
+pub struct NoticeArgs<'a> {
+    pub teacher: &'a str,
+    pub to: &'a str,
+    pub channel: &'a str,
+    pub out: &'a Path,
+    pub from_name: Option<&'a str>,
+    pub contact: Option<&'a str>,
+    pub template: &'a Path,
+    pub by: &'a str,
+}
+
+/// `wt rights notice-draft`: fills the template with the teacher's facts, writes it to --out,
+/// and records it as a drafted request. It sends nothing.
+pub async fn notice_draft(
+    pool: &PgPool,
+    records: &LocalRecords,
+    args: NoticeArgs<'_>,
+) -> anyhow::Result<()> {
+    let template = std::fs::read_to_string(args.template)
+        .with_context(|| format!("reading {}", args.template.display()))?;
+    let facts = rights::notice_facts(pool, args.teacher).await?;
+    let text = fill_notice(&template, &facts, args.from_name, args.contact);
+    std::fs::write(args.out, &text).with_context(|| format!("writing {}", args.out.display()))?;
+    let stored = records.store(text.as_bytes())?;
+    let id = rights::request(
+        pool,
+        rights::Subject::Teacher(&facts.teacher),
+        args.to,
+        args.channel,
+        &stored,
+        args.by,
+    )
+    .await?;
+    print_json(&serde_json::json!({
+        "teacher": facts.teacher,
+        "talks": facts.talks,
+        "request": id,
+        "draft": stored.key,
+        "out": args.out,
+        "sent": false,
+    }))
+}
+
+/// Fills the template's placeholders. A placeholder with nothing to fill stays as it is, for
+/// the sender to complete by hand.
+pub fn fill_notice(
+    template: &str,
+    facts: &rights::NoticeFacts,
+    from_name: Option<&str>,
+    contact: Option<&str>,
+) -> String {
+    let mut text = template
+        .replace("[Teacher name]", &facts.teacher)
+        .replace("[N]", &facts.talks.to_string());
+    if !facts.sanghas.is_empty() {
+        text = text.replace("[Sangha or source]", &facts.sanghas.join(" and "));
+    }
+    if let Some(name) = from_name {
+        text = text.replace("[Your name]", name);
+    }
+    if let Some(contact) = contact {
+        text = text.replace("[How to reach you]", contact);
+    }
+    text
 }

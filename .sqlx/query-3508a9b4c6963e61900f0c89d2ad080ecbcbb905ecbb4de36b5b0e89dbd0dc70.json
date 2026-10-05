@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = 'cleared', state_reason = null,\n                      rights_basis = $2::text::rights_basis,\n                      license_evidence_id = coalesce($3, license_evidence_id),\n                      -- The gate read granted consent; the talk's copy may predate it.\n                      consent_status = case when $2 = 'speaker_consent' then 'granted'\n                                            else consent_status end\n               where id = $1 and state = 'awaiting_consent'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3508a9b4c6963e61900f0c89d2ad080ecbcbb905ecbb4de36b5b0e89dbd0dc70"
+}

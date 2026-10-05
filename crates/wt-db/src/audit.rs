@@ -89,15 +89,25 @@ impl AuditSettings {
 /// state, so quarantined and partly indexed talks keep their passages without drifting.
 const RIGHTS_VALID: &str = "t.state not in ('excluded', 'withdrawn')
   and ((t.rights_basis = 'speaker_consent' and t.consent_status = 'granted')
-    or (t.rights_basis = 'license' and exists (
+    or (t.rights_basis in ('license', 'mandate') and exists (
           select 1 from license_evidence le where le.id = t.license_evidence_id and le.allowed)))
   and t.rights_holder is not null and lower(t.rights_holder) <> 'unknown'
   and t.teacher_id is not null and t.sangha_id is not null";
 
+/// What serving adds to valid rights (Spec 03, Mandated talks): the teacher has not opted
+/// out, and a mandated talk serves only while `talks_basis` is `mandate` and its source is on.
+/// Switching either off keeps the talk's text, so these are not part of [`RIGHTS_VALID`].
+const SERVING_ON: &str = "not exists (select 1 from teacher te
+                 where te.id = t.teacher_id and te.opted_out_at is not null)
+  and (t.rights_basis is distinct from 'mandate'
+    or ((select value from rights_setting where key = 'talks_basis') = 'mandate'
+        and (t.source_key is null or exists (
+              select 1 from source_policy sp where sp.key = t.source_key and sp.enabled))))";
+
 /// The servable predicate, stated independently of `servable_passage` so serving parity tests
-/// the view against the rule: a ready talk with valid rights.
+/// the view against the rule: a ready talk with valid rights, being served.
 fn consented_ready() -> String {
-    format!("t.state = 'ready' and {RIGHTS_VALID}")
+    format!("t.state = 'ready' and {RIGHTS_VALID} and {SERVING_ON}")
 }
 
 /// The five series named in the PRD; a ready talk whose title names one but has no series set
@@ -296,8 +306,58 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
             pool,
             "request_follow_up",
             Severity::Warn,
-            "select source_key || ' to ' || recipient || ', follow up due ' || follow_up_on::text
-             from permission_request where status = 'sent' and follow_up_on < current_date",
+            "select coalesce(pr.source_key, te.display_name) || ' to ' || pr.recipient
+                    || ', follow up due ' || pr.follow_up_on::text
+             from permission_request pr left join teacher te on te.id = pr.teacher_id
+             where pr.status = 'sent' and pr.follow_up_on < current_date",
+        )
+        .await?,
+    );
+
+    // Spec 03, Mandated talks: nothing of an opted-out or excluded teacher is served, no
+    // mandated talk is served while the switch is off, and every teacher whose talks are used
+    // on the mandate is sent a notice.
+    checks.push(
+        check(
+            pool,
+            "opted_out_served",
+            Severity::Fail,
+            "select sp.passage_id::text || ' ' || te.display_name from servable_passage sp
+             join teacher te on te.id = sp.teacher_id
+             where te.opted_out_at is not null
+                or exists (select 1 from source_exclusion x
+                           where x.scope = 'person' and x.lifted_at is null
+                             and lower(x.pattern) = lower(te.display_name))",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "mandate_served_while_off",
+            Severity::Fail,
+            "select sp.passage_id::text from servable_passage sp
+             where sp.rights_basis = 'mandate'
+               and (select value from rights_setting where key = 'talks_basis') <> 'mandate'",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "teacher_unnotified",
+            Severity::Warn,
+            &format!(
+                "select te.display_name from teacher te
+                 where exists (select 1 from talk t
+                               where t.teacher_id = te.id and t.rights_basis = 'mandate'
+                                 and t.state <> 'withdrawn')
+                   and not exists (select 1 from permission_request pr where pr.teacher_id = te.id)
+                   and (select min(t.created_at) from talk t
+                        where t.teacher_id = te.id and t.rights_basis = 'mandate')
+                       < now() - interval '{} days'",
+                settings.mandate_request_days
+            ),
         )
         .await?,
     );

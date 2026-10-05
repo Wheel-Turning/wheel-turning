@@ -841,3 +841,101 @@ async fn recording_dates_in_titles_set_talk_dates_and_catch_late_re_uploads() {
     );
     assert_eq!(date("2006"), Some("2021-02-25"));
 }
+
+#[tokio::test]
+async fn talks_from_a_mandated_source_clear_in_classification_without_consent() {
+    let mut fx = start().await;
+    fx.sources = SourcesFile::parse(
+        &format!("{SOURCES}rights_source = \"fixture-zendo-talks\"\n"),
+        "fixture",
+    )
+    .unwrap();
+    let adapter = FakeAdapter(Mutex::new(vec![
+        video(
+            "800000001",
+            "Ada: Sitting with the Breath",
+            2400,
+            "2024-05-05T18:00:00Z",
+            false,
+        ),
+        video(
+            "800000002",
+            "Sunday Dharma Talk: A Guest",
+            2400,
+            "2024-05-12T18:00:00Z",
+            false,
+        ),
+    ]));
+
+    // The source must exist in the rights ledger as a talks source.
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let refused = pipeline::discover(
+        &mut conn,
+        fx.sources.get("fixture-vimeo").unwrap(),
+        &adapter,
+        None,
+    )
+    .await;
+    assert!(
+        refused
+            .unwrap_err()
+            .to_string()
+            .contains("not a talks source"),
+        "an unknown rights_source is refused before anything is recorded"
+    );
+    drop(conn);
+    let decision = wt_core::records::StoredRecord {
+        key: "records/fixture".into(),
+        sha256: "fixture".into(),
+    };
+    wt_db::rights::add_source(
+        &fx.pool,
+        &wt_db::rights::NewSource {
+            key: "fixture-zendo-talks",
+            publisher: "Fixture Mountain Zendo",
+            prefixes: &["https://vimeo.com/fixturezendo".to_owned()],
+            kind: "talks",
+            basis: wt_db::rights::NewBasis::Mandate {
+                by: "Owner Fixture",
+                rationale: "fixture",
+                display_notice: "Talk by {teacher}, {sangha}.",
+                decision: &decision,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    wt_db::rights::set_talks_basis(&fx.pool, "mandate", "Owner Fixture")
+        .await
+        .unwrap();
+
+    discover(&fx, &adapter).await;
+    // The rights holder is known for Ada's talk; a talk still needs one under a mandate.
+    sqlx::query(
+        "update talk set rights_holder = 'Ada Fixture' where source_video_id =
+           (select id from source_video where external_id = '800000001')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let outcomes = classify_all(&fx).await;
+    assert_eq!(outcomes["800000001"], Classified::Cleared);
+    assert!(
+        matches!(&outcomes["800000002"], Classified::NeedsReview(_)),
+        "an unresolved speaker still waits for a person: {:?}",
+        outcomes["800000002"]
+    );
+    let (basis, source, consent_rows): (String, String, i64) = sqlx::query_as(
+        "select t.rights_basis::text, t.source_key,
+                (select count(*) from speaker_consent)
+         from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.external_id = '800000001'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (basis.as_str(), source.as_str(), consent_rows),
+        ("mandate", "fixture-zendo-talks", 0)
+    );
+}

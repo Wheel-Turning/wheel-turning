@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{ACTOR, ADA, consent, make_ready, talk};
+use common::{ACTOR, ADA, BO, consent, make_ready, talk};
 use sqlx::PgPool;
 use wt_core::Env;
 use wt_core::gate::ConsentStatus;
@@ -77,6 +77,9 @@ async fn a_clean_database_passes_every_check_in_prod() {
             "series_metadata",
             "mandate_unrequested",
             "request_follow_up",
+            "opted_out_served",
+            "mandate_served_while_off",
+            "teacher_unnotified",
         ]
     );
     let pending: Vec<&str> = report.not_yet_checked.iter().map(|(n, _)| *n).collect();
@@ -435,4 +438,44 @@ async fn a_mandate_without_a_request_and_an_overdue_follow_up_warn() {
     );
     assert_eq!(findings(&report, "request_follow_up"), 1);
     assert!(!report.failed());
+}
+
+#[tokio::test]
+async fn a_teacher_used_on_a_mandate_without_a_notice_warns_after_fourteen_days() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    let old = talk(&fx.pool, Some(BO), Some(BO)).await;
+    // A mandated talk recorded 20 days ago, with no notice to its teacher.
+    sqlx::raw_sql(
+        "insert into license_evidence (publisher, license_code, evidence_snapshot_ref,
+           snapshot_sha256, captured_at, reviewed_by, reviewed_at, allowed, kind)
+         values ('Fixture Mountain Zendo', 'operator-mandate', 'records/x', 'x', now(),
+                 'owner', now(), true, 'mandate');",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update talk set rights_basis = 'mandate', created_at = now() - interval '20 days',
+           license_evidence_id = (select id from license_evidence where kind = 'mandate')
+         where id = $1",
+    )
+    .bind(old.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["teacher_unnotified"]);
+    assert!(!report.failed());
+
+    sqlx::query(
+        "insert into permission_request (teacher_id, recipient, channel)
+         select id, 'bo@example.invalid', 'email' from teacher where display_name = $1",
+    )
+    .bind(BO)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
 }

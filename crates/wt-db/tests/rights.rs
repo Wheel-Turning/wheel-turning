@@ -9,8 +9,8 @@ use chrono::NaiveDate;
 use sqlx::PgPool;
 use wt_core::records::{StoredRecord, sha256_hex};
 use wt_db::rights::{
-    self, Basis, NewBasis, NewSource, RightsError, add_source, decline, due, grant, ledger,
-    lift_exclusion, no_response, request, sent,
+    self, Basis, NewBasis, NewSource, RightsError, Subject, add_source, decline, due, grant,
+    ledger, lift_exclusion, no_response, request, sent,
 };
 
 const OWNER: &str = "Owner Fixture";
@@ -40,6 +40,7 @@ async fn mandate(
             key,
             publisher: "Fixture Press",
             prefixes: &prefixes,
+            kind: "texts",
             basis: NewBasis::Mandate {
                 by: OWNER,
                 rationale: "free to download; widely shared",
@@ -52,7 +53,7 @@ async fn mandate(
 }
 
 async fn events(pool: &PgPool, key: &str) -> Vec<String> {
-    ledger(pool, Some(key))
+    ledger(pool, Some(Subject::Source(key)))
         .await
         .unwrap()
         .into_iter()
@@ -129,7 +130,7 @@ async fn a_request_is_sent_answered_and_read_back_in_order() {
 
     request(
         &fx.pool,
-        "fixturepress",
+        Subject::Source("fixturepress"),
         "rights@press.example",
         "email",
         &record("draft"),
@@ -138,9 +139,14 @@ async fn a_request_is_sent_answered_and_read_back_in_order() {
     .await
     .unwrap();
     assert_eq!(request_status(&fx.pool, "fixturepress").await, "draft");
-    let follow_up = sent(&fx.pool, "fixturepress", day(2026, 10, 6), OWNER)
-        .await
-        .unwrap();
+    let follow_up = sent(
+        &fx.pool,
+        Subject::Source("fixturepress"),
+        day(2026, 10, 6),
+        OWNER,
+    )
+    .await
+    .unwrap();
     assert_eq!(follow_up, day(2026, 10, 20));
     assert_eq!(request_status(&fx.pool, "fixturepress").await, "sent");
 
@@ -205,7 +211,7 @@ async fn a_decline_disables_the_source_and_excludes_it_until_a_grant_lifts_it() 
     .unwrap();
     request(
         &fx.pool,
-        "fixturepress",
+        Subject::Source("fixturepress"),
         "rights@press.example",
         "form",
         &record("draft"),
@@ -213,9 +219,14 @@ async fn a_decline_disables_the_source_and_excludes_it_until_a_grant_lifts_it() 
     )
     .await
     .unwrap();
-    sent(&fx.pool, "fixturepress", day(2026, 10, 6), OWNER)
-        .await
-        .unwrap();
+    sent(
+        &fx.pool,
+        Subject::Source("fixturepress"),
+        day(2026, 10, 6),
+        OWNER,
+    )
+    .await
+    .unwrap();
 
     let out = decline(&fx.pool, "fixturepress", &record("Please do not."), OWNER)
         .await
@@ -301,7 +312,7 @@ async fn silence_stays_a_mandate_and_due_lists_what_needs_doing() {
         .unwrap();
     request(
         &fx.pool,
-        "quiet",
+        Subject::Source("quiet"),
         "hello@quiet.example",
         "email",
         &record("q"),
@@ -309,12 +320,12 @@ async fn silence_stays_a_mandate_and_due_lists_what_needs_doing() {
     )
     .await
     .unwrap();
-    sent(&fx.pool, "quiet", day(2026, 10, 1), OWNER)
+    sent(&fx.pool, Subject::Source("quiet"), day(2026, 10, 1), OWNER)
         .await
         .unwrap();
     request(
         &fx.pool,
-        "drafted",
+        Subject::Source("drafted"),
         "hello@drafted.example",
         "email",
         &record("d"),
@@ -327,7 +338,7 @@ async fn silence_stays_a_mandate_and_due_lists_what_needs_doing() {
     assert_eq!(
         before
             .iter()
-            .map(|d| (d.source_key.as_str(), d.why))
+            .map(|d| (d.source_key.as_deref().unwrap_or_default(), d.why))
             .collect::<Vec<_>>(),
         [("drafted", "unsent")],
         "the sent request is not due until its follow-up date"
@@ -336,10 +347,12 @@ async fn silence_stays_a_mandate_and_due_lists_what_needs_doing() {
     assert!(
         after
             .iter()
-            .any(|d| d.source_key == "quiet" && d.why == "follow_up_due")
+            .any(|d| d.source_key.as_deref() == Some("quiet") && d.why == "follow_up_due")
     );
 
-    no_response(&fx.pool, "quiet", OWNER).await.unwrap();
+    no_response(&fx.pool, Subject::Source("quiet"), OWNER)
+        .await
+        .unwrap();
     assert_eq!(request_status(&fx.pool, "quiet").await, "no_response");
     let basis: String = sqlx::query_scalar("select basis from source_policy where key = 'quiet'")
         .fetch_one(&fx.pool)
@@ -356,7 +369,7 @@ async fn silence_stays_a_mandate_and_due_lists_what_needs_doing() {
             .contains(&"no_response_noted".to_owned())
     );
     assert!(matches!(
-        no_response(&fx.pool, "drafted", OWNER).await,
+        no_response(&fx.pool, Subject::Source("drafted"), OWNER).await,
         Err(RightsError::NoRequest { wanted: "sent", .. })
     ));
 }

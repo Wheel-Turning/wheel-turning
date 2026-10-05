@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into permission_request (source_key, recipient, channel, draft_ref)\n         values ($1, $2, $3, $4) returning id",
+  "query": "select id from talk where teacher_id = $1",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Uuid",
         "origin": {
           "Table": {
-            "table": "permission_request",
+            "table": "talk",
             "name": "id"
           }
         }
@@ -17,15 +17,12 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "65333367d6cb0a583ed178610d394f21ae2713f88b535fb775f0d3611e75a901"
+  "hash": "f9830bc13b077f2ec542d7916b5e13d6b57f74a1ff5d5b2a41454aee2eff817e"
 }

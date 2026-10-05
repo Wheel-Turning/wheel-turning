@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select value from rights_setting where key = 'talks_basis'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "rights_setting",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "af2cc51eb7f3f1f432638d617afa4f216d5b35fff8804a6757e29b9166080b9a"
+}

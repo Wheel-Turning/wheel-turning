@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set consent_status = 'granted',\n                          rights_basis = case when rights_basis = 'license' then rights_basis\n                                              else 'speaker_consent' end\n                   where teacher_id = $1 and state <> 'withdrawn'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "77549e45dfdd3bad5764c2c6a5fc50f93676fe9d75446d0843ecde9f30302de5"
+}
