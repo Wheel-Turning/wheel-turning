@@ -26,3 +26,4 @@ testcontainers = { workspace = true, optional = true }
 [dev-dependencies]
 wt-db = { path = ".", features = ["test-support"] }
 tokio.workspace = true
+trybuild.workspace = true

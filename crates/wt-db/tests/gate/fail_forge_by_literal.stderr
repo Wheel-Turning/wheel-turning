@@ -1,0 +1,8 @@
+error[E0451]: field `_s` of struct `Talk` is private
+  --> tests/gate/fail_forge_by_literal.rs:12:9
+   |
+ 7 |     let _forged: Talk<Consented> = Talk {
+   |                                    ---- in this type
+...
+12 |         _s: PhantomData,
+   |         ^^ private field

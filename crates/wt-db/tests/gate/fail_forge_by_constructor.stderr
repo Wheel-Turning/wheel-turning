@@ -1,0 +1,7 @@
+error[E0599]: no associated function or constant named `pending` found for struct `Talk<Consented>` in the current scope
+ --> tests/gate/fail_forge_by_constructor.rs:6:38
+  |
+6 |     let _forged = Talk::<Consented>::pending(
+  |                                      ^^^^^^^ associated function or constant not found in `Talk<Consented>`
+  |
+  = note: the associated function or constant was found for `Talk<wt_core::gate::Pending>`

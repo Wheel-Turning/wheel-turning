@@ -42,6 +42,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # test-only
 testcontainers = "0.28"
 http-body-util = "0.1"
+trybuild = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

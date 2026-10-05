@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `Talk<Consented>: From<Talk<wt_core::gate::Pending>>` is not satisfied
+ --> tests/gate/fail_pending_into_consented.rs:5:10
+  |
+5 |     talk.into()
+  |          ^^^^ the trait `From<Talk<wt_core::gate::Pending>>` is not implemented for `Talk<Consented>`
+  |
+  = note: required for `Talk<wt_core::gate::Pending>` to implement `Into<Talk<Consented>>`
