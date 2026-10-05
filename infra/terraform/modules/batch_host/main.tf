@@ -68,7 +68,16 @@ resource "aws_launch_template" "this" {
     name = var.instance_profile_name
   }
 
-  vpc_security_group_ids = [var.security_group_id]
+  # Subnet, public IP and security group all sit on one network interface. EC2 rejects a request
+  # that sets instance-level security groups beside a network interface, which is what
+  # associate_public_ip_address on the instance would add.
+  network_interfaces {
+    device_index                = 0
+    subnet_id                   = var.subnet_id
+    associate_public_ip_address = true
+    security_groups             = [var.security_group_id]
+    delete_on_termination       = true
+  }
 
   metadata_options {
     http_tokens                 = "required" # IMDSv2 only
@@ -98,12 +107,10 @@ resource "aws_launch_template" "this" {
 }
 
 resource "aws_instance" "this" {
-  count     = var.enabled ? 1 : 0
-  subnet_id = var.subnet_id
-
-  # A public IP is needed for outbound traffic without a NAT gateway. The security group allows
-  # no inbound traffic, and access is through Session Manager.
-  associate_public_ip_address = true
+  # The launch template's network interface gives the instance a public IP, which it needs for
+  # outbound traffic without a NAT gateway. The security group allows no inbound traffic, and
+  # access is through Session Manager.
+  count = var.enabled ? 1 : 0
 
   launch_template {
     id      = aws_launch_template.this[0].id
