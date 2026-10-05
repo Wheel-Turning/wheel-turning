@@ -6,22 +6,15 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::config::ClassifyConfig;
 
-/// Rule 1: Unicode NFKC, lowercase, punctuation removed, spaces collapsed. The database's
-/// `wt_normalize_title` must give the same result, since duplicate detection compares them.
+/// Rule 1: Unicode NFKC, lowercase, punctuation replaced by a space, spaces collapsed, so
+/// `Part-3` and `Shobogenzo_Uji` keep their words apart (decision of October 5, 2026). The SQL
+/// in `wt_db::ingest::duplicate_candidates` must give the same result, since rule 3 compares
+/// them.
 pub fn normalize_title(title: &str) -> String {
     let folded: String = title.nfkc().collect::<String>().to_lowercase();
     let kept: String = folded
         .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c
-            } else if c.is_whitespace() {
-                ' '
-            } else {
-                '\u{0}'
-            }
-        })
-        .filter(|&c| c != '\u{0}')
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
         .collect();
     kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -124,11 +117,13 @@ pub struct DupFacts {
     pub series_part: Option<(String, i32)>,
 }
 
-/// Rule 3, given the `pg_trgm` similarity of the two normalized titles. Two talks match when
-/// their dates are within a day, their durations within the larger of the minimum and the
-/// percentage, and their titles similar enough; or when their titles are identical and their
-/// durations within `dedupe_title_identical_tolerance_s`. Two different parts of one series
-/// never match, so a lecture series recorded weekly at similar lengths is not merged.
+/// Rule 3, given the `pg_trgm` similarity of the two normalized titles. Two talks match only
+/// when their dates are within a day, and then either their durations are within the larger of
+/// the minimum and the percentage and their titles similar enough, or their titles are
+/// identical and their durations within `dedupe_title_identical_tolerance_s`. The date limit
+/// on identical titles keeps weekly talks with one generic title apart (decision of October 5,
+/// 2026). Two different parts of one series never match, so a lecture series recorded weekly
+/// at similar lengths is not merged.
 pub fn is_duplicate(cfg: &ClassifyConfig, a: &DupFacts, b: &DupFacts, similarity: f32) -> bool {
     if let (Some((sa, pa)), Some((sb, pb))) = (&a.series_part, &b.series_part)
         && sa == sb
@@ -139,6 +134,10 @@ pub fn is_duplicate(cfg: &ClassifyConfig, a: &DupFacts, b: &DupFacts, similarity
     let (Some(da), Some(db)) = (a.duration_s, b.duration_s) else {
         return false;
     };
+    let close_dates = matches!((a.day, b.day), (Some(x), Some(y)) if (x - y).abs() <= 1);
+    if !close_dates {
+        return false;
+    }
     let gap = (da - db).abs();
     let s = &cfg.settings;
     if a.title == b.title && gap <= s.dedupe_title_identical_tolerance_s {
@@ -146,8 +145,7 @@ pub fn is_duplicate(cfg: &ClassifyConfig, a: &DupFacts, b: &DupFacts, similarity
     }
     let tolerance = f64::from(s.dedupe_duration_tolerance_min_s)
         .max(f64::from(da.max(db)) * f64::from(s.dedupe_duration_tolerance_pct) / 100.0);
-    let close_dates = matches!((a.day, b.day), (Some(x), Some(y)) if (x - y).abs() <= 1);
-    close_dates && f64::from(gap) <= tolerance && similarity >= s.dedupe_title_similarity
+    f64::from(gap) <= tolerance && similarity >= s.dedupe_title_similarity
 }
 
 #[cfg(test)]
@@ -193,13 +191,18 @@ mod tests {
             normalize_title("  Genjōkōan — Part 3!  "),
             "genjōkōan part 3"
         );
-        assert_eq!(normalize_title("Q&A: Zazen"), "qa zazen");
+        assert_eq!(normalize_title("Q&A: Zazen"), "q a zazen");
         assert_eq!(
             normalize_title("ﬁrst   Talk"),
             "first talk",
             "NFKC folds the ligature"
         );
-        assert_eq!(normalize_title("zoom_0"), "zoom0");
+        assert_eq!(normalize_title("zoom_0"), "zoom 0");
+        assert_eq!(
+            normalize_title("2021-11-03_Shobogenzo-Uji_Part-3.mp4"),
+            "2021 11 03 shobogenzo uji part 3 mp4",
+            "separators keep words apart"
+        );
     }
 
     #[test]
@@ -287,12 +290,16 @@ mod tests {
             "titles differ"
         );
         assert!(
-            is_duplicate(&c, &a, &facts("UJI — part 4", 400, 2500), 1.0),
-            "identical title, 100 s apart"
+            is_duplicate(&c, &a, &facts("UJI — part 4", 101, 2500), 1.0),
+            "identical title a day later, 100 s apart"
         );
         assert!(
-            !is_duplicate(&c, &a, &facts("Uji part 4", 400, 2600), 1.0),
+            !is_duplicate(&c, &a, &facts("Uji part 4", 101, 2600), 1.0),
             "identical title, 200 s apart"
+        );
+        assert!(
+            !is_duplicate(&c, &a, &facts("Uji, Part 4", 107, 2400), 1.0),
+            "identical title a week apart: weekly talks with one generic title"
         );
         let mut p3 = facts("Genjokoan part 3", 10, 2400);
         let mut p4 = facts("Genjokoan part 4", 10, 2400);

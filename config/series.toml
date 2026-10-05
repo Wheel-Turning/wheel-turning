@@ -1,23 +1,25 @@
 # Known series (Spec 03, rule 4). Each pattern is matched, ignoring case, against the normalized
-# title and needs a named capture `part`; the part may be absent from a title, in which case the
-# series is recorded with no part. `parts`, when known, lets the ingest report list missing parts.
+# title (punctuation becomes a space, so "Part-3" reads "part 3" and "#11" reads "11"). A part is
+# read only next to a part word or in the series' own numbering, never from a date. A title that
+# names the series without a part number is recorded with no part. `parts`, when known, lets the
+# ingest report list missing parts beyond the last one seen.
 
 [[series]]
 name = "Genjokoan"
-pattern = 'genj[oō] ?k[oō]an(?:\D{0,20}?(?P<part>\d+))?'
+pattern = 'genj[oō] ?k[oō]an(?:.{0,30}?\b(?:part|pt|paragraph|para) ?(?P<part>\d+))?'
 
 [[series]]
 name = "Uji"
-pattern = '\buji\b(?:\D{0,20}?(?P<part>\d+))?'
+pattern = '\buji\b(?:.{0,30}?\b(?:part|pt) ?(?P<part>\d+))?'
 
 [[series]]
 name = "Bendowa"
-pattern = '\bbend[oō]wa\b(?:\D{0,20}?(?P<part>\d+))?'
+pattern = '\bbend[oō]wa\b(?:.{0,30}?\b(?:part|pt) ?(?P<part>\d+))?'
 
 [[series]]
 name = "Blue Cliff Record"
-pattern = '\bblue cliff(?: record)?\b(?:\D{0,30}?(?P<part>\d+))?'
+pattern = '\bblue cliff(?: record)?\b(?: (?:case )?(?P<part>\d+))?'
 
 [[series]]
 name = "Song of the Grass Hut"
-pattern = '\bsong of the grass hut\b(?:\D{0,20}?(?P<part>\d+))?'
+pattern = '(?:\bverse (?P<part>\d+) from )?(?:the )?\bsong of the grass hut\b'

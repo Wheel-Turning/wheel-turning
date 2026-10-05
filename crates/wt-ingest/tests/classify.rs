@@ -547,3 +547,50 @@ async fn the_report_renders_every_section_from_the_fixture_corpus() {
     let again = wt_db::ingest::report_rows(&mut conn).await.unwrap();
     assert_eq!(again, rows);
 }
+
+#[tokio::test]
+async fn the_database_normalizes_titles_exactly_as_rule_1_does() {
+    let fx = start().await;
+    let titles = [
+        "2021-11-03_Fixture_Sunday_Shobogenzo-Uji-Being-Time_Part-3.mp4",
+        "Q&A: Zazen — “Quoted” words!",
+        "Genjōkōan  Paragraph	4 (5-09-2021)",
+        "ﬁrst Talk, again",
+    ];
+    let adapter = FakeAdapter(Mutex::new(
+        titles
+            .iter()
+            .enumerate()
+            .map(|(i, t)| video(&format!("77{i}"), t, 2400, "2024-01-01T00:00:00Z", false))
+            .collect(),
+    ));
+    discover(&fx, &adapter).await;
+    let probe = video("7799", "probe", 2400, "2024-01-01T00:00:00Z", false);
+    adapter.0.lock().unwrap().push(probe);
+    discover(&fx, &adapter).await;
+    let probe_id: sqlx::types::Uuid = sqlx::query_scalar(
+        "select t.id from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.external_id = '7799'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let candidates = wt_db::ingest::duplicate_candidates(
+        &mut conn,
+        wt_core::ids::TalkId::from(probe_id),
+        "probe",
+        2400,
+        10,
+    )
+    .await
+    .unwrap();
+    let from_sql: std::collections::BTreeSet<String> =
+        candidates.into_iter().map(|c| c.normalized_title).collect();
+    let from_rust: std::collections::BTreeSet<String> = titles
+        .iter()
+        .map(|t| wt_ingest::classify::normalize_title(t))
+        .collect();
+    assert_eq!(from_sql, from_rust);
+}

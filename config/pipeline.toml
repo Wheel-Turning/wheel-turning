@@ -1,7 +1,7 @@
 # Pipeline settings (Spec 03, Spec 04). The defaults are starting points to adjust against the
 # corpus review. Title patterns are regular expressions matched, ignoring case, against the
-# normalized title: NFKC, lowercase, punctuation removed, spaces collapsed. So "Q&A" is "qa"
-# and "zoom_0" is "zoom0".
+# normalized title: NFKC, lowercase, punctuation replaced by a space, spaces collapsed. So "Q&A"
+# is "q a" and "zoom_0" is "zoom 0".
 
 [ingest]
 min_talk_seconds = 300
@@ -25,9 +25,11 @@ review_title_patterns = [
   { pattern = '\bq ?a\b|\bquestions and answers\b', reason = "student_voices" },
 ]
 
-# Title patterns for the talk types other than dharma_talk.
+# Title patterns for talk types, first match wins. A title that says "dharma talk" is one
+# whatever its length; an unmatched title is a dharma_talk only from long_talk_seconds up.
 type_patterns = [
   { pattern = '\bclass\b', talk_type = "class" },
   { pattern = '\bsesshin\b|\bretreat\b', talk_type = "retreat_talk" },
   { pattern = '\bservice\b|\bceremony\b', talk_type = "service" },
+  { pattern = '\bdharma talk\b', talk_type = "dharma_talk" },
 ]

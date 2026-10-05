@@ -40,7 +40,7 @@ aliases = ["Kanshin", "Allison Tait"]
 display_name = "Steve Given"
 sangha = "Seattle Soto Zen"
 # Novice priest name Jundo; now Daiho Shindo.
-aliases = ["Daiho Shindo", "Daiho Shindo Steve Given", "Shindo Steve Given", "Jundo Steve Given"]
+aliases = ["Daiho Shindo", "Daiho Shindo Steve Given", "Shindo Steve Given", "Jundo Steve Given", "Steve Jundo Given"]
 
 [[teacher]]
 display_name = "Chris Middleman"

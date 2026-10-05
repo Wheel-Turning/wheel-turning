@@ -23,10 +23,12 @@ const PAGE_SIZE: u32 = 100;
 const API_FIELDS: &str = "uri,name,description,duration,created_time,link,privacy,license,\
                           metadata.connections.texttracks.total";
 
-/// A Vimeo id as it appears in a page link or an embed: `vimeo.com/123456789` or
-/// `player.vimeo.com/video/123456789`.
-static VIMEO_LINK: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"(?:player\.)?vimeo\.com/(?:video/)?(\d{6,12})\b").ok());
+/// A Vimeo id as it appears in a page: a link or embed (`vimeo.com/123456789`,
+/// `player.vimeo.com/video/123456789`), or the `data-video_id` attribute that WordPress video
+/// playlist plugins such as Vimeotheque put on each playlist item.
+static VIMEO_LINK: LazyLock<Option<Regex>> = LazyLock::new(|| {
+    Regex::new(r#"(?:(?:player\.)?vimeo\.com/(?:video/)?|data-video_id=["'])(\d{6,12})\b"#).ok()
+});
 
 /// Where the adapter sends requests. Tests point these at a local mock server.
 #[derive(Debug, Clone)]
@@ -382,8 +384,13 @@ mod tests {
             <a href="https://vimeo.com/672990540">Discrimination and Suffering</a>
             <a href="https://vimeo.com/802312541">again</a>
             <a href="https://vimeo.com/channels/staffpicks">not a video</a>
+            <div class="cvm-playlist-item" data-video_id="672974907"></div>
+            <div class="cvm-playlist-item" data-video_id='672990540'></div>
         "#;
-        assert_eq!(page_video_ids(html), ["802312541", "672990540"]);
+        assert_eq!(
+            page_video_ids(html),
+            ["802312541", "672990540", "672974907"]
+        );
     }
 
     #[test]

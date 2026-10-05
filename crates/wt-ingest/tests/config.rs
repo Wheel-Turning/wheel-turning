@@ -21,15 +21,45 @@ fn cfg() -> ClassifyConfig {
 #[test]
 fn the_five_named_series_record_their_parts() {
     let c = cfg();
+    // Shaped like the archive's titles, with invented subjects and dates.
     for (title, series, part) in [
-        ("Genjokoan, Part 3", "Genjokoan", Some(3)),
+        ("Genjokoan - Paragraph 3 (4-25-2021)", "Genjokoan", Some(3)),
+        ("Genjokoan, Part 7", "Genjokoan", Some(7)),
         ("Genjōkōan pt. 12", "Genjokoan", Some(12)),
-        ("Uji (Being-Time) #4", "Uji", Some(4)),
-        ("Bendowa – Talk 2", "Bendowa", Some(2)),
-        ("Blue Cliff Record, Case 46", "Blue Cliff Record", Some(46)),
-        ("Song of the Grass Hut 1", "Song of the Grass Hut", Some(1)),
+        ("Genjokoan Introduction (4/9/2021)", "Genjokoan", None),
         (
-            "Introducing the Song of the Grass Hut",
+            "2021-11-03_Fixture_Sunday_Shobogenzo-Uji-Being-Time_Part-3.mp4",
+            "Uji",
+            Some(3),
+        ),
+        (
+            "2021-10-24 Fixture - Sunday - Shobogenzo Uji Being Time - Part2.mp4",
+            "Uji",
+            Some(2),
+        ),
+        ("Uji on January 5, 2025", "Uji", None),
+        (
+            "Sunday Dharma Talk: Fixture - Bendowa Series",
+            "Bendowa",
+            None,
+        ),
+        (
+            "Dharma Talk on Blue Cliff Record #11: \"A Made-Up Case\" on May 1, 2023",
+            "Blue Cliff Record",
+            Some(11),
+        ),
+        (
+            "Dharma Talk on Blue Cliff Record Case #12: \"Another\", on June 4, 2023",
+            "Blue Cliff Record",
+            Some(12),
+        ),
+        (
+            "Dharma Talk on Verse #2 from The Song of the Grass Hut, on October 13, 2024",
+            "Song of the Grass Hut",
+            Some(2),
+        ),
+        (
+            "Dharma Talk on the Final Verse from The Song of the Grass Hut",
             "Song of the Grass Hut",
             None,
         ),
@@ -88,4 +118,17 @@ fn the_committed_patterns_classify_the_ssz_inventory_cases() {
         Some("student_voices")
     );
     assert_eq!(review("Facing the Jewel Mirror"), None);
+
+    // A title that says it is a dharma talk is one even under long_talk_seconds.
+    let short_talk = classify::talk_type(
+        &c,
+        &normalize_title("Dharma Talk on a Fixture Case"),
+        Some(860),
+    );
+    assert_eq!(
+        (short_talk.talk_type.as_str(), short_talk.review),
+        ("dharma_talk", None)
+    );
+    let short_other = classify::talk_type(&c, &normalize_title("A brief word"), Some(860));
+    assert_eq!(short_other.review.as_deref(), Some("talk_type_unclear"));
 }

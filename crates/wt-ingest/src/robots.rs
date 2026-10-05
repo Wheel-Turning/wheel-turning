@@ -1,7 +1,7 @@
-//! A small `robots.txt` reader: the group for our user agent, or `*`, and its `Allow` and
-//! `Disallow` prefixes, longest match winning. Enough to obey a site's rules before reading
-//! a page; it does not handle wildcards beyond a trailing `$` or `*`, and treats an unhandled
-//! wildcard rule as disallowing its literal prefix, which errs toward not fetching.
+//! A small `robots.txt` reader (RFC 9309): the group for our user agent, or `*`, and its
+//! `Allow` and `Disallow` rules. A rule matches from the start of the path; `*` matches any
+//! run of characters and a trailing `$` anchors the end. The longest matching rule decides,
+//! and `Allow` wins a tie. Enough to obey a site's rules before reading a page.
 
 /// The rules that apply to one user agent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -52,12 +52,7 @@ impl Robots {
                 "allow" | "disallow" => {
                     in_rules = true;
                     if !value.is_empty() {
-                        let prefix = value
-                            .trim_end_matches('$')
-                            .split('*')
-                            .next()
-                            .unwrap_or_default();
-                        rules.push((key == "allow", prefix.to_owned()));
+                        rules.push((key == "allow", value.to_owned()));
                     }
                 }
                 _ => {}
@@ -69,15 +64,41 @@ impl Robots {
         }
     }
 
-    /// Whether `path` (with its query) may be fetched. The longest matching prefix decides,
+    /// Whether `path` (with its query) may be fetched. The longest matching rule decides,
     /// and `Allow` wins a tie.
     pub fn allows(&self, path: &str) -> bool {
         self.rules
             .iter()
-            .filter(|(_, prefix)| path.starts_with(prefix.as_str()))
-            .max_by_key(|(allow, prefix)| (prefix.len(), *allow))
+            .filter(|(_, pattern)| matches(pattern, path))
+            .max_by_key(|(allow, pattern)| (pattern.len(), *allow))
             .is_none_or(|(allow, _)| *allow)
     }
+}
+
+/// Whether a rule matches `path` from its start. `*` matches any run of characters, including
+/// none, and a trailing `$` means the path must end where the pattern does.
+fn matches(pattern: &str, path: &str) -> bool {
+    let (pattern, anchored) = match pattern.strip_suffix('$') {
+        Some(p) => (p, true),
+        None => (pattern, false),
+    };
+    let mut pieces = pattern.split('*');
+    let first = pieces.next().unwrap_or_default();
+    let Some(mut rest) = path.strip_prefix(first) else {
+        return false;
+    };
+    let pieces: Vec<&str> = pieces.collect();
+    for (i, piece) in pieces.iter().enumerate() {
+        let last = i + 1 == pieces.len();
+        if last && anchored {
+            return rest.ends_with(piece);
+        }
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    !anchored || rest.is_empty()
 }
 
 #[cfg(test)]
@@ -110,6 +131,37 @@ mod tests {
         assert!(other.allows("/wp-admin/admin-ajax.php"));
         assert!(!other.allows("/private/x"));
         assert!(other.allows("/talks-page/"));
+    }
+
+    #[test]
+    fn wildcards_match_inside_the_path_and_never_widen_to_the_whole_site() {
+        // Rules like a WordPress shop's: the wildcard rules must block cart links only.
+        let shop = Robots::parse(
+            "User-agent: *
+Disallow: /*?add-to-cart=
+Disallow: /*?*add-to-cart=
+             Disallow: /wp-admin/
+Allow: /wp-admin/admin-ajax.php
+",
+            "WheelTurning/0.1",
+        );
+        assert!(shop.allows("/talks-page/"));
+        assert!(shop.allows("/"));
+        assert!(!shop.allows("/shop/?add-to-cart=12"));
+        assert!(!shop.allows("/shop/?size=2&add-to-cart=12"));
+        assert!(shop.allows("/shop/?size=2"));
+
+        let anchored = Robots::parse(
+            "User-agent: *
+Disallow: /*.pdf$
+Disallow: /exact$
+",
+            "x",
+        );
+        assert!(!anchored.allows("/files/notes.pdf"));
+        assert!(anchored.allows("/files/notes.pdf?download=1"));
+        assert!(!anchored.allows("/exact"));
+        assert!(anchored.allows("/exact/more"));
     }
 
     #[test]

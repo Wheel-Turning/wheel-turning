@@ -252,9 +252,8 @@ pub async fn duplicate_candidates(
         r#"with c as (
              select t.id, t.state::text as state, t.duration_s, sv.published_at,
                     coalesce((sv.raw->>'has_captions')::boolean, false) as has_captions,
-                    trim(regexp_replace(
-                      regexp_replace(lower(normalize(t.title, NFKC)), '[^[:alnum:][:space:]]+', '', 'g'),
-                      '[[:space:]]+', ' ', 'g')) as norm
+                    trim(regexp_replace(lower(normalize(t.title, NFKC)), '[^[:alnum:]]+', ' ', 'g'))
+                      as norm
              from talk t join source_video sv on sv.id = t.source_video_id
              where t.id <> $1 and t.duplicate_of is null
                and t.state not in ('excluded', 'withdrawn')
