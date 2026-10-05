@@ -36,6 +36,13 @@ pub struct Fx {
     pub pool: PgPool,
 }
 
+impl Fx {
+    /// The superuser URL of the test database, for tests that log in as another role.
+    pub fn url(&self) -> &wt_core::Secret {
+        self._db.url()
+    }
+}
+
 pub async fn start() -> Fx {
     let db = TestDb::start()
         .await

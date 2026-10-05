@@ -124,7 +124,7 @@ async fn serving_parity_fails_when_the_view_drifts_from_the_rule() {
         .await
         .unwrap();
     let narrowed = format!(
-        "create or replace view servable_passage with (security_barrier = true) as {} and false",
+        "create or replace view servable_passage as {} and false",
         def.trim().trim_end_matches(';')
     );
     sqlx::raw_sql(sqlx::AssertSqlSafe(narrowed))

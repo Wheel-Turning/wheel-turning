@@ -295,12 +295,13 @@ alter table talk drop constraint past_gate_requires_consent;
 alter table talk add constraint past_gate_requires_consent check (
   state not in ('cleared','fetching','transcribing','diarizing','segmenting',
                 'correcting','extracting','resolving','indexing','ready')
-  or (teacher_id is not null and sangha_id is not null
+  or coalesce(teacher_id is not null and sangha_id is not null
       and rights_holder is not null and lower(rights_holder) <> 'unknown'
       and ((rights_basis = 'speaker_consent' and consent_status = 'granted')
-        or (rights_basis in ('license','mandate') and license_evidence_id is not null))));
+        or (rights_basis in ('license','mandate') and license_evidence_id is not null)),
+      false));
 
-create or replace view servable_passage with (security_barrier = true) as
+create or replace view servable_passage as
 select p.id as passage_id, p.text, p.start_ms, p.end_ms, p.ordinal, p.segment_kind,
        p.embedding, p.tsv,
        t.id as talk_id, t.title as talk_title, t.talk_date, t.series, t.part,
