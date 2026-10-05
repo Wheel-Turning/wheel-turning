@@ -66,9 +66,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3. The batch host must be running; the forward goes through it (Spec 01).
-$instanceId = (& aws ec2 describe-instances @aws `
+# An empty result comes back as no output at all, so join and trim rather than call methods on it.
+$instanceId = ((& aws ec2 describe-instances @aws `
         --filters "Name=tag:Name,Values=$StackName-batch" 'Name=instance-state-name,Values=running' `
-        --query 'Reservations[].Instances[].InstanceId' --output text).Trim()
+        --query 'Reservations[].Instances[].InstanceId' --output text) -join ' ').Trim()
+if ($LASTEXITCODE -ne 0) {
+    Stop-Setup "could not list EC2 instances in $Region with the profile '$AwsProfile'."
+}
 if (-not $instanceId -or $instanceId -eq 'None') {
     Stop-Setup "no running batch host tagged $StackName-batch. Start it with batch_host_enabled = true (Spec 01) and run this again."
 }
@@ -76,8 +80,8 @@ if ($instanceId -match '\s') {
     Stop-Setup "more than one running instance is tagged $StackName-batch ($instanceId). Stop the extra one first."
 }
 
-$dbHost = (& aws rds describe-db-instances @aws --db-instance-identifier $StackName `
-        --query 'DBInstances[0].Endpoint.Address' --output text).Trim()
+$dbHost = ((& aws rds describe-db-instances @aws --db-instance-identifier $StackName `
+        --query 'DBInstances[0].Endpoint.Address' --output text) -join ' ').Trim()
 if ($LASTEXITCODE -ne 0 -or -not $dbHost -or $dbHost -eq 'None') {
     Stop-Setup "could not find the database $StackName in $Region."
 }
