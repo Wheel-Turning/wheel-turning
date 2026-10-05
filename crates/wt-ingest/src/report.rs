@@ -19,14 +19,17 @@ use wt_db::ingest::ReportRow;
 
 use crate::config::Series;
 
-/// Words that make a link in a description look like a donation page.
-const DONATION_WORDS: [&str; 10] = [
+/// Words that make a link in a description look like a donation page. `donat` is a stem for
+/// donate, donation and donations.
+const DONATION_WORDS: [&str; 12] = [
     "donat",
     "dana",
     "give",
     "giving",
     "support",
-    "contribut",
+    "contribute",
+    "contribution",
+    "contributing",
     "paypal",
     "venmo",
     "patreon",
