@@ -201,6 +201,10 @@ pub struct IngestSettings {
     pub feed_match_duration_tolerance_pct: f32,
     /// Minimum `pg_trgm` similarity of normalized titles for a title match.
     pub feed_match_title_similarity: f32,
+    /// An episode whose exact title, less the speaker in brackets, belongs to one Vimeo talk
+    /// matches it when the upload is within this many days of the episode. Re-uploads under a
+    /// new title came weeks after the talk, so this is wider than `feed_match_days`.
+    pub feed_exact_title_days: i64,
 }
 
 impl Default for IngestSettings {
@@ -221,6 +225,7 @@ impl Default for IngestSettings {
             feed_match_duration_tolerance_s: 120,
             feed_match_duration_tolerance_pct: 5.0,
             feed_match_title_similarity: 0.5,
+            feed_exact_title_days: 60,
         }
     }
 }

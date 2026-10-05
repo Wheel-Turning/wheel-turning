@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.id, sv.external_id, t.title, t.state::text as \"state!\", sv.published_at,\n                  coalesce((sv.raw->>'has_captions')::boolean, false) as \"has_captions!\",\n                  exists (select 1 from source_video e where e.platform = 'rss'\n                          and e.raw->'match'->>'vimeo_id' = sv.external_id) as \"matched!\"\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where sv.platform = 'vimeo' and sv.raw->>'source' = any($1)\n             and t.state not in ('excluded', 'withdrawn') and t.talk_date = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "has_captions!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "matched!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "8c4d051529f6d23d1f0fac402c60f2edd7be907c565d2cb86ebe83db9ffe4754"
+}

@@ -429,6 +429,8 @@ pub struct FeedReport {
     pub matched: usize,
     /// Episodes still without a match.
     pub unmatched: usize,
+    /// Vimeo talks merged in this run as another upload of a recording an episode identified.
+    pub duplicate_uploads: usize,
 }
 
 /// Reads an `audio_only` feed: records every episode, never a talk, and matches each unmatched
@@ -441,7 +443,7 @@ pub async fn discover_feed(
     vimeo_sources: &[String],
     actor: &str,
 ) -> Result<FeedReport, PipelineError> {
-    use crate::feedmatch::{self, Candidate, Side};
+    use crate::feedmatch::{self, Candidate, How, Side};
     use wt_db::feed::{self, NewEpisode};
 
     let episodes = adapter.discover(None).await?;
@@ -470,11 +472,53 @@ pub async fn discover_feed(
     }
 
     for episode in feed::unmatched_episodes(&mut tx, &source.name).await? {
+        let published = episode.published_at.map(|t| t.date_naive());
         let Some(duration) = episode.duration_s else {
-            report.unmatched += 1;
+            // No length: only a recording date, from the title or the audio file's name, can
+            // tie the episode to a talk.
+            let recorded = dates::recording_date(&episode.title, published).or_else(|| {
+                episode
+                    .enclosure_url
+                    .as_deref()
+                    .and_then(|u| feedmatch::date_from_audio_url(u, published))
+            });
+            let chosen = match recorded {
+                Some(date) => {
+                    let candidates: Vec<Candidate<String>> = feed::talk_candidates_on(
+                        &mut tx,
+                        vimeo_sources,
+                        &episode.normalized_title,
+                        date,
+                    )
+                    .await?
+                    .into_iter()
+                    .map(|t| {
+                        let uploaded = t.published_at.map(|p| p.date_naive());
+                        let titled = dates::recording_date(&t.title, uploaded);
+                        Candidate {
+                            key: t.vimeo_id,
+                            side: Side {
+                                date: titled.or(uploaded),
+                                dated_in_title: titled.is_some(),
+                                duration_s: t.duration_s,
+                            },
+                            similarity: t.similarity,
+                        }
+                    })
+                    .collect();
+                    feedmatch::choose_by_date(cfg, date, &candidates)
+                }
+                None => None,
+            };
+            match chosen {
+                Some((vimeo_id, how)) => {
+                    feed::set_match(&mut tx, episode.id, &vimeo_id, how.as_str(), actor).await?;
+                    report.matched += 1;
+                }
+                None => report.unmatched += 1,
+            }
             continue;
         };
-        let published = episode.published_at.map(|t| t.date_naive());
         let recorded = dates::recording_date(&episode.title, published);
         let me = Side {
             date: recorded.or(published),
@@ -512,6 +556,139 @@ pub async fn discover_feed(
             None => report.unmatched += 1,
         }
     }
+
+    // Exact title: an episode still unmatched whose title, less the speaker in brackets, is
+    // exactly one live Vimeo talk's title, uploaded within `feed_exact_title_days`.
+    for episode in feed::unmatched_episodes(&mut tx, &source.name).await? {
+        let core = feedmatch::title_core(&episode.title);
+        if core.is_empty() {
+            continue;
+        }
+        let titled = feed::talks_titled(&mut tx, vimeo_sources, &core).await?;
+        let [only] = titled.as_slice() else {
+            continue;
+        };
+        if only.matched || !within(cfg, episode.published_at, only.published_at) {
+            continue;
+        }
+        feed::set_match(
+            &mut tx,
+            episode.id,
+            &only.vimeo_id,
+            How::ExactTitle.as_str(),
+            actor,
+        )
+        .await?;
+        report.matched += 1;
+        report.unmatched = report.unmatched.saturating_sub(1);
+    }
+
+    // Another upload of the same recording: an episode identifies its talk by date and by title,
+    // and when those point at two Vimeo talks they are one recording uploaded twice. Rule 3
+    // cannot see this, because one copy is dated by its title and the other weeks later by its
+    // upload. The kept copy is chosen as in rule 3, and the episode follows it.
+    for episode in feed::matched_episodes(&mut tx, &source.name).await? {
+        let Some(matched) = feed::vimeo_talk_by_id(&mut tx, &episode.vimeo_id).await? else {
+            continue;
+        };
+        let published = episode.published_at.map(|t| t.date_naive());
+        // The only talk with the episode's exact title, uploaded near it.
+        let core = feedmatch::title_core(&episode.title);
+        let by_title = if core.is_empty() {
+            None
+        } else {
+            match feed::talks_titled(&mut tx, vimeo_sources, &core)
+                .await?
+                .as_slice()
+            {
+                [only] if within(cfg, episode.published_at, only.published_at) => {
+                    Some(only.clone())
+                }
+                _ => None,
+            }
+        };
+        // The only talk whose own title states the episode's recording date.
+        let recorded = dates::recording_date(&episode.title, published).or_else(|| {
+            episode
+                .enclosure_url
+                .as_deref()
+                .and_then(|u| feedmatch::date_from_audio_url(u, published))
+        });
+        let by_date = match recorded {
+            Some(date) => {
+                let dated: Vec<_> = feed::talks_dated(&mut tx, vimeo_sources, date)
+                    .await?
+                    .into_iter()
+                    .filter(|t| {
+                        dates::recording_date(&t.title, t.published_at.map(|p| p.date_naive()))
+                            == Some(date)
+                    })
+                    .collect();
+                match dated.as_slice() {
+                    [only] => Some(only.clone()),
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+        // Both kinds of evidence are needed, each naming one talk, and they must differ, with
+        // one of them the talk the episode already matched. Two talks merely dated the same
+        // day, such as a full recording and an excerpt, are left to a person.
+        let other = match (by_title, by_date) {
+            (Some(t), Some(d)) if t.vimeo_id != d.vimeo_id => {
+                if t.vimeo_id == matched.vimeo_id {
+                    d
+                } else if d.vimeo_id == matched.vimeo_id {
+                    t
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        let other = &other;
+        let rank = |t: &feed::VimeoTalk| {
+            (
+                PRE_GATE.contains(&t.state.as_str()),
+                !t.has_captions,
+                t.published_at.is_none(),
+                t.published_at,
+                t.talk.as_uuid(),
+            )
+        };
+        let (keeper, loser) = if rank(&matched) <= rank(other) {
+            (&matched, other)
+        } else {
+            (other, &matched)
+        };
+        if feed::merge_upload(
+            &mut tx,
+            loser.talk,
+            keeper.talk,
+            &episode.external_id,
+            actor,
+        )
+        .await?
+        {
+            report.duplicate_uploads += 1;
+            if keeper.vimeo_id != matched.vimeo_id {
+                let id = feed::episode_row(&mut tx, &episode.external_id).await?;
+                feed::set_match(&mut tx, id, &keeper.vimeo_id, "duplicate_upload", actor).await?;
+            }
+        }
+    }
     tx.commit().await?;
     Ok(report)
+}
+
+/// Whether a Vimeo upload is within `feed_exact_title_days` of an episode's publish time.
+fn within(
+    cfg: &ClassifyConfig,
+    episode: Option<DateTime<Utc>>,
+    upload: Option<DateTime<Utc>>,
+) -> bool {
+    match (episode, upload) {
+        (Some(e), Some(u)) => (e - u).num_days().abs() <= cfg.settings.feed_exact_title_days,
+        _ => false,
+    }
 }

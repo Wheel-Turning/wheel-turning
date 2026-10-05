@@ -7,8 +7,61 @@
 //! that, a talk whose title states the same recording date as the episode's title wins if it is
 //! the only one. Anything else stays unmatched, for a person to look at in the completeness
 //! check. Dates are recording dates when the titles state them, as for rule 3.
+//!
+//! An episode with no length, as in SSZ's feed, needs a recording date from its title or its
+//! audio file's name, and matches only a talk whose title states the same date: the only one
+//! that day, or else the one with the most similar title above the threshold. Without a date
+//! it stays unmatched (decision of October 5, 2026).
 
 use chrono::NaiveDate;
+
+/// An episode title without the speaker SSZ's feed appends in brackets, normalized as in rule
+/// 1: `Who Is Sick? (A Teacher)` gives `who is sick`.
+pub fn title_core(title: &str) -> String {
+    let trimmed = title.trim_end();
+    let core = match (trimmed.ends_with(')'), trimmed.rfind('(')) {
+        (true, Some(open)) if open > 0 => &trimmed[..open],
+        _ => trimmed,
+    };
+    crate::classify::normalize_title(core)
+}
+
+/// The recording date in an audio file's name, such as
+/// `…/AudioFiles/2021-01-17-Teacher-Sunday-Dharma-Talk.mp3?sig=…`. Only the file name is read,
+/// never the query, which carries signatures full of digits.
+pub fn date_from_audio_url(url: &str, published: Option<NaiveDate>) -> Option<NaiveDate> {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let name = path.rsplit('/').next().unwrap_or_default();
+    crate::dates::recording_date(name, published)
+}
+
+/// Chooses the talk for an episode with no length. `date` is the episode's recording date and
+/// `options` are talks stored with that date; only those whose own titles state it count.
+pub fn choose_by_date<T: Clone>(
+    cfg: &ClassifyConfig,
+    date: NaiveDate,
+    options: &[Candidate<T>],
+) -> Option<(T, How)> {
+    let same_day: Vec<&Candidate<T>> = options
+        .iter()
+        .filter(|o| o.side.dated_in_title && o.side.date == Some(date))
+        .collect();
+    match same_day.as_slice() {
+        [] => None,
+        [only] => Some((only.key.clone(), How::RecordingDate)),
+        several => {
+            let best = several
+                .iter()
+                .filter(|o| o.similarity >= cfg.settings.feed_match_title_similarity)
+                .max_by(|a, b| a.similarity.total_cmp(&b.similarity))?;
+            let tied = several
+                .iter()
+                .filter(|o| o.similarity == best.similarity)
+                .count();
+            (tied == 1).then(|| (best.key.clone(), How::Title))
+        }
+    }
+}
 
 use crate::config::ClassifyConfig;
 
@@ -41,6 +94,8 @@ pub enum How {
     Title,
     /// The only talk with the same recording date in its title.
     RecordingDate,
+    /// The only talk with exactly the episode's title.
+    ExactTitle,
 }
 
 impl How {
@@ -49,6 +104,7 @@ impl How {
         match self {
             How::Title => "title",
             How::RecordingDate => "recording_date",
+            How::ExactTitle => "exact_title",
         }
     }
 }
@@ -202,5 +258,88 @@ mod tests {
             "two talks on the day"
         );
         assert!(max_gap_s(&c, 3600) >= 360);
+    }
+}
+
+#[cfg(test)]
+mod no_length {
+    use super::*;
+
+    fn cfg() -> ClassifyConfig {
+        ClassifyConfig::parse("", "pipeline", "", "series").unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    fn talk(key: &str, d: Option<NaiveDate>, titled: bool, similarity: f32) -> Candidate<String> {
+        Candidate {
+            key: key.into(),
+            side: Side {
+                date: d,
+                dated_in_title: titled,
+                duration_s: Some(2400),
+            },
+            similarity,
+        }
+    }
+
+    #[test]
+    fn the_title_core_drops_the_bracketed_speaker_only_at_the_end() {
+        assert_eq!(title_core("Who Is Sick? (A Teacher)"), "who is sick");
+        assert_eq!(title_core("Mother's Day (and More)"), "mother s day");
+        assert_eq!(title_core("(Untitled)"), "untitled");
+        assert_eq!(
+            title_core("Ten (10) Grave Precepts"),
+            "ten 10 grave precepts"
+        );
+    }
+
+    #[test]
+    fn the_audio_file_name_gives_the_date_and_the_query_is_ignored() {
+        let url = "https://files.example.invalid/ssz/AudioFiles/2021-01-17-A-Teacher-Sunday-Talk.mp3\
+                   ?sr=b&sig=2020-12-31x";
+        assert_eq!(
+            date_from_audio_url(url, None),
+            NaiveDate::from_ymd_opt(2021, 1, 17)
+        );
+        assert_eq!(
+            date_from_audio_url("https://x.invalid/talk.mp3?d=2020-01-01", None),
+            None
+        );
+    }
+
+    #[test]
+    fn one_talk_dated_that_day_matches_and_two_need_a_title() {
+        let c = cfg();
+        let day = NaiveDate::from_ymd_opt(2021, 1, 17).unwrap_or_default();
+        let uploaded_that_day = talk("upload", Some(day), false, 0.9);
+        assert_eq!(
+            choose_by_date(
+                &c,
+                day,
+                &[
+                    talk("titled", Some(day), true, 0.1),
+                    uploaded_that_day.clone()
+                ]
+            ),
+            Some(("titled".to_owned(), How::RecordingDate)),
+            "a talk merely uploaded that day does not count"
+        );
+        assert_eq!(choose_by_date(&c, day, &[uploaded_that_day]), None);
+        let two = [
+            talk("sunday", Some(day), true, 0.7),
+            talk("zazenkai", Some(day), true, 0.2),
+        ];
+        assert_eq!(
+            choose_by_date(&c, day, &two),
+            Some(("sunday".to_owned(), How::Title))
+        );
+        let unclear = [
+            talk("a", Some(day), true, 0.3),
+            talk("b", Some(day), true, 0.3),
+        ];
+        assert_eq!(
+            choose_by_date(&c, day, &unclear),
+            None,
+            "an ambiguous day stays unmatched"
+        );
     }
 }

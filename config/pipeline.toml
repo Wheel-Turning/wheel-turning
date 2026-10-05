@@ -18,6 +18,7 @@ feed_match_days = 14
 feed_match_duration_tolerance_s = 120
 feed_match_duration_tolerance_pct = 5
 feed_match_title_similarity = 0.5
+feed_exact_title_days = 60
 
 # Clips, quotes and trailers are not talks: excluded with reason non_talk.
 exclude_title_patterns = ['\bquote\b', '\bclip\b', '\btrailer\b']

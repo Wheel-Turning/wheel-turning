@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id, title, published_at, duration_s,\n                  trim(regexp_replace(lower(normalize(title, NFKC)), '[^[:alnum:]]+', ' ', 'g'))\n                    as \"norm!\"\n           from source_video\n           where platform = 'rss' and raw->>'source' = $1 and raw->'match' is null\n           order by published_at nulls last, id",
+  "query": "select external_id, title, published_at,\n                  raw->'item'->'enclosure'->>'url' as enclosure_url,\n                  raw->'match'->>'vimeo_id' as \"vimeo_id!\"\n           from source_video\n           where platform = 'rss' and raw->>'source' = $1 and raw->'match' is not null\n           order by published_at nulls last, external_id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
-        "type_info": "Uuid",
+        "name": "external_id",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "source_video",
-            "name": "id"
+            "name": "external_id"
           }
         }
       },
@@ -38,18 +38,13 @@
       },
       {
         "ordinal": 3,
-        "name": "duration_s",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "source_video",
-            "name": "duration_s"
-          }
-        }
+        "name": "enclosure_url",
+        "type_info": "Text",
+        "origin": "Expression"
       },
       {
         "ordinal": 4,
-        "name": "norm!",
+        "name": "vimeo_id!",
         "type_info": "Text",
         "origin": "Expression"
       }
@@ -63,9 +58,9 @@
       false,
       false,
       true,
-      true,
+      null,
       null
     ]
   },
-  "hash": "72ce278c24581b6bfe8232888a7c60bf7610555155b71db2c130f2d4792874e4"
+  "hash": "9de464279e426ae5944f7625f64319c48d6a22c5330c1b6e0849ac1fe1429f1d"
 }

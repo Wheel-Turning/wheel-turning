@@ -163,6 +163,13 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
                 "2024-04-01T18:00:00Z",
                 None,
             ),
+            item(
+                "700000004",
+                "01-17-21 Sunday Dharma Talk: Ada",
+                2500,
+                "2021-01-20T18:00:00Z",
+                None,
+            ),
         ]),
     );
     {
@@ -184,7 +191,7 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
                 .unwrap();
         }
     }
-    assert_eq!(talks(&fx.pool).await, 3);
+    assert_eq!(talks(&fx.pool).await, 4);
 
     let podcast = Fake(
         SourcePlatform::Rss,
@@ -213,21 +220,36 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
                 "2024-03-01T18:00:00Z",
                 Some("https://example.invalid/3.mp3"),
             ),
+            // No length and a generic title, as in SSZ's feed: the audio file's name dates it.
+            {
+                let mut e = item(
+                    "ep-4",
+                    "Sunday Morning Dharma Talk (Ada)",
+                    0,
+                    "2021-01-18T18:00:00Z",
+                    Some(
+                        "https://example.invalid/AudioFiles/2021-01-17-Ada-Sunday-Talk.mp3?sig=2020-12-31",
+                    ),
+                );
+                e.duration_s = None;
+                e
+            },
         ]),
     );
     let report = run_feed(&fx, &podcast).await;
     assert_eq!(
         report,
         FeedReport {
-            listed: 3,
-            new: 3,
-            matched: 2,
-            unmatched: 1
+            listed: 4,
+            new: 4,
+            matched: 3,
+            unmatched: 1,
+            duplicate_uploads: 0
         }
     );
     assert_eq!(
         talks(&fx.pool).await,
-        3,
+        4,
         "an audio-only feed never creates a talk"
     );
 
@@ -244,6 +266,11 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
     assert_eq!(matched("ep-1").as_deref(), Some("700000001"));
     assert_eq!(matched("ep-2").as_deref(), Some("700000002"));
     assert_eq!(matched("ep-3"), None);
+    assert_eq!(
+        matched("ep-4").as_deref(),
+        Some("700000004"),
+        "dated by its audio file's name"
+    );
 
     // A matched talk's audio comes from the enclosure; nothing comes from Vimeo.
     match feed::media_route(&mut conn, talk_of(&fx.pool, "700000001").await)
@@ -268,10 +295,11 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
     assert_eq!(
         run_feed(&fx, &podcast).await,
         FeedReport {
-            listed: 3,
+            listed: 4,
             new: 0,
             matched: 0,
-            unmatched: 1
+            unmatched: 1,
+            duplicate_uploads: 0
         }
     );
     vimeo.1.lock().unwrap()[0].title =
@@ -291,7 +319,7 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
             .iter()
             .filter(|e| e.matched_vimeo_id.is_some())
             .count(),
-        2
+        3
     );
 
     let logged: i64 = sqlx::query_scalar(
@@ -300,5 +328,257 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
     .fetch_one(&fx.pool)
     .await
     .unwrap();
-    assert_eq!(logged, 2, "each match is logged once");
+    assert_eq!(logged, 3, "each match is logged once");
+}
+
+fn no_length(id: &str, title: &str, at: &str, file: &str) -> DiscoveredVideo {
+    let mut e = item(
+        id,
+        title,
+        0,
+        at,
+        Some(&format!("https://example.invalid/AudioFiles/{file}?sig=1")),
+    );
+    e.duration_s = None;
+    e
+}
+
+async fn state_of(pool: &PgPool, vimeo_id: &str) -> (String, Option<String>, Option<String>) {
+    sqlx::query_as(
+        "select t.state::text, t.state_reason, d_sv.external_id
+         from talk t join source_video sv on sv.id = t.source_video_id
+         left join talk d on d.id = t.duplicate_of
+         left join source_video d_sv on d_sv.id = d.source_video_id
+         where sv.platform = 'vimeo' and sv.external_id = $1",
+    )
+    .bind(vimeo_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_episode_reveals_a_re_upload_under_a_new_title_and_matches_exact_titles() {
+    let fx = start().await;
+    let vimeo = Fake(
+        SourcePlatform::Vimeo,
+        Mutex::new(vec![
+            // Dated uploads, then the same talks re-uploaded weeks later under real titles.
+            item(
+                "710000001",
+                "Ada 04-12-20",
+                1753,
+                "2020-04-15T18:00:00Z",
+                None,
+            ),
+            item(
+                "710000002",
+                "Ada 2020-05-10",
+                2874,
+                "2020-05-12T18:00:00Z",
+                None,
+            ),
+            item(
+                "710000003",
+                "Who Is Ill?",
+                1753,
+                "2020-05-17T18:00:00Z",
+                None,
+            ),
+            // A re-upload trimmed by ten minutes: length cannot tie it to its dated copy.
+            item(
+                "710000004",
+                "Mother's Day Fixture",
+                2280,
+                "2020-05-17T19:00:00Z",
+                None,
+            ),
+            // Titled only, no other copy.
+            item(
+                "710000005",
+                "What is the Point?",
+                2382,
+                "2020-07-08T18:00:00Z",
+                None,
+            ),
+            // One generic title on two different talks.
+            item(
+                "710000006",
+                "Sunday Talk",
+                2400,
+                "2020-08-02T18:00:00Z",
+                None,
+            ),
+            item(
+                "710000007",
+                "Sunday Talk",
+                2600,
+                "2020-08-09T18:00:00Z",
+                None,
+            ),
+            // A full recording and an excerpt of one day: dated alike, never proven one upload.
+            item(
+                "710000008",
+                "2020-06-14-Ada-Full",
+                2782,
+                "2020-06-14T18:00:00Z",
+                None,
+            ),
+            item(
+                "710000009",
+                "2020-06-14-Ada-Zen-is-Fixture",
+                2469,
+                "2020-06-14T19:00:00Z",
+                None,
+            ),
+        ]),
+    );
+    {
+        let mut conn = fx.pool.acquire().await.unwrap();
+        pipeline::discover(
+            &mut conn,
+            fx.sources.get("fixture-vimeo").unwrap(),
+            &vimeo,
+            None,
+        )
+        .await
+        .unwrap();
+        while let Some(j) = job::claim(&mut conn, &[JobKind::Classify], "w")
+            .await
+            .unwrap()
+        {
+            pipeline::run_classify_job(&mut conn, &j, &fx.cfg, &fx.sources, "test")
+                .await
+                .unwrap();
+        }
+    }
+    let podcast = Fake(
+        SourcePlatform::Rss,
+        Mutex::new(vec![
+            no_length(
+                "ep-a",
+                "Who Is Ill? (Ada Fixture)",
+                "2020-04-12T18:00:00Z",
+                "2020_04_12_Ada.mp3",
+            ),
+            no_length(
+                "ep-b",
+                "Mother's Day Fixture (Ada Fixture)",
+                "2020-05-10T18:00:00Z",
+                "2020_05_10_Ada.mp3",
+            ),
+            no_length(
+                "ep-c",
+                "What is the Point? (Ada Fixture)",
+                "2020-07-05T18:00:00Z",
+                "point.mp3",
+            ),
+            no_length(
+                "ep-d",
+                "Sunday Talk (Ada Fixture)",
+                "2020-08-02T18:00:00Z",
+                "sunday.mp3",
+            ),
+            no_length(
+                "ep-e",
+                "Zen is Fixture (Ada Fixture)",
+                "2020-06-14T18:00:00Z",
+                "2020_06_14_Ada.mp3",
+            ),
+        ]),
+    );
+
+    let report = run_feed(&fx, &podcast).await;
+    assert_eq!(
+        report,
+        FeedReport {
+            listed: 5,
+            new: 5,
+            matched: 4,
+            unmatched: 1,
+            duplicate_uploads: 2
+        }
+    );
+    // The dated copies were uploaded first, so rule 3's ranking keeps them.
+    assert_eq!(
+        state_of(&fx.pool, "710000003").await,
+        (
+            "excluded".into(),
+            Some("duplicate_upload".into()),
+            Some("710000001".into())
+        )
+    );
+    assert_eq!(
+        state_of(&fx.pool, "710000004").await,
+        (
+            "excluded".into(),
+            Some("duplicate_upload".into()),
+            Some("710000002".into())
+        ),
+        "the trimmed re-upload too"
+    );
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let episodes = feed::episodes(&mut conn, "fixture-podcast").await.unwrap();
+    let matched = |id: &str| {
+        episodes
+            .iter()
+            .find(|e| e.external_id == id)
+            .unwrap()
+            .matched_vimeo_id
+            .clone()
+    };
+    assert_eq!(matched("ep-a").as_deref(), Some("710000001"));
+    assert_eq!(matched("ep-b").as_deref(), Some("710000002"));
+    assert_eq!(matched("ep-c").as_deref(), Some("710000005"), "exact title");
+    assert_eq!(
+        matched("ep-d"),
+        None,
+        "a title two talks share matches neither"
+    );
+    assert_eq!(matched("ep-e").as_deref(), Some("710000009"));
+    for id in [
+        "710000005",
+        "710000006",
+        "710000007",
+        "710000008",
+        "710000009",
+    ] {
+        assert_ne!(
+            state_of(&fx.pool, id).await.1.as_deref(),
+            Some("duplicate_upload"),
+            "{id}"
+        );
+    }
+
+    // Reclassify never reopens what the feed proved, and the feed does not merge twice.
+    let report = pipeline::reclassify(&mut conn, "next-rules", None, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        report.eligible, 7,
+        "the two feed-proven duplicates are not eligible"
+    );
+    while let Some(j) = job::claim(&mut conn, &[JobKind::Classify], "w")
+        .await
+        .unwrap()
+    {
+        pipeline::run_classify_job(&mut conn, &j, &fx.cfg, &fx.sources, "test")
+            .await
+            .unwrap();
+    }
+    drop(conn);
+    assert_eq!(
+        state_of(&fx.pool, "710000003").await.1.as_deref(),
+        Some("duplicate_upload")
+    );
+    assert_eq!(
+        run_feed(&fx, &podcast).await,
+        FeedReport {
+            listed: 5,
+            new: 0,
+            matched: 0,
+            unmatched: 1,
+            duplicate_uploads: 0
+        }
+    );
 }
