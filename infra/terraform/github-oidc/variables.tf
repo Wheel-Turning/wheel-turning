@@ -18,12 +18,12 @@ variable "github_repo_id" {
 variable "name" {
   description = "Name prefix of the v1 stack this role deploys."
   type        = string
-  default     = "dg-v1"
+  default     = "wt-v1"
 }
 
 variable "state_bucket" {
   type    = string
-  default = "dharma-gates-tfstate-904883674947"
+  default = "wt-tfstate-904883674947"
 }
 
 variable "batch_instance_types" {

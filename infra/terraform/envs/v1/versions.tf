@@ -14,7 +14,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "dharma-gates-tfstate-904883674947"
+    bucket       = "wt-tfstate-904883674947"
     key          = "v1/terraform.tfstate"
     region       = "us-east-2"
     encrypt      = true

@@ -5,7 +5,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      project = "dharma-gates"
+      project = "wheel-turning"
       env     = "v1"
     }
   }
@@ -14,7 +14,7 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  name = "dg-v1"
+  name = "wt-v1"
   # Created by infra/terraform/github-oidc, which is applied before this stack.
   workload_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name}/${local.name}-workload-boundary"
 }

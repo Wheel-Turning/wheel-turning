@@ -1,6 +1,6 @@
 # Spec 01: deploy.yml runs on a version tag or by hand. It builds the container image, pushes it
 # to ECR, runs terraform plan and holds for manual approval, applies, then runs migrations as a
-# one-off ECS task under dg_owner before the new service revision starts taking traffic.
+# one-off ECS task under wt_owner before the new service revision starts taking traffic.
 #
 # The repository is private on GitHub's free plan, which has no environment approval gates, so
 # approval is a second, hand-started run:
@@ -39,9 +39,9 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
-  ROLE_ARN: arn:aws:iam::904883674947:role/ci/dg-v1-github-deploy
+  ROLE_ARN: arn:aws:iam::904883674947:role/ci/wt-v1-github-deploy
   TF_DIR: infra/terraform/envs/v1
-  ECR_REPOSITORY: dg-v1
+  ECR_REPOSITORY: wt-v1
   TF_IN_AUTOMATION: "1"
 
 jobs:
@@ -201,7 +201,7 @@ jobs:
           # Refuses to run if anything changed since the plan was reviewed.
           terraform apply -input=false -no-color "$RUNNER_TEMP/reviewed/migrate.tfplan"
 
-      - name: Run migrations as dg_owner
+      - name: Run migrations as wt_owner
         working-directory: ${{ env.TF_DIR }}
         run: |
           set -euo pipefail
@@ -217,7 +217,7 @@ jobs:
           aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
           exit_code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
             --query 'tasks[0].containers[0].exitCode' --output text)"
-          aws logs get-log-events --log-group-name /dg-v1/admin \
+          aws logs get-log-events --log-group-name /wt-v1/admin \
             --log-stream-name "migrate/migrate/${task##*/}" --query 'events[].message' --output text || true
           if [[ "$exit_code" != "0" ]]; then
             echo "::error::migrations failed with exit code $exit_code; the web service was not changed"

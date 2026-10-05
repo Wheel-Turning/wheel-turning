@@ -7,9 +7,9 @@
 #
 # Permissions: what deploy.yml needs to push an image, run migrations, and plan and apply the v1
 # stack. The action list started from IAM Policy Autopilot's analysis of the v1 plan JSON, then:
-# - every write is scoped to the dg-v1 names or the /dg-v1/ IAM path
-# - iam:PassRole is limited to /dg-v1/ roles and the ECS tasks and EC2 services
-# - roles under /dg-v1/ must carry the workload permissions boundary, so CI cannot grant a
+# - every write is scoped to the wt-v1 names or the /wt-v1/ IAM path
+# - iam:PassRole is limited to /wt-v1/ roles and the ECS tasks and EC2 services
+# - roles under /wt-v1/ must carry the workload permissions boundary, so CI cannot grant a
 #   workload role more than the boundary allows
 # - no secretsmanager:GetSecretValue: CI never reads secret values
 # - no delete of the VPC, subnets, buckets, database, secrets, cluster or load balancer: CI
@@ -22,7 +22,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      project = "dharma-gates"
+      project = "wheel-turning"
       env     = "v1"
     }
   }
@@ -56,7 +56,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Workload permissions boundary: the most any /dg-v1/ role may ever do, whatever CI writes into
+# Workload permissions boundary: the most any /wt-v1/ role may ever do, whatever CI writes into
 # its policies. It covers exactly the services the workloads use, inside this account.
 # ---------------------------------------------------------------------------------------------
 
@@ -246,7 +246,7 @@ data "aws_iam_policy_document" "deploy" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["dharma-gates"]
+      values   = ["wheel-turning"]
     }
   }
 
@@ -373,7 +373,7 @@ data "aws_iam_policy_document" "deploy" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["dharma-gates"]
+      values   = ["wheel-turning"]
     }
   }
 
@@ -404,7 +404,7 @@ data "aws_iam_policy_document" "deploy" {
     ]
   }
 
-  # ---- IAM: workload roles under /dg-v1/, always inside the boundary -------------------------
+  # ---- IAM: workload roles under /wt-v1/, always inside the boundary -------------------------
   statement {
     sid       = "WorkloadRolesRead"
     actions   = ["iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListRoleTags", "iam:ListInstanceProfilesForRole", "iam:GetInstanceProfile", "iam:ListInstanceProfileTags", "iam:GetPolicy", "iam:GetPolicyVersion"]

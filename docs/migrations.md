@@ -22,6 +22,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0007 | `0007_triggers.sql` | M0 (#1) | `set_updated_at()` and its triggers; append-only guards on `speaker_consent`, `correction_log`, `takedown_log` | none |
 | 0008 | `0008_roles_grants.sql` | M0 (#1) | roles `dg_owner`, `dg_pipeline`, `dg_web`, `dg_analyst`; ownership of every object to `dg_owner` | all grants for objects in 0002 to 0006 |
 | 0009 | `0009_owner_runs_migrations.sql` | M1 (#2) | none | `usage, create` on schema `public` and table rights on `_sqlx_migrations` to `dg_owner` |
+| 0010 | `0010_rename_roles_to_wt.sql` | v1 rebuild | none; renames `dg_owner`, `dg_pipeline`, `dg_web`, `dg_analyst` to `wt_owner`, `wt_pipeline`, `wt_web`, `wt_analyst`, and grants and ownership follow | none |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 

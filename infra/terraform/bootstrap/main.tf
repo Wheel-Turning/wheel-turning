@@ -5,7 +5,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      project = "dharma-gates"
+      project = "wheel-turning"
       env     = "v1"
     }
   }
@@ -15,7 +15,7 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "state" {
   # Bucket names are global; the account id keeps this one unique and recognisable.
-  bucket = "dharma-gates-tfstate-${data.aws_caller_identity.current.account_id}"
+  bucket = "wt-tfstate-${data.aws_caller_identity.current.account_id}"
 
   lifecycle {
     prevent_destroy = true
