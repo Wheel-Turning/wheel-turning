@@ -222,10 +222,18 @@ impl VimeoAdapter {
                     url: oembed.to_string(),
                     message: e.to_string(),
                 })?;
+            // A video restricted to embedding on its owner's domain answers 200 with
+            // `domain_status_code` 403 and no title or duration. Treat it like a refusal.
+            let Some(title) = item.title.filter(|t| !t.trim().is_empty()) else {
+                tracing::warn!(source = %self.source, vimeo_id = %id,
+                               domain_status = ?item.domain_status_code,
+                               "oEmbed gave no details for a video from the talks page");
+                continue;
+            };
             videos.push(DiscoveredVideo {
                 external_id: id.clone(),
                 url: video_url,
-                title: item.title,
+                title,
                 description: item.description.filter(|d| !d.trim().is_empty()),
                 published_at: item.upload_date.as_deref().and_then(parse_upload_date),
                 duration_s: item.duration,
@@ -326,7 +334,8 @@ struct ApiTotal {
 
 #[derive(Debug, Deserialize)]
 struct OEmbed {
-    title: String,
+    title: Option<String>,
+    domain_status_code: Option<u16>,
     description: Option<String>,
     duration: Option<i32>,
     upload_date: Option<String>,

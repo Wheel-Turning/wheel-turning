@@ -159,6 +159,7 @@ async fn talks_page_discovery_uses_oembed_for_each_embedded_video() {
                  <a href="https://vimeo.com/300000002">Second</a>
                  <a href="https://vimeo.com/300000001">First again</a>
                  <iframe src="https://player.vimeo.com/video/300000003"></iframe>
+                 <div class="cvm-playlist-item" data-video_id="300000004"></div>
                </body></html>"#,
         ))
         .expect(1)
@@ -193,6 +194,17 @@ async fn talks_page_discovery_uses_oembed_for_each_embedded_video() {
         .respond_with(ResponseTemplate::new(404))
         .mount(&server)
         .await;
+    // A video restricted to its owner's domain: 200, but no title or duration.
+    Mock::given(method("GET"))
+        .and(path("/api/oembed.json"))
+        .and(query_param("url", "https://vimeo.com/300000004"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "video", "version": "1.0", "provider_name": "Vimeo",
+            "domain_status_code": 403, "video_id": 300_000_004u64, "uri": "/videos/300000004",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
 
     let page = format!("{}/talks-page/", server.uri());
     let adapter =
@@ -203,7 +215,7 @@ async fn talks_page_discovery_uses_oembed_for_each_embedded_video() {
     assert_eq!(
         ids,
         ["300000001", "300000002"],
-        "page order, each once, refused one skipped"
+        "page order, each once, refused and domain-restricted ones skipped"
     );
     assert_eq!(videos[0].title, "Fixture talk one");
     assert_eq!(videos[0].duration_s, Some(2400));
