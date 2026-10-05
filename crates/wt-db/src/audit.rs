@@ -5,10 +5,10 @@
 //! or object storage (audio residue, transcript JSON speakers, takedown objects) join when the
 //! transcript pipeline writes those stores in M4, and are listed as not yet checked.
 
-use wt_core::Env;
-use wt_core::stores::{OnTakedown, STORES, StoreKind};
 use serde::Serialize;
 use sqlx::PgPool;
+use wt_core::Env;
+use wt_core::stores::{OnTakedown, STORES, StoreKind};
 
 use crate::DbError;
 
@@ -126,7 +126,9 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         examples: if in_view == expected {
             vec![]
         } else {
-            vec![format!("servable_passage has {in_view} rows, expected {expected}")]
+            vec![format!(
+                "servable_passage has {in_view} rows, expected {expected}"
+            )]
         },
     });
 
@@ -142,7 +144,10 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
 
     // Takedown completeness: any row left in a deleting store for a talk in a logged scope.
     let mut leftovers = Vec::new();
-    for store in STORES.iter().filter(|s| s.on_takedown == OnTakedown::Delete) {
+    for store in STORES
+        .iter()
+        .filter(|s| s.on_takedown == OnTakedown::Delete)
+    {
         if let StoreKind::Table { table, talk_column } = store.kind {
             leftovers.push(format!(
                 "select '{name}: ' || x.{talk_column}::text from {table} x

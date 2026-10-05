@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = $2::text::talk_state, state_reason = null\n               where id = $1\n                 and state in ('cleared','fetching','transcribing','diarizing','segmenting',\n                               'correcting','extracting','resolving','indexing','ready')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d91f24556f65bdc9a275d543481b51e18ed4385749b3189bf8af1a200803e22c"
+}

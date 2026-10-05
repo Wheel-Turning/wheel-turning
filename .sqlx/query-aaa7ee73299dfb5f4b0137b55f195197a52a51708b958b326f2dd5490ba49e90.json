@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set consent_status = 'declined' where teacher_id = $1 and state <> 'withdrawn'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aaa7ee73299dfb5f4b0137b55f195197a52a51708b958b326f2dd5490ba49e90"
+}

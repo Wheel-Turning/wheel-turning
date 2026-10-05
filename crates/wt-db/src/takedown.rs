@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 
+use sqlx::types::Uuid;
+use sqlx::{PgConnection, PgPool};
 use wt_core::answer::AnswerPayload;
 use wt_core::ids::{PassageId, TalkId, TeacherId};
 use wt_core::stores::{OnTakedown, STORES, StoreKind};
-use sqlx::types::Uuid;
-use sqlx::{PgConnection, PgPool};
 
 use crate::DbError;
 use crate::registry::{RegistryDbError, find_teacher};
@@ -81,18 +81,20 @@ pub async fn dry_run(pool: &PgPool, scope: &Scope) -> Result<TakedownReport, Tak
 }
 
 /// Runs the takedown's database step in one transaction. Serving stops the moment it commits.
-pub async fn run(pool: &PgPool, scope: &Scope, actor: &str) -> Result<TakedownReport, TakedownError> {
+pub async fn run(
+    pool: &PgPool,
+    scope: &Scope,
+    actor: &str,
+) -> Result<TakedownReport, TakedownError> {
     let mut tx = pool.begin().await?;
     let (talks, teacher) = resolve_scope(&mut tx, scope).await?;
     let mut report = count(&mut tx, &talks).await?;
     let talk_ids: Vec<Uuid> = talks.iter().map(TalkId::as_uuid).collect();
 
-    let removed: Vec<Uuid> = sqlx::query_scalar!(
-        "select id from passage where talk_id = any($1)",
-        &talk_ids
-    )
-    .fetch_all(&mut *tx)
-    .await?;
+    let removed: Vec<Uuid> =
+        sqlx::query_scalar!("select id from passage where talk_id = any($1)", &talk_ids)
+            .fetch_all(&mut *tx)
+            .await?;
     let removed_ids: Vec<PassageId> = removed.iter().copied().map(PassageId::from).collect();
     let removed_text: Vec<String> = removed.iter().map(Uuid::to_string).collect();
 
@@ -114,11 +116,15 @@ pub async fn run(pool: &PgPool, scope: &Scope, actor: &str) -> Result<TakedownRe
         let mut payload: AnswerPayload = serde_json::from_value(answer.payload)
             .map_err(|e| TakedownError::BadPayload(answer.id, e))?;
         report.themes_stripped += i64::try_from(payload.strip_passages(&removed_ids)).unwrap_or(0);
-        let value = serde_json::to_value(&payload)
-            .map_err(|e| TakedownError::BadPayload(answer.id, e))?;
-        sqlx::query!("update answer set payload = $2 where id = $1", answer.id, value)
-            .execute(&mut *tx)
-            .await?;
+        let value =
+            serde_json::to_value(&payload).map_err(|e| TakedownError::BadPayload(answer.id, e))?;
+        sqlx::query!(
+            "update answer set payload = $2 where id = $1",
+            answer.id,
+            value
+        )
+        .execute(&mut *tx)
+        .await?;
         report.answers_rewritten += 1;
     }
 
@@ -205,12 +211,16 @@ async fn resolve_scope(
             )
             .fetch_all(&mut *conn)
             .await?;
-            Ok((talks.into_iter().map(TalkId::from).collect(), Some(teacher_id)))
+            Ok((
+                talks.into_iter().map(TalkId::from).collect(),
+                Some(teacher_id),
+            ))
         }
         Scope::Talk(id) => {
-            let found = sqlx::query_scalar!("select id from talk where id = $1 for update", id.as_uuid())
-                .fetch_optional(&mut *conn)
-                .await?;
+            let found =
+                sqlx::query_scalar!("select id from talk where id = $1 for update", id.as_uuid())
+                    .fetch_optional(&mut *conn)
+                    .await?;
             match found {
                 Some(_) => Ok((vec![*id], None)),
                 None => Err(TakedownError::UnknownTalk(*id)),
@@ -225,7 +235,10 @@ async fn count(conn: &mut PgConnection, talks: &[TalkId]) -> Result<TakedownRepo
         talks: talks.to_vec(),
         ..TakedownReport::default()
     };
-    for store in STORES.iter().filter(|s| s.on_takedown == OnTakedown::Delete) {
+    for store in STORES
+        .iter()
+        .filter(|s| s.on_takedown == OnTakedown::Delete)
+    {
         match store.kind {
             StoreKind::Table { table, talk_column } => {
                 // Names come from the compile-time registry, never from input.

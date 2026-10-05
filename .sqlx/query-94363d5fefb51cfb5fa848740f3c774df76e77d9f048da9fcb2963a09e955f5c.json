@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into sangha (name, lineage, affiliation, donation_url, donation_url_template, listed)\n               values ($1, $2, $3, $4, $5, $6)\n               on conflict (name) do update set\n                 lineage = excluded.lineage, affiliation = excluded.affiliation,\n                 donation_url = excluded.donation_url,\n                 donation_url_template = excluded.donation_url_template,\n                 listed = excluded.listed,\n                 donation_verified = case when sangha.donation_url is distinct from excluded.donation_url\n                                          then false else sangha.donation_verified end",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "94363d5fefb51cfb5fa848740f3c774df76e77d9f048da9fcb2963a09e955f5c"
+}

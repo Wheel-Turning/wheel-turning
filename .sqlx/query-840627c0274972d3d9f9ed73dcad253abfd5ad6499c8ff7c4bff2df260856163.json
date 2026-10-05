@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set teacher_id = null, speaker_guess = $2,\n                          state = 'needs_review', state_reason = 'speaker_unresolved'\n                   where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "840627c0274972d3d9f9ed73dcad253abfd5ad6499c8ff7c4bff2df260856163"
+}

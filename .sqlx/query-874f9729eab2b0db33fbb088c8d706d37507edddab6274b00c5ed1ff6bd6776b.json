@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set teacher_id = $2, sangha_id = $3, speaker_guess = $4,\n                          state = 'awaiting_consent', state_reason = null,\n                          consent_status = coalesce(\n                            (select status from current_consent where teacher_id = $2), 'unknown')\n                   where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "874f9729eab2b0db33fbb088c8d706d37507edddab6274b00c5ed1ff6bd6776b"
+}

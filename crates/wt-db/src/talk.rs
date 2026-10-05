@@ -1,11 +1,11 @@
 //! `TalkRepo`: loading talks into the gate's typestate and the only ways to move them past it.
 
+use sqlx::PgConnection;
 use wt_core::gate::{
     ConsentStatus, Consented, CurrentConsent, GateError, LicenseEvidence, Pending, PipelineState,
     RightsBasis, RightsHolder, Talk, TalkState,
 };
 use wt_core::ids::{LicenseEvidenceId, SanghaId, TalkId, TeacherId};
-use sqlx::PgConnection;
 
 use crate::DbError;
 
@@ -154,9 +154,12 @@ impl TalkRepo {
     }
 
     async fn wrong_state(conn: &mut PgConnection, id: TalkId, target: TalkState) -> TalkError {
-        match sqlx::query_scalar!(r#"select state::text as "s!" from talk where id = $1"#, id.as_uuid())
-            .fetch_optional(&mut *conn)
-            .await
+        match sqlx::query_scalar!(
+            r#"select state::text as "s!" from talk where id = $1"#,
+            id.as_uuid()
+        )
+        .fetch_optional(&mut *conn)
+        .await
         {
             Ok(Some(state)) => TalkError::WrongState { id, state, target },
             Ok(None) => TalkError::NotFound(id),

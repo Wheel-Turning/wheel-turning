@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = 'cleared', state_reason = null,\n                      rights_basis = coalesce(rights_basis, 'speaker_consent')\n               where id = $1 and state = 'awaiting_consent'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29bb1f49b3a6f2a443ba1169c3dd98736bedf9ddcc4d0705a420ec5110a1b0c9"
+}

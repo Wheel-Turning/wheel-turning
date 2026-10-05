@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update answer set payload = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db199c51d232bedd70d329e74a7f0e4ceba2a36f3d24a08ee64ca4cd85b98da5"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state_reason = $2 where id = $1 and state = 'awaiting_consent'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfa2578e04621a2a8f16166cbce15d9fd827d90c08f364968f8543554b218a63"
+}

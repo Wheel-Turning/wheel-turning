@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into speaker_consent (teacher_id, status, scope_note, evidence_ref, decided_at, created_by)\n           values ($1, $2::text::consent_status, $3, $4, now(), $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cde37835cc975c1c80eff040e26bb6fe8cadace7ac503e02f2b9e6e71b2bc268"
+}

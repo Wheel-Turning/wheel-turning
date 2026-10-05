@@ -1,9 +1,9 @@
 //! Consent records and their propagation to talks, rights holders, and manual exclusion
 //! (Spec 03: the consent gate in the pipeline).
 
+use sqlx::{PgConnection, PgPool};
 use wt_core::gate::{ConsentStatus, GateError};
 use wt_core::ids::{TalkId, TeacherId};
-use sqlx::{PgConnection, PgPool};
 
 use crate::DbError;
 use crate::correction::log_change;
@@ -137,7 +137,9 @@ async fn propagate(
                         log_state(conn, id, "awaiting_consent", "cleared", actor, &reason).await?;
                         out.cleared.push(talk_id);
                     }
-                    Err(gate) => out.still_waiting.push((talk_id, gate_reason(&gate).to_owned())),
+                    Err(gate) => out
+                        .still_waiting
+                        .push((talk_id, gate_reason(&gate).to_owned())),
                 }
             }
         }
@@ -185,7 +187,15 @@ async fn propagate(
             .fetch_all(&mut *conn)
             .await?;
             for row in returned {
-                log_state(conn, row.id, &row.old_state, "awaiting_consent", actor, &reason).await?;
+                log_state(
+                    conn,
+                    row.id,
+                    &row.old_state,
+                    "awaiting_consent",
+                    actor,
+                    &reason,
+                )
+                .await?;
                 out.returned_to_awaiting.push(TalkId::from(row.id));
             }
             sqlx::query!(
@@ -337,10 +347,10 @@ pub async fn set_rights(
             .collect()
         }
     };
-    if talks.is_empty() {
-        if let RightsTarget::Talk(id) = target {
-            return Err(TalkError::NotFound(id).into());
-        }
+    if talks.is_empty()
+        && let RightsTarget::Talk(id) = target
+    {
+        return Err(TalkError::NotFound(id).into());
     }
 
     let mut cleared = Vec::new();
@@ -350,9 +360,9 @@ pub async fn set_rights(
             Holder::Speaker => match teacher {
                 Some(name) => name,
                 None => {
-                    return Err(ConsentError::Registry(RegistryDbError::UnknownTeacher(format!(
-                        "speaker of talk {id}"
-                    ))));
+                    return Err(ConsentError::Registry(RegistryDbError::UnknownTeacher(
+                        format!("speaker of talk {id}"),
+                    )));
                 }
             },
         };
@@ -370,9 +380,10 @@ pub async fn set_rights(
             "set-rights",
         )
         .await?;
-        let state = sqlx::query_scalar!(r#"select state::text as "s!" from talk where id = $1"#, id)
-            .fetch_one(&mut *tx)
-            .await?;
+        let state =
+            sqlx::query_scalar!(r#"select state::text as "s!" from talk where id = $1"#, id)
+                .fetch_one(&mut *tx)
+                .await?;
         if state == "awaiting_consent" && try_clear(&mut tx, TalkId::from(id)).await?.is_ok() {
             cleared.push(TalkId::from(id));
         }

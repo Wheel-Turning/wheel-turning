@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set rights_holder = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48fb38b0358b2919a7d980244e0adcaa8df9b4e02da61483697737632215cbc8"
+}

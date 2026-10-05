@@ -3231,12 +3231,15 @@ version = "0.1.0"
 name = "wt-db"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sqlx",
  "testcontainers",
  "thiserror",
  "tokio",
  "wt-core",
  "wt-db",
+ "wt-registry",
 ]
 
 [[package]]

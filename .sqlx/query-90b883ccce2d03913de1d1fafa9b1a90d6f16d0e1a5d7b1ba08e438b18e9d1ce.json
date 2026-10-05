@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into teacher (display_name, sangha_id)\n               values ($1, (select id from sangha where name = $2))\n               on conflict (display_name) do update set sangha_id = excluded.sangha_id\n               returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "90b883ccce2d03913de1d1fafa9b1a90d6f16d0e1a5d7b1ba08e438b18e9d1ce"
+}

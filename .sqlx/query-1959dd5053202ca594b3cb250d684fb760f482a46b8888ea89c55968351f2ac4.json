@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set consent_status = 'granted',\n                          rights_basis = coalesce(rights_basis, 'speaker_consent')\n                   where teacher_id = $1 and state <> 'withdrawn'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1959dd5053202ca594b3cb250d684fb760f482a46b8888ea89c55968351f2ac4"
+}

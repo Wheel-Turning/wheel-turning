@@ -1,12 +1,13 @@
 //! Registry import and speaker assignment.
 
+use sqlx::{PgConnection, PgPool};
 use wt_core::ids::{SanghaId, TalkId, TeacherId};
 use wt_registry::{AliasMatcher, RegistryFile, SpeakerMatch};
-use sqlx::{PgConnection, PgPool};
 
 use crate::DbError;
 use crate::consent::try_clear;
 use crate::correction::log_change;
+use crate::talk::TalkError;
 
 /// What an import changed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,9 @@ pub enum RegistryDbError {
     /// No sangha has that name.
     #[error("no sangha is called {0:?}")]
     UnknownSangha(String),
+    /// Clearing a newly assigned talk through the gate failed.
+    #[error(transparent)]
+    Talk(#[from] TalkError),
     /// The database refused.
     #[error(transparent)]
     Db(#[from] DbError),
@@ -177,7 +181,8 @@ pub async fn alias_matcher(
         .fetch_all(&mut *conn)
         .await?;
     Ok(AliasMatcher::new(
-        rows.into_iter().map(|r| (TeacherId::from(r.teacher_id), r.alias)),
+        rows.into_iter()
+            .map(|r| (TeacherId::from(r.teacher_id), r.alias)),
     )?)
 }
 
@@ -210,7 +215,10 @@ pub async fn assign_speaker(
     )
     .fetch_one(&mut *conn)
     .await?;
-    if !matches!(talk.state.as_str(), "discovered" | "needs_review" | "awaiting_consent") {
+    if !matches!(
+        talk.state.as_str(),
+        "discovered" | "needs_review" | "awaiting_consent"
+    ) {
         return Ok(SpeakerOutcome::NeedsReview);
     }
 
