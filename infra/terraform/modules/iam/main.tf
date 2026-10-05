@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "web_exec" {
     # The Anthropic key joins this list when synthesis (M6) first needs it. ECS refuses to start a
     # task whose secret has no value yet, and that key is set out of band.
     resources = [
-      var.secret_arns["db_dg_web_login"],
+      var.secret_arns["db_wt_web_login"],
       var.secret_arns["session_secret"],
     ]
   }
@@ -124,9 +124,9 @@ data "aws_iam_policy_document" "admin_exec" {
     resources = [
       var.db_master_secret_arn,
       var.secret_arns["session_secret"],
-      var.secret_arns["db_dg_owner_login"],
-      var.secret_arns["db_dg_web_login"],
-      var.secret_arns["db_dg_pipeline_login"],
+      var.secret_arns["db_wt_owner_login"],
+      var.secret_arns["db_wt_web_login"],
+      var.secret_arns["db_wt_pipeline_login"],
     ]
   }
 }
@@ -218,7 +218,7 @@ data "aws_iam_policy_document" "batch" {
     sid     = "ReadPipelineSecrets"
     actions = ["secretsmanager:GetSecretValue"]
     resources = [
-      var.secret_arns["db_dg_pipeline_login"],
+      var.secret_arns["db_wt_pipeline_login"],
       var.secret_arns["anthropic_api_key"],
       var.secret_arns["youtube_api_key"],
     ]

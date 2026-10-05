@@ -10,7 +10,7 @@ variable "name" {
 
 variable "cidr_block" {
   type    = string
-  default = "10.20.0.0/16"
+  default = "10.40.0.0/16"
 }
 
 data "aws_availability_zones" "available" {

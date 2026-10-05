@@ -333,7 +333,7 @@ mod tests {
             ("WT_ENV", "prod".to_owned()),
             (
                 "DATABASE_URL",
-                format!("postgres://dg_web_login:{DB_SECRET}@db.internal:5432/wt?sslmode=require"),
+                format!("postgres://wt_web_login:{DB_SECRET}@db.internal:5432/wt?sslmode=require"),
             ),
             ("WT_SESSION_SECRET", SESSION_SECRET.to_owned()),
             ("ANTHROPIC_API_KEY", ANTHROPIC_SECRET.to_owned()),
@@ -458,14 +458,14 @@ mod tests {
         let config = load(&[
             ("WT_ENV", "prod"),
             ("WT_SESSION_SECRET", SESSION_SECRET),
-            ("WT_DB_HOST", "dg-v1.abc.us-east-2.rds.amazonaws.com"),
-            ("WT_DB_USER", "dg_web_login"),
+            ("WT_DB_HOST", "wt-v1.abc.us-east-2.rds.amazonaws.com"),
+            ("WT_DB_USER", "wt_web_login"),
             ("WT_DB_PASSWORD", "p@ss/w:rd"),
         ])
         .unwrap();
         assert_eq!(
             config.database_url.expose(),
-            "postgres://dg_web_login:p%40ss%2Fw%3Ard@dg-v1.abc.us-east-2.rds.amazonaws.com:5432/wt?sslmode=require"
+            "postgres://wt_web_login:p%40ss%2Fw%3Ard@wt-v1.abc.us-east-2.rds.amazonaws.com:5432/wt?sslmode=require"
         );
     }
 

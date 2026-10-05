@@ -33,3 +33,9 @@ variable "enable_anomaly_detection" {
   type        = bool
   default     = true
 }
+
+variable "cloudtrail_retention_days" {
+  description = "How long CloudTrail log files are kept in the trail bucket."
+  type        = number
+  default     = 365
+}

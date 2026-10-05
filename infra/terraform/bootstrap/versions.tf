@@ -13,7 +13,7 @@ terraform {
   # own state into the bucket it created. To rebuild from nothing, comment this block out, apply,
   # and migrate again.
   backend "s3" {
-    bucket       = "dharma-gates-tfstate-904883674947"
+    bucket       = "wt-tfstate-904883674947"
     key          = "bootstrap/terraform.tfstate"
     region       = "us-east-2"
     encrypt      = true

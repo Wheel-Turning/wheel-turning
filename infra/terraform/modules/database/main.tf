@@ -69,8 +69,8 @@ resource "aws_db_instance" "this" {
   storage_type      = "gp3"
   storage_encrypted = true
 
-  db_name                     = "dg"
-  username                    = "dg_admin"
+  db_name                     = "wt"
+  username                    = "wt_admin"
   manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.this.name

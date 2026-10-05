@@ -36,7 +36,7 @@ def aws(*args: str) -> dict:
 
 def default_bucket() -> str:
     account = aws("sts", "get-caller-identity")["Account"]
-    return f"dg-v1-scratch-{account}"
+    return f"wt-v1-scratch-{account}"
 
 
 def covers_whole_bucket(rule: dict) -> bool:
@@ -91,7 +91,7 @@ def check_probe(bucket: str) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--bucket", help="defaults to dg-v1-scratch-<account id>")
+    parser.add_argument("--bucket", help="defaults to wt-v1-scratch-<account id>")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--put-probe", action="store_true", help="write the expiry probe object")
     mode.add_argument("--check-probe", action="store_true", help="assert the probe has expired")

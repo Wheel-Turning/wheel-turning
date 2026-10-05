@@ -97,12 +97,12 @@ resource "aws_launch_template" "this" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "${var.name}-batch", project = "dharma-gates", env = "v1" }
+    tags          = { Name = "${var.name}-batch", project = "wheel-turning", env = "v1" }
   }
 
   tag_specifications {
     resource_type = "volume"
-    tags          = { Name = "${var.name}-batch", project = "dharma-gates", env = "v1" }
+    tags          = { Name = "${var.name}-batch", project = "wheel-turning", env = "v1" }
   }
 }
 

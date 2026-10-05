@@ -3,7 +3,7 @@
 
 locals {
   tags = {
-    project = "dharma-gates"
+    project = "wheel-turning"
     env     = "v1"
   }
 }
