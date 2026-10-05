@@ -2,6 +2,7 @@
 //! (Spec 03). Discovery records metadata only; nothing here fetches media.
 
 pub mod classify;
+pub mod completeness;
 pub mod config;
 pub mod dates;
 pub mod pipeline;

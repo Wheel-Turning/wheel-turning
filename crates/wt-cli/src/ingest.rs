@@ -206,3 +206,106 @@ pub async fn reclassify(
     let report = pipeline::reclassify(&mut conn, &version, talk, dry_run).await?;
     print_json(&report)
 }
+
+/// Compares the Vimeo account list with the talks page and with what discovery recorded, and
+/// writes the completeness page. The account list comes from the API when a token is set,
+/// otherwise from account pages a person saved (`saved_lists`). Prints the counts and the ids
+/// on the talks page but not in the account list as JSON. Reads only.
+pub async fn completeness(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    source: &str,
+    saved_lists: &[std::path::PathBuf],
+    out: &Path,
+) -> anyhow::Result<()> {
+    use wt_ingest::completeness::{self, RecordedVideo};
+
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let source = sources.get(source)?;
+    if source.platform != SourcePlatform::Vimeo {
+        bail!(
+            "source {} is {}, and the completeness check compares Vimeo lists",
+            source.name,
+            source.platform
+        );
+    }
+    let adapter = VimeoAdapter::new(
+        &source.name,
+        config.vimeo_access_token.clone(),
+        source.talks_page.as_deref(),
+        VimeoEndpoints::vimeo()?,
+    )?;
+
+    let (account, from) = match adapter.account_videos().await? {
+        Some(videos) => (
+            Some(
+                videos
+                    .into_iter()
+                    .map(|v| completeness::ListedVideo {
+                        id: v.external_id,
+                        title: Some(v.title),
+                        duration_s: v.duration_s,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            "the Vimeo API".to_owned(),
+        ),
+        None if !saved_lists.is_empty() => {
+            let mut lists = Vec::new();
+            for path in saved_lists {
+                let html = std::fs::read_to_string(path)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                lists.push(completeness::parse_saved_account_page(&html));
+            }
+            (
+                Some(completeness::merge_lists(lists)),
+                format!("{} saved account page(s)", saved_lists.len()),
+            )
+        }
+        None => (
+            None,
+            "nowhere: set WT_VIMEO_ACCESS_TOKEN or pass --vimeo-list".to_owned(),
+        ),
+    };
+    let page_ids = if source.talks_page.is_some() {
+        adapter.talks_page_ids().await?
+    } else {
+        Vec::new()
+    };
+    let mut conn = pool.acquire().await?;
+    let recorded: Vec<RecordedVideo> = wt_db::ingest::report_rows(&mut conn)
+        .await?
+        .into_iter()
+        .filter(|r| r.platform == "vimeo")
+        .map(|r| RecordedVideo {
+            id: r.external_id,
+            title: r.title,
+            state: r.state,
+        })
+        .collect();
+    let feed = "No podcast feed source is set up yet. Once it is, this section lists Vimeo talks \
+                missing from the feed and feed episodes with no Vimeo match.";
+    let mut report = completeness::compare(account.as_deref(), &page_ids, &recorded, feed);
+    report.account_list_source = from;
+
+    let now = sqlx::types::chrono::Utc::now()
+        .format("%Y-%m-%d %H:%M UTC")
+        .to_string();
+    std::fs::write(out, completeness::render_html(&report, &now))
+        .with_context(|| format!("writing {}", out.display()))?;
+    let ids =
+        |entries: &[completeness::Entry]| entries.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+    print_json(&serde_json::json!({
+        "account_list": report.account_list_source,
+        "account": report.account_count,
+        "account_hours": report.account_hours,
+        "talks_page": report.talks_page_count,
+        "recorded": report.recorded_count,
+        "known": report.known_count,
+        "on_page_not_in_account": ids(&report.page_not_in_account),
+        "in_account_not_on_page": report.account_not_on_page.len(),
+        "listed_not_recorded": ids(&report.listed_not_recorded),
+        "recorded_not_listed": ids(&report.recorded_not_listed),
+    }))
+}

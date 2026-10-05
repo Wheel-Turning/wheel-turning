@@ -356,7 +356,7 @@ Decision of October 3, 2026, revised the same day. SSZ publishes every dharma ta
 3. The owner asks SSZ for route (b) or (c). Ask whoever administers the SSZ Vimeo account either to create a personal access token for the project with the `public`, `private` and `video_files` scopes and enable downloads on the talks, or to share a bulk export. This is the same conversation as the SSZ permission note in the PRD.
 4. Link style. `link_style = "vimeo"` renders the page address with `#t=<seconds>s`. A talk with only a podcast match uses `none`, and the page shows "starts at h:mm:ss". This supersedes rule 2 of Answer assembly in Spec 05.
 5. Captions. Vimeo can hold text tracks. When the API returns one, it is saved in scratch as a reference for measuring accuracy and is never used as the transcript.
-6. A completeness check compares the Vimeo list with the talks page and the feed and reports talks missing from either, so the PRD's figure of about 225 distinct talks is checked against Vimeo.
+6. A completeness check compares the Vimeo list with the talks page and the feed and reports talks missing from either, so the PRD's figure of about 225 distinct talks is checked against Vimeo. `wt ingest completeness --out <path> [--vimeo-list <saved page>]...` writes it, with sections for talks-page videos missing from the account list, account videos missing from the talks page, videos listed but never recorded, and recorded videos no longer listed. The account list comes from the API when `WT_VIMEO_ACCESS_TOKEN` is set; without one it comes from Vimeo account video pages a person saved in a browser, which the command reads from disk and never fetches, since vimeo.com's robots.txt bars automated reading of those pages (decision of October 5, 2026). The feed comparison joins once the feed source exists.
 
 ```toml
 [[source]]
@@ -405,4 +405,4 @@ Acceptance criteria:
 - [ ] The discovery run lists the 278 videos in the account's public list and, with a token that has the private scope, the 6 further videos the SSZ site embeds, 284 in all.
 - [x] Untitled recordings and Q&A sessions arrive at `needs_review` with a reason, and none is processed until a person decides.
 - [x] Clips under 5 minutes arrive as excluded with the reason `too_short`.
-- [ ] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs.
+- [x] The 6 videos that appear on the SSZ site but not in the account's public list are reported with their Vimeo IDs. (`wt ingest completeness` with a saved account page, run on October 5, 2026: 807610906, 805297241, 802789038, 802348391, 802312541 and 672974907.)

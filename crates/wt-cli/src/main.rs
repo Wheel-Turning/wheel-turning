@@ -84,6 +84,24 @@ enum IngestCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Compare the Vimeo account list with the talks page and with what discovery recorded,
+    /// and write the completeness page. Without WT_VIMEO_ACCESS_TOKEN the account list comes
+    /// from account pages saved in a browser (--vimeo-list); the Vimeo site is never fetched.
+    /// Prints counts and the ids on the talks page but not in the account list as JSON.
+    Completeness {
+        /// The Vimeo source in sources.toml.
+        #[arg(long, default_value = "ssz-vimeo")]
+        source: String,
+        /// A saved Vimeo account videos page. Repeat for several pages.
+        #[arg(long = "vimeo-list")]
+        vimeo_list: Vec<PathBuf>,
+        /// Where to write the HTML page.
+        #[arg(long)]
+        out: PathBuf,
+        /// The directory holding sources.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// Write the review page: duplicate clusters, exclusions, review holds, series coverage,
     /// videos by month and donation-looking links. Reads only; it changes nothing.
     Report {
@@ -350,6 +368,25 @@ async fn main() -> anyhow::Result<ExitCode> {
         Command::Ingest {
             command: IngestCommand::Report { out, config_dir },
         } => ingest::report(&pool().await?, &config_dir, &out).await?,
+        Command::Ingest {
+            command:
+                IngestCommand::Completeness {
+                    source,
+                    vimeo_list,
+                    out,
+                    config_dir,
+                },
+        } => {
+            ingest::completeness(
+                &pool().await?,
+                &config,
+                &config_dir,
+                &source,
+                &vimeo_list,
+                &out,
+            )
+            .await?;
+        }
         Command::Ingest {
             command:
                 IngestCommand::Reclassify {

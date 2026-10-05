@@ -163,7 +163,16 @@ impl VimeoAdapter {
             })
     }
 
-    async fn discover_page(&self, page: &Url) -> Result<Vec<DiscoveredVideo>, IngestError> {
+    /// The Vimeo ids the talks page links or embeds, in page order, after checking
+    /// `robots.txt`. A disallowed page is never requested.
+    pub async fn talks_page_ids(&self) -> Result<Vec<String>, IngestError> {
+        let page = self
+            .talks_page
+            .as_ref()
+            .ok_or_else(|| IngestError::Misconfigured {
+                source_name: self.source.clone(),
+                what: "a talks_page",
+            })?;
         let mut robots_url = page.clone();
         robots_url.set_path("/robots.txt");
         robots_url.set_query(None);
@@ -196,8 +205,21 @@ impl VimeoAdapter {
                 url: page.to_string(),
                 message: e.without_url().to_string(),
             })?;
+        Ok(page_video_ids(&html))
+    }
+
+    /// The account's videos from the API, or `None` without an access token.
+    pub async fn account_videos(&self) -> Result<Option<Vec<DiscoveredVideo>>, IngestError> {
+        match &self.token {
+            Some(token) => Ok(Some(self.discover_api(token).await?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn discover_page(&self, page: &Url) -> Result<Vec<DiscoveredVideo>, IngestError> {
+        let ids = self.talks_page_ids().await?;
         let mut videos = Vec::new();
-        for id in page_video_ids(&html) {
+        for id in ids {
             let video_url = format!("https://vimeo.com/{id}");
             let mut oembed = self
                 .endpoints

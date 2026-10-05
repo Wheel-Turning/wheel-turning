@@ -268,3 +268,38 @@ async fn a_site_without_robots_txt_is_read_and_a_source_with_nothing_configured_
         IngestError::Misconfigured { .. }
     ));
 }
+
+#[tokio::test]
+async fn the_completeness_check_reads_page_ids_and_needs_a_token_for_the_account_list() {
+    let server = MockServer::start().await;
+    mount_site(&server, Some("User-agent: *\nDisallow: /wp-admin/\n")).await;
+    Mock::given(method("GET"))
+        .and(path("/talks-page/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"<div data-video_id="400000002"></div><a href="https://vimeo.com/400000001">x</a>
+               <div data-video_id="400000002"></div>"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // No oEmbed request is made: listing the page's ids describes nothing.
+    Mock::given(method("GET"))
+        .and(path("/api/oembed.json"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let page = format!("{}/talks-page/", server.uri());
+    let adapter =
+        VimeoAdapter::new("fixture-vimeo", None, Some(&page), endpoints(&server)).unwrap();
+    assert_eq!(
+        adapter.talks_page_ids().await.unwrap(),
+        ["400000002", "400000001"]
+    );
+    assert_eq!(
+        adapter.account_videos().await.unwrap(),
+        None,
+        "no token, no account list"
+    );
+}
