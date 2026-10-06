@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "analyze passage",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e8922ddcf248185c7c5eed81779702bacaa085c6670f041cb66390b4b21b3e74"
+}

@@ -45,6 +45,23 @@ impl Fx {
             .unwrap()
     }
 
+    /// Runs `wt` with extra environment variables set and others removed.
+    fn wt_env(&self, args: &[&str], set: &[(&str, &str)], remove: &[&str]) -> Output {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_wt"));
+        cmd.args(args)
+            .env("DATABASE_URL", self.db.url().expose())
+            .env("WT_LOG", "warn")
+            .env_remove("WT_ENV")
+            .env_remove("WT_DB_HOST");
+        for (k, v) in set {
+            cmd.env(k, v);
+        }
+        for k in remove {
+            cmd.env_remove(k);
+        }
+        cmd.output().unwrap()
+    }
+
     /// Runs `wt` and expects success, returning stdout parsed as JSON.
     fn json(&self, args: &[&str]) -> serde_json::Value {
         let out = self.wt(args);
@@ -407,20 +424,6 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
     let dir = config_dir();
     let dir_arg = dir.to_str().unwrap();
 
-    let refused = fx.wt(&[
-        "worker",
-        "--kinds",
-        "index",
-        "--drain",
-        "--config-dir",
-        dir_arg,
-    ]);
-    assert!(!refused.status.success());
-    assert!(
-        stderr(&refused).contains("no handler for index jobs"),
-        "{}",
-        stderr(&refused)
-    );
     let unknown = fx.wt(&["worker", "--kinds", "discover", "--drain"]);
     assert!(!unknown.status.success());
     assert!(
@@ -991,9 +994,18 @@ async fn glossary_import_llm_cap_and_stage_workers_check_their_settings() {
     // A stage worker refuses to start without what it needs.
     let dir = config_dir();
     let cfg = dir.to_str().unwrap();
-    let index = fx.wt(&["worker", "--kinds", "index", "--drain", "--config-dir", cfg]);
+    let no_models = std::env::temp_dir().join(format!("wt-no-models-{}", Uuid::new_v4()));
+    let index = fx.wt_env(
+        &["worker", "--kinds", "index", "--drain", "--config-dir", cfg],
+        &[("WT_MODEL_DIR", no_models.to_str().unwrap())],
+        &[],
+    );
     assert!(!index.status.success());
-    assert!(stderr(&index).contains("index"), "{}", stderr(&index));
+    assert!(
+        stderr(&index).contains("model.onnx") && stderr(&index).contains("export_models.py"),
+        "{}",
+        stderr(&index)
+    );
     let audio = Command::new(env!("CARGO_BIN_EXE_wt"))
         .args(["worker", "--kinds", "audio", "--drain", "--config-dir", cfg])
         .env("DATABASE_URL", fx.db.url().expose())
@@ -1032,5 +1044,144 @@ async fn glossary_import_llm_cap_and_stage_workers_check_their_settings() {
         stderr(&extract).contains("WT_LLM_MODEL"),
         "{}",
         stderr(&extract)
+    );
+}
+
+#[tokio::test]
+async fn pipeline_export_reindex_and_sample_commands() {
+    let fx = start().await;
+    fx.import_registry();
+    let talk = fx.talk(Some("Ada Fixture")).await;
+    wt_db::consent::set_consent(
+        &fx.pool,
+        "Ada",
+        wt_core::gate::ConsentStatus::Granted,
+        Some("fixture"),
+        None,
+        "test",
+    )
+    .await
+    .unwrap();
+    assert_eq!(fx.state(talk).await, "cleared");
+
+    // Advance queues one audio job per cleared talk, once.
+    assert_eq!(fx.json(&["pipeline", "advance"])["audio_jobs_queued"], 1);
+    assert_eq!(fx.json(&["pipeline", "advance"])["audio_jobs_queued"], 0);
+
+    // Retry requeues a dead job and clears the talk's reason.
+    sqlx::query(
+        "update job set state = 'dead', attempts = 5, last_error = 'boom' where talk_id = $1",
+    )
+    .bind(talk)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query("update talk set state_reason = 'audio job dead: boom' where id = $1")
+        .bind(talk)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let retried = fx.json(&["pipeline", "retry", "--talk", &talk.to_string()]);
+    assert_eq!(retried["requeued"], "audio");
+    let (state, attempts, reason): (String, i32, Option<String>) = sqlx::query_as(
+        "select j.state::text, j.attempts, t.state_reason from job j join talk t on t.id = j.talk_id
+         where j.talk_id = $1",
+    )
+    .bind(talk)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!((state.as_str(), attempts, reason), ("queued", 0, None));
+    let none = fx.wt(&["pipeline", "retry", "--talk", &talk.to_string()]);
+    assert!(!none.status.success());
+    assert!(stderr(&none).contains("no dead job"), "{}", stderr(&none));
+
+    // Export writes servable passages with ids only.
+    let transcript: Uuid = sqlx::query_scalar(
+        "insert into transcript (talk_id, version, origin, s3_key, content_hash)
+         values ($1, 1, 'asr', 'transcripts/x/v1.json', 'h') returning id",
+    )
+    .bind(talk)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let text = "We sit together in the quiet hall and let the thinking come and go.";
+    sqlx::query(
+        "with s as (insert into segment (talk_id, transcript_id, ordinal, kind, start_ms, end_ms, text)
+                    values ($1, $2, 0, 'talk', 0, 9000, $3) returning id)
+         insert into passage (talk_id, segment_id, segment_kind, ordinal, start_ms, end_ms, text,
+                              word_count, content_hash, embedding, embedding_model)
+         select $1, s.id, 'talk', 0, 1200, 9000, $3, 14, 'h',
+                array_fill(0.03125::real, array[1024])::vector, 'fake' from s",
+    )
+    .bind(talk)
+    .bind(transcript)
+    .bind(text)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query("update talk set state = 'ready' where id = $1")
+        .bind(talk)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let out = std::env::temp_dir().join(format!("wt-export-{}", Uuid::new_v4()));
+    let report = fx.json(&[
+        "export",
+        "transcripts",
+        "--format",
+        "jsonl",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        (report["passages"].as_i64(), report["talks"].as_i64()),
+        (Some(1), Some(1))
+    );
+    let line = std::fs::read_to_string(out.join("passages.jsonl")).unwrap();
+    let row: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+    let mut keys: Vec<&str> = row
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        ["passage_id", "start_ms", "talk_id", "teacher_id", "text"]
+    );
+    assert_eq!(row["text"], text);
+    assert_eq!(row["talk_id"], talk.to_string());
+    assert!(!line.contains("Ada"), "no names in the export");
+    std::fs::remove_dir_all(&out).unwrap();
+
+    // Reindex needs a target and the model; the sample needs whisper-cli.
+    let dir = config_dir();
+    let cfg = dir.to_str().unwrap();
+    let no_target = fx.wt(&["reindex", "--config-dir", cfg]);
+    assert!(!no_target.status.success());
+    let no_models = std::env::temp_dir().join(format!("wt-no-models-{}", Uuid::new_v4()));
+    let reindex = fx.wt_env(
+        &["reindex", "--all", "--config-dir", cfg],
+        &[("WT_MODEL_DIR", no_models.to_str().unwrap())],
+        &[],
+    );
+    assert!(!reindex.status.success());
+    assert!(
+        stderr(&reindex).contains("model.onnx"),
+        "{}",
+        stderr(&reindex)
+    );
+    let sample = fx.wt_env(
+        &["segment", "sample", "--count", "1", "--config-dir", cfg],
+        &[],
+        &["WT_WHISPER_CLI"],
+    );
+    assert!(!sample.status.success());
+    assert!(
+        stderr(&sample).contains("WT_WHISPER_CLI"),
+        "{}",
+        stderr(&sample)
     );
 }

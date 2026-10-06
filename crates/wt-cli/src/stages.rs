@@ -1,10 +1,11 @@
 //! The pipeline stages a worker runs past classification (Spec 04): `audio`, `correct`,
-//! `extract` and `resolve`. Everything a stage needs is built once at startup, and a worker
+//! `extract`, `resolve` and `index`. Everything a stage needs is built once at startup, and a worker
 //! asked to run a stage whose settings are missing refuses to start.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
@@ -19,20 +20,39 @@ use wt_db::job::{Job, JobKind};
 use wt_extract::{
     ClaudeClient, ClaudeSettings, LlmError, LlmLabeler, LogAlerter, PgLedger, PriceTable,
 };
+use wt_index::ChunkSettings;
 use wt_ingest::audio::{self, AudioDeps, AudioError};
 use wt_ingest::config::{ClassifyConfig, Series};
 use wt_ingest::media::MediaFetcher;
 use wt_ingest::textjobs::{self, PgHandList, TextJobError};
+use wt_ml::{Embedder, OnnxEmbedder, OnnxSettings};
 use wt_registry::glossary::Glossary;
 use wt_segment::{LabelError, SegmentSettings, SidecarDiarizer};
 
-/// `[segment]` and `[asr]` from `config/pipeline.toml`.
+/// `[segment]`, `[asr]` and `[chunk]` from `config/pipeline.toml`.
 #[derive(Debug, Default, Deserialize)]
 struct Sections {
     #[serde(default)]
     segment: SegmentSettings,
     #[serde(default)]
     asr: AsrSettings,
+    #[serde(default)]
+    chunk: ChunkSettings,
+}
+
+/// Loads the embedding model named by `WT_MODEL_DIR` and `WT_EMBED_MODEL`.
+pub fn embedder(config: &Config) -> anyhow::Result<OnnxEmbedder> {
+    let mut settings = OnnxSettings::new(&config.model_dir, &config.embed_model);
+    settings.runtime.clone_from(&config.ort_dylib);
+    OnnxEmbedder::load(&settings).context("loading the embedding model")
+}
+
+/// `[chunk]` from `config/pipeline.toml`.
+pub fn chunk_settings(config_dir: &Path) -> anyhow::Result<ChunkSettings> {
+    let text = std::fs::read_to_string(config_dir.join("pipeline.toml"))
+        .context("reading pipeline.toml")?;
+    let sections: Sections = toml::from_str(&text).context("reading [chunk]")?;
+    Ok(sections.chunk)
 }
 
 /// How a stage job ended, for the worker loop.
@@ -61,13 +81,17 @@ pub struct Stages {
     scratch_root: PathBuf,
     segment: SegmentSettings,
     asr: AsrSettings,
+    chunk: ChunkSettings,
     series: Vec<Series>,
     whisper: Option<WhisperCli>,
     diarizer: Option<SidecarDiarizer>,
     fetcher: Option<MediaFetcher>,
     llm: Option<ClaudeClient>,
+    embedder: Option<OnnxEmbedder>,
     hand_list: PgHandList,
     actor: String,
+    /// Talks indexed since the last `ANALYZE passage`.
+    indexed: AtomicUsize,
 }
 
 impl Stages {
@@ -80,9 +104,6 @@ impl Stages {
         kinds: &[JobKind],
         actor: &str,
     ) -> anyhow::Result<Self> {
-        if kinds.contains(&JobKind::Index) {
-            bail!("no handler for index jobs yet: it arrives with the embedder");
-        }
         let text = std::fs::read_to_string(config_dir.join("pipeline.toml"))
             .context("reading pipeline.toml")?;
         let sections: Sections = toml::from_str(&text).context("reading [segment] and [asr]")?;
@@ -108,6 +129,11 @@ impl Stages {
         } else {
             (None, None, None)
         };
+        let embedder = if kinds.contains(&JobKind::Index) {
+            Some(embedder(config)?)
+        } else {
+            None
+        };
         let needs_llm = kinds
             .iter()
             .any(|k| matches!(k, JobKind::Audio | JobKind::Extract));
@@ -122,13 +148,16 @@ impl Stages {
             scratch_root: config.scratch_dir.clone(),
             segment: sections.segment,
             asr: sections.asr,
+            chunk: sections.chunk,
             series: cfg.series.clone(),
             whisper,
             diarizer,
             fetcher,
             llm,
+            embedder,
             hand_list: PgHandList::new(pool.clone()),
             actor: actor.to_owned(),
+            indexed: AtomicUsize::new(0),
         })
     }
 
@@ -139,31 +168,15 @@ impl Stages {
         let glossary = Glossary::new(&wt_db::glossary::load(&mut db).await?)?;
         let outcome = match job.kind {
             JobKind::Audio => {
-                let (Some(whisper), Some(diarizer), Some(fetcher), Some(llm)) =
-                    (&self.whisper, &self.diarizer, &self.fetcher, &self.llm)
-                else {
-                    bail!("this worker was not started for audio jobs");
-                };
-                let class = textjobs::data_class(conn, talk).await?;
-                let labeler = LlmLabeler::new(llm, class);
-                let terms = wt_db::glossary::load(&mut db).await?;
-                let hints = AsrHints {
-                    glossary_prompt: glossary_prompt(terms.iter().map(|t| t.canonical.as_str())),
-                    language: self.asr.language.clone(),
-                };
-                let deps = AudioDeps {
-                    transcriber: whisper,
-                    diarizer,
-                    labeler: &labeler,
-                    converter: &Ffmpeg::default(),
-                    fetcher,
-                    objects: &self.objects,
-                    scratch_root: &self.scratch_root,
-                    segment: &self.segment,
-                    hints: &hints,
-                    actor: &self.actor,
-                };
-                match audio::run(conn, talk, &deps).await {
+                let (labeler, hints) = self.audio_parts(conn, talk).await?;
+                let ffmpeg = Ffmpeg::default();
+                let deps = self.audio_deps(&labeler, &hints, &ffmpeg)?;
+                let retranscribe = job
+                    .payload
+                    .get("retranscribe")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                match audio::run(conn, talk, &deps, retranscribe).await {
                     Ok(o) => format!("{o:?}"),
                     Err(AudioError::Label(LabelError::CapReached(m))) => return Ok(Ran::Capped(m)),
                     Err(e) => return Err(e.into()),
@@ -195,9 +208,95 @@ impl Stages {
                         .await?;
                 format!("{outcome:?}")
             }
+            JobKind::Index => {
+                let embedder = self
+                    .embedder
+                    .as_ref()
+                    .context("this worker was not started for index jobs")?;
+                let outcome = textjobs::run_index(
+                    conn,
+                    talk,
+                    &self.objects,
+                    &glossary,
+                    &self.chunk,
+                    embedder as &dyn Embedder,
+                )
+                .await?;
+                if matches!(&outcome, Ok(i) if i.written) {
+                    self.indexed.fetch_add(1, Ordering::Relaxed);
+                }
+                format!("{outcome:?}")
+            }
             other => bail!("no stage handler for {other} jobs"),
         };
         Ok(Ran::Done(outcome))
+    }
+
+    /// The labeler and recognition hints an audio run needs for `talk`.
+    async fn audio_parts(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        talk: wt_core::ids::TalkId,
+    ) -> anyhow::Result<(LlmLabeler<'_>, AsrHints)> {
+        let llm = self
+            .llm
+            .as_ref()
+            .context("this worker was not started for audio jobs")?;
+        let class = textjobs::data_class(conn, talk).await?;
+        let terms = wt_db::glossary::load(conn).await?;
+        let hints = AsrHints {
+            glossary_prompt: glossary_prompt(terms.iter().map(|t| t.canonical.as_str())),
+            language: self.asr.language.clone(),
+        };
+        Ok((LlmLabeler::new(llm, class), hints))
+    }
+
+    fn audio_deps<'a>(
+        &'a self,
+        labeler: &'a LlmLabeler<'_>,
+        hints: &'a AsrHints,
+        ffmpeg: &'a Ffmpeg,
+    ) -> anyhow::Result<AudioDeps<'a>> {
+        let (Some(whisper), Some(diarizer), Some(fetcher)) =
+            (&self.whisper, &self.diarizer, &self.fetcher)
+        else {
+            bail!("this worker was not started for audio jobs");
+        };
+        Ok(AudioDeps {
+            transcriber: whisper,
+            diarizer,
+            labeler,
+            converter: ffmpeg,
+            fetcher,
+            objects: &self.objects,
+            scratch_root: &self.scratch_root,
+            segment: &self.segment,
+            hints,
+            actor: &self.actor,
+        })
+    }
+
+    /// Runs the audio steps for one talk without persisting anything, for the segmentation
+    /// sample report.
+    pub async fn sample(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        talk: wt_core::ids::TalkId,
+    ) -> anyhow::Result<audio::SampleOutcome> {
+        let (labeler, hints) = self.audio_parts(conn, talk).await?;
+        let ffmpeg = Ffmpeg::default();
+        let deps = self.audio_deps(&labeler, &hints, &ffmpeg)?;
+        Ok(audio::sample(conn, talk, &deps).await?)
+    }
+
+    /// When the queue is empty: `ANALYZE passage` if talks were indexed since the last one.
+    pub async fn idle(&self, conn: &mut sqlx::PgConnection) -> anyhow::Result<()> {
+        let n = self.indexed.swap(0, Ordering::Relaxed);
+        if n > 0 {
+            wt_index::index::analyze(conn).await?;
+            tracing::info!(talks = n, "analyzed passage after indexing");
+        }
+        Ok(())
     }
 }
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state_reason = null where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "36d07e16f23e4fa1953a6ef1b55e6e3701125b298732710b47fce136ccf83723"
+}

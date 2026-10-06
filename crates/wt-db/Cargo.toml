@@ -20,6 +20,7 @@ wt-core.workspace = true
 wt-registry.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 testcontainers = { workspace = true, optional = true }

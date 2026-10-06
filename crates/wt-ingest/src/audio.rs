@@ -98,6 +98,9 @@ pub enum AudioOutcome {
     /// No media route: the talk waits in `needs_review` with reason `no_media`, and nothing was
     /// fetched.
     NoMedia,
+    /// The talk already has a current transcript and the job did not ask to retranscribe, so
+    /// nothing was fetched or changed.
+    Current,
     /// The segmenter needs a person: the talk waits in `needs_review` with this reason.
     Held(String),
     /// Segmented and stored, with a `correct` job queued.
@@ -151,38 +154,54 @@ pub fn transcript_key(talk: TalkId, version: i32) -> String {
     format!("transcripts/{}/v{version}.json", talk.as_uuid())
 }
 
-/// Runs the `audio` job for one talk.
-pub async fn run(
-    conn: &mut sqlx::PgConnection,
-    talk_id: TalkId,
-    deps: &AudioDeps<'_>,
-) -> Result<AudioOutcome, AudioError> {
-    // Every job re-authorizes, so an opt-out or withdrawal stops it here.
-    let talk = match TalkRepo::authorize(conn, talk_id).await? {
-        Ok(talk) => talk,
-        Err(gate) => return Ok(AudioOutcome::NotCleared(gate)),
-    };
-    let route = feed::media_route(conn, talk_id).await?;
-    let Some(source) = MediaSource::from_route(&route) else {
-        transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
-        return Ok(AudioOutcome::NoMedia);
-    };
+/// The audio steps' result, before anything is stored.
+#[derive(Debug)]
+pub enum Steps {
+    /// The segmenter needs a person, for this reason.
+    Held(String),
+    /// Segmented; scratch is already deleted.
+    Segmented {
+        /// The segmenter's output.
+        seg: Segmentation,
+        /// The recognition model's name.
+        model: String,
+        /// Audio length.
+        audio_ms: i64,
+    },
+}
 
-    TalkRepo::advance(conn, &talk, PipelineState::Fetching).await?;
-    let scratch = ScratchDir::create(deps.scratch_root, talk_id)?;
-    let fetched = deps.fetcher.fetch(&talk, &source, &scratch).await?;
+/// Fetch, convert, transcribe, diarize and segment, in one scratch directory deleted on every
+/// outcome. With a connection, the talk moves through the pipeline states as each step starts;
+/// without one, nothing in the database changes.
+async fn steps(
+    mut conn: Option<&mut sqlx::PgConnection>,
+    talk: &wt_core::gate::Talk<wt_core::gate::Consented>,
+    source: &MediaSource,
+    deps: &AudioDeps<'_>,
+) -> Result<Steps, AudioError> {
+    if let Some(c) = conn.as_deref_mut() {
+        TalkRepo::advance(c, talk, PipelineState::Fetching).await?;
+    }
+    let scratch = ScratchDir::create(deps.scratch_root, talk.id)?;
+    let fetched = deps.fetcher.fetch(talk, source, &scratch).await?;
     let wav = deps.converter.to_wav(&scratch, &fetched)?;
 
-    TalkRepo::advance(conn, &talk, PipelineState::Transcribing).await?;
+    if let Some(c) = conn.as_deref_mut() {
+        TalkRepo::advance(c, talk, PipelineState::Transcribing).await?;
+    }
     let raw = deps
         .transcriber
         .transcribe(&scratch, &wav, deps.hints)
         .await?;
 
-    TalkRepo::advance(conn, &talk, PipelineState::Diarizing).await?;
+    if let Some(c) = conn.as_deref_mut() {
+        TalkRepo::advance(c, talk, PipelineState::Diarizing).await?;
+    }
     let turns = deps.diarizer.diarize(&wav).await?;
 
-    TalkRepo::advance(conn, &talk, PipelineState::Segmenting).await?;
+    if let Some(c) = conn {
+        TalkRepo::advance(c, talk, PipelineState::Segmenting).await?;
+    }
     let audio_ms = i32::try_from(raw.audio_ms).unwrap_or(i32::MAX);
     let plan = match wt_segment::plan(
         &raw.words,
@@ -193,9 +212,8 @@ pub async fn run(
     ) {
         Ok(plan) => plan,
         Err(review) => {
-            transcript::hold_for_review(conn, talk_id, review.reason(), deps.actor).await?;
             scratch.finish()?;
-            return Ok(AudioOutcome::Held(review.reason().to_owned()));
+            return Ok(Steps::Held(review.reason().to_owned()));
         }
     };
     let labels: BTreeMap<_, _> = if plan.ambiguous().is_empty() {
@@ -206,15 +224,84 @@ pub async fn run(
     let seg = plan.finish(&labels)?;
     // The raw recognition and the audio are no longer needed; delete them before storing.
     scratch.finish()?;
+    Ok(Steps::Segmented {
+        seg,
+        model: raw.model,
+        audio_ms: raw.audio_ms,
+    })
+}
+
+/// How a segmentation sample went for one talk.
+#[derive(Debug)]
+pub enum SampleOutcome {
+    /// The talk did not pass the gate.
+    NotCleared(GateError),
+    /// No media route.
+    NoMedia,
+    /// The steps ran.
+    Ran(Steps),
+}
+
+/// Runs the audio steps for `wt segment sample` without persisting anything: no state change,
+/// no transcript, no segments. Scratch is deleted as in the job.
+pub async fn sample(
+    conn: &mut sqlx::PgConnection,
+    talk_id: TalkId,
+    deps: &AudioDeps<'_>,
+) -> Result<SampleOutcome, AudioError> {
+    let talk = match TalkRepo::authorize(conn, talk_id).await? {
+        Ok(talk) => talk,
+        Err(gate) => return Ok(SampleOutcome::NotCleared(gate)),
+    };
+    let route = feed::media_route(conn, talk_id).await?;
+    let Some(source) = MediaSource::from_route(&route) else {
+        return Ok(SampleOutcome::NoMedia);
+    };
+    Ok(SampleOutcome::Ran(steps(None, &talk, &source, deps).await?))
+}
+
+/// Runs the `audio` job for one talk.
+pub async fn run(
+    conn: &mut sqlx::PgConnection,
+    talk_id: TalkId,
+    deps: &AudioDeps<'_>,
+    retranscribe: bool,
+) -> Result<AudioOutcome, AudioError> {
+    // Every job re-authorizes, so an opt-out or withdrawal stops it here.
+    let talk = match TalkRepo::authorize(conn, talk_id).await? {
+        Ok(talk) => talk,
+        Err(gate) => return Ok(AudioOutcome::NotCleared(gate)),
+    };
+    // Rerunning on unchanged input is a no-op; a new model asks for `retranscribe`.
+    if !retranscribe && transcript::current(conn, talk_id).await?.is_some() {
+        return Ok(AudioOutcome::Current);
+    }
+    let route = feed::media_route(conn, talk_id).await?;
+    let Some(source) = MediaSource::from_route(&route) else {
+        transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
+        return Ok(AudioOutcome::NoMedia);
+    };
+
+    let (seg, model, audio_ms) = match steps(Some(&mut *conn), &talk, &source, deps).await? {
+        Steps::Held(reason) => {
+            transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
+            return Ok(AudioOutcome::Held(reason));
+        }
+        Steps::Segmented {
+            seg,
+            model,
+            audio_ms,
+        } => (seg, model, audio_ms),
+    };
 
     let version = transcript::next_version(conn, talk_id).await?;
     let key = transcript_key(talk_id, version);
     let json = transcript_json(
         talk_id,
         version,
-        &raw.model,
+        &model,
         &deps.hints.language,
-        raw.audio_ms,
+        audio_ms,
         &seg,
     );
     let hash = sha256_hex(json.as_bytes());
@@ -307,4 +394,31 @@ fn transcript_json(
 
 fn span_kind(kind: SpanKind) -> &'static str {
     kind.as_str()
+}
+
+/// `wt pipeline advance`: queues an `audio` job for every talk at `cleared`, keyed by its media
+/// route, so running it twice queues nothing new and a talk whose route changes gets a new job.
+/// Returns the talks queued.
+pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId>, AudioError> {
+    let mut queued = Vec::new();
+    for talk in job::cleared_talks(conn).await? {
+        let route = match feed::media_route(conn, talk).await? {
+            feed::MediaRoute::FeedEnclosure { url, .. } => format!("enclosure:{url}"),
+            feed::MediaRoute::None => "none".to_owned(),
+        };
+        let key = sha256_hex(route.as_bytes());
+        if job::enqueue(
+            conn,
+            JobKind::Audio,
+            Some(talk),
+            &key,
+            &serde_json::json!({}),
+        )
+        .await?
+        .is_some()
+        {
+            queued.push(talk);
+        }
+    }
+    Ok(queued)
 }

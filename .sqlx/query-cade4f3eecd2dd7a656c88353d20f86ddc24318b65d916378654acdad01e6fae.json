@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into citation (passage_id, talk_id, span_start, span_end, raw_text,\n                               work_locator_id, confidence, method)\n         select u.p, $1, u.s, u.e, u.raw, u.loc, u.conf::confidence, u.m\n         from unnest($2::uuid[], $3::int4[], $4::int4[], $5::text[], $6::uuid[], $7::text[],\n                     $8::text[]) as u(p, s, e, raw, loc, conf, m)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "Int4Array",
+        "Int4Array",
+        "TextArray",
+        "UuidArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cade4f3eecd2dd7a656c88353d20f86ddc24318b65d916378654acdad01e6fae"
+}

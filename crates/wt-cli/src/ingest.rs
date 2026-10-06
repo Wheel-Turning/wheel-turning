@@ -225,6 +225,9 @@ async fn run_worker(
             last_reap = Some(tokio::time::Instant::now());
         }
         let Some(claimed) = job::claim(&mut conn, kinds, name).await? else {
+            if let Some(stages) = stages {
+                stages.idle(&mut conn).await?;
+            }
             if drain {
                 return Ok(());
             }

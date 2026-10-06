@@ -243,3 +243,30 @@ pub async fn corrected_talks(conn: &mut PgConnection) -> Result<Vec<TalkId>, DbE
     .await?;
     Ok(rows.into_iter().map(TalkId::from).collect())
 }
+
+/// Up to `limit` talks waiting at `cleared`, in random order, with their titles: the sample for
+/// `wt segment sample`.
+pub async fn sample_cleared(
+    conn: &mut PgConnection,
+    limit: i64,
+) -> Result<Vec<(TalkId, String)>, DbError> {
+    let rows = sqlx::query!(
+        "select id, title from talk where state = 'cleared' order by random() limit $1",
+        limit
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (TalkId::from(r.id), r.title))
+        .collect())
+}
+
+/// A talk's title.
+pub async fn title(conn: &mut PgConnection, talk: TalkId) -> Result<Option<String>, DbError> {
+    Ok(
+        sqlx::query_scalar!("select title from talk where id = $1", talk.as_uuid())
+            .fetch_optional(&mut *conn)
+            .await?,
+    )
+}

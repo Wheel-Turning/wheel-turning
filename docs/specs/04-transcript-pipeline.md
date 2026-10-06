@@ -202,6 +202,18 @@ The index step, per talk, in one transaction:
 
 After a batch, run `ANALYZE passage`. HNSW search settings are applied per query in Spec 05. `wt reindex --talk <id> | --all [--model <name>]` reruns the index step from stored segments and the transcript JSON, which is how a new glossary version or embedding model is applied.
 
+Decisions of October 6, 2026, made while building the index step and the embedder:
+
+- `ort` loads ONNX Runtime at run time from `WT_ORT_DYLIB` (or `ORT_DYLIB_PATH`), version 1.22 or newer, so nothing is downloaded at build time and CI builds without it. `tokenizers` is built without its C and C++ parts. `scripts/export_models.py` runs with `uv run` and needs no PyTorch: bge-m3's repository ships an fp32 ONNX graph at the recorded revision, which the script quantizes to int8 weights with ONNX Runtime, checks against fp32 on a few invented sentences (cosine of at least 0.95), and records in `export.json` with file hashes. It prints the path of the ONNX Runtime library it installed. The reranker export comes with the `Reranker` in Spec 05.
+- The dense vector is the first token's final hidden state, normalized, as bge-m3 defines it.
+- A passage under 40 characters, such as a short answer of "Yes, exactly.", is left out rather than failing the talk on the database check; one over 1800 characters fails the job, since the chunk settings then need changing.
+- A citation's `raw_text` is its corrected words; its span is cut at the end of the passage holding its first word. A citation the resolver left `unresolved` is stored with method `llm`, since the model found it, and a citation whose first word is in no kept passage is dropped and counted in the job log.
+- `talk.content_hash` covers the passages, the citations and the embedding model. An `index` job on a `ready` talk with the same hash changes nothing; a `ready` talk being reindexed stays `ready`, serving its old passages until the new ones commit.
+- The worker runs `ANALYZE passage` when its queue empties after indexing at least one talk, and `wt reindex` runs it at the end.
+- Rerunning a stage on unchanged input changes no rows (CLAUDE.md rule 8). `audio` does nothing for a talk with a current transcript unless its job's payload has `"retranscribe": true`, which is how a new recognition model is applied. Every stage moves a talk only forward. `extract` records the hash of the text it read in the staging object and does not call the model again for the same text. `correct` and `resolve` queue `index` with the same input hash (the segment text and the staged citations), and `extract` queues `resolve` by the text it read.
+- `wt pipeline advance` (Spec 03) queues `audio` for each `cleared` talk keyed by its media route, so a talk whose route changes gets a new job; `wt pipeline retry --talk <id>` requeues the talk's latest dead job with fresh attempts and clears its `state_reason`.
+- `wt segment sample` picks `cleared` talks at random, or takes `--talk`, and writes to `data/segment-sample.html` by default, since the report holds teachers' words. The language model labels ambiguous windows as in the job, so the sample is charged to the cap. Student turns appear as time ranges only.
+
 ## Acceptance criteria
 
 M4 is done when every item below passes in CI with fakes, and one synthetic talk has run through a real worker, a real Postgres and real ONNX models.
@@ -216,10 +228,10 @@ M4 is done when every item below passes in CI with fakes, and one synthetic talk
 - [x] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `WT_LLM_REAL_DATA_OK` is not `true`. (`wt-extract` unit tests and `tests/client.rs`; real talks are marked `Real` in `wt-ingest/tests/textjobs.rs`.)
 - [x] The resolver gives `resolved` only for hand-list matches, gives `probable` for series-label and fuzzy model hints, and gives `unresolved` when a model hint matches no hand-listed locator. Precision of `resolved` is 100 percent on the fixture set. (`wt-extract/tests/resolve.rs`; the Postgres hand list in `wt-ingest/tests/textjobs.rs`.)
 - [x] Chunker golden tests: every passage is within `min_words` and `max_words` except an unmergeable tail, none crosses a segment boundary, timestamps are monotone, and output is identical across runs. (`wt-index/tests/chunker.rs`. The chunker takes one segment's words, so no passage can cross a segment; a tail merged within `merge_cap_words` may pass `max_words`, as rule 4 allows.)
-- [ ] The embedder returns 1024-dimension unit vectors that are identical across repeated runs on CPU within 1e-5.
-- [ ] A synthetic talk goes from `cleared` to `ready` through `wt worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
-- [ ] `wt export transcripts --format jsonl --out <dir>` writes the corrected segments of every consented `ready` talk for the Gate A notebook.
-- [ ] `wt segment sample --count 10` renders the segmentation report.
+- [x] The embedder returns 1024-dimension unit vectors that are identical across repeated runs on CPU within 1e-5. (`wt-ml/tests/onnx.rs`, ignored in CI, passed on October 6, 2026 on the owner's PC with the int8 export and ONNX Runtime 1.30.0: 23 texts in about 0.3 seconds. The export agrees with fp32 at a cosine of 0.986 or more with per-channel quantization, against 0.980 per tensor, so per channel is the default.)
+- [x] A synthetic talk goes from `cleared` to `ready` through `wt worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows. (`wt-ingest/tests/pipeline.rs` drives all five stages through the queue with fakes and reruns each one. On October 6, 2026 the real `wt worker --kinds correct,index` took a synthetic talk to `ready` on a fresh Postgres with the real bge-m3 export, 7 passages, and `wt reindex --all` then found it current. The real `audio` tools ran in `wt-ingest/tests/real_tools.rs`; `extract` waits for an API key.)
+- [x] `wt export transcripts --format jsonl --out <dir>` writes the corrected passages of every consented `ready` talk for the Gate A notebook, in the format of Spec 07: one line per passage, read through `servable_passage` (decision of October 6, 2026; Spec 04 said segments, Spec 07 passages). (`wt-cli/tests/commands.rs`.)
+- [x] `wt segment sample --count 10` renders the segmentation report. (The report's rendering is tested in `wt-cli`'s unit tests, and the command's refusal without `WT_WHISPER_CLI` in `wt-cli/tests/commands.rs`; the steps it runs are the `audio` job's, without persisting.)
 
 ## Language-model spend cap
 
