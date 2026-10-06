@@ -321,6 +321,45 @@ pub async fn fail(conn: &mut PgConnection, job: &Job, error: &str) -> Result<Fai
     Ok(outcome)
 }
 
+/// Talks waiting at `cleared`, for `wt pipeline advance`.
+pub async fn cleared_talks(conn: &mut PgConnection) -> Result<Vec<TalkId>, JobError> {
+    let rows =
+        sqlx::query_scalar!("select id from talk where state = 'cleared' order by created_at")
+            .fetch_all(&mut *conn)
+            .await?;
+    Ok(rows.into_iter().map(TalkId::from).collect())
+}
+
+/// Requeues the talk's most recent dead job with fresh attempts and clears the talk's
+/// `state_reason`, for `wt pipeline retry`. Returns the job's kind, or `None` when the talk
+/// has no dead job.
+pub async fn retry_dead(
+    conn: &mut PgConnection,
+    talk: TalkId,
+) -> Result<Option<JobKind>, JobError> {
+    let mut tx = conn.begin().await?;
+    let kind = sqlx::query_scalar!(
+        "update job set state = 'queued', attempts = 0, run_at = now(), last_error = null,
+                        finished_at = null, locked_by = null, locked_at = null
+         where id = (select id from job where talk_id = $1 and state = 'dead'
+                     order by updated_at desc, created_at desc limit 1)
+         returning kind",
+        talk.as_uuid()
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if kind.is_some() {
+        sqlx::query!(
+            "update talk set state_reason = null where id = $1",
+            talk.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(kind.as_deref().and_then(JobKind::parse))
+}
+
 /// Returns `running` jobs whose lock is older than `timeout` to `queued`, for a worker that
 /// died or lost its connection. A stale job that has used all its attempts goes `dead`
 /// instead, like a failed one, so a job that kills its worker every time cannot cycle forever

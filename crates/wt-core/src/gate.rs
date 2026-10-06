@@ -106,6 +106,32 @@ impl TalkState {
         Self::ALL.into_iter().find(|s| s.as_str() == value)
     }
 
+    /// The state's place in the pipeline, from `cleared` (0) to `ready`; none outside it.
+    pub fn pipeline_rank(self) -> Option<u8> {
+        Some(match self {
+            TalkState::Cleared => 0,
+            TalkState::Fetching => 1,
+            TalkState::Transcribing => 2,
+            TalkState::Diarizing => 3,
+            TalkState::Segmenting => 4,
+            TalkState::Correcting => 5,
+            TalkState::Extracting => 6,
+            TalkState::Resolving => 7,
+            TalkState::Indexing => 8,
+            TalkState::Ready => 9,
+            _ => return None,
+        })
+    }
+
+    /// Whether the talk is at `stage` or further along, so running that stage again must not
+    /// move it back (Spec 04: rerunning a stage on unchanged input changes no rows).
+    pub fn is_at_or_past(self, stage: PipelineState) -> bool {
+        match (self.pipeline_rank(), TalkState::from(stage).pipeline_rank()) {
+            (Some(a), Some(b)) => a >= b,
+            _ => false,
+        }
+    }
+
     /// Whether the state is at or beyond `cleared` and before the terminal states, which is
     /// where the database requires consent.
     pub fn is_past_gate(self) -> bool {
@@ -753,6 +779,10 @@ mod tests {
         for state in TalkState::ALL {
             assert_eq!(TalkState::parse(state.as_str()), Some(state));
         }
+        assert!(TalkState::Ready.is_at_or_past(PipelineState::Correcting));
+        assert!(TalkState::Correcting.is_at_or_past(PipelineState::Correcting));
+        assert!(!TalkState::Segmenting.is_at_or_past(PipelineState::Correcting));
+        assert!(!TalkState::NeedsReview.is_at_or_past(PipelineState::Fetching));
         assert!(TalkState::Cleared.is_past_gate());
         assert!(TalkState::Ready.is_past_gate());
         assert!(!TalkState::AwaitingConsent.is_past_gate());

@@ -19,6 +19,9 @@ use wt_db::transcript::{self, SegmentRow};
 use wt_extract::extract::{self, Staging};
 use wt_extract::resolve::{self, HandList};
 use wt_extract::{DataClass, LlmClient, LlmError};
+use wt_index::ChunkSettings;
+use wt_index::index::{self, IndexCitation, IndexSegment};
+use wt_ml::Embedder;
 use wt_registry::glossary::Glossary;
 
 use crate::config::Series;
@@ -47,6 +50,12 @@ pub enum TextJobError {
     /// A connection error.
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+    /// The index step refused.
+    #[error(transparent)]
+    Index(#[from] wt_index::IndexError),
+    /// The embedder failed.
+    #[error(transparent)]
+    Ml(#[from] wt_ml::MlError),
 }
 
 /// How a text job ended.
@@ -139,6 +148,31 @@ fn join(words: &[(Word, (usize, usize))]) -> String {
         .join(" ")
 }
 
+/// Moves the talk to `stage` unless it is there or further along already, so a rerun never
+/// moves a talk back.
+async fn advance_forward(
+    conn: &mut sqlx::PgConnection,
+    talk: &wt_core::gate::Talk<wt_core::gate::Consented>,
+    stage: PipelineState,
+) -> Result<(), TextJobError> {
+    if !talk.state.is_at_or_past(stage) {
+        TalkRepo::advance(conn, talk, stage).await?;
+    }
+    Ok(())
+}
+
+/// Hash of the corrected text of every segment.
+fn corrected_hash(fixed: &[Vec<(Word, (usize, usize))>]) -> String {
+    let texts: Vec<String> = fixed.iter().map(|ws| join(ws)).collect();
+    sha256_hex(texts.join("\u{1e}").as_bytes())
+}
+
+/// The `index` job's input hash: the corrected segment text and the staged citations. `correct`
+/// and `resolve` both queue `index` with it, so a rerun of either queues nothing new.
+fn index_input(texts_hash: &str, staging: &[u8]) -> String {
+    sha256_hex(format!("{texts_hash}{}", sha256_hex(staging)).as_bytes())
+}
+
 /// The data class of a talk: `Synthetic` for fixtures, `Real` otherwise.
 pub async fn data_class(
     conn: &mut sqlx::PgConnection,
@@ -165,7 +199,7 @@ pub async fn run_correct(
         Ok(t) => t,
         Err(gate) => return Ok(TextOutcome::NotCleared(gate)),
     };
-    TalkRepo::advance(conn, &talk, PipelineState::Correcting).await?;
+    advance_forward(conn, &talk, PipelineState::Correcting).await?;
     let (words, transcript_hash) = stored_words(conn, objects, talk_id).await?;
     let segments = transcript::segments(conn, talk_id).await?;
     let fixed = corrected(glossary, &words, &segments);
@@ -187,12 +221,13 @@ pub async fn run_correct(
             suggested += 1;
         }
     }
-    if suggested > 0 {
+    if suggested > 0 && objects.get(&suggestions_key(talk_id))?.as_deref() != Some(rows.as_bytes())
+    {
         objects.put(&suggestions_key(talk_id), rows.as_bytes())?;
     }
 
     let texts: Vec<String> = fixed.iter().map(|ws| join(ws)).collect();
-    let corrected_hash = sha256_hex(texts.join("\u{1e}").as_bytes());
+    let corrected_hash = corrected_hash(&fixed);
     let staged = objects.get(&staging_key(talk_id))?;
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     for (seg, text) in segments.iter().zip(&texts) {
@@ -203,12 +238,11 @@ pub async fn run_correct(
     let next = match &staged {
         // Citations record stored-word positions, so a re-correction needs only a new index.
         Some(bytes) => {
-            let key = sha256_hex(format!("{corrected_hash}{}", sha256_hex(bytes)).as_bytes());
             job::enqueue(
                 &mut tx,
                 JobKind::Index,
                 Some(talk_id),
-                &key,
+                &index_input(&corrected_hash, bytes),
                 &serde_json::json!({}),
             )
             .await?;
@@ -245,22 +279,32 @@ pub async fn run_extract(
         Ok(t) => t,
         Err(gate) => return Ok(TextOutcome::NotCleared(gate)),
     };
-    TalkRepo::advance(conn, &talk, PipelineState::Extracting).await?;
+    advance_forward(conn, &talk, PipelineState::Extracting).await?;
     let class = data_class(conn, talk_id).await?;
     let (words, _) = stored_words(conn, objects, talk_id).await?;
     let segments = transcript::segments(conn, talk_id).await?;
-    let all: Vec<(Word, (usize, usize))> = corrected(glossary, &words, &segments)
-        .into_iter()
-        .flatten()
-        .collect();
-    let staging = extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await?;
-    let json = serde_json::to_vec(&staging).unwrap_or_default();
-    objects.put(&staging_key(talk_id), &json)?;
+    let fixed = corrected(glossary, &words, &segments);
+    let input = corrected_hash(&fixed);
+    let unchanged = objects
+        .get(&staging_key(talk_id))?
+        .and_then(|b| serde_json::from_slice::<Staging>(&b).ok())
+        .is_some_and(|s| s.input_hash.as_deref() == Some(input.as_str()));
+    // When the same text was extracted before, the staged citations stand and the model is not
+    // called again.
+    if !unchanged {
+        let all: Vec<(Word, (usize, usize))> = fixed.into_iter().flatten().collect();
+        let mut staging =
+            extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await?;
+        staging.input_hash = Some(input.clone());
+        let json = serde_json::to_vec(&staging).unwrap_or_default();
+        objects.put(&staging_key(talk_id), &json)?;
+    }
     job::enqueue(
         conn,
         JobKind::Resolve,
         Some(talk_id),
-        &sha256_hex(&json),
+        // The extracted text, not the staging object, which `resolve` writes into.
+        &input,
         &serde_json::json!({}),
     )
     .await?;
@@ -280,7 +324,7 @@ pub async fn run_resolve(
         Ok(t) => t,
         Err(gate) => return Ok(TextOutcome::NotCleared(gate)),
     };
-    TalkRepo::advance(conn, &talk, PipelineState::Resolving).await?;
+    advance_forward(conn, &talk, PipelineState::Resolving).await?;
     let key = staging_key(talk_id);
     let bytes = objects
         .get(&key)?
@@ -312,12 +356,16 @@ pub async fn run_resolve(
         c.resolution = Some(r);
     }
     let json = serde_json::to_vec(&staging).unwrap_or_default();
-    objects.put(&key, &json)?;
+    if json != bytes {
+        objects.put(&key, &json)?;
+    }
+    let segments = transcript::segments(conn, talk_id).await?;
+    let texts: Vec<&str> = segments.iter().map(|s| s.text.as_str()).collect();
     job::enqueue(
         conn,
         JobKind::Index,
         Some(talk_id),
-        &sha256_hex(&json),
+        &index_input(&sha256_hex(texts.join("\u{1e}").as_bytes()), &json),
         &serde_json::json!({}),
     )
     .await?;
@@ -397,4 +445,113 @@ impl HandList for PgHandList {
             .map_err(hand_list_error)?
             .map(|id| id.to_string()))
     }
+}
+
+/// How an index job went, for the log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    /// Passages written; none when the talk was already current.
+    pub passages: usize,
+    /// Citations written.
+    pub citations: usize,
+    /// Short passages left out.
+    pub skipped_short: usize,
+    /// Citations in no kept passage.
+    pub dropped_citations: usize,
+    /// Whether anything was written.
+    pub written: bool,
+}
+
+/// The `index` job: chunks the corrected words of each segment, embeds the passages, maps the
+/// staged citations onto them and, in one transaction, replaces the talk's passages and moves it
+/// to `ready`. A talk already `ready` with the same content hash is left as it is.
+pub async fn run_index(
+    conn: &mut sqlx::PgConnection,
+    talk_id: TalkId,
+    objects: &dyn ObjectStore,
+    glossary: &Glossary,
+    chunk: &ChunkSettings,
+    embedder: &dyn Embedder,
+) -> Result<Result<Indexed, GateError>, TextJobError> {
+    let talk = match TalkRepo::authorize(conn, talk_id).await? {
+        Ok(t) => t,
+        Err(gate) => return Ok(Err(gate)),
+    };
+    let (words, _) = stored_words(conn, objects, talk_id).await?;
+    let segments = transcript::segments(conn, talk_id).await?;
+    let index_segments: Vec<IndexSegment> = corrected(glossary, &words, &segments)
+        .into_iter()
+        .zip(&segments)
+        .map(|(words, seg)| IndexSegment {
+            id: seg.id,
+            kind: seg.kind.clone(),
+            words,
+        })
+        .collect();
+    let staging: Option<Staging> = match objects.get(&staging_key(talk_id))? {
+        Some(bytes) => Some(
+            serde_json::from_slice(&bytes)
+                .map_err(|e| TextJobError::Missing(format!("staging for {talk_id}: {e}")))?,
+        ),
+        None => None,
+    };
+    let citations: Vec<IndexCitation> = staging
+        .iter()
+        .flat_map(|s| &s.citations)
+        .map(|c| {
+            let r = c.resolution.as_ref();
+            let locator = r
+                .and_then(|r| r.work_locator_id.as_deref())
+                .and_then(|id| id.parse().ok());
+            IndexCitation {
+                w0: c.w0,
+                w1: c.w1,
+                confidence: match (r, locator) {
+                    (Some(r), Some(_)) => r.confidence.clone(),
+                    _ => "unresolved".to_owned(),
+                },
+                // Found by the model and matched to nothing: the database names the finder.
+                method: r
+                    .and_then(|r| r.method.clone())
+                    .filter(|_| locator.is_some())
+                    .unwrap_or_else(|| "llm".to_owned()),
+                work_locator_id: locator,
+            }
+        })
+        .collect();
+    let plan = index::plan(&index_segments, &citations, chunk, embedder.model_id())?;
+    let mut indexed = Indexed {
+        passages: plan.passages.len(),
+        citations: plan.citations.len(),
+        skipped_short: plan.skipped_short,
+        dropped_citations: plan.dropped_citations,
+        written: false,
+    };
+    if index::is_current(conn, talk_id.as_uuid(), &plan.content_hash).await? {
+        return Ok(Ok(indexed));
+    }
+    // A ready talk keeps serving its old passages until the new ones commit.
+    advance_forward(conn, &talk, PipelineState::Indexing).await?;
+    let texts: Vec<String> = plan
+        .passages
+        .iter()
+        .map(|p| p.passage.text.clone())
+        .collect();
+    let vectors = embedder.embed(&texts).await?;
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    index::write(
+        &mut tx,
+        talk_id.as_uuid(),
+        &plan,
+        &vectors,
+        embedder.model_id(),
+        embedder.dim(),
+    )
+    .await?;
+    advance_forward(&mut tx, &talk, PipelineState::Ready).await?;
+    tx.commit().await?;
+    indexed.written = true;
+    tracing::info!(talk = %talk_id, passages = indexed.passages, citations = indexed.citations,
+                   model = embedder.model_id(), "talk indexed");
+    Ok(Ok(indexed))
 }

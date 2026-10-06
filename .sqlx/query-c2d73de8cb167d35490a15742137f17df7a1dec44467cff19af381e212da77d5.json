@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\", talk_id as \"talk_id!\",\n                  teacher_id as \"teacher_id!\", start_ms as \"start_ms!\", text as \"text!\"\n           from servable_passage order by talk_id, ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "talk_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "teacher_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "teacher_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "start_ms!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "text!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "c2d73de8cb167d35490a15742137f17df7a1dec44467cff19af381e212da77d5"
+}

@@ -100,6 +100,9 @@ pub struct Staging {
     pub citations: Vec<StagedCitation>,
     /// Citations discarded because their words were not in the window.
     pub discarded: usize,
+    /// Hash of the corrected text extracted from, so a rerun on the same text skips the model.
+    #[serde(default)]
+    pub input_hash: Option<String>,
 }
 
 /// Lowercase letters and digits: the form citations are matched in, so case, spacing and
@@ -184,6 +187,7 @@ pub async fn extract(
         practice_period: None,
         citations: Vec::new(),
         discarded: 0,
+        input_hash: None,
     };
     for window in windows(words.len()) {
         let text = words[window.0..window.1]

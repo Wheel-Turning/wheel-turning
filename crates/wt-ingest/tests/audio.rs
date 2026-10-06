@@ -207,7 +207,7 @@ async fn run(
         actor: "test",
     };
     let mut conn = fx.pool.acquire().await.unwrap();
-    audio::run(&mut conn, talk, &deps).await
+    audio::run(&mut conn, talk, &deps, false).await
 }
 
 async fn state(pool: &PgPool, talk: TalkId) -> (String, Option<String>) {

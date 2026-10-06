@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into passage (id, talk_id, segment_id, segment_kind, ordinal, start_ms, end_ms,\n                              text, word_count, content_hash, embedding, embedding_model)\n         select u.id, $1, u.seg, u.kind::segment_kind, u.ord, u.s, u.e, u.txt, u.wc, u.h,\n                u.emb::vector, $12\n         from unnest($2::uuid[], $3::uuid[], $4::text[], $5::int4[], $6::int4[], $7::int4[],\n                     $8::text[], $9::int4[], $10::text[], $11::text[])\n              as u(id, seg, kind, ord, s, e, txt, wc, h, emb)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "UuidArray",
+        "TextArray",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array",
+        "TextArray",
+        "Int4Array",
+        "TextArray",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "80e80047a1ecb6bd91e306ab589aa582be3884a96e58a4cdc3554cd36eaef6f4"
+}

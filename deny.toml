@@ -7,6 +7,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # paste is unmaintained, not vulnerable: a compile-time macro crate that tokenizers uses
+    # (0.23, and the 1.0 release candidates too). No runtime code. Recheck when tokenizers moves.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained build-time macro crate used by tokenizers" },
+]
 
 [licenses]
 version = 2

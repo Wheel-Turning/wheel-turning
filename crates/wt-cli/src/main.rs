@@ -11,6 +11,7 @@ use wt_core::ids::TalkId;
 use wt_core::telemetry::{LogOutput, init_logging};
 
 mod commands;
+mod index_cmds;
 mod ingest;
 mod rights;
 mod source;
@@ -77,6 +78,24 @@ enum Command {
         #[command(subcommand)]
         command: ExclusionCommand,
     },
+    /// Moves cleared talks into the pipeline and retries failed stages (Spec 03).
+    Pipeline {
+        #[command(subcommand)]
+        command: PipelineCommand,
+    },
+    /// Reruns the index step from stored segments, with a new glossary or embedding model
+    /// (Spec 04).
+    Reindex(ReindexArgs),
+    /// Exports for the evaluation notebooks (Spec 07).
+    Export {
+        #[command(subcommand)]
+        command: ExportCommand,
+    },
+    /// Segmentation tools (Spec 04).
+    Segment {
+        #[command(subcommand)]
+        command: SegmentCommand,
+    },
     /// The glossary (Spec 04, Glossary correction).
     Glossary {
         #[command(subcommand)]
@@ -91,6 +110,69 @@ enum Command {
     Teacher {
         #[command(subcommand)]
         command: TeacherCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PipelineCommand {
+    /// Queues an audio job for every talk at cleared.
+    Advance,
+    /// Requeues a talk's dead job with fresh attempts.
+    Retry {
+        /// The talk.
+        #[arg(long)]
+        talk: TalkId,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+#[command(group(clap::ArgGroup::new("which").required(true).args(["talk", "all"])))]
+struct ReindexArgs {
+    /// A talk to reindex. Repeat for several.
+    #[arg(long)]
+    talk: Vec<TalkId>,
+    /// Every talk with corrected segments.
+    #[arg(long)]
+    all: bool,
+    /// The embedding model directory under WT_MODEL_DIR, instead of WT_EMBED_MODEL.
+    #[arg(long)]
+    model: Option<String>,
+    /// The directory holding pipeline.toml.
+    #[arg(long, default_value = "config")]
+    config_dir: PathBuf,
+}
+
+#[derive(Debug, Subcommand)]
+enum ExportCommand {
+    /// Writes passages.jsonl: one line per servable passage with its id, opaque talk and
+    /// teacher ids, start time and text. No names, titles or audio.
+    Transcripts {
+        /// Output format.
+        #[arg(long, value_parser = ["jsonl"], default_value = "jsonl")]
+        format: String,
+        /// The directory to write into. Keep it under data/, which git ignores.
+        #[arg(long, default_value = "data/export")]
+        out: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SegmentCommand {
+    /// Runs fetch, recognition, diarization and segmentation on cleared talks without storing
+    /// anything, and writes an HTML timeline per talk.
+    Sample {
+        /// How many cleared talks to pick at random.
+        #[arg(long, default_value_t = 10)]
+        count: i64,
+        /// Specific talks instead of a random pick. Repeat for several.
+        #[arg(long)]
+        talk: Vec<TalkId>,
+        /// The report file. Keep it under data/: it holds teachers' words.
+        #[arg(long, default_value = "data/segment-sample.html")]
+        out: PathBuf,
+        /// The directory holding pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
     },
 }
 
@@ -478,7 +560,7 @@ enum IngestCommand {
 
 #[derive(Debug, Args)]
 struct WorkerArgs {
-    /// Job kinds to run, comma separated: classify, audio, correct, extract, resolve.
+    /// Job kinds to run, comma separated: classify, audio, correct, extract, resolve, index.
     #[arg(long, value_delimiter = ',', value_parser = parse_kind, default_value = "classify")]
     kinds: Vec<wt_db::job::JobKind>,
     /// Workers in this process.
@@ -634,9 +716,18 @@ fn parse_status(value: &str) -> Result<ConsentStatus, String> {
     })
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<ExitCode> {
+fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
+    // The dispatch future holds every command's state, more than the 1 MB main-thread stack a
+    // Windows debug build gets, so it lives on the heap.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("starting the async runtime")?
+        .block_on(Box::pin(run(cli)))
+}
+
+async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let config = Config::from_env().context("loading configuration")?;
     // Reports go to stdout, so logs must not.
     init_logging(config.env, &config.log, LogOutput::Stderr)?;
@@ -940,6 +1031,49 @@ async fn main() -> anyhow::Result<ExitCode> {
                 rights::due(&pool().await?, today).await?;
             }
         },
+        Command::Pipeline { command } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            match command {
+                PipelineCommand::Advance => {
+                    let queued = wt_ingest::audio::advance_cleared(&mut conn).await?;
+                    commands::print_json(
+                        &serde_json::json!({ "audio_jobs_queued": queued.len() }),
+                    )?;
+                }
+                PipelineCommand::Retry { talk } => {
+                    match wt_db::job::retry_dead(&mut conn, talk).await? {
+                        Some(kind) => commands::print_json(
+                            &serde_json::json!({ "talk": talk, "requeued": kind.as_str() }),
+                        )?,
+                        None => anyhow::bail!("talk {talk} has no dead job to retry"),
+                    }
+                }
+            }
+        }
+        Command::Reindex(args) => {
+            let talks = if args.all { None } else { Some(args.talk) };
+            index_cmds::reindex(&pool().await?, &config, &args.config_dir, talks, args.model)
+                .await?;
+        }
+        Command::Export {
+            command: ExportCommand::Transcripts { format: _, out },
+        } => {
+            index_cmds::export_transcripts(&pool().await?, &out).await?;
+        }
+        Command::Segment {
+            command:
+                SegmentCommand::Sample {
+                    count,
+                    talk,
+                    out,
+                    config_dir,
+                },
+        } => {
+            let talks = if talk.is_empty() { None } else { Some(talk) };
+            index_cmds::segment_sample(&pool().await?, &config, &config_dir, count, talks, &out)
+                .await?;
+        }
         Command::Glossary { command } => match command {
             GlossaryCommand::Import { file, by } => {
                 let text = std::fs::read_to_string(&file)

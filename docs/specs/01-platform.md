@@ -60,6 +60,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
 | `WT_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
 | `WT_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `WT_MODEL_DIR` |
+| `WT_ORT_DYLIB` | unset | ONNX Runtime library, 1.22 or newer, loaded at run time (unset: `ORT_DYLIB_PATH` or the search path) |
 | `WT_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
 | `WT_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
 | `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction. See Spec 04. |
