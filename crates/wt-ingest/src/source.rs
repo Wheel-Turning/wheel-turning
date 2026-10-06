@@ -118,6 +118,14 @@ pub enum IngestError {
     /// The source offers no media download for this talk.
     #[error("the source offers no media for this talk")]
     MediaNotAvailable,
+    /// Free disk space is under twice the download's size.
+    #[error("not enough free disk: {needed} bytes needed, {free} free")]
+    NoDiskSpace {
+        /// Bytes needed.
+        needed: u64,
+        /// Bytes free.
+        free: u64,
+    },
 }
 
 /// A source of talks. Every adapter implements it.

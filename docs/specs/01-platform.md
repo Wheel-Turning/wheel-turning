@@ -76,6 +76,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_DIARIZE_URL` | `http://127.0.0.1:8090` | Base URL of the diarization sidecar |
 | `HF_TOKEN` | none | Hugging Face access token for the pyannote model, secret. Read by the diarization sidecar, not by the loader. See Spec 04. |
 | `WT_WHISPER_MODEL` | none | Path to the whisper large-v3 model file for ASR |
+| `WT_WHISPER_CLI` | none | Path to whisper.cpp's `whisper-cli`, built for the worker's hardware, which the worker runs as a subprocess (Spec 04, decision of October 5, 2026) |
 | `GGML_VK_DISABLE_COOPMAT` | none | Set to 1 on the transcription worker. Read by whisper.cpp's Vulkan backend, not by the loader. Without it Vulkan produces garbage on the Arc 140V. See Spec 04. |
 | `WT_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
 | `WT_ALERT_TOPIC_ARN` | none | SNS topic for alerts to the owner. Empty turns alerts off. See Spec 08. |

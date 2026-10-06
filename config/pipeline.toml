@@ -64,6 +64,27 @@ chant_phrase_min_share = 0.30
 talk_min_wpm = 90.0
 talk_min_ttr = 0.35
 talk_max_chant_share = 0.10
+# Lines of the service chants, Japanese and English, to tune on the sample.
+chant_phrases = [
+    "namu kie butsu",
+    "namu kie ho",
+    "namu kie so",
+    "maka hannya haramita shingyo",
+    "kanjizai bosa gyo jin hannya haramita",
+    "gya tei gya tei hara gya tei",
+    "hara so gya tei bo ji sowaka",
+    "ji ho san shi i shi fu",
+    "shi son bu sa mo ko sa",
+    "mo ko ho ja ho ro mi",
+    "all buddhas throughout space and time",
+    "all honored ones bodhisattva mahasattvas",
+    "wisdom beyond wisdom maha prajna paramita",
+    "gate gate paragate parasamgate bodhi svaha",
+    "beings are numberless i vow to free them",
+    "delusions are inexhaustible i vow to end them",
+    "dharma gates are boundless i vow to enter them",
+    "the buddha way is unsurpassable i vow to become it",
+]
 
 [chunk]
 # Passages (Spec 04, Chunking, embedding and indexing).
@@ -73,3 +94,12 @@ max_words = 220
 hard_break_ms = 8000
 min_words = 60
 merge_cap_words = 260
+
+[asr]
+# Speech recognition (Spec 04, Transcription). whisper.cpp's whisper-cli runs from
+# WT_WHISPER_CLI with the model in WT_WHISPER_MODEL; large-v3 on the Vulkan build, per
+# docs/asr-benchmark.md.
+language = "en"
+beam_size = 5
+use_gpu = true
+threads = 8

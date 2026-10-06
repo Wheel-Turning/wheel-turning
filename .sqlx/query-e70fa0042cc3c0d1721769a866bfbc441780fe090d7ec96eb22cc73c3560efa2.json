@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk t set state = 'needs_review', state_reason = $2\n           from talk before\n           where t.id = $1 and before.id = t.id\n             and t.state in ('cleared','fetching','transcribing','diarizing','segmenting')\n           returning before.state::text as \"state!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e70fa0042cc3c0d1721769a866bfbc441780fe090d7ec96eb22cc73c3560efa2"
+}

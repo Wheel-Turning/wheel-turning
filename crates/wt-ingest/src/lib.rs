@@ -1,12 +1,14 @@
 //! The `SourceAdapter` trait, the Vimeo adapter, deduplication and talk classification
 //! (Spec 03). Discovery records metadata only; nothing here fetches media.
 
+pub mod audio;
 pub mod classify;
 pub mod completeness;
 pub mod config;
 pub mod dates;
 pub mod feedmatch;
 pub mod http;
+pub mod media;
 pub mod pipeline;
 pub mod podcast;
 pub mod report;

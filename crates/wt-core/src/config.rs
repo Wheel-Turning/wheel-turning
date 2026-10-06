@@ -117,6 +117,8 @@ pub struct Config {
     pub diarize_url: String,
     /// `WT_WHISPER_MODEL`, the path to the whisper large-v3 model file.
     pub whisper_model: Option<PathBuf>,
+    /// `WT_WHISPER_CLI`, the whisper.cpp `whisper-cli` executable built for this machine.
+    pub whisper_cli: Option<PathBuf>,
     /// `WT_SITE_DANA_URL`, the site's own donation page.
     pub site_dana_url: Option<String>,
     /// `WT_LOG`, the log filter.
@@ -207,6 +209,7 @@ impl Config {
             diarize_url: get("WT_DIARIZE_URL")
                 .unwrap_or_else(|| "http://127.0.0.1:8090".to_owned()),
             whisper_model: get("WT_WHISPER_MODEL").map(PathBuf::from),
+            whisper_cli: get("WT_WHISPER_CLI").map(PathBuf::from),
             site_dana_url: get("WT_SITE_DANA_URL"),
             log,
         })
