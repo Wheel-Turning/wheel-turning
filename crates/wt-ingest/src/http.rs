@@ -71,9 +71,14 @@ pub const MIN_DELAY: Duration = Duration::from_secs(1);
 
 /// A client with the project's `User-Agent` and a 30-second timeout.
 pub fn client() -> Result<reqwest::Client, IngestError> {
+    client_with_timeout(Duration::from_secs(30))
+}
+
+/// A client with the project's `User-Agent` and the given timeout, for long downloads.
+pub fn client_with_timeout(timeout: Duration) -> Result<reqwest::Client, IngestError> {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(30))
+        .timeout(timeout)
         .build()
         .map_err(|e| IngestError::Http {
             url: String::new(),

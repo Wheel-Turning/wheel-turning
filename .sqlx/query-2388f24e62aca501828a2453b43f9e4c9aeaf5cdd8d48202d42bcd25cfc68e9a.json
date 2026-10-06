@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update transcript set is_current = false where talk_id = $1 and is_current",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2388f24e62aca501828a2453b43f9e4c9aeaf5cdd8d48202d42bcd25cfc68e9a"
+}

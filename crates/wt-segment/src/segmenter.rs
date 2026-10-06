@@ -51,6 +51,8 @@ pub struct SegmentSettings {
     pub talk_min_ttr: f64,
     /// ...and under this share of words inside chant phrases.
     pub talk_max_chant_share: f64,
+    /// Lines of the service's chants, matched word by word, ignoring case and punctuation.
+    pub chant_phrases: Vec<String>,
 }
 
 impl Default for SegmentSettings {
@@ -67,6 +69,29 @@ impl Default for SegmentSettings {
             talk_min_wpm: 90.0,
             talk_min_ttr: 0.35,
             talk_max_chant_share: 0.10,
+            chant_phrases: [
+                "namu kie butsu",
+                "namu kie ho",
+                "namu kie so",
+                "maka hannya haramita shingyo",
+                "kanjizai bosa gyo jin hannya haramita",
+                "gya tei gya tei hara gya tei",
+                "hara so gya tei bo ji sowaka",
+                "ji ho san shi i shi fu",
+                "shi son bu sa mo ko sa",
+                "mo ko ho ja ho ro mi",
+                "all buddhas throughout space and time",
+                "all honored ones bodhisattva mahasattvas",
+                "wisdom beyond wisdom maha prajna paramita",
+                "gate gate paragate parasamgate bodhi svaha",
+                "beings are numberless i vow to free them",
+                "delusions are inexhaustible i vow to end them",
+                "dharma gates are boundless i vow to enter them",
+                "the buddha way is unsurpassable i vow to become it",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         }
     }
 }

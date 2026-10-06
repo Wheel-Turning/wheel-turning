@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select max(version) from transcript where talk_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "61e85d3cbf854fca51b1eee15bb3747ecdc8dc47a07d743e2c8982d9965263c8"
+}

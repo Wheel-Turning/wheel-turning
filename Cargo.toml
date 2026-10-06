@@ -16,6 +16,9 @@ wt-core = { path = "crates/wt-core" }
 wt-db = { path = "crates/wt-db" }
 wt-registry = { path = "crates/wt-registry" }
 wt-ingest = { path = "crates/wt-ingest" }
+wt-asr = { path = "crates/wt-asr" }
+wt-segment = { path = "crates/wt-segment" }
+wt-index = { path = "crates/wt-index" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"

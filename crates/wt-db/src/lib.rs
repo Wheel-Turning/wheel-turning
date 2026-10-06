@@ -20,6 +20,7 @@ pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod transcript;
 
 /// Every migration in `migrations/`, embedded at compile time.
 pub static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
