@@ -131,18 +131,29 @@ pub async fn discover(
 /// until nothing is due. Each worker reaps stale locks once a minute.
 pub async fn worker(
     pool: &PgPool,
+    config: &Config,
     config_dir: &Path,
     kinds: &[JobKind],
     concurrency: usize,
     drain: bool,
 ) -> anyhow::Result<()> {
-    if let Some(missing) = kinds.iter().find(|k| **k != JobKind::Classify) {
-        bail!("no handler for {missing} jobs yet: this build runs classify");
-    }
     let cfg = ClassifyConfig::load(
         &config_dir.join("pipeline.toml"),
         &config_dir.join("series.toml"),
     )?;
+    let stage_kinds: Vec<JobKind> = kinds
+        .iter()
+        .copied()
+        .filter(|k| *k != JobKind::Classify)
+        .collect();
+    let stages = if stage_kinds.is_empty() {
+        None
+    } else {
+        Some(std::sync::Arc::new(
+            crate::stages::Stages::build(pool, config, config_dir, &cfg, &stage_kinds, "wt worker")
+                .await?,
+        ))
+    };
     let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
     let lock_timeout =
         Duration::from_secs(u64::try_from(cfg.settings.job_lock_timeout_s).unwrap_or(7200));
@@ -152,11 +163,26 @@ pub async fn worker(
 
     let mut tasks = tokio::task::JoinSet::new();
     for n in 0..concurrency.max(1) {
-        let (pool, cfg, sources, kinds) =
-            (pool.clone(), cfg.clone(), sources.clone(), kinds.to_vec());
+        let (pool, cfg, sources, kinds, stages) = (
+            pool.clone(),
+            cfg.clone(),
+            sources.clone(),
+            kinds.to_vec(),
+            stages.clone(),
+        );
         let name = format!("{host}-{}-{n}", std::process::id());
         tasks.spawn(async move {
-            run_worker(&pool, &cfg, &sources, &kinds, &name, lock_timeout, drain).await
+            run_worker(
+                &pool,
+                &cfg,
+                &sources,
+                stages.as_deref(),
+                &kinds,
+                &name,
+                lock_timeout,
+                drain,
+            )
+            .await
         });
     }
     tokio::select! {
@@ -173,10 +199,12 @@ pub async fn worker(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_worker(
     pool: &PgPool,
     cfg: &ClassifyConfig,
     sources: &SourcesFile,
+    stages: Option<&crate::stages::Stages>,
     kinds: &[JobKind],
     name: &str,
     lock_timeout: Duration,
@@ -203,10 +231,35 @@ async fn run_worker(
             tokio::time::sleep(IDLE).await;
             continue;
         };
-        match pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name).await {
-            Ok(outcome) => {
-                tracing::info!(job = %claimed.id, kind = %claimed.kind, outcome = ?outcome, "job done");
+        let result: anyhow::Result<()> = if claimed.kind == JobKind::Classify {
+            pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name)
+                .await
+                .map(|outcome| {
+                    tracing::info!(job = %claimed.id, kind = %claimed.kind, outcome = ?outcome, "job done");
+                })
+                .map_err(Into::into)
+        } else {
+            match stages {
+                None => Err(anyhow::anyhow!("no handler for {} jobs", claimed.kind)),
+                Some(stages) => match stages.run(&mut conn, &claimed).await {
+                    Ok(crate::stages::Ran::Done(outcome)) => {
+                        job::succeed(&mut conn, &claimed).await?;
+                        tracing::info!(job = %claimed.id, kind = %claimed.kind, %outcome, "job done");
+                        Ok(())
+                    }
+                    Ok(crate::stages::Ran::Capped(reason)) => {
+                        let until = wt_db::llm::next_month(chrono::Utc::now());
+                        job::defer(&mut conn, &claimed, until, "cap_reached").await?;
+                        tracing::warn!(job = %claimed.id, kind = %claimed.kind, %reason, %until,
+                                       "language-model cap reached; job waits for next month");
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                },
             }
+        };
+        match result {
+            Ok(()) => {}
             Err(e) => {
                 let error = format!("{e:#}");
                 match job::fail(&mut conn, &claimed, &error).await? {

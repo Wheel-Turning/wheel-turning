@@ -36,6 +36,32 @@ pub struct GlossaryTerm {
     pub variants: Vec<String>,
 }
 
+/// A glossary file such as `scripts/seed_glossary.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlossaryFile {
+    /// The terms.
+    #[serde(rename = "term", default)]
+    pub terms: Vec<GlossaryTerm>,
+}
+
+impl GlossaryFile {
+    /// Parses a glossary file, refusing blank canonical forms.
+    pub fn parse(text: &str, origin: &str) -> Result<Self, RegistryError> {
+        let file: GlossaryFile = toml::from_str(text).map_err(|e| RegistryError::Parse {
+            path: origin.to_owned(),
+            source: Box::new(e),
+        })?;
+        if let Some(blank) = file.terms.iter().find(|t| t.canonical.trim().is_empty()) {
+            return Err(RegistryError::Invalid(format!(
+                "{origin}: a term has a blank canonical form (variants {:?})",
+                blank.variants
+            )));
+        }
+        Ok(file)
+    }
+}
+
 /// A possible variant the glossary does not know yet, for a person to review. Never applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
@@ -179,10 +205,25 @@ impl Glossary {
     /// several words, they share that time evenly. Punctuation after the last replaced word is
     /// kept.
     pub fn apply(&self, words: &[Word]) -> Vec<Word> {
+        self.apply_mapped(words)
+            .into_iter()
+            .map(|(w, _)| w)
+            .collect()
+    }
+
+    /// Like [`Glossary::apply`], with each corrected word's source: the first and one past the
+    /// last index of the input words it came from. Positions in the uncorrected list stay
+    /// valid whatever the glossary, so citations are stored against them.
+    pub fn apply_mapped(&self, words: &[Word]) -> Vec<(Word, (usize, usize))> {
         let mut out = Vec::with_capacity(words.len());
         let mut next = 0;
         for (first, end, replacement) in self.matches(words) {
-            out.extend_from_slice(&words[next..first]);
+            out.extend(
+                words[next..first]
+                    .iter()
+                    .enumerate()
+                    .map(|(k, w)| (w.clone(), (next + k, next + k + 1))),
+            );
             let span = &words[first..end];
             let (start_ms, end_ms) = (span[0].start_ms, span[span.len() - 1].end_ms);
             let prob = span.iter().map(|w| w.prob).fold(f32::INFINITY, f32::min);
@@ -205,20 +246,28 @@ impl Glossary {
                 if last {
                     text.push_str(&trailing);
                 }
-                out.push(Word {
-                    text,
-                    start_ms: start_ms + each * k,
-                    end_ms: if last {
-                        end_ms
-                    } else {
-                        start_ms + each * (k + 1)
+                out.push((
+                    Word {
+                        text,
+                        start_ms: start_ms + each * k,
+                        end_ms: if last {
+                            end_ms
+                        } else {
+                            start_ms + each * (k + 1)
+                        },
+                        prob,
                     },
-                    prob,
-                });
+                    (first, end),
+                ));
             }
             next = end;
         }
-        out.extend_from_slice(&words[next..]);
+        out.extend(
+            words[next..]
+                .iter()
+                .enumerate()
+                .map(|(k, w)| (w.clone(), (next + k, next + k + 1))),
+        );
         out
     }
 

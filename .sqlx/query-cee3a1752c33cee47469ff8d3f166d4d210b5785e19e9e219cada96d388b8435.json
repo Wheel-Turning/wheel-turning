@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update glossary_term set variants = $2 where canonical = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cee3a1752c33cee47469ff8d3f166d4d210b5785e19e9e219cada96d388b8435"
+}

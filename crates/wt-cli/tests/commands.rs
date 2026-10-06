@@ -361,7 +361,7 @@ fn config_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wt-config-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
-    for file in ["pipeline.toml", "series.toml"] {
+    for file in ["pipeline.toml", "series.toml", "llm_prices.toml"] {
         std::fs::copy(repo.join(file), dir.join(file)).unwrap();
     }
     std::fs::write(
@@ -410,14 +410,14 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
     let refused = fx.wt(&[
         "worker",
         "--kinds",
-        "audio",
+        "index",
         "--drain",
         "--config-dir",
         dir_arg,
     ]);
     assert!(!refused.status.success());
     assert!(
-        stderr(&refused).contains("no handler for audio jobs"),
+        stderr(&refused).contains("no handler for index jobs"),
         "{}",
         stderr(&refused)
     );
@@ -933,4 +933,104 @@ async fn notice_draft_fills_the_template_records_it_and_sends_nothing() {
         .collect();
     assert_eq!(events, ["request_drafted", "request_sent", "suspended"]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn glossary_import_llm_cap_and_stage_workers_check_their_settings() {
+    let fx = start().await;
+    let seed = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/seed_glossary.toml");
+    let first = fx.json(&[
+        "glossary",
+        "import",
+        "--file",
+        seed.to_str().unwrap(),
+        "--by",
+        "test",
+    ]);
+    assert!(first["added"].as_u64().unwrap() >= 20, "{first}");
+    assert_eq!(first["talks_requeued"], 0);
+    let again = fx.json(&[
+        "glossary",
+        "import",
+        "--file",
+        seed.to_str().unwrap(),
+        "--by",
+        "test",
+    ]);
+    assert_eq!(
+        (again["added"].as_u64(), again["variants_added"].as_u64()),
+        (Some(0), Some(0))
+    );
+    assert_eq!(
+        first["glossary_version"], again["glossary_version"],
+        "importing twice changes nothing"
+    );
+    let added = fx.json(&[
+        "glossary",
+        "add",
+        "--canonical",
+        "Dogen",
+        "--kind",
+        "name",
+        "--variant",
+        "dough jen",
+        "--by",
+        "test",
+    ]);
+    assert_eq!(added["variants_added"], 1);
+    assert_ne!(added["glossary_version"], again["glossary_version"]);
+
+    let shown = fx.json(&["llm", "cap", "show"]);
+    assert_eq!(shown["cap_usd"], 25.0);
+    let set = fx.json(&["llm", "cap", "set", "60", "--by", "owner"]);
+    assert_eq!(
+        (set["cap_usd"].as_f64(), set["month_to_date_usd"].as_f64()),
+        (Some(60.0), Some(0.0))
+    );
+
+    // A stage worker refuses to start without what it needs.
+    let dir = config_dir();
+    let cfg = dir.to_str().unwrap();
+    let index = fx.wt(&["worker", "--kinds", "index", "--drain", "--config-dir", cfg]);
+    assert!(!index.status.success());
+    assert!(stderr(&index).contains("index"), "{}", stderr(&index));
+    let audio = Command::new(env!("CARGO_BIN_EXE_wt"))
+        .args(["worker", "--kinds", "audio", "--drain", "--config-dir", cfg])
+        .env("DATABASE_URL", fx.db.url().expose())
+        .env("WT_LOG", "warn")
+        .env_remove("WT_ENV")
+        .env_remove("WT_WHISPER_CLI")
+        .env("ANTHROPIC_API_KEY", "fixture-key")
+        .env("WT_LLM_MODEL", "claude-haiku-4-5")
+        .output()
+        .unwrap();
+    assert!(!audio.status.success());
+    assert!(
+        stderr(&audio).contains("WT_WHISPER_CLI"),
+        "{}",
+        stderr(&audio)
+    );
+    let extract = Command::new(env!("CARGO_BIN_EXE_wt"))
+        .args([
+            "worker",
+            "--kinds",
+            "extract",
+            "--drain",
+            "--config-dir",
+            cfg,
+        ])
+        .env("DATABASE_URL", fx.db.url().expose())
+        .env("WT_LOG", "warn")
+        .env_remove("WT_ENV")
+        .env("ANTHROPIC_API_KEY", "fixture-key")
+        .env_remove("WT_LLM_MODEL")
+        .env_remove("WT_LLM_MODEL_EXTRACT")
+        .output()
+        .unwrap();
+    assert!(!extract.status.success());
+    assert!(
+        stderr(&extract).contains("WT_LLM_MODEL"),
+        "{}",
+        stderr(&extract)
+    );
 }

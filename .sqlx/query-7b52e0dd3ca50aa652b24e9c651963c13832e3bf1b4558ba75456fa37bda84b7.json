@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce((sv.raw->>'synthetic')::boolean, false) as \"synthetic!\", t.series, t.part\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "synthetic!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "series",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "series"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "part",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "part"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "7b52e0dd3ca50aa652b24e9c651963c13832e3bf1b4558ba75456fa37bda84b7"
+}

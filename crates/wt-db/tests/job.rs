@@ -458,3 +458,54 @@ async fn finishing_a_stage_and_enqueueing_the_next_commit_together() {
     .unwrap();
     assert!(finished);
 }
+
+#[tokio::test]
+async fn a_capped_job_waits_for_next_month_without_using_an_attempt() {
+    let fx = common::start().await;
+    let id = enqueue(&fx.pool, JobKind::Extract, "capped-input")
+        .await
+        .unwrap();
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let claimed = job::claim(&mut conn, &[JobKind::Extract], "w")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claimed.id, id);
+    let until = wt_db::llm::next_month(Utc::now());
+    job::defer(&mut conn, &claimed, until, "cap_reached")
+        .await
+        .unwrap();
+    let (state, attempts, run_at, error): (
+        String,
+        i32,
+        sqlx::types::chrono::DateTime<Utc>,
+        String,
+    ) = sqlx::query_as("select state::text, attempts, run_at, last_error from job where id = $1")
+        .bind(id.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (state.as_str(), attempts, error.as_str()),
+        ("queued", 0, "cap_reached")
+    );
+    assert_eq!(run_at, until, "the first of next month");
+    assert!(
+        job::claim(&mut conn, &[JobKind::Extract], "w")
+            .await
+            .unwrap()
+            .is_none(),
+        "not due"
+    );
+    // Raising the cap releases it at once.
+    assert_eq!(
+        wt_db::llm::set_cap(&mut conn, 60.0, "owner").await.unwrap(),
+        1
+    );
+    assert!(
+        job::claim(&mut conn, &[JobKind::Extract], "w")
+            .await
+            .unwrap()
+            .is_some()
+    );
+}

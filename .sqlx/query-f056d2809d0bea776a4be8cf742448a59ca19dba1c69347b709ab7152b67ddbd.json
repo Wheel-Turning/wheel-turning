@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select canonical, kind, variants from glossary_term order by canonical",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "canonical",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "glossary_term",
+            "name": "canonical"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "glossary_term",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "variants",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "glossary_term",
+            "name": "variants"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f056d2809d0bea776a4be8cf742448a59ca19dba1c69347b709ab7152b67ddbd"
+}

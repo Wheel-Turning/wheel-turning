@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into llm_alert (month) values ($1) on conflict (month) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03ea038841ed3f5476b5b5213c547c892d1a0e9bf2d034c7dbda54ef73c926dc"
+}

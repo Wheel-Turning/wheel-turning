@@ -138,3 +138,20 @@ fn the_version_follows_the_content_only() {
     assert_ne!(a.version(), more.version(), "a new variant changes it");
     assert_eq!(a.version().len(), 64);
 }
+
+#[test]
+fn each_corrected_word_knows_its_source_words() {
+    let g = glossary();
+    let input = words("as doe gen said");
+    let mapped = g.apply_mapped(&input);
+    let sources: Vec<(String, (usize, usize))> =
+        mapped.into_iter().map(|(w, src)| (w.text, src)).collect();
+    assert_eq!(
+        sources,
+        [
+            ("as".to_owned(), (0, 1)),
+            ("Dogen".to_owned(), (1, 3)),
+            ("said".to_owned(), (3, 4)),
+        ]
+    );
+}

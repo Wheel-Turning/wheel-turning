@@ -117,6 +117,12 @@ The correction function is pure: `apply_glossary(words, glossary) -> corrected w
 
 Teacher aliases are not rewritten in text. Aliases serve named-teacher detection in Spec 05.
 
+Decisions of October 5, 2026, made while building the correct step:
+
+- `apply_mapped` returns, with each corrected word, the range of stored (uncorrected) teacher words it came from. Staged citations record positions in the stored words, which no glossary change moves, so after a glossary change `correct` re-runs and queues `index` directly, reusing the staged citations, and `extract` and `resolve` do not run again. A talk not yet extracted continues to `extract` as usual.
+- A glossary change re-queues `correct` for exactly the talks whose corrected text it changes: `wt glossary import` and `wt glossary add` recompute each corrected talk's segments with the new glossary and compare them with the stored text. The `correct` job's input hash is the transcript's hash and the glossary version.
+- Near misses go to one file per talk, `transcripts/<talk_id>/glossary_suggestions.csv`, under the talk's transcript prefix so a takedown removes them with the transcript. No English word list is loaded yet, so every near miss that sounds like and nearly spells a glossary term is suggested; suggestions are never applied, so this only makes the file longer. `scripts/seed_glossary.toml` holds the starting terms and some guessed variants, to grow from the suggestions.
+
 ## Extraction and citation resolution
 
 `LlmClient` in `wt-extract` is the only code that calls the Claude API.
@@ -132,10 +138,10 @@ pub enum DataClass { Synthetic, Real }
 
 Rules for the client:
 
-1. It calls the Messages API at `https://api.anthropic.com/v1/messages` with `x-api-key`, an `anthropic-version` header, and temperature 0. It forces structured output by defining one tool whose `input_schema` is the JSON Schema of `T` and setting `tool_choice` to that tool. The tool input is parsed with `serde`. A parse failure gets one repair retry and then fails the job.
+1. It calls the Messages API at `https://api.anthropic.com/v1/messages` with `x-api-key` and an `anthropic-version` header. It constrains the reply with structured outputs, `output_config: {format: {type: "json_schema", schema}}`, where the schema is that of `T` closed with `additionalProperties: false` and without the numeric and length bounds the API does not accept. The reply is parsed with `serde`. A parse failure gets one repair retry and then fails the job. Decision of October 5, 2026: the earlier rule forced one tool with `tool_choice`, which Claude Sonnet 5.5, Opus 5.5 and Fable 5.1 reject with a 400, and they also reject sampling settings, so temperature 0 is sent only to models that `config/llm_prices.toml` marks `sampling = true` (Claude Haiku 4.5 today).
 2. A request with `DataClass::Real` is refused unless `WT_LLM_REAL_DATA_OK=true`. Talks loaded by the fixture loader carry `raw.synthetic = true` in `source_video` and use `Synthetic`.
 3. Logs record the stage, model, token counts and a hash of the request. They never contain transcript text.
-4. Rate limits and 5xx responses retry with exponential backoff up to three times inside the call. The model name comes only from `WT_LLM_MODEL`.
+4. Rate limits and 5xx responses retry with exponential backoff up to three times inside the call. The model comes from the stage's setting, falling back to `WT_LLM_MODEL` (see the spend cap below). Labeling ambiguous segment windows is stage `classify` and uses the extraction model (decision of October 5, 2026).
 
 Extraction runs over the corrected segments in windows of up to 6,000 words with 200 words of overlap and returns this per window:
 
@@ -149,7 +155,7 @@ pub struct RawCitation {
 }
 ```
 
-The code verifies that `text` is a substring of the window under whitespace and case normalization and discards anything that is not. The model's offsets are never used. The code finds the word range itself. Discard counts are logged per talk. Verified citations are saved with word ranges in the staging object `citations/<talk_id>.json` in S3, which the index step consumes once passages exist.
+The code verifies that `text` is a substring of the window under whitespace and case normalization and discards anything that is not. Punctuation is ignored too, since recognition punctuates freely (decision of October 5, 2026). The model's offsets are never used. The code finds the word range itself. Discard counts are logged per talk. Verified citations are saved with word ranges in the staging object `citations/<talk_id>.json` in S3, which the index step consumes once passages exist.
 
 Resolution assigns one of three confidence levels, in this order of precedence:
 
@@ -159,6 +165,8 @@ Resolution assigns one of three confidence levels, in this order of precedence:
 4. Anything else is `unresolved`, stored with its raw text and no locator.
 
 The model never creates a locator. A hint that matches nothing in the hand list becomes `unresolved`. For talks in labeled series, the resolver is scored against the series label as ground truth.
+
+Decisions of October 5, 2026, made while building the resolver: text, hints and context are compared after the normalization of Spec 03's rule 1 (lowercase, punctuation as spaces, spaces collapsed), with labels and aliases normalized the same way; the context is the 20 stored words either side of the citation. `config/series.toml` gives a series a `locator` template such as `genjokoan:{part}` where its parts name sections of a text (Genjokoan paragraphs, Blue Cliff Record cases, Song of the Grass Hut verses; not Uji or Bendowa, whose parts are talks). A series-label match needs that locator in the hand list, which Spec 08's imports load, so until then generic citations stay `unresolved`. Resolution is written into the staging object beside each citation.
 
 ## Chunking, embedding and indexing
 
@@ -204,9 +212,9 @@ M4 is done when every item below passes in CI with fakes, and one synthetic talk
 - [x] After an `audio` job finishes in any outcome, nothing remains under `WT_SCRATCH_DIR` for that talk. (`wt-ingest/tests/audio.rs`: success, a failed step, a talk held for review, no media.)
 - [x] The stored transcript JSON contains no words from a non-teacher speaker. A test with a `FakeDiarizer` that returns a student turn proves it, and also checks no `qa_student` row can exist. (`wt-ingest/tests/audio.rs`.)
 - [x] Segmenter tests on synthetic timelines cover: silence of 120 seconds or more becomes `sitting`; a chant window is labeled `chant`; a student turn is dropped and the following teacher turn is `qa_teacher` with a null `question_note`; a second speaker at 35 percent or more sends the talk to `needs_review`. (`wt-segment/tests/segmenter.rs` covers all four in the segmenter; `wt-ingest/tests/audio.rs` checks the stored null `question_note` and the move to `needs_review`.)
-- [ ] The glossary replaces known variants with canonical forms, preserves timestamps across multi-word replacements, writes near misses to the suggestions file without applying them, and a glossary change requeues `correct` and `index` for the affected talks only.
-- [ ] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `WT_LLM_REAL_DATA_OK` is not `true`.
-- [ ] The resolver gives `resolved` only for hand-list matches, gives `probable` for series-label and fuzzy model hints, and gives `unresolved` when a model hint matches no hand-listed locator. Precision of `resolved` is 100 percent on the fixture set.
+- [x] The glossary replaces known variants with canonical forms, preserves timestamps across multi-word replacements, writes near misses to the suggestions file without applying them, and a glossary change requeues `correct` and `index` for the affected talks only. (`wt-registry/tests/glossary.rs`, `wt-ingest/tests/textjobs.rs`.)
+- [x] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `WT_LLM_REAL_DATA_OK` is not `true`. (`wt-extract` unit tests and `tests/client.rs`; real talks are marked `Real` in `wt-ingest/tests/textjobs.rs`.)
+- [x] The resolver gives `resolved` only for hand-list matches, gives `probable` for series-label and fuzzy model hints, and gives `unresolved` when a model hint matches no hand-listed locator. Precision of `resolved` is 100 percent on the fixture set. (`wt-extract/tests/resolve.rs`; the Postgres hand list in `wt-ingest/tests/textjobs.rs`.)
 - [x] Chunker golden tests: every passage is within `min_words` and `max_words` except an unmergeable tail, none crosses a segment boundary, timestamps are monotone, and output is identical across runs. (`wt-index/tests/chunker.rs`. The chunker takes one segment's words, so no passage can cross a segment; a tail merged within `merge_cap_words` may pass `max_words`, as rule 4 allows.)
 - [ ] The embedder returns 1024-dimension unit vectors that are identical across repeated runs on CPU within 1e-5.
 - [ ] A synthetic talk goes from `cleared` to `ready` through `wt worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
@@ -236,7 +244,9 @@ Estimates at list prices of October 3, 2026. Sources disagree about the current 
 
 Default models: a Haiku-class model for extraction, classification and vision, and a Sonnet-class model for synthesis and verification, because those two stages decide whether an invented claim reaches a page. Expect about $20 a month in steady use and under $60 in the first month.
 
-Migration `0020_llm_usage.sql`:
+The price table's models and prices were checked against the provider's pricing page on October 5, 2026: Claude Haiku 4.5 at $1 and $5, Claude Sonnet 5.5 at $2 and $10, and Claude Opus 5.5 at $4 and $20 per million input and output tokens. The ledger also keeps the owner's cap from `wt llm cap set` (`llm_setting`) and the month's 80 percent alert (`llm_alert`), so the alert goes out once a month however many workers see it. Alerts are logged as warnings until the project has an SNS client for `WT_ALERT_TOPIC_ARN`.
+
+Migration `0020_llm_usage.sql` (merged as `0018_llm_usage.sql`, with `llm_setting` and `llm_alert`; see `docs/migrations.md`):
 
 ```sql
 create table llm_usage (
@@ -253,11 +263,11 @@ create index llm_usage_month_idx on llm_usage (created_at);
 
 Acceptance criteria for the spend cap:
 
-- [ ] Each call records tokens and an estimated cost, and the month-to-date sum matches the sum of the rows.
-- [ ] A fake client at 80 percent publishes one alert, and at 100 percent refuses further calls.
-- [ ] A refused ingestion job returns to the queue with a run time on the first of the next month, and `wt llm cap set` releases it.
-- [ ] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry.
-- [ ] A stage whose model setting is empty uses `WT_LLM_MODEL`, and the loader fails at startup if neither is set when a language-model stage is enabled.
+- [x] Each call records tokens and an estimated cost, and the month-to-date sum matches the sum of the rows. (`wt-extract/tests/client.rs`.)
+- [x] A fake client at 80 percent publishes one alert, and at 100 percent refuses further calls. (`wt-extract/tests/client.rs`; the alert is logged until there is an SNS client.)
+- [x] A refused ingestion job returns to the queue with a run time on the first of the next month, and `wt llm cap set` releases it. (`wt-db/tests/job.rs`; the worker defers `audio` and `extract` jobs the cap refuses, without using an attempt.)
+- [ ] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry. (With synthesis in M6: the client already returns `CapReached` for any stage.)
+- [x] A stage whose model setting is empty uses `WT_LLM_MODEL`, and the loader fails at startup if neither is set when a language-model stage is enabled. (`wt-core` config tests; `wt worker --kinds extract` refuses to start in `wt-cli/tests/commands.rs`.)
 
 ## Transcription model and where it runs
 

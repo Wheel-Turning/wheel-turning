@@ -15,6 +15,7 @@ pub mod report;
 pub mod robots;
 pub mod rss;
 pub mod source;
+pub mod textjobs;
 pub mod vimeo;
 
 pub use source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
