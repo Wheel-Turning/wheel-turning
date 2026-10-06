@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(soundex("Rupert"), "R163");
         assert_eq!(soundex("Ashcraft"), "A261");
         assert_eq!(damerau_levenshtein("shikantaza", "shikantasa"), 1);
-        assert_eq!(damerau_levenshtein("ab", "ba"), 1);
+        assert_eq!(damerau_levenshtein("ac", "ca"), 1);
         assert_eq!(damerau_levenshtein("", "abc"), 3);
     }
 }
