@@ -11,3 +11,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wt-core.workspace = true
+serde.workspace = true
+unicode-segmentation = "1"
+
+[dev-dependencies]
+toml = "1"

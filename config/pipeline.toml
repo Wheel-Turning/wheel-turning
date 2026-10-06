@@ -47,3 +47,29 @@ type_patterns = [
 # "mandate", the owner's recorded decision to rely on it, or "license" or "permission" when that
 # evidence is in hand, which the command then needs as --evidence.
 default_basis_for_new_sources = "mandate"
+
+[segment]
+# Segmentation (Spec 04, Diarization and segmentation). The window thresholds are starting
+# points to tune on the ten-video sample (decision of October 5, 2026). A window with no words
+# is "other"; chant is slow, repetitive speech or a high share of chant phrases; talk is
+# brisk, varied speech; everything else goes to the language model.
+multi_speaker_share = 0.35
+sitting_silence_s = 120
+window_s = 60
+min_span_s = 20
+align_nearest_ms = 500
+chant_max_wpm = 60.0
+chant_max_ttr = 0.35
+chant_phrase_min_share = 0.30
+talk_min_wpm = 90.0
+talk_min_ttr = 0.35
+talk_max_chant_share = 0.10
+
+[chunk]
+# Passages (Spec 04, Chunking, embedding and indexing).
+sentence_pause_ms = 1200
+target_words = 140
+max_words = 220
+hard_break_ms = 8000
+min_words = 60
+merge_cap_words = 260

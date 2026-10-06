@@ -4,6 +4,8 @@
 //! `dg registry import`, and speaker resolution, which matches teacher aliases in a talk's title
 //! and description. `wt-db` stores what these produce.
 
+pub mod glossary;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 

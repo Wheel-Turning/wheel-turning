@@ -23,7 +23,7 @@ Audio is the most sensitive artifact in the system, so its handling is strict.
 2. After fetch, `ffmpeg` extracts mono 16 kHz WAV (`-vn -ac 1 -ar 16000`) and the original video file is deleted at once. Only audio stays, and only until the end of the segment step.
 3. The worker checks free disk before fetch and refuses the job unless free space is at least twice the source file size.
 4. The raw ASR output contains every speaker's words, so it stays in scratch and is never uploaded. Only the filtered, teacher-only transcript is persisted. This is how student speech is kept out of every store.
-5. A failed attempt leaves its scratch directory in place for the retry to reuse if the intermediate files match the input hash, with a time limit of `scratch_resume_ttl_h` (default 6) after which the reaper deletes it. A job that goes `dead` deletes its scratch directory.
+5. Struck (decision of October 5, 2026): a failed attempt does not keep its scratch for the retry. Rule 1 and the acceptance items delete scratch on every outcome, as the PRD's "delete the audio" asks, so a retry fetches and transcribes again. `ScratchDir::create` also clears a directory a crashed worker left behind, and `scratch::leftovers` lists any such directory for the audit.
 6. Nothing in the code base writes audio or video anywhere else. A CI test greps for audio file extensions in write paths outside `wt-core::scratch`.
 
 ## Transcription
@@ -90,6 +90,13 @@ The segmenter in `wt-segment` turns words and turns into labeled spans. It is de
 5. Question and answer. After the first `talk` span, any run of non-teacher speech is a student turn and is labeled `qa_student` in memory. A teacher turn that follows a student turn is labeled `qa_teacher`. Student turns are removed from the word list before anything is persisted.
 6. Persist. Only `talk` and `qa_teacher` spans become `segment` rows. Chant, announcement, sitting and other spans are recorded in the `spans` array of the transcript JSON for the audit and are not stored as text rows. `question_note` is always null in v1. The PRD allows omitting the question and that is the safer choice.
 7. Cleanup. The `audio` handler writes the filtered transcript JSON, inserts the `transcript` and `segment` rows in one transaction, and then `finish()` deletes scratch.
+
+Decisions of October 5, 2026, made while building the segmenter:
+
+- It runs in two phases so it stays a pure function. `plan` aligns, finds sitting, labels windows by rule, picks the teacher and returns the ambiguous windows; the caller has those labeled and `finish` builds spans and segments. The text of an ambiguous window holds only the teacher's words, so student speech is not sent to the language model either.
+- The window rules, in `[segment]` of `config/pipeline.toml`: a window with no words is `other`. It is `chant` below `chant_max_wpm` (60) words a minute with a type-token ratio below `chant_max_ttr` (0.35), or with at least `chant_phrase_min_share` (0.30) of its words in chant phrases. It is `talk` at `talk_min_wpm` (90) or more with a type-token ratio of at least `talk_min_ttr` (0.35) and under `talk_max_chant_share` (0.10) chant phrases. Anything else is ambiguous. These are starting points to tune on the ten-video sample.
+- "Outside chanting" in step 2 means outside the windows the rules call chant, since the teacher is chosen before ambiguous windows are labeled. A recording with no aligned speech goes to `needs_review` with reason `no_speech`.
+- Step 5 counts non-teacher speech as a student turn only inside a `talk` or `other` stretch after the first talk begins. Non-teacher speech before the first talk, or during chant or announcements, is simply dropped. A teacher answer, `qa_teacher`, lasts until the next student turn or the end of its stretch, and the teacher's words in an `other` stretch that answer a student are `qa_teacher` too. Student turns are kept in memory as time ranges for the sample report and never appear in the persisted `spans`.
 
 `wt segment sample --count 10 --out report.html` picks ten cleared talks, runs steps 1 to 5 without persisting, and writes an HTML timeline per talk showing labeled spans with the first words of each. It is the tool for the PRD's ten-video segmentation check on talks that have passed the gate.
 
@@ -168,7 +175,7 @@ The chunker in `wt-index` is a pure function from corrected words to passages. D
 1. Input is the corrected word list of one `talk` or `qa_teacher` segment. Passages never cross a segment boundary.
 2. Sentences come from Unicode sentence segmentation over the corrected text, and a pause of `sentence_pause_ms` (default 1200) between words also ends a sentence.
 3. Sentences are packed greedily into passages. A passage closes when it reaches `target_words` (default 140) and is never allowed past `max_words` (default 220). A pause of `hard_break_ms` (default 8000) also closes a passage.
-4. A final passage shorter than `min_words` (default 60) merges into the previous one if the result stays within `merge_cap_words` (default 260), and otherwise is kept as is. The database check on character length is the last guard.
+4. A final passage shorter than `min_words` (default 60) merges into the previous one if the result stays within `merge_cap_words` (default 260), and otherwise is kept as is. A hard break starts a new stretch, and each stretch's final passage is a final passage here: it merges only within its stretch, never across the pause (decision of October 5, 2026). The database check on character length is the last guard.
 5. There is no overlap between passages in v1.
 6. `start_ms` is the start of the first word and `end_ms` is the end of the last word.
 7. The output is deterministic, and each passage has a `content_hash` over its text and offsets.
@@ -190,14 +197,14 @@ M4 is done when every item below passes in CI with fakes, and one synthetic talk
 
 - [ ] `SourceAdapter` gains `fetch_media` and `fetch_captions`, taking a `&Talk<Consented>` (Spec 03). With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts. (Moved from M3, decision of October 5, 2026.)
 - [ ] With no usable media route (Spec 03, Seattle Soto Zen sources item 2), a talk stays at `needs_review` with reason `no_media` and nothing is fetched. (Moved from M3, decision of October 5, 2026.)
-- [ ] `ScratchGuard` deletes scratch on success, on a returned error and on panic. A test injects each failure.
+- [x] `ScratchGuard` deletes scratch on success, on a returned error and on panic. A test injects each failure. (`ScratchDir` in `wt-core::scratch`; a repository guard also fails on an audio file written outside it.)
 - [ ] After an `audio` job finishes in any outcome, nothing remains under `WT_SCRATCH_DIR` for that talk.
 - [ ] The stored transcript JSON contains no words from a non-teacher speaker. A test with a `FakeDiarizer` that returns a student turn proves it, and also checks no `qa_student` row can exist.
-- [ ] Segmenter tests on synthetic timelines cover: silence of 120 seconds or more becomes `sitting`; a chant window is labeled `chant`; a student turn is dropped and the following teacher turn is `qa_teacher` with a null `question_note`; a second speaker at 35 percent or more sends the talk to `needs_review`.
+- [ ] Segmenter tests on synthetic timelines cover: silence of 120 seconds or more becomes `sitting`; a chant window is labeled `chant`; a student turn is dropped and the following teacher turn is `qa_teacher` with a null `question_note`; a second speaker at 35 percent or more sends the talk to `needs_review`. (`wt-segment/tests/segmenter.rs` covers all four in the segmenter; the null `question_note` and the `needs_review` move are checked with the `audio` job, which persists them.)
 - [ ] The glossary replaces known variants with canonical forms, preserves timestamps across multi-word replacements, writes near misses to the suggestions file without applying them, and a glossary change requeues `correct` and `index` for the affected talks only.
 - [ ] Extraction discards a fabricated citation that is not a substring of the window. `DataClass::Real` is refused when `WT_LLM_REAL_DATA_OK` is not `true`.
 - [ ] The resolver gives `resolved` only for hand-list matches, gives `probable` for series-label and fuzzy model hints, and gives `unresolved` when a model hint matches no hand-listed locator. Precision of `resolved` is 100 percent on the fixture set.
-- [ ] Chunker golden tests: every passage is within `min_words` and `max_words` except an unmergeable tail, none crosses a segment boundary, timestamps are monotone, and output is identical across runs.
+- [x] Chunker golden tests: every passage is within `min_words` and `max_words` except an unmergeable tail, none crosses a segment boundary, timestamps are monotone, and output is identical across runs. (`wt-index/tests/chunker.rs`. The chunker takes one segment's words, so no passage can cross a segment; a tail merged within `merge_cap_words` may pass `max_words`, as rule 4 allows.)
 - [ ] The embedder returns 1024-dimension unit vectors that are identical across repeated runs on CPU within 1e-5.
 - [ ] A synthetic talk goes from `cleared` to `ready` through `wt worker`, `servable_passage` returns its passages, and rerunning every stage changes no rows.
 - [ ] `wt export transcripts --format jsonl --out <dir>` writes the corrected segments of every consented `ready` talk for the Gate A notebook.

@@ -1,4 +1,9 @@
-//! The `Diarizer` client, segment labels and student-speech removal.
-//!
-//! Placeholder created in M0 so the workspace layout from Spec 00 exists. The milestone that
-//! needs this crate fills it in.
+//! The `Diarizer` client, segment labels and student-speech removal (Spec 04, Diarization and
+//! segmentation).
+
+pub mod segmenter;
+
+pub use segmenter::{
+    Label, MissingLabel, Plan, Review, SegmentDraft, SegmentSettings, Segmentation, Span, SpanKind,
+    Turn, Window, plan,
+};
