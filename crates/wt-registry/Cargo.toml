@@ -11,6 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wt-core.workspace = true
+serde_json.workspace = true
 aho-corasick = "1"
 serde.workspace = true
 thiserror.workspace = true

@@ -11,3 +11,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wt-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+toml = "1"

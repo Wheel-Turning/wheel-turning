@@ -1,4 +1,6 @@
-//! The chunker, embedding and the index writer.
-//!
-//! Placeholder created in M0 so the workspace layout from Spec 00 exists. The milestone that
-//! needs this crate fills it in.
+//! The chunker and the index step (Spec 04, Chunking, embedding and indexing). This crate and
+//! the takedown routine are the only code that reads the `passage` table directly.
+
+pub mod chunker;
+
+pub use chunker::{ChunkSettings, Passage, chunk};
