@@ -12,7 +12,7 @@ workspace = true
 
 [features]
 # Starts a throwaway pgvector Postgres in Docker for integration tests in this and other crates.
-test-support = ["dep:testcontainers"]
+test-support = ["dep:testcontainers", "dep:tokio"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
@@ -23,6 +23,7 @@ serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 testcontainers = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 wt-db = { path = ".", features = ["test-support"] }
