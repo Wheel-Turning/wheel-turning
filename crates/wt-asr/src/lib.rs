@@ -106,6 +106,10 @@ pub struct AsrSettings {
     /// clip it raised large-v3's word error rate from 1.9% to 8.8% on Vulkan and from 1.6% to
     /// 59.6% on OpenVINO (October 6, 2026), and the glossary pass corrects terms afterwards.
     pub glossary_prompt: bool,
+    /// Tokens of earlier text whisper-cli conditions each window on (`-mc`); negative leaves
+    /// whisper's default, all of it. 0: with context, large-v3 looped an invented sentence ten
+    /// times on a synthetic talk, and without it did not (October 6, 2026).
+    pub max_context: i32,
 }
 
 impl Default for AsrSettings {
@@ -116,6 +120,7 @@ impl Default for AsrSettings {
             use_gpu: true,
             threads: 8,
             glossary_prompt: false,
+            max_context: 0,
         }
     }
 }
@@ -130,6 +135,7 @@ impl WhisperCli {
             threads: settings.threads,
             beam_size: settings.beam_size,
             use_gpu: settings.use_gpu,
+            max_context: settings.max_context,
         }
     }
 }
@@ -147,6 +153,8 @@ pub struct WhisperCli {
     pub beam_size: u32,
     /// Whether to use the GPU.
     pub use_gpu: bool,
+    /// `-mc`, when not negative.
+    pub max_context: i32,
 }
 
 impl WhisperCli {
@@ -169,6 +177,9 @@ impl WhisperCli {
         }
         if !self.use_gpu {
             cmd.arg("-ng");
+        }
+        if self.max_context >= 0 {
+            cmd.args(["-mc", &self.max_context.to_string()]);
         }
         cmd
     }

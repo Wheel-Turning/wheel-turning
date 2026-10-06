@@ -162,6 +162,7 @@ impl BenchEngine for WhisperEngine {
             threads: self.settings.threads,
             beam_size: self.settings.beam_size,
             use_gpu: setup.use_gpu,
+            max_context: self.settings.max_context,
         };
         let stem = scratch.file(&format!("bench-{}-{}", setup.name, model.name))?;
         let mut cmd = cli.command(wav, &stem, hints);

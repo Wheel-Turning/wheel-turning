@@ -167,13 +167,14 @@ The build scripts, runner, models and results are in `.bench/` in the primary ch
 - `accuracy/extract.py` and `accuracy/reference_ch3.txt`: the chapter text and the corrected reference.
 - `accuracy/score.py`: the word error rate and term scoring. `accuracy/scores.jsonl` holds the results.
 
-## October 6, 2026: the glossary prompt, and what was decided
+## October 6, 2026: the glossary prompt, context, and what was decided
 
 The two runs below measure `wt asr benchmark`, the command Spec 04 asks for, on the same clip and reference as October 4. The first passed the glossary to `whisper-cli` as its initial prompt, as the worker then did; the second ran the two GPU setups without it.
 
 - **The prompt hurts `large-v3`.** On Vulkan with coopmat off its word error rate rose from 1.93% without the prompt to 8.82% with it, and its speed fell from 2.72 to 1.99 times real time. On the OpenVINO GPU route it rose from 1.59% to 59.55%, a transcript that repeats and wanders. `distil-large-v3` changed little either way, and still missed most terms of art.
 - **Decision (owner, October 6, 2026): the prompt is off.** `glossary_prompt = false` under `[asr]` in `config/pipeline.toml` is the default, and Spec 04's glossary pass corrects known mis-hearings after transcription. `--prompt` and `--no-prompt` on the benchmark override the setting for comparisons.
-- **Speed.** Without the prompt `large-v3` on Vulkan measured 2.72 times real time, under the rule's threshold of 3 and below October 4's 3.26. These runs came after more than an hour of continuous load, so the PC was likely running hot. **Decision (owner, October 6, 2026): keep the October 4 choice**, `large-v3` on Vulkan with coopmat off for the whole corpus on this PC, and measure the real-time factor again on the first real talks of the full run.
+- **Speed.** Without the prompt `large-v3` on Vulkan measured 2.72 times real time, under the rule's threshold of 3 and below October 4's 3.26. These runs came after more than an hour of continuous load, so the PC was likely running hot; the last run, rested and with `-mc 0`, measured 3.18. **Decision (owner, October 6, 2026): keep the October 4 choice**, `large-v3` on Vulkan with coopmat off for the whole corpus on this PC, and measure the real-time factor again on the first real talks of the full run.
+- **The worker's real run looped.** On a synthetic talk (invented text, spoken by Windows' speech synthesizer), the worker's `large-v3` on Vulkan inserted an invented sentence ten times over, 93 words, with every other word right but one. Run again with `-mc 0` (`--max-context 0`), so that each window is not conditioned on the text before it, the same audio gave exactly the script's 409 words with 3 substitutions, in the same 49 seconds. On the benchmark clip `-mc 0` lowered `large-v3`'s word error rate to 1.18% (from 1.93%) at 3.18 times real time, with the PC rested (the last run below). `max_context = 0` under `[asr]` is now the default. A looped sentence would be stored and served as the teacher's words, so it matters more than its share of the error rate suggests.
 - Default Vulkan still fails on this GPU: `large-v3` stopped after 38 words and `distil-large-v3` looped for 15 minutes.
 - The clip has no teacher names, so that rate is n/a. Peak RAM is a sample every 100 ms, so it can miss a short peak; GPU memory is not measured.
 
@@ -219,3 +220,17 @@ Chosen setup: vulkan-coopmat-off, at 1.99 times real time, so run the first 20 t
 Best real-time factor: 8.61, distil-large-v3 on vulkan-coopmat-off. On speed alone the rule says: run the whole corpus on this PC.
 Model: large-v3 (fastest model that keeps the glossary terms; rejected: distil-large-v3 got 4 glossary terms wrong on vulkan-coopmat-off where large-v3 got 1).
 Chosen setup: vulkan-coopmat-off, at 2.72 times real time, so run the first 20 to 30 talks on this PC for Gate A and rent a GPU machine for the rest.
+
+## Run of 2026-10-06, `wt asr benchmark`, with the worker's settings, rested
+
+- Hardware: Intel(R) Core(TM) Ultra 7 256V, 8 logical cores, 17 GB RAM, Windows 11 Home.
+- Clip: clip.wav, 10.0 minutes, without the glossary prompt, scored against its known text.
+- Note: Intel Arc 140V integrated GPU, driver 32.0.101.6314; the worker's settings after October 6: no glossary prompt and max_context = 0 (whisper-cli -mc 0).
+
+| Setup | Model | RTF | Wall time | Peak RAM | Words | WER | Glossary terms wrong | Teacher names wrong |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vulkan-coopmat-off | large-v3 | 3.18 | 188.8 s | 4.5 GB | 1700 | 1.18% (20/1701) | 25.00% (1/4) | n/a |
+
+Best real-time factor: 3.18, large-v3 on vulkan-coopmat-off. On speed alone the rule says: run the whole corpus on this PC.
+Model: large-v3 (fastest model that keeps the glossary terms).
+Chosen setup: vulkan-coopmat-off, at 3.18 times real time, so run the whole corpus on this PC.
