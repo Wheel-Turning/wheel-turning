@@ -11,3 +11,22 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wt-core.workspace = true
+wt-db.workspace = true
+wt-segment.workspace = true
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+schemars = "1"
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time", "macros", "rt"] }
+toml = "1"
+tracing.workspace = true
+
+[dev-dependencies]
+wt-db = { workspace = true, features = ["test-support"] }
+tokio.workspace = true
+wiremock = "0.6"

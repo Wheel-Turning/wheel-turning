@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select value from llm_setting where key = 'monthly_cap_usd'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "llm_setting",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "55fae65e43df70fc673e30c8ed3537487f567b5d0f203230d73034fcd4a55546"
+}

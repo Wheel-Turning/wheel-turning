@@ -2,10 +2,13 @@
 # title (punctuation becomes a space, so "Part-3" reads "part 3" and "#11" reads "11"). A part is
 # read only next to a part word or in the series' own numbering, never from a date. A title that
 # names the series without a part number is recorded with no part. `parts`, when known, lets the
-# ingest report list missing parts beyond the last one seen.
+# ingest report list missing parts beyond the last one seen. `locator`, where a part names a
+# section of a text, maps it to a hand-listed locator for citation resolution (Spec 04); it has
+# no effect until that locator is in the hand list.
 
 [[series]]
 name = "Genjokoan"
+locator = "genjokoan:{part}"
 pattern = 'genj[oō] ?k[oō]an(?:.{0,30}?\b(?:part|pt|paragraph|para) ?(?P<part>\d+))?'
 
 [[series]]
@@ -18,8 +21,10 @@ pattern = '\bbend[oō]wa\b(?:.{0,30}?\b(?:part|pt) ?(?P<part>\d+))?'
 
 [[series]]
 name = "Blue Cliff Record"
+locator = "blue-cliff-record:{part}"
 pattern = '\bblue cliff(?: record)?\b(?: (?:case )?(?P<part>\d+))?'
 
 [[series]]
 name = "Song of the Grass Hut"
+locator = "song-of-the-grass-hut:{part}"
 pattern = '(?:\bverse (?P<part>\d+) from )?(?:the )?\bsong of the grass hut\b'

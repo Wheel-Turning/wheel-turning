@@ -246,6 +246,31 @@ pub async fn succeed(conn: &mut PgConnection, job: &Job) -> Result<(), JobError>
     held(updated.rows_affected(), job)
 }
 
+/// Puts a job back in the queue until `until` without counting the attempt, such as an
+/// ingestion job the language-model cap refused (Spec 04): it runs on the first of the next
+/// month, or when `wt llm cap set` releases it. `reason` becomes `last_error`.
+pub async fn defer(
+    conn: &mut PgConnection,
+    job: &Job,
+    until: chrono::DateTime<chrono::Utc>,
+    reason: &str,
+) -> Result<(), JobError> {
+    sqlx::query!(
+        "update job set state = 'queued', run_at = $4, last_error = $5, attempts = attempts - 1,
+                        locked_by = null, locked_at = null
+         where id = $1 and state = 'running' and locked_by = $2 and attempts = $3",
+        job.id.as_uuid(),
+        job.worker,
+        job.attempt,
+        until,
+        reason
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(DbError::from)?;
+    Ok(())
+}
+
 /// Records a failed attempt. With attempts left the job is queued again after [`backoff`];
 /// otherwise it is `dead` and its talk keeps its stage state with `state_reason` set to the
 /// error summary.

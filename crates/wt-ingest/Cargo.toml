@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 wt-asr.workspace = true
 wt-segment.workspace = true
+wt-extract.workspace = true
 fs4 = "0.13"
 wt-core.workspace = true
 wt-db.workspace = true

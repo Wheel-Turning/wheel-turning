@@ -136,3 +136,110 @@ pub async fn hold_for_review(
     .await?;
     Ok(true)
 }
+
+/// The talk's current transcript: version, object key and content hash.
+pub async fn current(
+    conn: &mut PgConnection,
+    talk: TalkId,
+) -> Result<Option<(i32, String, String)>, DbError> {
+    let row = sqlx::query!(
+        "select version, s3_key, content_hash from transcript
+         where talk_id = $1 and is_current order by version desc limit 1",
+        talk.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|r| (r.version, r.s3_key, r.content_hash)))
+}
+
+/// One stored segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentRow {
+    /// Its id.
+    pub id: Uuid,
+    /// Its place in the talk.
+    pub ordinal: i32,
+    /// `talk` or `qa_teacher`.
+    pub kind: String,
+    /// Start, milliseconds.
+    pub start_ms: i32,
+    /// End, milliseconds.
+    pub end_ms: i32,
+    /// Its text: uncorrected until the correct step, corrected after.
+    pub text: String,
+}
+
+/// The talk's segments in order.
+pub async fn segments(conn: &mut PgConnection, talk: TalkId) -> Result<Vec<SegmentRow>, DbError> {
+    let rows = sqlx::query!(
+        r#"select id, ordinal, kind::text as "kind!", start_ms, end_ms, text from segment
+           where talk_id = $1 order by ordinal"#,
+        talk.as_uuid()
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| SegmentRow {
+            id: r.id,
+            ordinal: r.ordinal,
+            kind: r.kind,
+            start_ms: r.start_ms,
+            end_ms: r.end_ms,
+            text: r.text,
+        })
+        .collect())
+}
+
+/// Replaces a segment's text with its corrected form.
+pub async fn set_segment_text(
+    conn: &mut PgConnection,
+    id: Uuid,
+    text: &str,
+) -> Result<(), DbError> {
+    sqlx::query!("update segment set text = $2 where id = $1", id, text)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Facts about a talk the text jobs need: whether it is a fixture (data class), and its series
+/// and part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TalkFacts {
+    /// `source_video.raw.synthetic` is true.
+    pub synthetic: bool,
+    /// Its series, if any.
+    pub series: Option<String>,
+    /// Its part, if any.
+    pub part: Option<i32>,
+}
+
+/// The talk's [`TalkFacts`].
+pub async fn talk_facts(conn: &mut PgConnection, talk: TalkId) -> Result<TalkFacts, DbError> {
+    let row = sqlx::query!(
+        r#"select coalesce((sv.raw->>'synthetic')::boolean, false) as "synthetic!", t.series, t.part
+           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1"#,
+        talk.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(TalkFacts {
+        synthetic: row.synthetic,
+        series: row.series,
+        part: row.part,
+    })
+}
+
+/// Talks with a current transcript that are past segmenting, for re-queuing `correct` after a
+/// glossary change.
+pub async fn corrected_talks(conn: &mut PgConnection) -> Result<Vec<TalkId>, DbError> {
+    let rows = sqlx::query_scalar!(
+        "select distinct t.id from talk t join transcript tr on tr.talk_id = t.id and tr.is_current
+         where t.state in ('correcting','extracting','resolving','indexing','ready')
+         order by t.id"
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.into_iter().map(TalkId::from).collect())
+}

@@ -143,8 +143,14 @@ impl Diarizer for FakeDiarizer {
 
 /// Labeling errors.
 #[derive(Debug, thiserror::Error)]
-#[error("labeling ambiguous windows: {0}")]
-pub struct LabelError(pub String);
+pub enum LabelError {
+    /// The labeler failed or answered badly.
+    #[error("labeling ambiguous windows: {0}")]
+    Failed(String),
+    /// The language-model spend cap is reached; the job waits for the next month.
+    #[error("labeling ambiguous windows: {0}")]
+    CapReached(String),
+}
 
 /// Labels the windows the rules leave ambiguous. Each window's text holds only the teacher's
 /// words.

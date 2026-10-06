@@ -1,0 +1,113 @@
+# The glossary's starting terms (Spec 04, Glossary correction), loaded with
+# `wt glossary import --file scripts/seed_glossary.toml --by "<name>"`. Safe to import again:
+# variants merge, and a term spelled differently from the stored one is reported, not changed.
+#
+# Each term has a canonical spelling, a kind (term, name or text_title) and known variants:
+# mis-hearings and alternate spellings, matched whole-word and ignoring case and punctuation.
+# These variants are guesses to start from; grow the list from the near-miss suggestions the
+# correct job writes, adding a variant only after seeing it in a transcript.
+
+[[term]]
+canonical = "Dogen"
+kind = "name"
+variants = ["doe gen", "dogan", "dough gen", "dōgen", "do gen"]
+
+[[term]]
+canonical = "shikantaza"
+kind = "term"
+variants = ["she can taza", "shikan taza", "she kahn taza", "shikantasa"]
+
+[[term]]
+canonical = "Genjokoan"
+kind = "text_title"
+variants = ["gen joe koan", "genjo koan", "genjō kōan", "genjo-koan", "gen jo koan"]
+
+[[term]]
+canonical = "Shobogenzo"
+kind = "text_title"
+variants = ["show bo gen zo", "shobo genzo", "shōbōgenzō", "shobo-genzo"]
+
+[[term]]
+canonical = "Uji"
+kind = "text_title"
+variants = ["oo gee", "u-ji"]
+
+[[term]]
+canonical = "Bendowa"
+kind = "text_title"
+variants = ["ben doe wa", "bendo wa", "bendōwa"]
+
+[[term]]
+canonical = "Blue Cliff Record"
+kind = "text_title"
+variants = ["blue cliff records", "hekiganroku"]
+
+[[term]]
+canonical = "Song of the Grass Hut"
+kind = "text_title"
+variants = ["song of the grass hat", "song of a grass hut"]
+
+[[term]]
+canonical = "zazen"
+kind = "term"
+variants = ["zah zen", "za zen"]
+
+[[term]]
+canonical = "sesshin"
+kind = "term"
+variants = ["sess sheen", "seshin", "sesh in"]
+
+[[term]]
+canonical = "zendo"
+kind = "term"
+variants = ["zen doe", "zen dough"]
+
+[[term]]
+canonical = "kinhin"
+kind = "term"
+variants = ["kin hin", "keen hin"]
+
+[[term]]
+canonical = "dokusan"
+kind = "term"
+variants = ["doe koo san", "doku san"]
+
+[[term]]
+canonical = "oryoki"
+kind = "term"
+variants = ["oh rio key", "oryōki", "o ryoki"]
+
+[[term]]
+canonical = "rakusu"
+kind = "term"
+variants = ["rock oo su", "raku su"]
+
+[[term]]
+canonical = "koan"
+kind = "term"
+variants = ["ko an", "kōan"]
+
+[[term]]
+canonical = "sangha"
+kind = "term"
+variants = ["sanga", "sang ha"]
+
+[[term]]
+canonical = "bodhisattva"
+kind = "term"
+variants = ["bodhi sattva", "bodisattva", "bodhisatva"]
+
+[[term]]
+canonical = "Avalokiteshvara"
+kind = "name"
+variants = ["avalokitesvara", "avalo kiteshvara"]
+
+[[term]]
+canonical = "Shunryu Suzuki"
+kind = "name"
+variants = ["shun ryu suzuki", "shunryū suzuki"]
+
+[[term]]
+canonical = "Katagiri"
+kind = "name"
+variants = ["kata giri"]

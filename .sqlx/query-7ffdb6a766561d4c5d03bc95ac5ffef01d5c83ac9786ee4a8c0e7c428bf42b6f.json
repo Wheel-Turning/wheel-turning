@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, ordinal, kind::text as \"kind!\", start_ms, end_ms, text from segment\n           where talk_id = $1 order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ordinal",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "start_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "end_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "end_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7ffdb6a766561d4c5d03bc95ac5ffef01d5c83ac9786ee4a8c0e7c428bf42b6f"
+}

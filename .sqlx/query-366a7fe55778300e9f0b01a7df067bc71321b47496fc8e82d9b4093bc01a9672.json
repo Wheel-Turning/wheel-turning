@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update segment set text = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "366a7fe55778300e9f0b01a7df067bc71321b47496fc8e82d9b4093bc01a9672"
+}

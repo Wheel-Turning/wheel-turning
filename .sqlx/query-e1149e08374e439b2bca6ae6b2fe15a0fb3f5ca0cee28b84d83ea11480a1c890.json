@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update job set run_at = now()\n         where state = 'queued' and run_at > now() and last_error = 'cap_reached'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e1149e08374e439b2bca6ae6b2fe15a0fb3f5ca0cee28b84d83ea11480a1c890"
+}

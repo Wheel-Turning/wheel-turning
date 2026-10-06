@@ -14,6 +14,7 @@ mod commands;
 mod ingest;
 mod rights;
 mod source;
+mod stages;
 
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
@@ -76,11 +77,75 @@ enum Command {
         #[command(subcommand)]
         command: ExclusionCommand,
     },
+    /// The glossary (Spec 04, Glossary correction).
+    Glossary {
+        #[command(subcommand)]
+        command: GlossaryCommand,
+    },
+    /// The language-model spend cap (Spec 04).
+    Llm {
+        #[command(subcommand)]
+        command: LlmCommand,
+    },
     /// A teacher's standing (Spec 03, Mandated talks).
     Teacher {
         #[command(subcommand)]
         command: TeacherCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum GlossaryCommand {
+    /// Load terms from a glossary file, such as scripts/seed_glossary.toml. Variants merge into
+    /// existing terms; a conflicting spelling or kind is reported and left as stored. Then
+    /// queues correction for exactly the talks the change affects.
+    Import {
+        /// The glossary TOML.
+        #[arg(long)]
+        file: PathBuf,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Add one term, or variants to an existing term, then queue correction for the talks it
+    /// affects.
+    Add {
+        /// The canonical spelling.
+        #[arg(long)]
+        canonical: String,
+        /// term, name or text_title.
+        #[arg(long, value_parser = ["term", "name", "text_title"], default_value = "term")]
+        kind: String,
+        /// A known variant. Repeat for several.
+        #[arg(long = "variant")]
+        variants: Vec<String>,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LlmCommand {
+    /// Inspect or change the monthly cap.
+    Cap {
+        #[command(subcommand)]
+        command: CapCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CapCommand {
+    /// Set the monthly cap in US dollars, and release ingestion jobs the cap had put off.
+    Set {
+        /// The cap.
+        usd: f64,
+        /// Who is changing it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Print the cap and the spend so far this month.
+    Show,
 }
 
 #[derive(Debug, Subcommand)]
@@ -413,7 +478,7 @@ enum IngestCommand {
 
 #[derive(Debug, Args)]
 struct WorkerArgs {
-    /// Job kinds to run, comma separated. This build runs classify.
+    /// Job kinds to run, comma separated: classify, audio, correct, extract, resolve.
     #[arg(long, value_delimiter = ',', value_parser = parse_kind, default_value = "classify")]
     kinds: Vec<wt_db::job::JobKind>,
     /// Workers in this process.
@@ -875,6 +940,54 @@ async fn main() -> anyhow::Result<ExitCode> {
                 rights::due(&pool().await?, today).await?;
             }
         },
+        Command::Glossary { command } => match command {
+            GlossaryCommand::Import { file, by } => {
+                let text = std::fs::read_to_string(&file)
+                    .with_context(|| format!("reading {}", file.display()))?;
+                let parsed =
+                    wt_registry::glossary::GlossaryFile::parse(&text, &file.display().to_string())?;
+                glossary_change(&pool().await?, &config, &parsed.terms, &by).await?;
+            }
+            GlossaryCommand::Add {
+                canonical,
+                kind,
+                variants,
+                by,
+            } => {
+                let kind = match kind.as_str() {
+                    "name" => wt_registry::glossary::TermKind::Name,
+                    "text_title" => wt_registry::glossary::TermKind::TextTitle,
+                    _ => wt_registry::glossary::TermKind::Term,
+                };
+                let term = wt_registry::glossary::GlossaryTerm {
+                    canonical,
+                    kind,
+                    variants,
+                };
+                glossary_change(&pool().await?, &config, &[term], &by).await?;
+            }
+        },
+        Command::Llm {
+            command: LlmCommand::Cap { command },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let now = chrono::Utc::now();
+            if let CapCommand::Set { usd, by } = &command {
+                if !(usd.is_finite() && *usd >= 0.0) {
+                    anyhow::bail!("the cap must be a dollar amount of zero or more");
+                }
+                let released = wt_db::llm::set_cap(&mut conn, *usd, by).await?;
+                tracing::info!(cap = usd, released, "language-model cap set");
+            }
+            let cap = wt_db::llm::cap(&mut conn, config.llm_monthly_cap_usd).await?;
+            let spent = wt_db::llm::month_to_date(&mut conn, now).await?;
+            commands::print_json(&serde_json::json!({
+                "cap_usd": cap,
+                "month_to_date_usd": (spent * 10_000.0).round() / 10_000.0,
+                "month": wt_db::llm::month_of(now).to_string(),
+            }))?;
+        }
         Command::Teacher {
             command:
                 TeacherCommand::OptOut {
@@ -894,6 +1007,7 @@ async fn main() -> anyhow::Result<ExitCode> {
         Command::Worker(args) => {
             ingest::worker(
                 &pool().await?,
+                &config,
                 &args.config_dir,
                 &args.kinds,
                 args.concurrency,
@@ -919,4 +1033,26 @@ impl From<TalkOrTeacher> for Target {
             None => Target::Teacher(args.teacher.unwrap_or_default()),
         }
     }
+}
+
+/// Applies a glossary change and queues correction for exactly the talks it affects.
+async fn glossary_change(
+    pool: &sqlx::PgPool,
+    config: &Config,
+    terms: &[wt_registry::glossary::GlossaryTerm],
+    by: &str,
+) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    let report = wt_db::glossary::import(&mut conn, terms, by).await?;
+    let glossary = wt_registry::glossary::Glossary::new(&wt_db::glossary::load(&mut conn).await?)?;
+    let objects = stages::objects(config)?;
+    let requeued =
+        wt_ingest::textjobs::requeue_after_glossary_change(&mut conn, &objects, &glossary).await?;
+    commands::print_json(&serde_json::json!({
+        "added": report.added,
+        "variants_added": report.variants_added,
+        "conflicts": report.conflicts,
+        "glossary_version": glossary.version(),
+        "talks_requeued": requeued.len(),
+    }))
 }

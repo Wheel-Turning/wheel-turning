@@ -1,0 +1,27 @@
+# Language-model prices for the spend cap (Spec 04), in US dollars per million tokens. Edited
+# by hand: check them against https://platform.claude.com/docs/en/about-claude/pricing and move
+# checked_on. A model missing here is refused, since its cost could not be estimated.
+#
+# `sampling` says whether the model accepts sampling settings: the client sends temperature 0
+# only where it does. Claude Sonnet 5.5, Opus 5.5 and Fable 5.1 reject them (decision of
+# October 5, 2026).
+
+checked_on = "2026-10-05"
+
+[[model]]
+id = "claude-haiku-4-5"
+input_per_mtok = 1.0
+output_per_mtok = 5.0
+sampling = true
+
+[[model]]
+id = "claude-sonnet-5-5"
+input_per_mtok = 2.0
+output_per_mtok = 10.0
+sampling = false
+
+[[model]]
+id = "claude-opus-5-5"
+input_per_mtok = 4.0
+output_per_mtok = 20.0
+sampling = false

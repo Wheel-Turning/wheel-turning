@@ -1,4 +1,14 @@
-//! The `LlmClient`, extraction schemas, extraction and citation resolution.
-//!
-//! Placeholder created in M0 so the workspace layout from Spec 00 exists. The milestone that
-//! needs this crate fills it in.
+//! The language-model client, citation extraction and citation resolution (Spec 04,
+//! Extraction and citation resolution).
+
+pub mod extract;
+pub mod labeler;
+pub mod llm;
+pub mod resolve;
+
+pub use labeler::LlmLabeler;
+
+pub use llm::{
+    Alerter, ClaudeClient, ClaudeSettings, DataClass, FakeLlm, Ledger, LlmClient, LlmError,
+    LlmRequest, LogAlerter, PgLedger, PriceTable, api_schema, complete_json,
+};

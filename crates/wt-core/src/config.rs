@@ -107,6 +107,13 @@ pub struct Config {
     pub anthropic_api_key: Option<Secret>,
     /// `WT_LLM_REAL_DATA_OK`. Must be true before any call carries real transcript text.
     pub llm_real_data_ok: bool,
+    /// `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and
+    /// `WT_LLM_MODEL_VISION`: per-stage models, each falling back to `WT_LLM_MODEL`.
+    pub llm_stage_models: LlmStageModels,
+    /// `WT_LLM_MONTHLY_CAP_USD`, default 25. `wt llm cap set` overrides it in the database.
+    pub llm_monthly_cap_usd: f64,
+    /// `WT_ALERT_TOPIC_ARN`. Empty turns alerts off.
+    pub alert_topic_arn: Option<String>,
     /// `YOUTUBE_API_KEY`.
     pub youtube_api_key: Option<Secret>,
     /// `WT_VIMEO_ACCESS_TOKEN`. With it, Vimeo discovery uses the API; without it, the talks page.
@@ -200,6 +207,25 @@ impl Config {
             llm_model: get("WT_LLM_MODEL"),
             anthropic_api_key: get("ANTHROPIC_API_KEY").map(Secret::new),
             llm_real_data_ok: parse_bool("WT_LLM_REAL_DATA_OK", get("WT_LLM_REAL_DATA_OK"))?,
+            llm_stage_models: LlmStageModels {
+                extract: get("WT_LLM_MODEL_EXTRACT"),
+                synth: get("WT_LLM_MODEL_SYNTH"),
+                verify: get("WT_LLM_MODEL_VERIFY"),
+                vision: get("WT_LLM_MODEL_VISION"),
+            },
+            llm_monthly_cap_usd: match get("WT_LLM_MONTHLY_CAP_USD") {
+                None => 25.0,
+                Some(v) => v
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|usd| usd.is_finite() && *usd >= 0.0)
+                    .ok_or_else(|| ConfigError::Invalid {
+                        key: "WT_LLM_MONTHLY_CAP_USD",
+                        reason: format!("expected a dollar amount, got {v:?}"),
+                    })?,
+            },
+            alert_topic_arn: get("WT_ALERT_TOPIC_ARN"),
             youtube_api_key: get("YOUTUBE_API_KEY").map(Secret::new),
             vimeo_access_token: get("WT_VIMEO_ACCESS_TOKEN").map(Secret::new),
             allow_third_party_fetch: parse_bool(
@@ -213,6 +239,20 @@ impl Config {
             site_dana_url: get("WT_SITE_DANA_URL"),
             log,
         })
+    }
+
+    /// The model for a language-model stage: its own setting, or else `WT_LLM_MODEL`. Fails when
+    /// neither is set, so a worker that runs the stage refuses to start (Spec 04).
+    pub fn llm_model_for(&self, stage: LlmStage) -> Result<&str, ConfigError> {
+        let own = match stage {
+            LlmStage::Extract | LlmStage::Classify => &self.llm_stage_models.extract,
+            LlmStage::Synth => &self.llm_stage_models.synth,
+            LlmStage::Verify => &self.llm_stage_models.verify,
+            LlmStage::Vision => &self.llm_stage_models.vision,
+        };
+        own.as_deref()
+            .or(self.llm_model.as_deref())
+            .ok_or(ConfigError::Missing { key: stage.key() })
     }
 
     /// The model identifier for the Claude API, which the LLM stages require.
@@ -289,6 +329,67 @@ fn check_database_url(key: &'static str, url: &Secret, env: Env) -> Result<(), C
         });
     }
     Ok(())
+}
+
+/// Per-stage language models, each optional.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LlmStageModels {
+    /// `WT_LLM_MODEL_EXTRACT`, also used to label ambiguous segment windows.
+    pub extract: Option<String>,
+    /// `WT_LLM_MODEL_SYNTH`.
+    pub synth: Option<String>,
+    /// `WT_LLM_MODEL_VERIFY`.
+    pub verify: Option<String>,
+    /// `WT_LLM_MODEL_VISION`.
+    pub vision: Option<String>,
+}
+
+/// A stage that calls the language model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmStage {
+    /// Citation extraction.
+    Extract,
+    /// Labeling ambiguous segment windows. Uses the extraction model (decision of October 5,
+    /// 2026): both are ingestion calls Spec 04 gives a Haiku-class model.
+    Classify,
+    /// Answer synthesis.
+    Synth,
+    /// Theme verification.
+    Verify,
+    /// The OCR rescue pass.
+    Vision,
+}
+
+impl LlmStage {
+    /// The value stored in `llm_usage.stage`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LlmStage::Extract => "extract",
+            LlmStage::Classify => "classify",
+            LlmStage::Synth => "synth",
+            LlmStage::Verify => "verify",
+            LlmStage::Vision => "vision",
+        }
+    }
+
+    /// The setting a missing model is reported under.
+    pub fn key(self) -> &'static str {
+        match self {
+            LlmStage::Extract | LlmStage::Classify => "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL",
+            LlmStage::Synth => "WT_LLM_MODEL_SYNTH or WT_LLM_MODEL",
+            LlmStage::Verify => "WT_LLM_MODEL_VERIFY or WT_LLM_MODEL",
+            LlmStage::Vision => "WT_LLM_MODEL_VISION or WT_LLM_MODEL",
+        }
+    }
+
+    /// Whether a refusal at the cap puts the job off to next month (ingestion) rather than
+    /// rendering without the call (synthesis and verification).
+    pub fn is_ingestion(self) -> bool {
+        matches!(
+            self,
+            LlmStage::Extract | LlmStage::Classify | LlmStage::Vision
+        )
+    }
 }
 
 fn parse_bool(key: &'static str, value: Option<String>) -> Result<bool, ConfigError> {
@@ -554,5 +655,52 @@ mod tests {
         for secret in [DB_SECRET, SESSION_SECRET, ANTHROPIC_SECRET, YOUTUBE_SECRET] {
             assert!(!output.contains(secret), "{secret} leaked into the log");
         }
+    }
+
+    #[test]
+    fn stage_models_fall_back_to_the_default_and_fail_when_neither_is_set() {
+        let base = [
+            ("WT_ENV", "dev"),
+            ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+        ];
+        let none = load(&base).unwrap_or_else(|e| panic!("{e}"));
+        assert!(matches!(
+            none.llm_model_for(LlmStage::Extract),
+            Err(ConfigError::Missing { .. })
+        ));
+        let fallback = load(&[
+            ("WT_ENV", "dev"),
+            ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+            ("WT_LLM_MODEL", "claude-haiku-4-5"),
+        ])
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            fallback.llm_model_for(LlmStage::Synth).ok(),
+            Some("claude-haiku-4-5")
+        );
+        assert_eq!(
+            fallback.llm_model_for(LlmStage::Classify).ok(),
+            Some("claude-haiku-4-5")
+        );
+        let own = load(&[
+            ("WT_ENV", "dev"),
+            ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+            ("WT_LLM_MODEL", "claude-haiku-4-5"),
+            ("WT_LLM_MODEL_SYNTH", "claude-sonnet-5-5"),
+        ])
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            own.llm_model_for(LlmStage::Synth).ok(),
+            Some("claude-sonnet-5-5")
+        );
+        assert_eq!(own.llm_monthly_cap_usd, 25.0);
+        assert!(
+            load(&[
+                ("WT_ENV", "dev"),
+                ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+                ("WT_LLM_MONTHLY_CAP_USD", "lots")
+            ])
+            .is_err()
+        );
     }
 }

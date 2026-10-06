@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select distinct t.id from talk t join transcript tr on tr.talk_id = t.id and tr.is_current\n         where t.state in ('correcting','extracting','resolving','indexing','ready')\n         order by t.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "253dfd880020baa283192f4f6e874bbf1be3d8861c3d07f7b0a07ed0068dc1bf"
+}

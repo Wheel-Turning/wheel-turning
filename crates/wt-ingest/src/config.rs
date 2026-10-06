@@ -287,6 +287,11 @@ pub struct SeriesEntry {
     /// The number of parts, when known, so the report can list missing ones.
     #[serde(default)]
     pub parts: Option<i32>,
+    /// The text locator a part refers to, with `{part}` for the number, such as
+    /// `genjokoan:{part}`. Citation resolution uses it for generic citations in the series'
+    /// talks (Spec 04, resolution rule 2).
+    #[serde(default)]
+    pub locator: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -302,7 +307,18 @@ pub struct Series {
     pub name: String,
     /// The number of parts, when known.
     pub parts: Option<i32>,
+    /// The locator template for a part.
+    pub locator: Option<String>,
     pub(crate) pattern: Regex,
+}
+
+impl Series {
+    /// The locator a part of this series refers to, if the series maps parts to locators.
+    pub fn locator_for(&self, part: i32) -> Option<String> {
+        self.locator
+            .as_deref()
+            .map(|t| t.replace("{part}", &part.to_string()))
+    }
 }
 
 /// Everything classification reads, compiled once.
@@ -369,6 +385,7 @@ impl ClassifyConfig {
                 Ok(Series {
                     name: e.name,
                     parts: e.parts,
+                    locator: e.locator,
                     pattern,
                 })
             })

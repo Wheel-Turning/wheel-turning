@@ -19,6 +19,7 @@ wt-ingest = { path = "crates/wt-ingest" }
 wt-asr = { path = "crates/wt-asr" }
 wt-segment = { path = "crates/wt-segment" }
 wt-index = { path = "crates/wt-index" }
+wt-extract = { path = "crates/wt-extract" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"
