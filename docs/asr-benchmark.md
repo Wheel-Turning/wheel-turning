@@ -197,12 +197,12 @@ The two runs below measure `wt asr benchmark`, the command Spec 04 asks for, on 
 | cpu | large-v3 | 0.34 | 1758.6 s | 4.2 GB | 1746 | 3.82% (65/1701) | 25.00% (1/4) | n/a |
 | cpu | distil-large-v3 | 1.02 | 588.8 s | 1.9 GB | 1749 | 2.65% (45/1701) | 75.00% (3/4) | n/a |
 
-The command first printed a decision that chose default Vulkan, whose output was garbage. It now leaves out unusable runs (a word error rate over 25%) before applying the rules. Applied that way:
+The command first printed a decision that chose default Vulkan, whose output was garbage. It now leaves out unusable runs (a word error rate over `max_wer_percent`, 5, or under half the median word count) before applying the rules. Applied that way:
 
-Left out: large-v3 and distil-large-v3 on vulkan, and large-v3 on openvino-gpu, unusable output.
+Left out: both models on vulkan, and large-v3 on vulkan-coopmat-off (8.82%), openvino-gpu (59.55%) and openvino-npu (10.64%), unusable output.
 Best real-time factor: 10.34, distil-large-v3 on openvino-gpu. On speed alone the rule says: run the whole corpus on this PC.
-Model: large-v3 (distil-large-v3 got 3 glossary terms wrong on vulkan-coopmat-off where large-v3 got 1).
-Chosen setup: vulkan-coopmat-off, at 1.99 times real time, so run the first 20 to 30 talks on this PC for Gate A and rent a GPU machine for the rest.
+Model: large-v3 (distil-large-v3 got 3 glossary terms wrong on cpu where large-v3 got 1).
+Chosen setup: cpu, at 0.34 times real time, so rent a GPU machine for everything. With the prompt, `large-v3` was usable only on the CPU route.
 
 ## Run of 2026-10-06, `wt asr benchmark`, without the glossary prompt
 
