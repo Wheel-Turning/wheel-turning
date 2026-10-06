@@ -1,6 +1,6 @@
 # Model licenses
 
-Every model the system can load (Spec 04, Model license record). A stage refuses to start when its configured model is not listed here with a revision, and CI fails when `config/` names a model missing from this file. Both checks come with M4.
+Every model the system can load (Spec 04, Model license record). A stage refuses to start when its configured model is not listed here with a revision, and CI fails when `config/` names a model missing from this file (`wt_core::licenses`; the CI check is in `wt-core/tests/repo_guards.rs`). A model counts as listed when its name is in backticks in a table row, and as having a revision when that row holds a commit or file hash, or is under Language models, where the model id is the revision.
 
 Revisions are Hugging Face commit hashes, or for a single file its SHA-256 as Hugging Face's LFS record gives it. Checked on October 5, 2026 by acowen with Claude Code, from the public model pages and the Hugging Face API.
 
@@ -34,13 +34,17 @@ Loaded as ONNX with int8 quantization, exported by `scripts/export_models.py` (S
 | `BAAI/bge-m3` | `bge-m3-int8` (`WT_EMBED_MODEL`) | MIT | `5617a9f61b028005a4858fdac845db406aefb181` |
 | `BAAI/bge-reranker-v2-m3` | `bge-reranker-v2-m3-int8` (`WT_RERANK_MODEL`) | Apache-2.0 | `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` |
 
+The export of October 6, 2026 took `onnx/model.onnx` and `onnx/tokenizer.json` from bge-m3 at that revision and quantized the weights to int8 per channel with ONNX Runtime 1.30.0. Its `model.onnx` has SHA-256 `63e806d9763c82e8ffb55e32d577a64cacf2a57be1ac0d803f118cf770cb399d`, as its `export.json` records. The reranker is not exported yet.
+
 ## Language models
 
 Called through the Claude API (`ANTHROPIC_API_KEY`) under Anthropic's Commercial Terms of Service, https://www.anthropic.com/legal/commercial-terms. The revision of an API model is its model id; `WT_LLM_MODEL` and the per-stage settings name it, and each is added here when first configured. None is configured yet.
 
 | Model id | Stages | Added |
 | --- | --- | --- |
-| (none yet) | | |
+| `claude-haiku-4-5` | Extract and window labeling (`WT_LLM_MODEL` or `WT_LLM_MODEL_EXTRACT`), priced in `config/llm_prices.toml` | October 6, 2026 |
+| `claude-sonnet-5-5` | Priced in `config/llm_prices.toml`; not configured for a stage yet | October 6, 2026 |
+| `claude-opus-5-5` | Priced in `config/llm_prices.toml`; not configured for a stage yet | October 6, 2026 |
 
 Data handling, read October 5, 2026 (https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data and https://platform.claude.com/docs/en/manage-claude/api-and-data-retention):
 

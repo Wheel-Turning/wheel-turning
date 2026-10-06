@@ -279,3 +279,18 @@ pub async fn assign_speaker(
         }
     }
 }
+
+/// Every display name and alias of teachers who have not opted out, for scoring recognition of
+/// teachers' names.
+pub async fn teacher_names(conn: &mut sqlx::PgConnection) -> Result<Vec<String>, DbError> {
+    let names = sqlx::query_scalar!(
+        r#"select display_name as "n!" from teacher where opted_out_at is null
+           union
+           select a.alias from teacher_alias a join teacher t on t.id = a.teacher_id
+           where t.opted_out_at is null
+           order by 1"#
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(names)
+}

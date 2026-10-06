@@ -290,11 +290,21 @@ Decision of October 3, 2026, following the GPU quota refusal in Spec 01.
 3. `wt asr benchmark --talks <ids>` runs both models over the ten-talk sample and compares each with a manual caption or a hand-corrected passage where one exists, and prints word error rate on the glossary terms, on teacher names and overall. Keep `large-v3` for the full run if `distil-large-v3` misses core vocabulary.
 4. Whichever model runs, the transcript JSON records its name and version, so a later switch to a better model can reprocess only the affected talks.
 
+Decisions of October 6, 2026, made while building the benchmark and the model switch:
+
+- `asr.model_path` is `WT_WHISPER_MODEL`. The recorded name is `whisper-` and the file's stem without `ggml-`, so `ggml-large-v3.bin` is `whisper-large-v3`. `wt asr requeue [--dry-run]` reads each current transcript's recorded model and queues `audio` with `"retranscribe": true` for the talks recorded with another, keyed by the new model so asking twice queues nothing new. A retranscribed talk's new segments replace the old ones, which takes its passages out of serving until it is indexed again.
+- `wt asr benchmark --clip <file> --reference <text>` runs on a clip; `--talk <id>` (repeatable) with `--references <dir>` fetches cleared talks instead and scores each against `<dir>/<talk id>.txt` where one exists. The setups and models are in `config/asr_bench.toml`, with paths under `.bench/` from `--bench-root`, and a setup whose binary is missing is skipped. Each run uses the worker's own `whisper-cli` arguments and glossary prompt, with the setup's environment, extra arguments and `PATH` additions.
+- Scoring follows `docs/asr-benchmark.md`: lowercase, accents and punctuation removed, hyphens as spaces. A preamble before the reference's first three words, found in the hypothesis's first quarter, is not scored, and reference words after the hypothesis ends cost nothing. The glossary rate counts occurrences in the reference of the glossary's canonical terms, and the names rate those of teachers' display names and aliases, as wrong when any of their words is not matched exactly. Terms come from the database's glossary.
+- A run whose word error rate is over 25%, or without a reference whose word count is under half the median, is unusable output and is left out before the rules apply, so a setup that fails fast cannot win on speed.
+- The worker no longer passes the glossary to `whisper-cli` as its initial prompt (owner's decision of October 6, 2026): on the benchmark clip it raised `large-v3`'s word error rate from 1.9% to 8.8% on Vulkan and from 1.6% to 59.6% on OpenVINO. `glossary_prompt = false` under `[asr]` is the default; the glossary pass corrects terms after transcription. The October 6 runs measured `large-v3` on Vulkan at 2.72 times real time after an hour of load, and the owner kept the October 4 route; the full run measures it again on its first talks. Both runs are in `docs/asr-benchmark.md`.
+- Peak memory is the process's working set sampled every 100 milliseconds; GPU memory is not measured. The vocabulary rule (item 3) is applied by preference order in `config/asr_bench.toml`: a later model is chosen only if, on every setup where both ran, it gets no more glossary terms wrong than each earlier one, and then the fastest acceptable model's fastest setup is chosen and its real-time factor sets the route. `--record` appends the table, the decision, the date and the hardware (CPU, memory and operating system as reported, plus `--note`) to `docs/asr-benchmark.md`.
+- A run is unusable, and left out of the decision though still shown in the table, when its word error rate on the known text is over `max_wer_percent` in `config/asr_bench.toml`, or when it produced under half the median word count of the completed runs. The word count applies with a reference too, because reference words after the hypothesis ends are free, so a run that stops early is scored on fewer words. The limit is 5 percent for now (owner's decision). It must come down as transcription improves, or the answers lose much of their value. Without these checks, the first recorded run chose default Vulkan, whose 38 words of garbage scored no glossary term wrong.
+
 Acceptance criteria:
 
 - [ ] A worker on the owner's Windows PC transcribes a synthetic audio fixture end to end with the build that matches its hardware and records the model name in the transcript.
-- [ ] `wt asr benchmark` prints the three error rates for both models on a fixture with known text.
-- [ ] Changing `asr.model_path` changes the recorded model name and requeues only talks transcribed with the old one when asked.
+- [x] `wt asr benchmark` prints the three error rates for both models on a fixture with known text. (`wt-asr/tests/bench.rs`, with a fake engine; scoring unit tests in `wt_asr::bench`.)
+- [x] Changing `asr.model_path` changes the recorded model name and requeues only talks transcribed with the old one when asked. (`wt asr requeue`; `wt-ingest/tests/audio.rs` and `wt-cli/tests/commands.rs`.)
 
 ## Owner's hardware and the decision rule
 
@@ -314,14 +324,16 @@ With 16 GB of RAM in use by other programs, close them during a run and expect `
 
 Acceptance criteria:
 
-- [ ] `wt asr benchmark` runs each available setup on a 10-minute clip and prints the real-time factor and peak memory.
-- [ ] The benchmark output names the setup chosen under the decision rule and records it in `docs/asr-benchmark.md` with the date and the hardware.
+- [x] `wt asr benchmark` runs each available setup on a 10-minute clip and prints the real-time factor and peak memory. (Run on October 6, 2026 on the owner's PC: five setups and two models, recorded in `docs/asr-benchmark.md`.)
+- [x] The benchmark output names the setup chosen under the decision rule and records it in `docs/asr-benchmark.md` with the date and the hardware. (`--record`; the October 6 runs.)
 
 ## Model license record
 
 `docs/model-licenses.md` lists every model the system can load: Whisper or distil-large-v3, bge-m3, bge-reranker-v2-m3, the pyannote segmentation and diarization models, and each language model by name. For each it gives the license name, the license URL, the revision or commit hash downloaded, the date checked and who checked. A stage refuses to start when its configured model is missing from the file or has no recorded revision, and CI fails when a configuration file names a model the record lacks. The record is rechecked whenever a model or its revision changes.
 
+Decisions of October 6, 2026: the record's path is `WT_MODEL_LICENSES` (default `docs/model-licenses.md`), read by `wt_core::licenses`. A model is listed when its name is in backticks in a table row, and has a revision when that row holds a 40- or 64-character hash, or is under Language models, where an API model's id is its revision. The worker checks the `WT_WHISPER_MODEL` file name for `audio`, each language-model stage's model for `audio` and `extract`, and `WT_EMBED_MODEL` for `index` and `wt reindex`. The diarization pipeline is the sidecar's setting and is listed in the record but not checked from Rust. The CI check covers the models in `config/llm_prices.toml`, the model files in `config/asr_bench.toml` and the retrieval defaults in `.env.example`.
+
 Acceptance criteria:
 
-- [ ] A stage with an unlisted model refuses to start with a message naming the model.
-- [ ] CI fails when `config/` names a model that `docs/model-licenses.md` does not list with a revision.
+- [x] A stage with an unlisted model refuses to start with a message naming the model. (`wt-core` unit tests; `wt-cli/tests/commands.rs` for an unlisted embedding model and Whisper file.)
+- [x] CI fails when `config/` names a model that `docs/model-licenses.md` does not list with a revision. (`wt-core/tests/repo_guards.rs`.)

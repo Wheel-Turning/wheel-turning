@@ -426,3 +426,82 @@ async fn third_party_fetching_is_refused_before_anything_starts() {
         "nothing written"
     );
 }
+
+/// Spec 04: changing the model requeues only talks transcribed with another one, when asked,
+/// and the requeued job retranscribes even though a transcript exists.
+#[tokio::test]
+async fn a_new_model_requeues_only_talks_transcribed_with_another() {
+    let fx = start().await;
+    let talk = cleared_talk(&fx, true).await;
+    let (words, turns) = timeline();
+    let transcriber = FakeTranscriber::new(words.clone(), 600_000);
+    run(&fx, talk, &transcriber, turns.clone()).await.unwrap();
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let objects = fx.objects();
+    let jobs = |pool: PgPool| async move {
+        let n: i64 = sqlx::query_scalar("select count(*) from job where kind = 'audio'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        n
+    };
+
+    // Same model: nothing. Dry run: counted, nothing queued.
+    let same = audio::requeue_for_model(&mut conn, &objects, "fake-asr", false)
+        .await
+        .unwrap();
+    assert!(same.is_empty());
+    let dry = audio::requeue_for_model(&mut conn, &objects, "whisper-large-v3", true)
+        .await
+        .unwrap();
+    assert_eq!(dry, vec![talk]);
+    assert_eq!(jobs(fx.pool.clone()).await, 0);
+
+    // Another model: one job with retranscribe, once.
+    for _ in 0..2 {
+        let queued = audio::requeue_for_model(&mut conn, &objects, "whisper-large-v3", false)
+            .await
+            .unwrap();
+        assert_eq!(queued, vec![talk]);
+    }
+    assert_eq!(jobs(fx.pool.clone()).await, 1);
+    let payload: serde_json::Value =
+        sqlx::query_scalar("select payload from job where kind = 'audio'")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(payload["retranscribe"], true);
+    assert_eq!(payload["was"], "fake-asr");
+
+    // Without retranscribe the job is a no-op; with it a new version is stored.
+    assert_eq!(
+        run(&fx, talk, &transcriber, turns.clone()).await.unwrap(),
+        AudioOutcome::Current
+    );
+    let diarizer = FakeDiarizer::new(turns);
+    let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
+    let segment = SegmentSettings::default();
+    let hints = AsrHints {
+        glossary_prompt: String::new(),
+        language: "en".into(),
+    };
+    let scratch = fx.scratch();
+    let again = FakeTranscriber::new(words, 600_000);
+    let deps = AudioDeps {
+        transcriber: &again,
+        diarizer: &diarizer,
+        labeler: &FixedLabeler(Label::Talk),
+        converter: &FakeConverter,
+        fetcher: &fetcher,
+        objects: &objects,
+        scratch_root: &scratch,
+        segment: &segment,
+        hints: &hints,
+        actor: "test",
+    };
+    let out = audio::run(&mut conn, talk, &deps, true).await.unwrap();
+    assert!(
+        matches!(out, AudioOutcome::Segmented { version: 2, .. }),
+        "{out:?}"
+    );
+}

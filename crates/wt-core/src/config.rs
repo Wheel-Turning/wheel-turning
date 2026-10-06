@@ -101,6 +101,8 @@ pub struct Config {
     pub embed_model: String,
     /// `WT_RERANK_MODEL`, the reranker model directory name inside `model_dir`.
     pub rerank_model: String,
+    /// `WT_MODEL_LICENSES`, the model license record every stage checks its models against.
+    pub model_licenses: PathBuf,
     /// `WT_ORT_DYLIB`, the ONNX Runtime library (`onnxruntime.dll` or `libonnxruntime.so`).
     /// Unset means `ORT_DYLIB_PATH` or the system search path.
     pub ort_dylib: Option<PathBuf>,
@@ -208,6 +210,8 @@ impl Config {
             rerank_model: get("WT_RERANK_MODEL")
                 .unwrap_or_else(|| "bge-reranker-v2-m3-int8".to_owned()),
             ort_dylib: get("WT_ORT_DYLIB").map(PathBuf::from),
+            model_licenses: get("WT_MODEL_LICENSES")
+                .map_or_else(|| PathBuf::from("docs/model-licenses.md"), PathBuf::from),
             llm_model: get("WT_LLM_MODEL"),
             anthropic_api_key: get("ANTHROPIC_API_KEY").map(Secret::new),
             llm_real_data_ok: parse_bool("WT_LLM_REAL_DATA_OK", get("WT_LLM_REAL_DATA_OK"))?,

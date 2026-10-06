@@ -270,3 +270,15 @@ pub async fn title(conn: &mut PgConnection, talk: TalkId) -> Result<Option<Strin
             .await?,
     )
 }
+
+/// Every talk's current transcript object key, for `wt asr requeue`.
+pub async fn current_keys(conn: &mut PgConnection) -> Result<Vec<(TalkId, String)>, DbError> {
+    let rows =
+        sqlx::query!("select talk_id, s3_key from transcript where is_current order by talk_id")
+            .fetch_all(&mut *conn)
+            .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (TalkId::from(r.talk_id), r.s3_key))
+        .collect())
+}

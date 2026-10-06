@@ -40,11 +40,26 @@ struct Sections {
     chunk: ChunkSettings,
 }
 
+/// Refuses a model the license record does not list with a revision (Spec 04).
+pub fn require_licensed(config: &Config, model: &str) -> anyhow::Result<()> {
+    wt_core::licenses::LicenseRecord::load(&config.model_licenses)?.require(model)?;
+    Ok(())
+}
+
 /// Loads the embedding model named by `WT_MODEL_DIR` and `WT_EMBED_MODEL`.
 pub fn embedder(config: &Config) -> anyhow::Result<OnnxEmbedder> {
+    require_licensed(config, &config.embed_model)?;
     let mut settings = OnnxSettings::new(&config.model_dir, &config.embed_model);
     settings.runtime.clone_from(&config.ort_dylib);
     OnnxEmbedder::load(&settings).context("loading the embedding model")
+}
+
+/// `[asr]` from `config/pipeline.toml`.
+pub fn asr_settings(config_dir: &Path) -> anyhow::Result<AsrSettings> {
+    let text = std::fs::read_to_string(config_dir.join("pipeline.toml"))
+        .context("reading pipeline.toml")?;
+    let sections: Sections = toml::from_str(&text).context("reading [asr]")?;
+    Ok(sections.asr)
 }
 
 /// `[chunk]` from `config/pipeline.toml`.
@@ -116,6 +131,11 @@ impl Stages {
                 .whisper_model
                 .clone()
                 .context("WT_WHISPER_MODEL must name the model to run audio jobs")?;
+            let file = model
+                .file_name()
+                .and_then(|n| n.to_str())
+                .context("WT_WHISPER_MODEL must name a model file")?;
+            require_licensed(config, file)?;
             let mut conn = pool.acquire().await?;
             let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
             (
@@ -245,7 +265,11 @@ impl Stages {
         let class = textjobs::data_class(conn, talk).await?;
         let terms = wt_db::glossary::load(conn).await?;
         let hints = AsrHints {
-            glossary_prompt: glossary_prompt(terms.iter().map(|t| t.canonical.as_str())),
+            glossary_prompt: if self.asr.glossary_prompt {
+                glossary_prompt(terms.iter().map(|t| t.canonical.as_str()))
+            } else {
+                String::new()
+            },
             language: self.asr.language.clone(),
         };
         Ok((LlmLabeler::new(llm, class), hints))
@@ -308,7 +332,9 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
         .context("ANTHROPIC_API_KEY must be set for the language-model stages")?;
     let mut models = BTreeMap::new();
     for stage in [LlmStage::Extract, LlmStage::Classify] {
-        models.insert(stage.as_str(), config.llm_model_for(stage)?.to_owned());
+        let model = config.llm_model_for(stage)?;
+        require_licensed(config, model)?;
+        models.insert(stage.as_str(), model.to_owned());
     }
     let prices = PriceTable::load(&config_dir.join("llm_prices.toml"))?;
     for model in models.values() {

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_name as \"n!\" from teacher where opted_out_at is null\n           union\n           select a.alias from teacher_alias a join teacher t on t.id = a.teacher_id\n           where t.opted_out_at is null\n           order by 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ea4829184b34f59cfb8630d4fec34c721e2450dc9bc4550a9d13050360decf44"
+}

@@ -166,3 +166,56 @@ The build scripts, runner, models and results are in `.bench/` in the primary ch
 - `results/runs.jsonl`: one line per run, with the transcripts and stderr logs beside it.
 - `accuracy/extract.py` and `accuracy/reference_ch3.txt`: the chapter text and the corrected reference.
 - `accuracy/score.py`: the word error rate and term scoring. `accuracy/scores.jsonl` holds the results.
+
+## October 6, 2026: the glossary prompt, and what was decided
+
+The two runs below measure `wt asr benchmark`, the command Spec 04 asks for, on the same clip and reference as October 4. The first passed the glossary to `whisper-cli` as its initial prompt, as the worker then did; the second ran the two GPU setups without it.
+
+- **The prompt hurts `large-v3`.** On Vulkan with coopmat off its word error rate rose from 1.93% without the prompt to 8.82% with it, and its speed fell from 2.72 to 1.99 times real time. On the OpenVINO GPU route it rose from 1.59% to 59.55%, a transcript that repeats and wanders. `distil-large-v3` changed little either way, and still missed most terms of art.
+- **Decision (owner, October 6, 2026): the prompt is off.** `glossary_prompt = false` under `[asr]` in `config/pipeline.toml` is the default, and Spec 04's glossary pass corrects known mis-hearings after transcription. `--prompt` and `--no-prompt` on the benchmark override the setting for comparisons.
+- **Speed.** Without the prompt `large-v3` on Vulkan measured 2.72 times real time, under the rule's threshold of 3 and below October 4's 3.26. These runs came after more than an hour of continuous load, so the PC was likely running hot. **Decision (owner, October 6, 2026): keep the October 4 choice**, `large-v3` on Vulkan with coopmat off for the whole corpus on this PC, and measure the real-time factor again on the first real talks of the full run.
+- Default Vulkan still fails on this GPU: `large-v3` stopped after 38 words and `distil-large-v3` looped for 15 minutes.
+- The clip has no teacher names, so that rate is n/a. Peak RAM is a sample every 100 ms, so it can miss a short peak; GPU memory is not measured.
+
+## Run of 2026-10-06, `wt asr benchmark`, with the glossary prompt
+
+- Hardware: Intel(R) Core(TM) Ultra 7 256V, 8 logical cores, 17 GB RAM, Windows 11 Home.
+- Clip: clip.wav, 10.0 minutes, with the glossary prompt, scored against its known text.
+- Note: Intel Arc 140V integrated GPU, driver 32.0.101.6314; the glossary prompt held the seed glossary and the clip's three terms of art. Peak RAM is sampled every 100 ms. The runs went one after another for about 75 minutes.
+
+| Setup | Model | RTF | Wall time | Peak RAM | Words | WER | Glossary terms wrong | Teacher names wrong |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vulkan | large-v3 | 4.21 | 142.7 s | 4.5 GB | 38 | 120.00% (42/35) | n/a | n/a |
+| vulkan | distil-large-v3 | 0.64 | 931.8 s | 2.1 GB | 1634 | 178.89% (1068/597) | 100.00% (4/4) | n/a |
+| vulkan-coopmat-off | large-v3 | 1.99 | 301.9 s | 3.2 GB | 1668 | 8.82% (150/1701) | 25.00% (1/4) | n/a |
+| vulkan-coopmat-off | distil-large-v3 | 9.16 | 65.5 s | 2.1 GB | 1751 | 3.00% (51/1701) | 75.00% (3/4) | n/a |
+| openvino-gpu | large-v3 | 1.30 | 460.8 s | 5.1 GB | 1616 | 59.55% (1013/1701) | 25.00% (1/4) | n/a |
+| openvino-gpu | distil-large-v3 | 10.34 | 58.0 s | 6.1 GB | 1749 | 2.70% (46/1701) | 75.00% (3/4) | n/a |
+| openvino-npu | large-v3 | 0.64 | 935.4 s | 5.6 GB | 1846 | 10.64% (181/1701) | 25.00% (1/4) | n/a |
+| openvino-npu | distil-large-v3 | 9.23 | 65.0 s | 4.3 GB | 1750 | 3.00% (51/1701) | 100.00% (4/4) | n/a |
+| cpu | large-v3 | 0.34 | 1758.6 s | 4.2 GB | 1746 | 3.82% (65/1701) | 25.00% (1/4) | n/a |
+| cpu | distil-large-v3 | 1.02 | 588.8 s | 1.9 GB | 1749 | 2.65% (45/1701) | 75.00% (3/4) | n/a |
+
+The command first printed a decision that chose default Vulkan, whose output was garbage. It now leaves out unusable runs (a word error rate over 25%) before applying the rules. Applied that way:
+
+Left out: large-v3 and distil-large-v3 on vulkan, and large-v3 on openvino-gpu, unusable output.
+Best real-time factor: 10.34, distil-large-v3 on openvino-gpu. On speed alone the rule says: run the whole corpus on this PC.
+Model: large-v3 (distil-large-v3 got 3 glossary terms wrong on vulkan-coopmat-off where large-v3 got 1).
+Chosen setup: vulkan-coopmat-off, at 1.99 times real time, so run the first 20 to 30 talks on this PC for Gate A and rent a GPU machine for the rest.
+
+## Run of 2026-10-06, `wt asr benchmark`, without the glossary prompt
+
+- Hardware: Intel(R) Core(TM) Ultra 7 256V, 8 logical cores, 17 GB RAM, Windows 11 Home.
+- Clip: clip.wav, 10.0 minutes, without the glossary prompt, scored against its known text.
+- Note: Intel Arc 140V integrated GPU, driver 32.0.101.6314; run without the glossary prompt, to compare with the run above that used it. Peak RAM is sampled every 100 ms. It started right after the run above.
+
+| Setup | Model | RTF | Wall time | Peak RAM | Words | WER | Glossary terms wrong | Teacher names wrong |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vulkan-coopmat-off | large-v3 | 2.72 | 220.4 s | 3.7 GB | 1694 | 1.93% (33/1706) | 25.00% (1/4) | n/a |
+| vulkan-coopmat-off | distil-large-v3 | 8.61 | 69.7 s | 2.1 GB | 1749 | 3.12% (53/1701) | 100.00% (4/4) | n/a |
+| openvino-gpu | large-v3 | 0.98 | 613.5 s | 4.4 GB | 1710 | 1.59% (27/1701) | 25.00% (1/4) | n/a |
+| openvino-gpu | distil-large-v3 | 5.46 | 109.8 s | 6.1 GB | 1747 | 3.00% (51/1701) | 75.00% (3/4) | n/a |
+
+Best real-time factor: 8.61, distil-large-v3 on vulkan-coopmat-off. On speed alone the rule says: run the whole corpus on this PC.
+Model: large-v3 (fastest model that keeps the glossary terms; rejected: distil-large-v3 got 4 glossary terms wrong on vulkan-coopmat-off where large-v3 got 1).
+Chosen setup: vulkan-coopmat-off, at 2.72 times real time, so run the first 20 to 30 talks on this PC for Gate A and rent a GPU machine for the rest.
