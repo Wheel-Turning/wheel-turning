@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 async-trait = "0.1"
 thiserror.workspace = true
-tracing.workspace = true
 tokio = { workspace = true }
 sha2.workspace = true
 # ONNX Runtime is loaded at run time from WT_ORT_DYLIB (or ORT_DYLIB_PATH), so nothing is

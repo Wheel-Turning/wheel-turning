@@ -4250,7 +4250,6 @@ dependencies = [
  "thiserror",
  "tokenizers",
  "tokio",
- "tracing",
 ]
 
 [[package]]
