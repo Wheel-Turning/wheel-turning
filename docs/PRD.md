@@ -18,12 +18,12 @@ Western Zen dharma talks number in the tens of thousands, and almost nothing in 
 
 Wheel Turning lets a practitioner describe what is happening in their practice and see how teachers have actually addressed it, with every passage traceable to its talk or text, its teacher or author, its sangha and a way to give. The purpose is to carry teachings further. As Red Pine puts it in his commentary on the Platform Sutra, a teaching exists to be transmitted from one mind to another, as one candle lights another. The product is free and noncommercial, any gift goes directly to the sanghas whose teaching was received, and the founder intends to form a nonprofit.
 
-1. Passages, not paraphrase. The unit of result is a short verbatim excerpt with a link to its exact source moment or page. A synthesis line may summarize differences in approach, but every claim in it links to a passage, and nothing is stated that no teacher said.
+1. Passages, not paraphrase. The unit of result is a short verbatim excerpt with a link to its exact source moment or page, and, unless its teacher limits it, a link into the full transcript of the talk at that passage. A synthesis line may summarize differences in approach, but every claim in it links to a passage, and nothing is stated that no teacher said.
 2. Teachers are never spoken for. Different approaches stay visibly different. Blending voices into one answer would erase what makes the corpus worth searching.
 3. Dana follows citation. Each passage carries its sangha's own donation link, and the sanghas cited in an answer share equally in any gift made from it.
 4. Relevance alone ranks. No payment, partnership, claimed profile, upload volume or rights basis (consent, license, permission or mandate) changes where a passage appears.
 5. Text only. The product stores transcripts, texts and metadata, never audio or video, and plays from the source. Student voices are never stored.
-6. Use, ask, record, leave. Sources are used by default on the project owner's decision. The project then asks each rights holder for explicit permission, records every answer, and removes anything on request, permanently.
+6. Use, ask, record, leave. Sources are used by default on the project owner's decision. The project then asks each rights holder for explicit permission, records every answer, and removes anything on request, permanently. A teacher can also choose a narrower level than full removal: excerpts only, nothing public, or a copy of their transcripts for their own use (see Display levels).
 7. Honest labeling. The page never says or implies a permission or license that was not given. Credit, a source link and a way to report an excerpt appear with every passage.
 8. Free and noncommercial. No ads, no paid tiers, no sale of the corpus or its data. The site's own optional dana is separate and never a condition of use.
 
@@ -73,6 +73,8 @@ Three kinds of material feed it:
 - Transcripts of talks, segmented into talk, chant, announcement, sitting and Q&A, with only talk and teacher answers indexed. Student speech is dropped before anything is stored.
 - Retrieval over passage-level segments of talks and, separately, units of texts.
 - The answer page described below, with teacher, sangha, source link, donation link and a report link on every talk passage, and a separate Texts section.
+- A full-transcript page for each talk at display level c, reached from each of its passages, showing the teacher's words with marked gaps, the attribution, source and giving links at the top, and a "Listen at" link for each passage.
+- Offline transcript review files for priests or other reviewers, imported as reviewed transcript versions, and owner-run exports of a teacher's reviewed transcripts for their own use, such as books.
 - A per-answer dana checklist: the donor enters a total, sees the equal division across cited sanghas, and each line opens that sangha's own donation page. No money passes through the product.
 - Source setup from a URL or a file, with OCR for scans and a proofread gate before an OCR text can serve.
 - Hand-listed citation resolution for a small set of known texts, with everything else shown as unresolved.
@@ -92,7 +94,7 @@ Three kinds of material feed it:
 A question returns passages grouped by teacher, under a thin synthesis of how approaches differ, with footnotes that resolve to talks and to texts, and a separate section of excerpts from the texts.
 
 1. The student or teacher asks a question in situational language, such as "I keep judging myself during zazen."
-2. The page shows a short synthesis line, then the verbatim passages below it, each with teacher, sangha, a link to the exact moment in the source, a link to that sangha's dana page and a "Report this excerpt" link.
+2. The page shows a short synthesis line, then the verbatim passages below it, each with teacher, sangha, a link to the exact moment in the source, a "Read in the transcript" link when the talk is at display level c, a link to that sangha's dana page and a "Report this excerpt" link.
 3. Themes in the synthesis are one-line descriptions of a difference in approach, and a theme renders only when at least two passages support it. A theme with one passage appears as that passage.
 4. A "From the texts" section follows the teacher groups. Each excerpt shows the work, locator, author, translator, edition, page when known, a source link and a credit line. Texts never count as teachers, never enter the dana split and are not passed to synthesis.
 5. Citations inside passages become footnotes. When a cited text is loaded, the footnote opens that passage in the text. Two lists close the page: the talks cited and the external texts referenced, with unresolved citations shown as unresolved.
@@ -163,10 +165,25 @@ Sources are used by default on the project owner's decision, each rights holder 
 
 - Student questions and student audio are never indexed or shown, including in Tuesday classes and Q&A. Teacher responses are indexed with the question omitted.
 - A talk needs a resolved speaker, a registered sangha and a known rights holder. "Unknown" is a valid rights-holder value and blocks indexing until someone fills it in.
-- The interface shows short passages only. Full transcripts and full texts stay in the index and are never displayed.
+- Answers show short passages. A talk's full transcript is shown on its own page by default, with the same attribution, source link, giving link and report link as a passage, unless its teacher has chosen a narrower display level. Full texts are not displayed: texts stay excerpt-only under Spec 08's limits. Owner's decision of October 7, 2026, after Genzen asked to be able to open the full transcript from a passage so that priests can review transcription errors and his talks might later become books.
 - A document that carries another party's copyright notice is flagged on arrival, and a source can be set to hold or block such documents. Under the owner's mandate the default is to flag.
 - Each tester chooses whether their questions are kept. Kept questions are disclosed, read only as totals by topic, and opened individually only when the tester flags one. A tester can switch keeping off or delete all their questions at any time, and a question not kept is deleted after 24 hours.
 - The mandate is meant for a private demonstration. Turning on public exposure with mandated sources enabled raises a warning at startup and in the nightly audit, and counsel reviews the model before any wider launch.
+
+**Display levels**
+
+Each teacher has a display level, and a talk can be set narrower than its teacher. The default for talks on every basis is full. Leaving one level for another takes one message, like any removal.
+
+| Level | What the public sees | What the project keeps | Copy for the teacher |
+| --- | --- | --- | --- |
+| a, Excluded | Nothing: not searchable, not shown | Transcript and passages, restorable | No |
+| b, Excerpts only | Passages in answers, no transcript page | Everything | No |
+| c, Full (default for talks) | Passages and the full transcript page | Everything | On request |
+| d, Owner only | Nothing | Everything, for the teacher's use | Yes |
+| e, Export and delete | Nothing | Nothing: the takedown runs after the export | Yes, before deletion |
+| f, Full removal | Nothing | Nothing, with permanent exclusions, as in rule 4 above | No |
+
+Levels a to c are what the public sees. Levels d to f are what happens behind it. The full transcript holds only the teacher's words. Student speech, chant, announcements and sitting appear as marked gaps. Transcripts are reviewed offline in v1: a reviewer such as one of the teacher's priests gets a file per talk with the text and links to each moment of the recording, marks corrections, and the owner imports them as a reviewed version that no later automated pass overwrites.
 
 **Outreach sequence for v1**
 
@@ -245,6 +262,7 @@ Risks are ordered by how much they can sink the product and how cheaply they can
 | A teacher or rights holder objects to use without permission | Leaving takes one message. Suspension within one business day, then permanent takedown and exclusion. Notices sent by hand. One setting returns talks to consent-first. Counsel review before any wider launch |
 | A notice-first approach offends a teacher or sangha | Ask Kanshin first, honor requests without argument, and keep consent-first one setting away |
 | A mandated document carries another party's copyright notice that gets overlooked | The notice scan flags it on arrival, a source can hold or block noticed documents, and any one document can be quarantined |
+| Full transcripts of teachers who have not replied go further than excerpts and may offend | Display levels let a teacher narrow to excerpts, nothing public, or removal in one message. Notices say plainly that full transcripts are shown. If a teacher, Kanshin or counsel says stop, the default returns to excerpts the same day (owner's decision of October 7, 2026) |
 | A mandated passage reads as if permission were given | Credit lines follow the true basis, and a test fails the build if permission wording appears on a mandated passage |
 | Exposure grows once the tool is public | Private demonstration in v1, warnings at startup and in the nightly audit, and a fresh review of every mandated source before a public launch |
 | Noncommercial or no-derivatives licenses limit transcription and excerpting | Those licenses stay off the allow-list until counsel answers, and the free, ad-free, noncommercial conditions are enforced in the build |
@@ -268,7 +286,8 @@ These gate parts of the plan and are unresolved today.
 - [ ] Permission requests, recorded in the ledger, to BDK America (a draft is ready), San Francisco Zen Center (which Creative Commons variant applies, and whether guest speakers are covered), Berkeley Zen Center, Zen Community of Oregon, Shasta Abbey, Treeleaf and the Everyday Zen family.
 - [ ] Who holds rights in Everyday Zen's recorded talks. The site footer reserves all rights, the podcast feed carries a foundation copyright, and at least one talk page names Norman Fischer personally. Ask the foundation and Fischer.
 - [ ] Rights status of Norman Fischer's written work. Most of it is likely with publishers, so expect link-outs and short excerpts at most.
-- [ ] A short paid consultation with counsel on the notice-first and mandate model, noncommercial and no-derivatives licenses, speaker rights, text-only storage, the excerpts-only display rule, YouTube terms, dana routing and the language-model provider's terms.
+- [ ] Genzen's oral approval of full transcripts for his talks, given on the condition that attribution and giving links appear on the transcript page, recorded in writing in the ledger with its date.
+- [ ] A short paid consultation with counsel on the notice-first and mandate model, noncommercial and no-derivatives licenses, speaker rights, text-only storage, full-transcript display and the display levels (not waited for: the owner's decision of October 7, 2026 is to test the demo and stop if told to, with counsel funded if it continues), YouTube terms, dana routing and the language-model provider's terms.
 - [ ] YouTube license flags for each Soto channel in the source list, read through the Data API, and lineage checks for the roughly 50 channels that cannot be placed from their names.
 - [ ] Language-model provider terms with zero retention confirmed before real transcripts are sent.
 - [ ] A teacher reviewer scheduled before any code is written, with the explicit brief to rate unflatteringly.
@@ -311,3 +330,4 @@ The rights model moved most, from consent first to use, ask, record and leave.
 | Purpose and name | Dharma Gates | Wheel Turning, free and noncommercial, with a nonprofit intended |
 | Metrics | Five tests | Adds text quality and rights handling |
 | Backlog | Chant tools, lineage widening, payments, follow-up, context cards, translations | Adds automatic email sending, removal alerts and per-teacher status |
+| Display (October 7) | Short passages only, full transcripts never shown | Full transcripts of talks shown by default with attribution and giving at the transcript level, six display levels per teacher or talk, offline transcript review and owner exports. Texts stay excerpt-only |
