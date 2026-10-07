@@ -282,3 +282,51 @@ pub async fn current_keys(conn: &mut PgConnection) -> Result<Vec<(TalkId, String
         .map(|r| (TalkId::from(r.talk_id), r.s3_key))
         .collect())
 }
+
+/// A talk with a current transcript, for the owner export.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportTalk {
+    /// The talk.
+    pub id: TalkId,
+    /// Its title.
+    pub title: String,
+    /// When it was given, if known.
+    pub talk_date: Option<chrono::NaiveDate>,
+    /// Its sangha's name.
+    pub sangha: Option<String>,
+    /// The source page.
+    pub source_url: String,
+    /// `asr`, `captions` or `reviewed`.
+    pub origin: String,
+}
+
+/// Every talk of `teacher` with a current transcript, oldest first, whatever its display level:
+/// the owner export is for the teacher's own use, including talks nobody else sees.
+pub async fn teacher_transcribed_talks(
+    conn: &mut PgConnection,
+    teacher: wt_core::ids::TeacherId,
+) -> Result<Vec<ExportTalk>, DbError> {
+    let rows = sqlx::query!(
+        r#"select t.id, t.title, t.talk_date, s.name as "sangha?", sv.url, tr.origin
+           from talk t
+           join transcript tr on tr.talk_id = t.id and tr.is_current
+           join source_video sv on sv.id = t.source_video_id
+           left join sangha s on s.id = t.sangha_id
+           where t.teacher_id = $1
+           order by t.talk_date nulls last, t.title, t.id"#,
+        teacher.as_uuid()
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ExportTalk {
+            id: TalkId::from(r.id),
+            title: r.title,
+            talk_date: r.talk_date,
+            sangha: r.sangha,
+            source_url: r.url,
+            origin: r.origin,
+        })
+        .collect())
+}

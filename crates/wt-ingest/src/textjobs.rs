@@ -121,7 +121,7 @@ fn segment_range(words: &[Word], seg: &SegmentRow) -> (usize, usize) {
 
 /// The corrected words of every segment, in order, each with its source range in the stored
 /// words.
-fn corrected(
+pub(crate) fn corrected(
     glossary: &Glossary,
     words: &[Word],
     segments: &[SegmentRow],

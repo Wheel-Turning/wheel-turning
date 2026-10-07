@@ -289,6 +289,29 @@ td, th {{ text-align:left; padding:4px 8px; border-bottom:1px solid var(--line);
     )
 }
 
+/// `wt export teacher`: the teacher's talks for their own use.
+pub async fn export_teacher(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    teacher: &str,
+    out: &Path,
+) -> anyhow::Result<wt_ingest::owner_export::ExportReport> {
+    let paragraphs = stages::chunk_settings(config_dir)?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let glossary = Glossary::new(&wt_db::glossary::load(&mut conn).await?)?;
+    Ok(wt_ingest::owner_export::export_teacher(
+        &mut conn,
+        &objects,
+        &glossary,
+        &paragraphs,
+        teacher,
+        out,
+    )
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

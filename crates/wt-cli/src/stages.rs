@@ -355,3 +355,23 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
         Arc::new(LogAlerter),
     )?)
 }
+
+/// Spec 07, takedown step 3: after the database commit, deletes each talk's stored objects,
+/// `transcripts/<talk>/` and `citations/<talk>.json`, then checks nothing is left. Returns how
+/// many objects were deleted. Retrying a failure and the audit's check come with M8.
+pub fn delete_talk_objects(
+    config: &Config,
+    talks: &[wt_core::ids::TalkId],
+) -> anyhow::Result<usize> {
+    let store = objects(config)?;
+    audio::delete_talk_objects(&store, talks).context("deleting the talks' stored objects")
+}
+
+/// A takedown's printed report with the deleted objects added.
+pub fn with_objects(report: &impl serde::Serialize, deleted: usize) -> serde_json::Value {
+    let mut value = serde_json::to_value(report).unwrap_or_default();
+    if let Some(map) = value.as_object_mut() {
+        map.insert("objects_deleted".into(), serde_json::json!(deleted));
+    }
+    value
+}

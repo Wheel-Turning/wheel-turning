@@ -383,7 +383,7 @@ Migration `0019_display_levels.sql`: the two columns with checks, `'reviewed'` a
 Acceptance criteria (M4T):
 
 - [x] Each level changes what `servable_passage` returns for a teacher's talks, a talk-level setting narrows but never widens its teacher's, and `full` is the default. (`wt-db/tests/display.rs`; `wt-cli/tests/commands.rs` checks the export.)
-- [ ] `wt teacher display --level e` writes the owner export before the takedown, and the takedown leaves zero rows in every store.
+- [x] `wt teacher display --level e` writes the owner export before the takedown, and the takedown leaves zero rows in every store. (`wt-ingest/tests/pipeline.rs` and `wt-cli/tests/commands.rs`. Decisions of October 7, 2026: e and f need `--yes` and apply to a teacher only; e deletes nothing if the export skipped any talk; both record the level, then run the `wt teacher opt-out` takedown with its exclusions, so discovery cannot bring the talks back.)
 - [x] A narrower level from a report is applied without `--evidence`; widening a level the teacher asked to narrow is refused without it. (`wt-db/tests/display.rs`. Decision of October 7, 2026: every widening needs `--evidence`, since the database does not record who asked for a narrowing, and requiring it always is the safer direction.)
 
 ## Seattle Soto Zen sources
