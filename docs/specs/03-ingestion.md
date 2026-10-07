@@ -376,13 +376,15 @@ Owner's decisions of October 7, 2026 (PRD, Rights, notice and removal). Talks ar
 4. A report or a message asking for any narrower level is honored without argument, like a removal, within one business day.
 5. Notices and permission requests say that full transcripts are shown and list the levels (Spec 09).
 
+Decisions of October 7, 2026, made while building it: `talk.display_level` accepts only a, b and d, so per-talk removal stays `wt takedown --talk`; `wt teacher display` refuses e and f, which run the takedown (`wt teacher opt-out` for f, the owner export for e); the view filters on plain column conditions rather than a function, because a function the planner cannot inline cost the vector search its HNSW index; since a talk's level is only a, b or d, a talk is public when its teacher is at b or c and the talk is unset or at b.
+
 Migration `0019_display_levels.sql`: the two columns with checks, `'reviewed'` added to `transcript.origin`, and the view replaced with `create or replace view`, keeping 0017's columns in order and adding `display_level` at the end.
 
 Acceptance criteria (M4T):
 
-- [ ] Each level changes what `servable_passage` returns for a teacher's talks, a talk-level setting narrows but never widens its teacher's, and `full` is the default.
+- [x] Each level changes what `servable_passage` returns for a teacher's talks, a talk-level setting narrows but never widens its teacher's, and `full` is the default. (`wt-db/tests/display.rs`; `wt-cli/tests/commands.rs` checks the export.)
 - [ ] `wt teacher display --level e` writes the owner export before the takedown, and the takedown leaves zero rows in every store.
-- [ ] A narrower level from a report is applied without `--evidence`; widening a level the teacher asked to narrow is refused without it.
+- [x] A narrower level from a report is applied without `--evidence`; widening a level the teacher asked to narrow is refused without it. (`wt-db/tests/display.rs`. Decision of October 7, 2026: every widening needs `--evidence`, since the database does not record who asked for a narrowing, and requiring it always is the safer direction.)
 
 ## Seattle Soto Zen sources
 

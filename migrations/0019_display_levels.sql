@@ -10,25 +10,10 @@ alter table transcript drop constraint transcript_origin_check;
 alter table transcript add constraint transcript_origin_check
   check (origin in ('captions','asr','reviewed'));
 
--- The narrower of a teacher's and a talk's levels, from narrowest: removed, export_then_delete,
--- excluded, owner_only, excerpts, full. A talk can never be wider than its teacher.
-create function display_level_rank(level text) returns integer
-  language sql immutable parallel safe set search_path = public as
-  $$ select case level
-       when 'removed' then 0 when 'export_then_delete' then 1 when 'excluded' then 2
-       when 'owner_only' then 3 when 'excerpts' then 4 when 'full' then 5 end $$;
-create function narrower_display_level(teacher_level text, talk_level text) returns text
-  language sql immutable parallel safe set search_path = public as
-  $$ select case
-       when talk_level is null then teacher_level
-       when display_level_rank(talk_level) < display_level_rank(teacher_level) then talk_level
-       else teacher_level end $$;
-alter function display_level_rank(text) owner to wt_owner;
-alter function narrower_display_level(text, text) owner to wt_owner;
-revoke all on function display_level_rank(text) from public;
-revoke all on function narrower_display_level(text, text) from public;
-grant execute on function display_level_rank(text) to wt_web, wt_pipeline;
-grant execute on function narrower_display_level(text, text) to wt_web, wt_pipeline;
+-- A talk's level can only be a, b or d, so a talk is public when its teacher is at excerpts or
+-- full and the talk is unset or at excerpts, and its effective level is the narrower one. Plain
+-- column conditions, not a function, so the planner can estimate them and keep the HNSW index
+-- (Spec 02; `a_vector_query_on_servable_passage_uses_the_hnsw_index`).
 
 -- The columns of 0017 keep their order; display_level is added at the end. Only talks whose
 -- effective level is excerpts or full are servable; the transcript page also needs full.
@@ -41,7 +26,8 @@ select p.id as passage_id, p.text, p.start_ms, p.end_ms, p.ordinal, p.segment_ki
        s.id as sangha_id, s.name as sangha_name, s.listed,
        s.donation_url, s.donation_url_template, s.donation_verified,
        t.rights_basis, le.display_notice,
-       narrower_display_level(te.display_level, t.display_level) as display_level
+       case when te.display_level = 'excerpts' or t.display_level = 'excerpts' then 'excerpts'
+            else 'full' end as display_level
 from passage p
 join talk t on t.id = p.talk_id
 join source_video sv on sv.id = t.source_video_id
@@ -51,7 +37,8 @@ left join license_evidence le on le.id = t.license_evidence_id
 where t.state = 'ready'
   and t.rights_holder is not null and lower(t.rights_holder) <> 'unknown'
   and te.opted_out_at is null
-  and narrower_display_level(te.display_level, t.display_level) in ('excerpts','full')
+  and te.display_level in ('excerpts','full')
+  and (t.display_level is null or t.display_level = 'excerpts')
   and (
     (t.rights_basis = 'speaker_consent' and t.consent_status = 'granted')
     or (t.rights_basis = 'license' and le.allowed)
