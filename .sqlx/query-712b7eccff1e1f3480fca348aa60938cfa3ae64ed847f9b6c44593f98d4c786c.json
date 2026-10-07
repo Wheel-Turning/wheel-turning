@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_level from teacher where id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_level"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "712b7eccff1e1f3480fca348aa60938cfa3ae64ed847f9b6c44593f98d4c786c"
+}

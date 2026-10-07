@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_level from talk where id = $1 and teacher_id = $2 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "display_level"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "40c6ab207a40bfc5be0a84b5b1f72893d2026c30b08e721935fda66d9e0c2f6d"
+}
