@@ -20,6 +20,12 @@ Analytics are cookie-free Cloudflare Web Analytics, turned on in the dashboard u
 
 `docs/brand/` holds the logo files as delivered: the mark and the lockup, each in color, white and themeable versions, with their content-credential metadata. The site inlines the themeable mark, which draws in `currentColor` with dots in `--accent`, and sets the wordmark as text because the lockup's live Cormorant Garamond text would fall back to another face on most machines.
 
+## Type and the preview image
+
+Headings and the wordmark use Cormorant Garamond, the lockup's face; reading text uses EB Garamond, a book face, so excerpts read like a printed page. Both are self-hosted in `site/fonts/` (Latin and Latin Extended subsets, so Pali and Sanskrit diacritics stay in the same face) with their SIL Open Font License files beside them. `font-display: swap` shows text at once, and metric-matched fallback faces built on local Georgia keep line breaks the same until the fonts load, or if they never do.
+
+`site/og.png` is the 1200 by 630 link preview. To regenerate it after a logo or font change, render a page that shows the mark, the wordmark and the tagline at that size in headless Chrome with `--screenshot`, forcing the light theme.
+
 ## Email
 
 The pages name `hello@wheelturning.org` and `rights@wheelturning.org`. Cloudflare Email Routing forwards both to the owner's verified mailbox, set up with `wrangler email routing` (enable, `addresses create`, then one `rules create` per address). A destination address forwards nothing until its owner clicks Cloudflare's verification email. Enabling routing fails while the zone still has the null MX record (`0 .`) Cloudflare adds to a domain with no mail; delete it in the dashboard, or enable routing there and accept its offer to replace conflicting records.

@@ -1,6 +1,123 @@
 /* Wheel Turning static site. Colors come from the logo files in docs/brand: ink #1B1D1F,
    accent #B8730A on light grounds and #E3A62B on dark ones. */
 
+/* Fonts. Cormorant Garamond for headings and the wordmark, as in the lockup; EB Garamond, a
+   book face, for reading text. Both are self-hosted under the SIL Open Font License (see
+   /fonts). Latin Extended is included so Pali and Sanskrit diacritics render in the same face.
+
+   Degradation: font-display: swap shows text at once in a fallback. The "Fallback" faces are
+   local Georgia scaled to each Garamond's proportions, so lines barely move when the web font
+   arrives and still read well if it never does. Without Georgia, the stacks fall through to
+   other book serifs and finally the generic serif. */
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-ext-400-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-400-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-ext-400-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/eb-garamond-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-600-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-600-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "EB Garamond Fallback";
+  src: local("Georgia"), local("Georgia Regular");
+  size-adjust: 85.94%;
+  ascent-override: 117.52%;
+  descent-override: 34.91%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond Fallback";
+  src: local("Georgia"), local("Georgia Regular");
+  size-adjust: 76.36%;
+  ascent-override: 120.48%;
+  descent-override: 37.98%;
+  line-gap-override: 0%;
+}
+
 :root {
   --ground: #f7f6f3;
   --surface: #ffffff;
@@ -10,8 +127,8 @@
   --rule: #dddad3;
   --accent: #b8730a;
   --focus: #1b1d1f;
-  --display: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-  --body: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+  --display: "Cormorant Garamond", "Cormorant Garamond Fallback", Garamond, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --body: "EB Garamond", "EB Garamond Fallback", Garamond, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   color-scheme: light;
 }
 
@@ -45,8 +162,11 @@ body {
   background: var(--ground);
   color: var(--text);
   font-family: var(--body);
-  font-size: 1.0625rem;
-  line-height: 1.65;
+  font-size: 1.1875rem;
+  line-height: 1.6;
+  font-variant-ligatures: common-ligatures;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
 }
 
 .skip {
@@ -164,7 +284,7 @@ h1 em,
   border-radius: 1.25rem;
   background: var(--surface);
   color: var(--muted);
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
 }
 
 .status::before {
@@ -210,7 +330,7 @@ h1 em,
 .principles p {
   margin: 0;
   color: var(--muted);
-  font-size: 1rem;
+  font-size: 1.125rem;
 }
 
 /* Long-form pages */
@@ -253,7 +373,7 @@ h1 em,
 .updated {
   margin: 0 0 1.5rem;
   color: var(--muted);
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
 }
 
 .summary {
@@ -301,7 +421,7 @@ h1 em,
   padding: 2rem 0 3rem;
   border-top: 1px solid var(--rule);
   color: var(--muted);
-  font-size: 0.9375rem;
+  font-size: 1.0625rem;
 }
 
 .site-footer nav ul {
