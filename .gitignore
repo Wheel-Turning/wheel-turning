@@ -39,3 +39,7 @@ crash.log
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Cloudflare tooling state
+.wrangler/
+.cloudflare/
