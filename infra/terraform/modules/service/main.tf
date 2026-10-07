@@ -32,6 +32,12 @@ variable "domain_name" {
   type        = string
 }
 
+variable "alternate_domain_names" {
+  description = "Further hostnames the certificate covers, each pointed at the load balancer by a DNS-only CNAME."
+  type        = list(string)
+  default     = []
+}
+
 variable "image_tag" {
   description = "Image tag for the web service. Empty means no image has been pushed yet: the service runs zero tasks."
   type        = string
@@ -306,8 +312,9 @@ resource "aws_lb_target_group" "web" {
 }
 
 resource "aws_acm_certificate" "this" {
-  domain_name       = var.domain_name
-  validation_method = "DNS"
+  domain_name               = var.domain_name
+  subject_alternative_names = var.alternate_domain_names
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true

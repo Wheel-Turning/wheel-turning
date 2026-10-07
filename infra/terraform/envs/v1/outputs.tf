@@ -1,7 +1,7 @@
 output "dns_records_for_cloudflare" {
   description = "Create each as a DNS-only (grey cloud) record at Cloudflare."
-  value = concat(module.service.certificate_validation_records, [{
-    name  = var.domain_name
+  value = concat(module.service.certificate_validation_records, [for name in concat([var.domain_name], var.alternate_domain_names) : {
+    name  = name
     type  = "CNAME"
     value = module.service.alb_dns_name
   }])
