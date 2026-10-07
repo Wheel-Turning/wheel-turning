@@ -218,3 +218,17 @@ fn only_the_named_modules_read_the_passage_table() {
         offenders.join("\n")
     );
 }
+
+/// Spec 08: nothing under `data-inbox/`, where source documents wait to be imported, is ever
+/// committed.
+#[test]
+fn nothing_under_data_inbox_is_committed() {
+    let tracked: Vec<String> = tracked_files()
+        .into_iter()
+        .filter(|path| path.starts_with("data-inbox/"))
+        .collect();
+    assert!(
+        tracked.is_empty(),
+        "files under data-inbox/ are committed: {tracked:?}"
+    );
+}

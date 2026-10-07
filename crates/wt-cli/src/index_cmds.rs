@@ -397,6 +397,38 @@ pub async fn import_corrections(
     .await?)
 }
 
+/// `wt text import`: the embedder loads only for `--apply`, so a dry run needs no model.
+pub async fn import_text(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    manifest: &Path,
+    apply: bool,
+    by: &str,
+) -> anyhow::Result<wt_ingest::texts::ImportReport> {
+    let licenses = wt_ingest::config::LicenseSettings::load(&config_dir.join("pipeline.toml"))?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let fake = wt_ml::FakeEmbedder::new("dry-run");
+    let real;
+    let embedder: &dyn Embedder = if apply {
+        real = stages::embedder(config)?;
+        &real
+    } else {
+        &fake
+    };
+    Ok(wt_ingest::texts::import(
+        &mut conn,
+        &objects,
+        embedder,
+        manifest,
+        &licenses.allowed_license_codes,
+        by,
+        apply,
+    )
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

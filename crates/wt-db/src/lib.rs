@@ -25,6 +25,7 @@ pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod texts;
 pub mod transcript;
 
 /// Every migration in `migrations/`, embedded at compile time.

@@ -247,7 +247,12 @@ async fn a_login_inheriting_wt_owner_runs_0020_but_only_the_bootstrap_user_repai
         .unwrap();
     assert_eq!(current, "wt_owner");
     let before = privileges(&first).await;
-    assert_eq!(wt_db::migrate(&owner_first).await.unwrap().applied, 1);
+    // Exactly the repair: later migrations, such as 0021, change privileges on purpose.
+    wt_db::MIGRATOR
+        .run_to(BEFORE_REPAIR + 1, &owner_first)
+        .await
+        .unwrap();
+    assert_eq!(applied(&first).await.last(), Some(&(BEFORE_REPAIR + 1)));
     assert_eq!(privileges(&first).await, before);
     assert!(not_owned_by_wt_owner(&first).await.is_empty());
     web_role_can_serve(&first).await;
@@ -265,8 +270,12 @@ async fn a_login_inheriting_wt_owner_runs_0020_but_only_the_bootstrap_user_repai
     assert_eq!(applied(&second).await.last(), Some(&BEFORE_REPAIR));
     assert_eq!(not_owned_by_wt_owner(&second).await, broken);
 
-    // The bootstrap user repairs it and the leftover roles go.
-    wt_db::migrate(&second).await.unwrap();
+    // The bootstrap user repairs it and the leftover roles go. Both databases are compared at
+    // the repair, before later migrations change privileges on purpose.
+    wt_db::MIGRATOR
+        .run_to(BEFORE_REPAIR + 1, &second)
+        .await
+        .unwrap();
     assert_like_a_fresh_cluster("wt_second", &second, &before).await;
     let dg_roles: i64 =
         sqlx::query_scalar("select count(*) from pg_roles where rolname like 'dg\\_%'")

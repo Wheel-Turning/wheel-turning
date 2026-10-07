@@ -4,6 +4,8 @@
 extend-ignore-re = ['U\+[0-9A-Fa-f]+(-[0-9A-Fa-f]+)?']
 
 [default.extend-words]
+# The EPUB package file (Open Packaging Format).
+opf = "opf"
 nd = "nd" # Creative Commons NoDerivatives, as in cc-by-nc-nd-4.0
 mis = "mis" # "mis-hearings", in a merged migration that cannot be edited
 pn = "pn" # P1..Pn, passage references

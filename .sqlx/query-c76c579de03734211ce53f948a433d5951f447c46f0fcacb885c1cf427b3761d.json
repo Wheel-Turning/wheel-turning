@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select allowed, license_code from license_evidence where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allowed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "allowed"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "license_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "license_code"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c76c579de03734211ce53f948a433d5951f447c46f0fcacb885c1cf427b3761d"
+}

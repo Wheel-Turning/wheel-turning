@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into work (title, author_person_id, tradition) values ($1, $2, $3)\n         on conflict (title) do update\n           set author_person_id = coalesce(excluded.author_person_id, work.author_person_id),\n               tradition = coalesce(excluded.tradition, work.tradition)\n         returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "970e84547cb065a32c187b014f27d6459481f88641106b72685e4b6afdbbf4e6"
+}
