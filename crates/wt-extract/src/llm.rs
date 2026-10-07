@@ -561,3 +561,20 @@ impl LlmClient for FakeLlm {
         }
     }
 }
+
+/// The client a worker uses when no model may be called: no API key, so every request is
+/// refused as having no model. Extraction then stages its citations as skipped.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnavailableLlm;
+
+#[async_trait]
+impl LlmClient for UnavailableLlm {
+    async fn complete_value(
+        &self,
+        req: &LlmRequest,
+        _schema: &Value,
+        _class: DataClass,
+    ) -> Result<Value, LlmError> {
+        Err(LlmError::NoModel(req.stage.as_str()))
+    }
+}

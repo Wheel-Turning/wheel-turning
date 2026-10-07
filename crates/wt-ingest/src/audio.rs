@@ -111,6 +111,8 @@ pub enum AudioOutcome {
         segments: usize,
         /// Teacher words kept.
         words: usize,
+        /// Ambiguous windows labeled by the rule fallback instead of the model.
+        fallback_windows: usize,
     },
 }
 
@@ -127,6 +129,13 @@ struct TranscriptJson<'a> {
     glossary_version: Option<&'a str>,
     words: Vec<JsonWord<'a>>,
     spans: Vec<JsonSpan>,
+    /// Ambiguous windows labeled by the rule fallback instead of the model.
+    #[serde(skip_serializing_if = "is_zero")]
+    label_fallback_windows: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Serialize)]
@@ -167,6 +176,8 @@ pub enum Steps {
         model: String,
         /// Audio length.
         audio_ms: i64,
+        /// Ambiguous windows labeled by the rule fallback instead of the model.
+        fallback_windows: usize,
     },
 }
 
@@ -221,6 +232,11 @@ async fn steps(
     } else {
         deps.labeler.label(plan.ambiguous()).await?
     };
+    let fallback_windows = if deps.labeler.is_fallback() {
+        labels.len()
+    } else {
+        0
+    };
     let seg = plan.finish(&labels)?;
     // The raw recognition and the audio are no longer needed; delete them before storing.
     scratch.finish()?;
@@ -228,6 +244,7 @@ async fn steps(
         seg,
         model: raw.model,
         audio_ms: raw.audio_ms,
+        fallback_windows,
     })
 }
 
@@ -285,17 +302,19 @@ pub async fn run(
         return Ok(AudioOutcome::NoMedia);
     };
 
-    let (seg, model, audio_ms) = match steps(Some(&mut *conn), &talk, &source, deps).await? {
-        Steps::Held(reason) => {
-            transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
-            return Ok(AudioOutcome::Held(reason));
-        }
-        Steps::Segmented {
-            seg,
-            model,
-            audio_ms,
-        } => (seg, model, audio_ms),
-    };
+    let (seg, model, audio_ms, fallback_windows) =
+        match steps(Some(&mut *conn), &talk, &source, deps).await? {
+            Steps::Held(reason) => {
+                transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
+                return Ok(AudioOutcome::Held(reason));
+            }
+            Steps::Segmented {
+                seg,
+                model,
+                audio_ms,
+                fallback_windows,
+            } => (seg, model, audio_ms, fallback_windows),
+        };
 
     let version = transcript::next_version(conn, talk_id).await?;
     let key = transcript_key(talk_id, version);
@@ -306,6 +325,7 @@ pub async fn run(
         &deps.hints.language,
         audio_ms,
         &seg,
+        fallback_windows,
     );
     let hash = sha256_hex(json.as_bytes());
     deps.objects.put(&key, json.as_bytes())?;
@@ -348,6 +368,7 @@ pub async fn run(
         version,
         segments: segments.len(),
         words: seg.words.len(),
+        fallback_windows,
     })
 }
 
@@ -358,6 +379,7 @@ fn transcript_json(
     language: &str,
     audio_ms: i64,
     seg: &Segmentation,
+    fallback_windows: usize,
 ) -> String {
     let doc = TranscriptJson {
         schema: 1,
@@ -391,6 +413,7 @@ fn transcript_json(
                 w1: s.words.map(|w| w.1),
             })
             .collect(),
+        label_fallback_windows: fallback_windows,
     };
     serde_json::to_string(&doc).unwrap_or_default()
 }

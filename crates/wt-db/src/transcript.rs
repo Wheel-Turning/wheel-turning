@@ -244,14 +244,22 @@ pub async fn corrected_talks(conn: &mut PgConnection) -> Result<Vec<TalkId>, DbE
     Ok(rows.into_iter().map(TalkId::from).collect())
 }
 
-/// Up to `limit` talks waiting at `cleared`, in random order, with their titles: the sample for
-/// `wt segment sample`.
+/// Up to `limit` talks waiting at `cleared` that have audio to fetch (a matched podcast
+/// enclosure, the route `feed::media_route` uses), in random order, with their titles: the
+/// sample for `wt segment sample`.
 pub async fn sample_cleared(
     conn: &mut PgConnection,
     limit: i64,
 ) -> Result<Vec<(TalkId, String)>, DbError> {
     let rows = sqlx::query!(
-        "select id, title from talk where state = 'cleared' order by random() limit $1",
+        "select t.id, t.title from talk t
+         join source_video sv on sv.id = t.source_video_id
+         where t.state = 'cleared'
+           and exists (select 1 from source_video e
+                       where e.platform = 'rss' and e.raw->'match'->>'vimeo_id' = sv.external_id
+                         and sv.platform = 'vimeo'
+                         and e.raw->'item'->'enclosure'->>'url' is not null)
+         order by random() limit $1",
         limit
     )
     .fetch_all(&mut *conn)

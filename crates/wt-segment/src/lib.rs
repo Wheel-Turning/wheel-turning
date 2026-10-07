@@ -5,7 +5,8 @@ pub mod diarize;
 pub mod segmenter;
 
 pub use diarize::{
-    DiarizeError, Diarizer, FakeDiarizer, FixedLabeler, LabelError, SidecarDiarizer, WindowLabeler,
+    DiarizeError, Diarizer, FakeDiarizer, FixedLabeler, LabelError, RuleFallbackLabeler,
+    SidecarDiarizer, WindowLabeler,
 };
 
 pub use segmenter::{

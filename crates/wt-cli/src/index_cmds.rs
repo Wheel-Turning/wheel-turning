@@ -131,8 +131,23 @@ pub async fn segment_sample(
     for (talk, title) in &picked {
         tracing::info!(%talk, "sampling segmentation");
         let section = match stages.sample(&mut conn, *talk).await {
-            Ok(SampleOutcome::Ran(Steps::Segmented { seg, audio_ms, .. })) => {
-                render_talk(title, *talk, &seg, audio_ms)
+            Ok(SampleOutcome::Ran(Steps::Segmented {
+                seg,
+                audio_ms,
+                fallback_windows,
+                ..
+            })) => {
+                let mut html = render_talk(title, *talk, &seg, audio_ms);
+                if fallback_windows > 0 {
+                    html = html.replacen(
+                        "unaligned words</p>",
+                        &format!(
+                            "unaligned words · {fallback_windows} ambiguous windows labeled by rule, not by the model</p>"
+                        ),
+                        1,
+                    );
+                }
+                html
             }
             Ok(SampleOutcome::Ran(Steps::Held(reason))) => {
                 note(title, *talk, &format!("Held for review: {reason}"))

@@ -10,5 +10,5 @@ pub use labeler::LlmLabeler;
 
 pub use llm::{
     Alerter, ClaudeClient, ClaudeSettings, DataClass, FakeLlm, Ledger, LlmClient, LlmError,
-    LlmRequest, LogAlerter, PgLedger, PriceTable, api_schema, complete_json,
+    LlmRequest, LogAlerter, PgLedger, PriceTable, UnavailableLlm, api_schema, complete_json,
 };
