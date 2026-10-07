@@ -1,4 +1,8 @@
 # typos runs in CI. Words here are correct in this codebase.
+[default]
+# CSS unicode-range values such as U+0100-02BA, in site/styles.css
+extend-ignore-re = ['U\+[0-9A-Fa-f]+(-[0-9A-Fa-f]+)?']
+
 [default.extend-words]
 nd = "nd" # Creative Commons NoDerivatives, as in cc-by-nc-nd-4.0
 mis = "mis" # "mis-hearings", in a merged migration that cannot be edited
