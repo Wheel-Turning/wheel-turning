@@ -98,7 +98,7 @@ fn english() -> String {
 }
 
 /// The source formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
     /// An EPUB file, read in spine order.
@@ -111,6 +111,8 @@ pub enum Format {
     Md,
     /// A PDF.
     Pdf,
+    /// A Word document.
+    Docx,
 }
 
 /// `[source]`.

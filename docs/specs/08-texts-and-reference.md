@@ -498,20 +498,33 @@ alter table text_edition add column fetched_at timestamptz;
 alter table text_edition add column source_etag text;
 ```
 
+As built (October 7, 2026):
+
+- **What covers a URL.** Approved evidence whose `url_prefixes` include a prefix of it, or an enabled source whose evidence is approved. The longest prefix wins. Anything else gets a `HEAD` request only.
+- **Fetching.** The fetcher resolves each host itself, refuses any address that is not public, and pins the request to the checked addresses. It follows each redirect by hand, checking the new address and exclusions again.
+  - Each host gets one connection at a time, at least `fetch_delay_ms` apart.
+  - `robots.txt` is read once per host under that slot. Any 4xx means no rules, and a 5xx refuses the host.
+  - Bodies are capped at `max_download_mb`.
+  - These settings and the aggregator hosts live under `[url_policy]` in `pipeline.toml`.
+- **Raw copies.** They go to `texts-source/<host>/<sha256>`, with the sidecar at the same key plus `.json`. A takedown deletes both.
+- **Conversion.** HTML takes `<article>`, `<main>` or `role="main"` if it holds 20 words, otherwise the element whose own paragraphs hold the most words. The HTML reader skips `nav`, `header`, `footer`, `aside`, `form` and `noscript` everywhere, local files included. DOCX reads `word/document.xml`, with `Heading*` and `Title` styles as sections. Not yet built: DOC, RTF and ODT through LibreOffice; they are reported as unsupported.
+- **Drafts.** A draft goes to `data-inbox/texts/<title slug>/`. Its rights holder is the evidence's grantor, else its publisher, else "public domain" for that code. A draft that fails to import is reported, not raised.
+- **License commands.** `wt license capture --publisher --url --code --scope [--prefix]` saves the page through the fetcher to the records directory. `wt license record-permission` and `wt license approve` follow this section. `capture` and `record-permission` refuse a host-wide prefix on an aggregator host.
+
 Acceptance criteria for URL ingestion:
 
-- [ ] A URL outside every approved prefix gets a `HEAD` request only, with a report and no body downloaded or stored. A URL inside a prefix is downloaded, stored in S3 with its sidecar and converted.
-- [ ] A URL disallowed by `robots.txt` is skipped and reported, and no flag overrides it.
-- [ ] Loopback, private and link-local addresses are blocked, including through a redirect.
-- [ ] Audio and video content types are refused.
-- [ ] A PDF served under an `.html` name is detected as a PDF by its signature.
-- [ ] Fixtures convert correctly: an HTML page loses its navigation and footer, a DOCX keeps headings and paragraphs, and an EPUB works. DOC and RTF conversion through LibreOffice runs nightly where it is installed.
+- [x] A URL outside every approved prefix gets a `HEAD` request only, with a report and no body downloaded or stored. A URL inside a prefix is downloaded, stored in S3 with its sidecar and converted. (`wt-ingest/tests/url_fetch.rs`.)
+- [x] A URL disallowed by `robots.txt` is skipped and reported, and no flag overrides it. (`wt-ingest/tests/url_fetch.rs`.)
+- [x] Loopback, private and link-local addresses are blocked, including through a redirect. (`wt-ingest/tests/url_fetch.rs` and `texts::web` unit tests.)
+- [x] Audio and video content types are refused. (`wt-ingest/tests/url_fetch.rs`.)
+- [x] A PDF served under an `.html` name is detected as a PDF by its signature. (`wt-ingest/tests/url_fetch.rs`.)
+- [ ] Fixtures convert correctly: an HTML page loses its navigation and footer, a DOCX keeps headings and paragraphs, and an EPUB works. DOC and RTF conversion through LibreOffice runs nightly where it is installed. (HTML, DOCX and EPUB pass in `url_fetch.rs`, `texts.rs` and `texts::convert`; LibreOffice conversion is not built.)
 - [ ] A crawl of an index fixture lists links, applies the pattern and the prefix scope, honors `--max-pages`, and requires a selection before importing.
-- [ ] The manifest draft takes title and author from meta tags, never guesses a translator, and `--yes` applies only to born-digital HTML.
-- [ ] An HTML unit's source link carries a text fragment, and a PDF unit's carries a page number.
-- [ ] A permission record without a grantor or URL prefixes violates the database constraint, needs a person's approval before use, and renders "Used with permission of" on the page.
+- [x] The manifest draft takes title and author from meta tags, never guesses a translator, and `--yes` applies only to born-digital HTML. (`wt-ingest/tests/url_fetch.rs` and `texts::url` unit tests.)
+- [x] An HTML unit's source link carries a text fragment, and a PDF unit's carries a page number. (`wt-ingest/tests/url_fetch.rs` and `pdf.rs`; `text_unit.source_anchor` holds the fragment, joined to the edition's source URL.)
+- [ ] A permission record without a grantor or URL prefixes violates the database constraint, needs a person's approval before use, and renders "Used with permission of" on the page. (The constraint and the approval: `url_fetch.rs`. The rendering comes with the page in M5.)
 - [ ] Refresh is a no-op for an unchanged document. A changed one produces a diff and does not replace the served edition until approved.
-- [ ] A local test server confirms the `User-Agent`, the per-host delay and the connection limit.
+- [x] A local test server confirms the `User-Agent`, the per-host delay and the connection limit. (`wt-ingest/tests/url_fetch.rs`.)
 
 ## Source policy for URL ingestion
 
@@ -540,7 +553,7 @@ As built (October 7, 2026), for every import, not only URL ones:
 
 Acceptance criteria for the source policy:
 
-- [ ] Recording evidence with a host-wide prefix on an aggregator host is rejected.
+- [x] Recording evidence with a host-wide prefix on an aggregator host is rejected. (`UrlPolicy::check_prefix`, used by `wt license capture` and `record-permission`; `wt-ingest/tests/url_fetch.rs`.)
 - [x] A fixture PDF whose first page carries a copyright notice naming another party is blocked as `third_party_notice`, and evidence naming that holder unblocks it. (`wt-ingest/tests/pdf.rs`; plain text in `wt-ingest/tests/notices.rs`.)
 - [ ] The notice scan covers HTML, PDF and DOCX, reading metadata and the first and last pages. (HTML, EPUB, text and PDF pages are scanned; DOCX and document metadata come with URL ingestion.)
 

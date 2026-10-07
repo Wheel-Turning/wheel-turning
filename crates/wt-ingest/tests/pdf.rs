@@ -442,6 +442,17 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
         units[0].2.is_none() && units[2].2.is_some(),
         "only OCR units carry a confidence"
     );
+    let anchors: Vec<Option<String>> =
+        sqlx::query_scalar("select source_anchor from text_unit order by ordinal")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        anchors[0].as_deref(),
+        Some("#page=1"),
+        "a PDF unit links to its page"
+    );
+    assert_eq!(anchors[5].as_deref(), Some("#page=3"));
     assert_eq!(
         count(&fx.pool, "select count(*) from servable_text_unit").await,
         0

@@ -348,6 +348,69 @@ impl TextSettings {
     }
 }
 
+/// `[url_policy]` in `config/pipeline.toml` (Spec 08, Ingesting from URLs and Source policy):
+/// politeness, the download cap, and aggregator hosts, which evidence may not cover host-wide.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct UrlPolicy {
+    /// The least time between two requests to one host.
+    pub fetch_delay_ms: u64,
+    /// The largest download.
+    pub max_download_mb: u64,
+    /// Hosts that republish many rights holders' works.
+    pub aggregator_hosts: Vec<String>,
+}
+
+impl Default for UrlPolicy {
+    fn default() -> Self {
+        Self {
+            fetch_delay_ms: 1000,
+            max_download_mb: 200,
+            aggregator_hosts: vec!["terebess.hu".into()],
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct UrlPolicyFile {
+    #[serde(default)]
+    url_policy: UrlPolicy,
+}
+
+impl UrlPolicy {
+    /// Reads `[url_policy]` from `config/pipeline.toml`; without the section, the defaults.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Ok(parse::<UrlPolicyFile>(&read(pipeline)?, &pipeline.display().to_string())?.url_policy)
+    }
+
+    /// The fetcher's settings.
+    pub fn web(&self) -> crate::texts::web::WebSettings {
+        crate::texts::web::WebSettings {
+            fetch_delay: std::time::Duration::from_millis(self.fetch_delay_ms),
+            max_download_bytes: self.max_download_mb.saturating_mul(1024 * 1024),
+            ..crate::texts::web::WebSettings::default()
+        }
+    }
+
+    /// Refuses a prefix that covers an aggregator host as a whole: each of its documents needs
+    /// its own evidence (Spec 08, Source policy, rule 1).
+    pub fn check_prefix(&self, prefix: &str) -> Result<(), String> {
+        let url = url::Url::parse(prefix).map_err(|e| format!("{prefix}: {e}"))?;
+        let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+        let aggregator = self.aggregator_hosts.iter().any(|a| {
+            let a = a.to_ascii_lowercase();
+            host == a || host.ends_with(&format!(".{a}"))
+        });
+        let path = url.path().trim_matches('/');
+        if aggregator && path.is_empty() {
+            return Err(format!(
+                "{host} is an aggregator: evidence names each document or a narrow path, never                  the whole host"
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct PipelineFile {
     #[serde(default)]

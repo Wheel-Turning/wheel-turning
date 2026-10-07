@@ -94,6 +94,12 @@ enum Command {
         #[command(subcommand)]
         command: TextCommand,
     },
+    /// License evidence: capture a license page, record a permission, approve either (Spec 03,
+    /// Licensed sources; Spec 08, Ingesting from URLs).
+    License {
+        #[command(subcommand)]
+        command: LicenseCommand,
+    },
     /// Reference assets: glossaries, alias lists, lineage and locator lists (Spec 08).
     Reference {
         #[command(subcommand)]
@@ -189,6 +195,69 @@ enum AsrCommand {
         /// Count them without queueing anything.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum LicenseCommand {
+    /// Saves a license page and records it as evidence, unapproved until a person reads it.
+    Capture {
+        /// Who publishes what it covers.
+        #[arg(long)]
+        publisher: String,
+        /// The page stating the license.
+        #[arg(long)]
+        url: String,
+        /// Such as cc-by-4.0 or public-domain.
+        #[arg(long)]
+        code: String,
+        /// What it covers, in words.
+        #[arg(long)]
+        scope: String,
+        /// URL prefixes it covers, for `wt text fetch`.
+        #[arg(long)]
+        prefix: Vec<String>,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Records an organization's permission for URL prefixes, unapproved until a person reads
+    /// the statement. A permission covers only what the grantor can authorize.
+    RecordPermission {
+        /// The organization.
+        #[arg(long)]
+        grantor: String,
+        /// URL prefixes it covers.
+        #[arg(long, required = true)]
+        scope_urls: Vec<String>,
+        /// What it allows.
+        #[arg(long)]
+        covers: String,
+        /// The statement, such as an email pasted into a text file.
+        #[arg(long)]
+        statement_file: PathBuf,
+        /// When it was given, YYYY-MM-DD.
+        #[arg(long)]
+        given_on: chrono::NaiveDate,
+        /// Who is recording it.
+        #[arg(long)]
+        recorded_by: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// A person's approval after reading the snapshot; refused for a code not in
+    /// allowed_license_codes.
+    Approve {
+        /// The evidence.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// Who read it.
+        #[arg(long)]
+        reviewer: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
     },
 }
 
@@ -291,6 +360,29 @@ enum TextCommand {
         #[arg(long, default_value_t = 400)]
         dpi: u32,
         /// Who is doing it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Fetches documents by URL through the evidence gate and drafts their manifests in
+    /// data-inbox/texts/. A URL no approved evidence or enabled source covers gets a HEAD
+    /// request only.
+    Fetch {
+        /// A URL; repeat for more.
+        #[arg(long)]
+        url: Vec<String>,
+        /// A file of URLs, one to a line, `#` for comments.
+        #[arg(long)]
+        urls_file: Option<PathBuf>,
+        /// Import a born-digital HTML page with a clear title without asking.
+        #[arg(long)]
+        yes: bool,
+        /// Where drafts go.
+        #[arg(long, default_value = "data-inbox")]
+        inbox: PathBuf,
+        /// Who is fetching.
         #[arg(long, visible_alias = "actor")]
         by: String,
         /// The directory holding pipeline.toml.
@@ -1630,6 +1722,41 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             commands::print_json(&report)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Fetch {
+                    url,
+                    urls_file,
+                    yes,
+                    inbox,
+                    by,
+                    config_dir,
+                },
+        } => {
+            let mut urls = url;
+            if let Some(file) = urls_file {
+                let text = std::fs::read_to_string(&file)
+                    .with_context(|| format!("reading {}", file.display()))?;
+                urls.extend(wt_ingest::texts::url::urls_file(&text));
+            }
+            if urls.is_empty() {
+                anyhow::bail!("give --url or --urls-file");
+            }
+            let reports = index_cmds::fetch_texts(
+                &pool().await?,
+                &config,
+                &config_dir,
+                &urls,
+                yes,
+                &inbox,
+                &by,
+            )
+            .await?;
+            commands::print_json(&reports)?;
+        }
+        Command::License { command } => {
+            index_cmds::license(&pool().await?, &records, command).await?;
         }
         Command::Text {
             command:

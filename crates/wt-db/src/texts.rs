@@ -194,6 +194,8 @@ pub struct NewUnit<'a> {
     pub source_page: Option<i32>,
     /// Its mean OCR confidence.
     pub confidence: Option<f32>,
+    /// Where it starts in the original: a text fragment for HTML, a page for a PDF.
+    pub source_anchor: Option<String>,
 }
 
 /// Replaces the edition's units and refreshes its units hash.
@@ -217,13 +219,16 @@ pub async fn replace_units(
     let embeddings: Vec<String> = units.iter().map(|u| u.embedding.clone()).collect();
     let pages: Vec<Option<i32>> = units.iter().map(|u| u.source_page).collect();
     let confidences: Vec<Option<f32>> = units.iter().map(|u| u.confidence).collect();
+    let anchors: Vec<Option<String>> = units.iter().map(|u| u.source_anchor.clone()).collect();
     sqlx::query!(
         "insert into text_unit (edition_id, ordinal, locator, label, heading, text, word_count,
-                                content_hash, embedding, embedding_model, source_page, confidence)
-         select $1, u.ord, u.loc, u.lab, u.head, u.txt, u.wc, u.h, u.emb::vector, $10, u.pg, u.cf
+                                content_hash, embedding, embedding_model, source_page, confidence,
+                                source_anchor)
+         select $1, u.ord, u.loc, u.lab, u.head, u.txt, u.wc, u.h, u.emb::vector, $10, u.pg, u.cf,
+                u.an
          from unnest($2::int4[], $3::text[], $4::text[], $5::text[], $6::text[], $7::int4[],
-                     $8::text[], $9::text[], $11::int4[], $12::float4[])
-              as u(ord, loc, lab, head, txt, wc, h, emb, pg, cf)",
+                     $8::text[], $9::text[], $11::int4[], $12::float4[], $13::text[])
+              as u(ord, loc, lab, head, txt, wc, h, emb, pg, cf, an)",
         edition,
         &ordinals,
         &locators,
@@ -235,7 +240,8 @@ pub async fn replace_units(
         &embeddings,
         model,
         &pages as &[Option<i32>],
-        &confidences as &[Option<f32>]
+        &confidences as &[Option<f32>],
+        &anchors as &[Option<String>]
     )
     .execute(&mut *conn)
     .await?;
@@ -485,6 +491,56 @@ pub async fn sync_locators(
     .await?
     .rows_affected();
     Ok(usize::try_from(n).unwrap_or(usize::MAX))
+}
+
+/// What covers a URL for import: approved evidence listing a prefix of it, or an enabled
+/// source whose evidence is approved. The longest prefix wins.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Covering {
+    /// The evidence.
+    pub evidence: Uuid,
+    /// `license`, `permission` or `mandate`.
+    pub kind: String,
+    /// Its code.
+    pub license_code: String,
+    /// The publisher it names.
+    pub publisher: Option<String>,
+    /// Who granted a permission.
+    pub grantor: Option<String>,
+    /// The source, when it comes through one.
+    pub source_key: Option<String>,
+    /// The prefix that matched.
+    pub prefix: String,
+}
+
+/// The evidence or source covering `url`, if any.
+pub async fn covering_evidence(
+    conn: &mut PgConnection,
+    url: &str,
+) -> Result<Option<Covering>, DbError> {
+    Ok(sqlx::query_as!(
+        Covering,
+        r#"select c.id as "evidence!", c.kind as "kind!", c.license_code as "license_code!",
+                  c.publisher, c.grantor, c.source_key, c.prefix as "prefix!"
+           from (
+             select le.id, le.kind, le.license_code, le.publisher, le.grantor,
+                    null::text as source_key, p as prefix
+             from license_evidence le, unnest(le.url_prefixes) p
+             where le.allowed and starts_with($1, lower(p))
+             union all
+             select le.id, le.kind, le.license_code, coalesce(le.publisher, sp.publisher),
+                    le.grantor, sp.key, p
+             from source_policy sp
+             join license_evidence le on le.id = sp.license_evidence_id,
+                  unnest(sp.url_prefixes) p
+             where sp.enabled and le.allowed and starts_with($1, lower(p))
+           ) c
+           order by length(c.prefix) desc, c.source_key nulls last
+           limit 1"#,
+        url
+    )
+    .fetch_optional(&mut *conn)
+    .await?)
 }
 
 /// Writes the audit row of an importer run.

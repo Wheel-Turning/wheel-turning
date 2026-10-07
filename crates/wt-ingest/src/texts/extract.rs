@@ -221,7 +221,11 @@ fn walk(handle: NodeHandle, parser: &Parser<'_>, sections: &mut Vec<Section>) {
     let Some(name) = tag_name(node) else {
         return;
     };
-    if matches!(name.as_str(), "script" | "style" | "head") {
+    // Navigation, page furniture and forms are not text (Spec 08, conversion).
+    if matches!(
+        name.as_str(),
+        "script" | "style" | "head" | "nav" | "header" | "footer" | "aside" | "form" | "noscript"
+    ) {
         return;
     }
     if BLOCKS.contains(&name.as_str()) {
@@ -355,7 +359,10 @@ pub fn read(path: &Path, format: Format) -> Result<Vec<Section>, TextError> {
     match format {
         Format::Txt => Ok(from_txt(&text()?)),
         Format::Md => Ok(from_md(&text()?)),
-        Format::Html => Ok(from_html(&text()?)),
+        // The page's main content, as a readability extractor picks it (Spec 08, Ingesting
+        // from URLs, conversion).
+        Format::Html => Ok(from_html(&super::convert::html_main(&text()?))),
+        Format::Docx => super::convert::from_docx(path),
         Format::Epub => from_epub(path),
         Format::Pdf => Err(TextError::Source(
             "a PDF is read page by page through texts::pdf, with its tools".into(),
