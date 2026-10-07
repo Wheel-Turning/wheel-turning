@@ -271,6 +271,47 @@ impl RightsSettings {
     }
 }
 
+/// `[licenses]` in `config/pipeline.toml` (Spec 03, Licensed sources; Spec 08): the license
+/// codes evidence may carry.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct LicenseSettings {
+    /// Codes a person may approve and an import may rely on.
+    pub allowed_license_codes: Vec<String>,
+}
+
+impl Default for LicenseSettings {
+    fn default() -> Self {
+        Self {
+            allowed_license_codes: [
+                "public-domain",
+                "permission-excerpt",
+                "operator-mandate",
+                "cc0",
+                "cc-by-4.0",
+                "cc-by-3.0",
+                "cc-by-sa-4.0",
+                "cc-by-sa-3.0",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LicensesFile {
+    #[serde(default)]
+    licenses: LicenseSettings,
+}
+
+impl LicenseSettings {
+    /// Reads `[licenses]` from `config/pipeline.toml`; without the section, the defaults.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Ok(parse::<LicensesFile>(&read(pipeline)?, &pipeline.display().to_string())?.licenses)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct PipelineFile {
     #[serde(default)]

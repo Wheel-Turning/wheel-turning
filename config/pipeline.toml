@@ -48,6 +48,11 @@ type_patterns = [
 # evidence is in hand, which the command then needs as --evidence.
 default_basis_for_new_sources = "mandate"
 
+[licenses]
+# License codes evidence may carry for talks and texts (Spec 03, Licensed sources; Spec 08, which
+# adds public-domain). Noncommercial and no-derivatives variants stay off until counsel answers.
+allowed_license_codes = ["public-domain", "permission-excerpt", "operator-mandate", "cc0", "cc-by-4.0", "cc-by-3.0", "cc-by-sa-4.0", "cc-by-sa-3.0"]
+
 [segment]
 # Segmentation (Spec 04, Diarization and segmentation). The window thresholds are starting
 # points to tune on the ten-video sample (decision of October 5, 2026). A window with no words

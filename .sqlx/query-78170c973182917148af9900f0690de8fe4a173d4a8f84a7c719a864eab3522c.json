@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.content_hash from text_edition e join work w on w.id = e.work_id\n         where w.title = $1 and e.edition_label = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "content_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "78170c973182917148af9900f0690de8fe4a173d4a8f84a7c719a864eab3522c"
+}

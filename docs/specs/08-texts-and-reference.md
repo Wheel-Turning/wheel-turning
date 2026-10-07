@@ -238,6 +238,15 @@ Reference assets feed the pipeline and nothing else:
 
 What these assets change: the glossary prompt for ASR and the glossary correction pass read the glossary rows, the resolver reads locator aliases, and the extraction prompt receives person names to recognize. Lineage edges are used only to validate the registry and for future context cards. Lineage never enters ranking.
 
+Decisions of October 7, 2026, made while building the importer (`wt_ingest::texts`, `wt text import`):
+
+- EPUB is read as a zip of XHTML in spine order with `zip`, and HTML with `tl`, because the `epub` crate is GPL-3.0 and `scraper`'s `cssparser` is MPL-2.0, neither of which `deny.toml` allows. Self-closing XHTML tags are expanded before parsing, and common character references are decoded.
+- `include_sections` restores sections the default exclusions would drop; it does not limit the sections kept.
+- The fixtures are built inside the tests (an EPUB with an introduction and two chapters of numbered verses), so no binary fixture is committed and `scripts/make_fixtures.py` is not needed.
+- A dry run changes nothing, so it writes no `import_run` row; an applied run writes one. `wt text import` without `--apply` needs no embedding model.
+- An applied edition is `ready` but serves only after a passing proofread (`proof_check`), as `servable_text_unit` requires.
+- `[licenses] allowed_license_codes` is now in `config/pipeline.toml`, with Spec 03's list.
+
 ## PDFs and OCR
 
 PDFs with a text layer are read directly. Scanned PDFs are run through OCR and then proofread by a person before the edition can be served, because an OCR error in a text unit shows up as a misquotation of the work. Set `format = "pdf"` in the manifest and add a `[pdf]` table.
@@ -696,14 +705,14 @@ Acceptance criteria for the rights lifecycle:
 
 Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv glossary written by `scripts/make_fixtures.py`. No real work is needed in the repository.
 
-- [ ] Migrations `0009` and `0010` apply cleanly after `0008`, and the existing Spec 02 tests still pass.
-- [ ] A `ready` edition without license evidence, without `excerptable`, or without a rights holder fails the `ready_requires_license` check.
-- [ ] `servable_text_unit` returns nothing for an edition that is not `ready`, whose evidence is not `allowed`, or that is not excerptable.
-- [ ] `dg_web` can select `servable_text_unit`, `person` and `person_alias`, and is denied on `text_unit`, `text_edition` and `reference_asset`.
-- [ ] A dry run changes nothing in the database. An `--apply` run with unchanged files and manifest is a no-op.
-- [ ] Section filtering excludes introduction, notes and translator material by default, and `include_sections` can restore a section.
-- [ ] Each unit scheme (verse, numbered, paragraph, heading) produces the expected units and locators on its fixture. Over-long units split into `.a` and `.b`, and a duplicate locator fails the import.
-- [ ] An import with evidence that is missing, not approved, or outside `allowed_license_codes` is refused, and a public-domain edition with approved evidence is accepted.
+- [x] Migrations `0009` and `0010` apply cleanly after `0008`, and the existing Spec 02 tests still pass. (As `0021_texts_schema.sql`, which gathers the text parts of the planned `0009` to `0013` and `0018`, the rights parts having landed in `0015`; `wt-db/tests/migrations.rs` and `schema.rs`.)
+- [x] A `ready` edition without license evidence, without `excerptable`, or without a rights holder fails the `ready_requires_license` check. (`wt-db/tests/texts_schema.rs`.)
+- [x] `servable_text_unit` returns nothing for an edition that is not `ready`, whose evidence is not `allowed`, or that is not excerptable. (`wt-db/tests/texts_schema.rs`, with the proofread and source conditions too.)
+- [x] `dg_web` can select `servable_text_unit`, `person` and `person_alias`, and is denied on `text_unit`, `text_edition` and `reference_asset`. (As `wt_web`; `wt-db/tests/texts_schema.rs`.)
+- [x] A dry run changes nothing in the database. An `--apply` run with unchanged files and manifest is a no-op. (`wt-ingest/tests/texts.rs`.)
+- [x] Section filtering excludes introduction, notes and translator material by default, and `include_sections` can restore a section. (`wt-ingest/tests/texts.rs` and `texts::extract` unit tests.)
+- [x] Each unit scheme (verse, numbered, paragraph, heading) produces the expected units and locators on its fixture. Over-long units split into `.a` and `.b`, and a duplicate locator fails the import. (`texts::units` unit tests; the numbered scheme end to end in `wt-ingest/tests/texts.rs`.)
+- [x] An import with evidence that is missing, not approved, or outside `allowed_license_codes` is refused, and a public-domain edition with approved evidence is accepted. (`wt-ingest/tests/texts.rs`.)
 - [ ] A glossary import merges variants, reports a conflicting canonical form without overwriting it, and changes the glossary version so affected talks requeue.
 - [ ] An alias list creates `person` rows and never creates teacher aliases. A lineage file creates edges, and `--link-teachers` links only exact name matches.
 - [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text".
@@ -712,7 +721,7 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
 - [ ] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end.
 - [ ] `wt text link-out` creates a `work` and locators with no text rows.
-- [ ] A guard test fails if git tracks any file under `data-inbox/`.
+- [x] A guard test fails if git tracks any file under `data-inbox/`. (`wt-core/tests/repo_guards.rs`.)
 
 Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthetic scanned PDF rendered from known text with planted noise, and a mixed one:
 
@@ -723,7 +732,7 @@ Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthe
 - [ ] The vision pass, tested with a fake client, replaces a page only at 0.75 similarity or higher, and a fake hallucinated page is rejected and left for proofreading.
 - [ ] `DataClass::PublicText` is refused without approved license evidence for the edition.
 - [ ] The proof sheet shows each sampled unit beside its page crop, the sample is 12 random and 12 lowest-confidence units, and `proof-import` computes pass or fail correctly from at most 1 error in the random 12 and at most 3 in the worst 12.
-- [ ] An edition with no passing `proof_check` returns nothing from `servable_text_unit`, and one with a passing check serves.
+- [x] An edition with no passing `proof_check` returns nothing from `servable_text_unit`, and one with a passing check serves. (`wt-db/tests/texts_schema.rs`.)
 - [ ] `wt text fix` changes the unit, writes `correction_log` and requires a new proofread before the edition serves again.
 - [ ] Units from a PDF edition show their page number, and no page image is stored in the database.
 

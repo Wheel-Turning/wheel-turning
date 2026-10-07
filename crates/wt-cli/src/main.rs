@@ -89,6 +89,11 @@ enum Command {
         #[command(subcommand)]
         command: PipelineCommand,
     },
+    /// Foundational texts (Spec 08).
+    Text {
+        #[command(subcommand)]
+        command: TextCommand,
+    },
     /// Offline transcript review (Spec 04, Transcript review and owner exports).
     Transcript {
         #[command(subcommand)]
@@ -179,6 +184,27 @@ enum AsrCommand {
         /// Count them without queueing anything.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TextCommand {
+    /// Imports a corpus text from a manifest and its source files: a dry run that reports
+    /// sections, units and locators unless --apply, which writes the edition, its units with
+    /// embeddings and its locators. An unchanged source and manifest make --apply a no-op.
+    Import {
+        /// The manifest TOML, beside the source files.
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Write; without it, only report.
+        #[arg(long)]
+        apply: bool,
+        /// Who is importing.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
     },
 }
 
@@ -1227,6 +1253,26 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 asr_cmds::requeue(&pool().await?, &config, dry_run).await?;
             }
         },
+        Command::Text {
+            command:
+                TextCommand::Import {
+                    manifest,
+                    apply,
+                    by,
+                    config_dir,
+                },
+        } => {
+            let report = index_cmds::import_text(
+                &pool().await?,
+                &config,
+                &config_dir,
+                &manifest,
+                apply,
+                &by,
+            )
+            .await?;
+            commands::print_json(&report)?;
+        }
         Command::Transcript { command } => match command {
             TranscriptCommand::ExportReview {
                 talk,

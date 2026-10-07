@@ -33,6 +33,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0018 | `0018_llm_usage.sql` | M4 | `llm_usage` with its month index; `llm_setting` (the owner's cap); `llm_alert` (one 80 percent alert a month) | select, insert on `llm_usage` and `llm_alert` to `wt_pipeline` and `wt_web`; select, insert, update on `llm_setting` to `wt_pipeline`, select to `wt_web` |
 | 0019 | `0019_display_levels.sql` | M4T | `teacher.display_level` (default `full`), `talk.display_level` (a, b or d), `'reviewed'` on `transcript.origin`, `servable_passage` with `display_level` at the end and only `excerpts` and `full` talks | none: the view keeps its grants |
 | 0020 | `0020_repair_dg_roles_on_shared_cluster.sql` | M4 | none; on a database migrated in a cluster that already held the `wt_*` roles, where 0008 recreated the `dg_*` roles and 0010 could not rename them, hands everything each `dg_*` role owns in the database to its `wt_*` counterpart, moves its privileges there, reapplies 0013's revoke of `update (flagged)` on `query_log` from `wt_web`, and drops the `dg_*` role once nothing in the cluster depends on it. A no-op on a database without `dg_*` roles. Only the bootstrap user can repair a database: a login inheriting `wt_owner` holds no rights there and fails without changing anything | the privileges the `dg_*` roles held, moved to `wt_*` |
+| 0021 | `0021_texts_schema.sql` | M4b | Spec 08's texts and reference schema: `text_state`, `reference_kind`, `person`, `person_alias`, `teacher.person_id`, `work.author_person_id` and `tradition`, `reference_asset`, `source_asset_id` on `glossary_term` and `work_locator`, `text_edition` (with the OCR, URL-ingestion, mandate and legal-text columns), `text_unit`, `lineage_edge`, `import_run`, `proof_check`, `takedown_request`, the edition and source takedown scopes, `source_policy.source_retention`, `citation.text_unit_id`, `query_log.named_author_id` and `text_count`, the `servable_text_unit` view and `servable_citation` with `text_unit_id` | `wt_pipeline` read and write on the new tables; `wt_web` select on `servable_text_unit`, `person` and `person_alias`, and insert on `takedown_request` |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 
@@ -42,14 +43,8 @@ These come from the October 3 to 5 specs. Each gets its number at merge.
 
 | Spec | Spec's number | Description | Notes |
 |---|---|---|---|
-| 08 | 0009 | texts and reference objects | Spec 08 also adds `query_log` columns to it. Its `license_evidence` changes landed in 0015 |
-| 08 | 0010 | texts grants | Under rule 2 these grants move into the migrations that create each object, so this file is not needed |
-| 08 | 0011 | OCR proof | |
-| 08 | 0012 | URL ingestion | Its `license_evidence` changes landed in 0015; the text columns remain |
-| 08 | 0013 | mandate rights | Its `license_evidence` columns and `source_policy` landed in 0015; `text_edition.source_key`, `servable_text_unit`, `takedown_request` and the `edition` and `source` takedown scopes remain |
 | 08 | 0014 | rights ledger | Landed whole in 0015 |
 | 06 | 0017 | `accessibility_report` table | New table |
-| 08 | 0018 | retention and legal text: `text_edition.legal_text`, `legal_pages`, `source_deleted_at`, `source_policy.source_retention` | Alters Spec 08's `text_edition` and `source_policy`, so it merges after the migrations that create them |
 | 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
 | 02 | 0021 | donation links: `sangha.donation_kind`, `donation_note`, `donation_checked_at`, `donation_checked_by` and the `donation_verified_needs_page` check | Alters `sangha` from 0002 |
 | 05 | 0022 | `query_log.sensitive_category` | Alters `query_log` from 0005. Storing an acute question without its text also needs 0019, which makes `query_text` nullable, so it merges after 0019 |
