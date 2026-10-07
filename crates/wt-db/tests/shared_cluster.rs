@@ -188,3 +188,90 @@ async fn a_second_database_on_a_shared_cluster_is_owned_by_wt_owner() {
     assert!(dg_roles.is_empty(), "leftover roles: {dg_roles:?}");
     assert_like_a_fresh_cluster("wt", &first, &reference).await;
 }
+
+/// The applied migration versions, newest last.
+async fn applied(pool: &PgPool) -> Vec<i64> {
+    sqlx::query_scalar("select version from _sqlx_migrations where success order by version")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// From 0009 on a login inheriting `wt_owner` runs migrations. On a healthy database 0019 is a
+/// no-op for it. A broken database grants `wt_owner` nothing, not even the schema, and moving
+/// `dg_owner`'s objects needs membership in `dg_owner`, so only the bootstrap user that ran
+/// 0008 can repair one: the owner login must fail there without changing anything.
+#[tokio::test]
+async fn a_login_inheriting_wt_owner_runs_0019_but_only_the_bootstrap_user_repairs() {
+    const PASSWORD: &str = "test-password-0123456789abcdef";
+    let db = TestDb::start()
+        .await
+        .expect("docker must be running for database tests");
+
+    // Both databases as far as they went before the repair. The second one is broken and
+    // brings the dg_* roles back into the cluster.
+    let first = wt_db::connect(db.url()).await.unwrap();
+    wt_db::MIGRATOR.run_to(BEFORE_REPAIR, &first).await.unwrap();
+    sqlx::query("create database wt_second")
+        .execute(&first)
+        .await
+        .unwrap();
+    let second = connect_to(db.url(), "wt_second").await;
+    wt_db::MIGRATOR
+        .run_to(BEFORE_REPAIR, &second)
+        .await
+        .unwrap();
+    let broken = not_owned_by_wt_owner(&second).await;
+    assert!(
+        !broken.is_empty(),
+        "the shared-cluster bug did not reproduce"
+    );
+
+    wt_db::create_login(
+        &first,
+        "wt_owner",
+        "wt_owner_login",
+        &wt_core::Secret::new(PASSWORD),
+    )
+    .await
+    .unwrap();
+    let rest = db.url().expose().split_once('@').unwrap().1;
+    let owner_url = wt_core::Secret::new(format!("postgres://wt_owner_login:{PASSWORD}@{rest}"));
+
+    // The healthy database: the owner login applies 0019, which changes nothing there and keeps
+    // the dg_* roles the broken database still depends on.
+    let owner_first = connect_to(&owner_url, "wt").await;
+    let current: String = sqlx::query_scalar("select current_user::text")
+        .fetch_one(&owner_first)
+        .await
+        .unwrap();
+    assert_eq!(current, "wt_owner");
+    let before = privileges(&first).await;
+    assert_eq!(wt_db::migrate(&owner_first).await.unwrap().applied, 1);
+    assert_eq!(privileges(&first).await, before);
+    assert!(not_owned_by_wt_owner(&first).await.is_empty());
+    web_role_can_serve(&first).await;
+    let dg_roles: i64 =
+        sqlx::query_scalar("select count(*) from pg_roles where rolname like 'dg\\_%'")
+            .fetch_one(&first)
+            .await
+            .unwrap();
+    assert_eq!(dg_roles, 4, "the broken database still needs its roles");
+
+    // The broken database: the owner login is refused and nothing changes.
+    let owner_second = connect_to(&owner_url, "wt_second").await;
+    let refused = wt_db::migrate(&owner_second).await;
+    assert!(refused.is_err(), "wt_owner cannot repair: {refused:?}");
+    assert_eq!(applied(&second).await.last(), Some(&BEFORE_REPAIR));
+    assert_eq!(not_owned_by_wt_owner(&second).await, broken);
+
+    // The bootstrap user repairs it and the leftover roles go.
+    wt_db::migrate(&second).await.unwrap();
+    assert_like_a_fresh_cluster("wt_second", &second, &before).await;
+    let dg_roles: i64 =
+        sqlx::query_scalar("select count(*) from pg_roles where rolname like 'dg\\_%'")
+            .fetch_one(&first)
+            .await
+            .unwrap();
+    assert_eq!(dg_roles, 0);
+}

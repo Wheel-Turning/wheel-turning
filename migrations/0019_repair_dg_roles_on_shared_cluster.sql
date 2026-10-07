@@ -11,6 +11,12 @@
 -- every privilege it holds here to the counterpart and revokes it, and drops the dg_* role once
 -- nothing in the cluster depends on it. It leaves the database as 0001 to 0018 leave a database
 -- on a fresh cluster. On a database without dg_* roles it changes nothing.
+--
+-- Only the bootstrap user that ran 0008 (the local superuser, the RDS master user) can repair a
+-- database: there wt_owner holds no rights, not even usage on the schema, and moving dg_owner's
+-- objects needs membership in dg_owner. A login inheriting wt_owner fails on such a database
+-- and changes nothing. On a healthy database it applies this migration as a no-op and leaves
+-- the dg_* roles to the bootstrap user's run on the broken one.
 
 do $$
 declare
