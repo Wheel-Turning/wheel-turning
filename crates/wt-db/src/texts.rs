@@ -13,6 +13,10 @@ pub struct ImportEvidence {
     pub allowed: bool,
     /// Such as `public-domain`.
     pub license_code: String,
+    /// The publisher it names, which the notice scan treats as covered.
+    pub publisher: Option<String>,
+    /// For a permission, who granted it.
+    pub grantor: Option<String>,
 }
 
 /// The evidence row, if it exists.
@@ -21,7 +25,7 @@ pub async fn evidence(
     id: Uuid,
 ) -> Result<Option<ImportEvidence>, DbError> {
     let row = sqlx::query!(
-        "select allowed, license_code from license_evidence where id = $1",
+        "select allowed, license_code, publisher, grantor from license_evidence where id = $1",
         id
     )
     .fetch_optional(&mut *conn)
@@ -29,6 +33,8 @@ pub async fn evidence(
     Ok(row.map(|r| ImportEvidence {
         allowed: r.allowed,
         license_code: r.license_code,
+        publisher: r.publisher,
+        grantor: r.grantor,
     }))
 }
 
@@ -99,6 +105,12 @@ pub struct NewEdition<'a> {
     pub mean_confidence: Option<f32>,
     /// The source it came through, whose `enabled` flag the serving view reads.
     pub source_key: Option<&'a str>,
+    /// Its legal pages, kept whole and never embedded or shown.
+    pub legal_text: Option<&'a str>,
+    /// Where they were found.
+    pub legal_pages: serde_json::Value,
+    /// Copyright notices naming a holder the evidence does not cover, when flagged or held.
+    pub notice: Option<&'a str>,
 }
 
 /// The stored import key of an edition, if it exists.
@@ -124,8 +136,9 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
         "insert into text_edition (work_id, edition_label, translator_person_id, language,
                                    source_url, rights_holder, license_evidence_id, excerptable,
                                    state, content_hash, extraction, ocr_engine, mean_confidence,
-                                   source_key)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12, $13)
+                                   source_key, legal_text, legal_pages, notice)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12, $13, $14, $15,
+                 $16)
          on conflict (work_id, edition_label) do update
            set translator_person_id = excluded.translator_person_id,
                language = excluded.language, source_url = excluded.source_url,
@@ -134,7 +147,8 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
                excerptable = excluded.excerptable, state = 'imported',
                content_hash = excluded.content_hash, extraction = excluded.extraction,
                ocr_engine = excluded.ocr_engine, mean_confidence = excluded.mean_confidence,
-               source_key = excluded.source_key, imported_at = now()
+               source_key = excluded.source_key, legal_text = excluded.legal_text,
+               legal_pages = excluded.legal_pages, notice = excluded.notice, imported_at = now()
          returning id",
         e.work,
         e.label,
@@ -148,7 +162,10 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
         e.extraction,
         e.ocr_engine,
         e.mean_confidence,
-        e.source_key
+        e.source_key,
+        e.legal_text,
+        e.legal_pages,
+        e.notice
     )
     .fetch_one(&mut *conn)
     .await?)

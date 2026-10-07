@@ -408,6 +408,49 @@ pub async fn existing_state(
     .await?)
 }
 
+/// A source's `notice_action`: `flag`, `hold` or `block`.
+pub async fn notice_action(conn: &mut PgConnection, key: &str) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "select notice_action from source_policy where key = $1",
+        key
+    )
+    .fetch_optional(&mut *conn)
+    .await?)
+}
+
+/// An edition `wt source report` lists: one with a notice, or quarantined.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Noticed {
+    /// The edition.
+    pub id: Uuid,
+    /// Its work.
+    pub work_title: String,
+    /// Its label.
+    pub edition_label: String,
+    /// Its source.
+    pub source_key: Option<String>,
+    /// Its state.
+    pub state: String,
+    /// The notice text.
+    pub notice: Option<String>,
+}
+
+/// Editions with a notice or in quarantine, of one source or all.
+pub async fn noticed(conn: &mut PgConnection, key: Option<&str>) -> Result<Vec<Noticed>, DbError> {
+    Ok(sqlx::query_as!(
+        Noticed,
+        r#"select e.id, w.title as work_title, e.edition_label, e.source_key,
+                  e.state::text as "state!", e.notice
+           from text_edition e join work w on w.id = e.work_id
+           where (e.notice is not null or e.state = 'quarantined')
+             and ($1::text is null or e.source_key = $1)
+           order by e.source_key, w.title"#,
+        key
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Whether a source exists and is enabled.
 pub async fn source_enabled(conn: &mut PgConnection, key: &str) -> Result<Option<bool>, DbError> {
     Ok(

@@ -527,11 +527,22 @@ Source assessments, read October 2, 2026:
 | BDK America, https://www.bdkamerica.org/tripitaka-list/ | The homepage banner says most publications are free as PDFs. Product pages offer a free PDF download, for example Shōbōgenzō Volume I. The footer carries a 2026 BDK America copyright line, and no license statement appeared on the homepage, the Tripiṭaka list or the Shōbōgenzō page. The Shōbōgenzō page says BDK reprints the Nishijima and Cross translation first published by Windbell Publications in 1996 to 1999. The list includes Shōbōgenzō (four volumes), Blue Cliff Record, Platform Sutra, Baizhang Zen Monastic Regulations, Three Chan Classics and Zen Texts. | Needs written permission. Free PDFs are distribution, not a license. Rights may sit with BDK, the translators or the original publisher. | Ask BDK America through its contact page for permission to excerpt named volumes with attribution, and ask who holds rights in the Shōbōgenzō translation. |
 | Terebess, https://terebess.hu/zen/ | The pages read carry no site-wide rights statement. Individual pages carry notices of many holders: a full Thomas Cleary book PDF marked with his 1994 copyright and a no-reproduction line, a Gregory Wonderwheel translation marked 2007 to 2008, and Gábor Terebess's own pages marked with his name. | Aggregator. Mixed rights, so per-document evidence only. | Use it to find texts, then verify each document's rights holder. Public-domain translations and works the site owner wrote can be cleared individually, and Gábor Terebess can grant permission for his own pages. |
 
+As built (October 7, 2026), for every import, not only URL ones:
+
+- **Legal pages.** Sections titled as legal pages (copyright, colophon, imprint, license, permissions, legal, rights) and notice blocks among the first and last five blocks are taken out of the units. They are stored whole in `legal_text`, with where each came from in `legal_pages`.
+- **Notice scan.** It reads those pages and the first and last three blocks for copyright lines with a year, the sign, or "Copyright by".
+  - A holder that neither the edition's `rights_holder` nor the evidence's publisher or grantor names is a third party. Matching ignores case and punctuation, and either name may contain the other.
+  - Without a source, a third-party notice blocks the import as `third_party_notice`.
+  - With a `source_key`, the source's `notice_action` decides. `flag` loads the edition and keeps the notice in `text_edition.notice` (migration `0023_text_notices.sql`). `hold` loads it quarantined. `block` refuses it.
+  - `wt source report [--key]` lists flagged and quarantined editions.
+- **English only.** A text under 15% common English words, judged when it has 40 words or more, is skipped and reported. So is a manifest whose `language` is not `en`.
+- **Not yet read.** PDF and DOCX metadata are not read yet. DOCX comes with URL ingestion.
+
 Acceptance criteria for the source policy:
 
 - [ ] Recording evidence with a host-wide prefix on an aggregator host is rejected.
-- [ ] A fixture PDF whose first page carries a copyright notice naming another party is blocked as `third_party_notice`, and evidence naming that holder unblocks it.
-- [ ] The notice scan covers HTML, PDF and DOCX, reading metadata and the first and last pages.
+- [x] A fixture PDF whose first page carries a copyright notice naming another party is blocked as `third_party_notice`, and evidence naming that holder unblocks it. (`wt-ingest/tests/pdf.rs`; plain text in `wt-ingest/tests/notices.rs`.)
+- [ ] The notice scan covers HTML, PDF and DOCX, reading metadata and the first and last pages. (HTML, EPUB, text and PDF pages are scanned; DOCX and document metadata come with URL ingestion.)
 
 ## Mandated sources
 
@@ -648,8 +659,8 @@ Acceptance criteria for mandated sources:
 - [ ] `GET /rights` works with no session, `POST /rights/request` stores a row, rate limits at 5 per hour per address and rejects a filled honeypot, and no other route is reachable without a session.
 - [ ] Each text hit carries a "Report this excerpt" link whose form arrives prefilled.
 - [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent.
-- [ ] A noticed document is flagged and listed under `flag`, quarantined on arrival under `hold`, and refused under `block`.
-- [ ] A non-English document is skipped and reported.
+- [x] A noticed document is flagged and listed under `flag`, quarantined on arrival under `hold`, and refused under `block`. (`wt-ingest/tests/notices.rs`.)
+- [x] A non-English document is skipped and reported. (`wt-ingest/tests/notices.rs`.)
 - [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The last two are built: `text_source_served_while_off` and `takedown_request_overdue`, `wt-db/tests/audit.rs`. The exposure warning comes with the deployment setting.)
 
 ## Rights lifecycle

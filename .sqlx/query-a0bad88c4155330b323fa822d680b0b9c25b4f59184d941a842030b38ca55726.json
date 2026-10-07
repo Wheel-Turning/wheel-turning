@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select notice_action from source_policy where key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "notice_action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "notice_action"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0bad88c4155330b323fa822d680b0b9c25b4f59184d941a842030b38ca55726"
+}
