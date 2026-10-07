@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update teacher set display_level = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8debef6fb8fd552367ae8a7036c705784f641f851764b955460a7ca798c26de6"
+}

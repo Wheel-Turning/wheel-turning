@@ -317,6 +317,34 @@ enum TeacherCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Set how much of a teacher's talks is shown (Spec 03, Display levels): a excluded,
+    /// b excerpts only, c full (the default), d owner only. Narrowing applies at once;
+    /// widening needs --evidence pointing to the teacher's own request. For f use opt-out.
+    Display {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// a, b, c or d, or excluded, excerpts, full, owner_only.
+        #[arg(long, value_parser = parse_display_level)]
+        level: wt_db::display::DisplayLevel,
+        /// Only this talk: a, b or d, no wider than the teacher's level.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Why, in their words or yours.
+        #[arg(long)]
+        reason: String,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Pointer to the teacher's own request, needed to widen a level.
+        #[arg(long)]
+        evidence: Option<String>,
+    },
+}
+
+fn parse_display_level(value: &str) -> Result<wt_db::display::DisplayLevel, String> {
+    wt_db::display::DisplayLevel::parse(value)
+        .ok_or_else(|| format!("unknown display level {value:?}; use a to f or its name"))
 }
 
 #[derive(Debug, Args)]
@@ -1238,6 +1266,31 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     yes,
                 },
         } => rights::opt_out(&pool().await?, &teacher, &reason, &by, suspend_only, yes).await?,
+        Command::Teacher {
+            command:
+                TeacherCommand::Display {
+                    teacher,
+                    level,
+                    talk,
+                    reason,
+                    by,
+                    evidence,
+                },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let change = wt_db::display::set_level(
+                &mut conn,
+                &teacher,
+                talk,
+                level,
+                &by,
+                &reason,
+                evidence.as_deref(),
+            )
+            .await?;
+            commands::print_json(&change)?;
+        }
         Command::Exclusion { command } => match command {
             ExclusionCommand::List => rights::exclusions(&pool().await?).await?,
             ExclusionCommand::Lift { id, by, evidence } => {
