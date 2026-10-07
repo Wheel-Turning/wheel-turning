@@ -163,3 +163,22 @@ async fn the_apple_lookup_gives_the_feed_address() {
         "no such podcast"
     );
 }
+
+/// RFC 9309: a host answering `robots.txt` with any 4xx has no rules, as Azure blob storage
+/// does with 400; a 5xx is refused.
+#[tokio::test]
+async fn a_4xx_robots_txt_means_no_rules_and_a_5xx_is_refused() {
+    use wt_ingest::http::{Exclusions, check_robots, client};
+    for (status, allowed) in [(400u16, true), (403, true), (404, true), (503, false)] {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        let url = url::Url::parse(&format!("{}/AudioFiles/talk.mp3", server.uri())).unwrap();
+        let target = Exclusions::default().clear(&url).unwrap();
+        let result = check_robots(&client().unwrap(), &target).await;
+        assert_eq!(result.is_ok(), allowed, "{status}: {result:?}");
+    }
+}
