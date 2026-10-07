@@ -411,3 +411,94 @@ async fn a_synthetic_talk_goes_from_cleared_to_ready_and_rerunning_every_stage_c
     assert_eq!(snapshot(&fx.pool).await, before);
     assert_eq!(objects.get(&staging_key(fx.talk)).unwrap(), staged);
 }
+
+/// Spec 04, Owner exports, and Spec 03, display level e: the teacher's talk is written for their
+/// own use with the removed stretches marked and no student words, and then the takedown leaves
+/// nothing in the database while the export stays.
+#[tokio::test]
+async fn the_owner_export_writes_the_teachers_words_then_level_e_deletes_the_rest() {
+    let fx = start().await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    audio::advance_cleared(&mut conn).await.unwrap();
+    let llm = FakeLlm::new(vec![Ok(extraction_reply())]);
+    while let Some(claimed) = job::claim(&mut conn, &STAGES, "test").await.unwrap() {
+        run_stage(&fx, claimed.kind, &llm).await;
+        job::succeed(&mut conn, &claimed).await.unwrap();
+    }
+
+    let objects = LocalObjects::new(fx.dir.join("objects"));
+    let out = fx.dir.join("owner-export");
+    let report = wt_ingest::owner_export::export_teacher(
+        &mut conn,
+        &objects,
+        &glossary(),
+        &ChunkSettings::default(),
+        "Ada",
+        &out,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.files.len(), 1, "{report:?}");
+    assert!(report.skipped.is_empty());
+    let text = std::fs::read_to_string(report.dir.join(&report.files[0])).unwrap();
+    assert!(text.starts_with("# Ada: Fixture Talk\n"), "{text}");
+    assert!(text.contains("Source: https://vimeo.com/900000001"));
+    assert!(
+        text.contains("As Dogen wrote"),
+        "the glossary's corrections"
+    );
+    assert!(text.contains("_[Question omitted, 0:05:20]_"), "{text}");
+    assert!(
+        !text.split_whitespace().any(|w| w.len() > 1
+            && w.starts_with('s')
+            && w[1..].chars().all(|c| c.is_ascii_digit())),
+        "no student word is exported"
+    );
+    let index = std::fs::read_to_string(report.dir.join("README.md")).unwrap();
+    assert!(index.contains(&report.files[0]));
+
+    // Level e: recorded, then the opt-out takedown with exclusions.
+    let change = wt_db::display::mark_takedown_level(
+        &mut conn,
+        "Ada",
+        wt_db::display::DisplayLevel::ExportThenDelete,
+        "owner",
+        "asked for a copy and removal",
+    )
+    .await
+    .unwrap();
+    assert!(change.changed);
+    let takedown = wt_db::rights::opt_out(&fx.pool, "Ada", "asked", "owner", false)
+        .await
+        .unwrap();
+    assert!(takedown.takedown.is_some());
+    for table in ["passage", "segment", "transcript", "citation"] {
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            // The table names are the constants above.
+            "select count(*) from {table}"
+        )))
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 0, "{table} rows remain");
+    }
+    let level: String =
+        sqlx::query_scalar("select display_level from teacher where display_name = 'Ada Fixture'")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(level, "export_then_delete");
+    // Step 3: the stored transcript and citations go too; the export stays.
+    let talks = takedown.takedown.as_ref().unwrap().talks.clone();
+    let key = format!("transcripts/{}/v1.json", fx.talk.as_uuid());
+    assert!(objects.get(&key).unwrap().is_some());
+    let deleted = audio::delete_talk_objects(&objects, &talks).unwrap();
+    assert!(deleted >= 2, "transcript and citations: {deleted}");
+    assert!(objects.get(&key).unwrap().is_none());
+    assert!(objects.get(&staging_key(fx.talk)).unwrap().is_none());
+    assert_eq!(audio::delete_talk_objects(&objects, &talks).unwrap(), 0);
+    assert!(
+        report.dir.join(&report.files[0]).is_file(),
+        "the export stays"
+    );
+}

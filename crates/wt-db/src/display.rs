@@ -270,6 +270,59 @@ pub async fn set_level(
     })
 }
 
+/// Records level e or f on the teacher, logged, before the takedown that goes with it runs, so
+/// a takedown that fails part way leaves the teacher at the narrower level.
+pub async fn mark_takedown_level(
+    conn: &mut PgConnection,
+    teacher: &str,
+    to: DisplayLevel,
+    actor: &str,
+    reason: &str,
+) -> Result<LevelChange, DisplayError> {
+    if !matches!(to, DisplayLevel::Removed | DisplayLevel::ExportThenDelete) {
+        return Err(DisplayError::Unknown(to.as_str().to_owned()));
+    }
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    let (id, name) = find_teacher(&mut tx, teacher).await?;
+    let current = sqlx::query_scalar!(
+        "select display_level from teacher where id = $1 for update",
+        id.as_uuid()
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let from = level(&current)?;
+    let to = to.min(from);
+    let changed = to != from;
+    if changed {
+        sqlx::query!(
+            "update teacher set display_level = $2 where id = $1",
+            id.as_uuid(),
+            to.as_str()
+        )
+        .execute(&mut *tx)
+        .await?;
+        log_change(
+            &mut tx,
+            "teacher",
+            id.as_uuid(),
+            "display_level",
+            Some(serde_json::json!(from.as_str())),
+            Some(serde_json::json!(to.as_str())),
+            actor,
+            reason,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(LevelChange {
+        teacher: name,
+        talk: None,
+        from,
+        to,
+        changed,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

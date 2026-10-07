@@ -247,7 +247,7 @@ Acceptance criteria (M4T):
 - [ ] A synthetic talk round-trips: export a review file, apply edits to its JSON, import them, and the new reviewed version holds the edits with word times inside the replaced spans, the passages are rebuilt, and `correction_log` names the reviewer.
 - [ ] An import against a transcript that changed since the file was written is refused.
 - [ ] `wt asr requeue` and a glossary change leave a reviewed version untouched.
-- [ ] `wt export teacher` writes one file per talk with no student words and the reviewed text where it exists.
+- [x] `wt export teacher` writes one file per talk with no student words and the reviewed text where it exists. (`wt-ingest/tests/pipeline.rs`. Decisions of October 7, 2026: the export reads the stored transcript and segments, not the serving view, since a teacher at level d or e has nothing servable; paragraphs come from the chunker and each ends with its time; the transcript's chant, announcement, sitting and other spans and each omitted question are marked by name; the files go to `<out>/<teacher>/` with a `README.md` index, and a talk whose transcript cannot be read is reported, not dropped. The reviewed text arrives with the review files.)
 
 ## Language-model spend cap
 

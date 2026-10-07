@@ -1239,6 +1239,68 @@ async fn pipeline_export_reindex_and_sample_commands() {
         "reply-1",
     ]);
 
+    // The owner export reports a talk whose stored transcript is missing rather than dropping it.
+    let dir = config_dir();
+    let cfg = dir.to_str().unwrap();
+    let owner = std::env::temp_dir().join(format!("wt-owner-{}", Uuid::new_v4()));
+    let exported = fx.json(&[
+        "export",
+        "teacher",
+        "--teacher",
+        "Ada",
+        "--out",
+        owner.to_str().unwrap(),
+        "--config-dir",
+        cfg,
+    ]);
+    assert_eq!(exported["files"].as_array().unwrap().len(), 0);
+    assert_eq!(exported["skipped"].as_array().unwrap().len(), 1);
+    // e and f take the teacher down, so they need --yes, and apply to a teacher only.
+    for level in ["e", "f"] {
+        let refused = fx.wt(&[
+            "teacher",
+            "display",
+            "--teacher",
+            "Ada",
+            "--level",
+            level,
+            "--reason",
+            "asked",
+            "--by",
+            "owner",
+        ]);
+        assert!(!refused.status.success());
+        assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
+    }
+    let e_with_missing = fx.wt(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "e",
+        "--reason",
+        "asked",
+        "--by",
+        "owner",
+        "--yes",
+        "--out",
+        owner.to_str().unwrap(),
+        "--config-dir",
+        cfg,
+    ]);
+    assert!(
+        !e_with_missing.status.success(),
+        "nothing is deleted when the export is incomplete"
+    );
+    assert!(
+        stderr(&e_with_missing).contains("nothing was deleted"),
+        "{}",
+        stderr(&e_with_missing)
+    );
+    assert_eq!(fx.state(talk).await, "ready");
+    std::fs::remove_dir_all(&owner).unwrap();
+
     // Reindex needs a target and the model; the sample needs whisper-cli.
     let dir = config_dir();
     let cfg = dir.to_str().unwrap();
