@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <style>
+    .i { stroke: #1d2b4f; }
+    .h { fill: #f5f6f8; }
+    @media (prefers-color-scheme: dark) {
+      .i { stroke: #f5f6f8; }
+      .h { fill: #14192b; }
+    }
+  </style>
+  <circle class="i" cx="100" cy="100" r="88" fill="none" stroke-width="12"/>
+  <g class="i" stroke-width="10" stroke-linecap="round">
+    <line x1="130" y1="100" x2="184" y2="100"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(45 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(90 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(135 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(180 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(225 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(270 100 100)"/>
+    <line x1="130" y1="100" x2="184" y2="100" transform="rotate(315 100 100)"/>
+  </g>
+  <circle class="i h" cx="100" cy="100" r="26" stroke-width="10"/>
+  <circle cx="100" cy="100" r="11" fill="#e0a21a"/>
+</svg>
