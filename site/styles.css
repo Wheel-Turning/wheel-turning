@@ -1,28 +1,30 @@
-/* Wheel Turning static site. Colors come from the logo: ink #1D2B4F, accent #E0A21A. */
+/* Wheel Turning static site. Colors come from the logo files in docs/brand: ink #1B1D1F,
+   accent #B8730A on light grounds and #E3A62B on dark ones. */
 
 :root {
-  --ground: #f5f6f8;
+  --ground: #f7f6f3;
   --surface: #ffffff;
-  --ink: #1d2b4f;
-  --text: #1f2433;
-  --muted: #4a5168;
-  --rule: #d9dce4;
-  --accent: #e0a21a;
-  --focus: #1d2b4f;
-  --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --ink: #1b1d1f;
+  --text: #1b1d1f;
+  --muted: #4d5156;
+  --rule: #dddad3;
+  --accent: #b8730a;
+  --focus: #1b1d1f;
+  --display: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --body: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ground: #14192b;
-    --surface: #1b2136;
-    --ink: #f5f6f8;
-    --text: #e6e8ee;
-    --muted: #b4bacb;
-    --rule: #2f3753;
-    --focus: #e0a21a;
+    --ground: #161718;
+    --surface: #1f2123;
+    --ink: #ffffff;
+    --text: #e8e7e3;
+    --muted: #b6b4ae;
+    --rule: #34373a;
+    --accent: #e3a62b;
+    --focus: #e3a62b;
     color-scheme: dark;
   }
 }
@@ -103,25 +105,23 @@ a:hover {
   letter-spacing: 0.01em;
 }
 
-.brand svg {
-  width: 36px;
-  height: 36px;
+.brand .mark {
+  width: 40px;
+  height: 40px;
   flex: none;
 }
 
-/* Mark colors, shared by every inline logo */
+/* The inline mark: strokes follow the text color, dots take the accent */
 
-.mark-ink {
-  stroke: var(--ink);
+.mark {
+  color: var(--ink);
 }
 
-.mark-hub {
-  fill: var(--ground);
-  stroke: var(--ink);
-}
-
-.mark-dot {
-  fill: var(--accent);
+h1 em,
+.brand em {
+  color: var(--accent);
+  font-style: italic;
+  font-weight: inherit;
 }
 
 /* Home */
@@ -131,9 +131,9 @@ a:hover {
   text-align: center;
 }
 
-.hero svg {
-  width: 132px;
-  height: 132px;
+.hero .mark {
+  width: 160px;
+  height: 160px;
   margin-bottom: 1.5rem;
 }
 
@@ -216,7 +216,8 @@ a:hover {
 /* Long-form pages */
 
 .page {
-  padding: 1.5rem 0 3rem;
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
 }
 
 .page h1,
@@ -323,20 +324,11 @@ a:hover {
 }
 
 @media (forced-colors: active) {
-  svg {
-    forced-color-adjust: none;
+  .mark {
+    color: CanvasText;
   }
 
-  .mark-ink {
-    stroke: CanvasText;
-  }
-
-  .mark-hub {
-    fill: Canvas;
-    stroke: CanvasText;
-  }
-
-  .mark-dot {
+  .mark [fill^="var"] {
     fill: CanvasText;
   }
 }

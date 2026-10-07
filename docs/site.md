@@ -16,6 +16,10 @@ Workers static assets serve `privacy.html` at `/privacy`, use `404.html` for unk
 
 Analytics are cookie-free Cloudflare Web Analytics, turned on in the dashboard under Analytics & Logs, Web Analytics, for `wheelturning.org` with automatic setup, which injects the beacon at the edge. The privacy page's "Visit counts" section describes it; change both together if the tool changes.
 
+## Brand files
+
+`docs/brand/` holds the logo files as delivered: the mark and the lockup, each in color, white and themeable versions, with their content-credential metadata. The site inlines the themeable mark, which draws in `currentColor` with dots in `--accent`, and sets the wordmark as text because the lockup's live Cormorant Garamond text would fall back to another face on most machines.
+
 ## Email
 
 The pages name `hello@wheelturning.org` and `rights@wheelturning.org`. Cloudflare Email Routing forwards both to the owner's verified mailbox, set up with `wrangler email routing` (enable, `addresses create`, then one `rules create` per address). A destination address forwards nothing until its owner clicks Cloudflare's verification email. Enabling routing fails while the zone still has the null MX record (`0 .`) Cloudflare adds to a domain with no mail; delete it in the dashboard, or enable routing there and accept its offer to replace conflicting records.
