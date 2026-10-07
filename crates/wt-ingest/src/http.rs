@@ -145,8 +145,10 @@ pub async fn text(url: &Url, response: reqwest::Response) -> Result<String, Inge
     })
 }
 
-/// Checks the host's `robots.txt` for `url` and refuses if it disallows the path. A missing
-/// `robots.txt` means no rules.
+/// Checks the host's `robots.txt` for `url` and refuses if it disallows the path. As RFC 9309
+/// (2.3.1.3) says, a `robots.txt` the host answers with any 4xx status is unavailable and means
+/// no rules; a 5xx answer is refused, since the host may be unreachable. Azure blob storage,
+/// which serves SSZ's podcast audio, answers 400 (October 7, 2026).
 pub async fn check_robots(
     client: &reqwest::Client,
     target: &FetchTarget,
@@ -159,7 +161,7 @@ pub async fn check_robots(
     let response = send(client.get(robots_url.clone()), &robots_url).await?;
     let robots = match response.status().as_u16() {
         200..=299 => Robots::parse(&response.text().await.unwrap_or_default(), USER_AGENT),
-        404 | 410 => Robots::default(),
+        400..=499 => Robots::default(),
         status => {
             return Err(IngestError::Status {
                 url: robots_url.to_string(),
