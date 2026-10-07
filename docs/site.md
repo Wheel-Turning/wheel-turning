@@ -12,7 +12,7 @@ The site is a Worker with static assets, configured in `wrangler.jsonc` at the r
 npx wrangler deploy
 ```
 
-Workers static assets serve `privacy.html` at `/privacy`, use `404.html` for unknown paths, and apply `_headers`, which sets a strict Content-Security-Policy. The only outside origins it allows are Cloudflare Web Analytics' script (`static.cloudflareinsights.com`) and beacon endpoint (`cloudflareinsights.com`).
+Workers static assets serve `privacy.html` at `/privacy`, use `404.html` for unknown paths, and apply `_headers`, which sets a strict Content-Security-Policy. The only outside origins it allows are Cloudflare Web Analytics' script (`static.cloudflareinsights.com`) and beacon endpoints (`cloudflareinsights.com`, and `/cdn-cgi/rum` on the site's own origin, which is where the automatically injected beacon reports).
 
 Analytics are cookie-free Cloudflare Web Analytics, turned on in the dashboard under Analytics & Logs, Web Analytics, for `wheelturning.org` with automatic setup, which injects the beacon at the edge. The privacy page's "Visit counts" section describes it; change both together if the tool changes.
 
