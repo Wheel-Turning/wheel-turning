@@ -19,6 +19,9 @@ pub enum ObjectError {
         /// The underlying error.
         source: std::io::Error,
     },
+    /// Objects remain under a prefix after deleting it.
+    #[error("objects remain under {0} after deletion")]
+    Remains(String),
 }
 
 /// A place for objects by key.

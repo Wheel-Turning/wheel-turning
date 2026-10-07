@@ -483,3 +483,23 @@ pub async fn fetch_wav(
     let fetched = fetcher.fetch(&talk, &source, scratch).await?;
     Ok(Ok(Some(converter.to_wav(scratch, &fetched)?)))
 }
+
+/// Spec 07, takedown step 3: after the database commit, deletes each talk's stored objects,
+/// `transcripts/<talk>/` (every version and the suggestions file) and `citations/<talk>.json`,
+/// then checks nothing is left. Returns how many objects were deleted.
+pub fn delete_talk_objects(
+    store: &dyn ObjectStore,
+    talks: &[TalkId],
+) -> Result<usize, ObjectError> {
+    let mut deleted = 0;
+    for talk in talks {
+        let id = talk.as_uuid();
+        for prefix in [format!("transcripts/{id}/"), format!("citations/{id}.json")] {
+            deleted += store.delete_prefix(&prefix)?;
+            if store.delete_prefix(&prefix)? != 0 {
+                return Err(ObjectError::Remains(prefix));
+            }
+        }
+    }
+    Ok(deleted)
+}

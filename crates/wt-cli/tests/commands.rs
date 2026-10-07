@@ -1172,6 +1172,135 @@ async fn pipeline_export_reindex_and_sample_commands() {
     assert!(!line.contains("Ada"), "no names in the export");
     std::fs::remove_dir_all(&out).unwrap();
 
+    // Display levels: narrowing takes effect in the export at once; widening needs evidence.
+    let narrowed = fx.json(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "b",
+        "--reason",
+        "asked",
+        "--by",
+        "owner",
+    ]);
+    assert_eq!(
+        (narrowed["from"].as_str(), narrowed["to"].as_str()),
+        (Some("full"), Some("excerpts"))
+    );
+    let hidden = fx.json(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "a",
+        "--reason",
+        "asked",
+        "--by",
+        "owner",
+    ]);
+    assert_eq!(hidden["to"], "excluded");
+    let out2 = std::env::temp_dir().join(format!("wt-export-{}", Uuid::new_v4()));
+    let none = fx.json(&["export", "transcripts", "--out", out2.to_str().unwrap()]);
+    assert_eq!(none["passages"], 0, "an excluded teacher is not exported");
+    std::fs::remove_dir_all(&out2).unwrap();
+    let refused = fx.wt(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "c",
+        "--reason",
+        "back",
+        "--by",
+        "owner",
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("--evidence"),
+        "{}",
+        stderr(&refused)
+    );
+    fx.json(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "full",
+        "--reason",
+        "back",
+        "--by",
+        "owner",
+        "--evidence",
+        "reply-1",
+    ]);
+
+    // The owner export reports a talk whose stored transcript is missing rather than dropping it.
+    let dir = config_dir();
+    let cfg = dir.to_str().unwrap();
+    let owner = std::env::temp_dir().join(format!("wt-owner-{}", Uuid::new_v4()));
+    let exported = fx.json(&[
+        "export",
+        "teacher",
+        "--teacher",
+        "Ada",
+        "--out",
+        owner.to_str().unwrap(),
+        "--config-dir",
+        cfg,
+    ]);
+    assert_eq!(exported["files"].as_array().unwrap().len(), 0);
+    assert_eq!(exported["skipped"].as_array().unwrap().len(), 1);
+    // e and f take the teacher down, so they need --yes, and apply to a teacher only.
+    for level in ["e", "f"] {
+        let refused = fx.wt(&[
+            "teacher",
+            "display",
+            "--teacher",
+            "Ada",
+            "--level",
+            level,
+            "--reason",
+            "asked",
+            "--by",
+            "owner",
+        ]);
+        assert!(!refused.status.success());
+        assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
+    }
+    let e_with_missing = fx.wt(&[
+        "teacher",
+        "display",
+        "--teacher",
+        "Ada",
+        "--level",
+        "e",
+        "--reason",
+        "asked",
+        "--by",
+        "owner",
+        "--yes",
+        "--out",
+        owner.to_str().unwrap(),
+        "--config-dir",
+        cfg,
+    ]);
+    assert!(
+        !e_with_missing.status.success(),
+        "nothing is deleted when the export is incomplete"
+    );
+    assert!(
+        stderr(&e_with_missing).contains("nothing was deleted"),
+        "{}",
+        stderr(&e_with_missing)
+    );
+    assert_eq!(fx.state(talk).await, "ready");
+    std::fs::remove_dir_all(&owner).unwrap();
+
     // Reindex needs a target and the model; the sample needs whisper-cli.
     let dir = config_dir();
     let cfg = dir.to_str().unwrap();

@@ -208,6 +208,20 @@ struct ReindexArgs {
 
 #[derive(Debug, Subcommand)]
 enum ExportCommand {
+    /// Writes a teacher's talks for their own use, such as books (Spec 04, Owner exports): one
+    /// Markdown file per talk with the teacher's words in paragraphs and the removed stretches
+    /// marked, whatever the talk's display level. No student speech, no audio.
+    Teacher {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// The directory to write into. Keep it under data/, which git ignores.
+        #[arg(long, default_value = "data/owner-export")]
+        out: PathBuf,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// Writes passages.jsonl: one line per servable passage with its id, opaque talk and
     /// teacher ids, start time and text. No names, titles or audio.
     Transcripts {
@@ -317,6 +331,45 @@ enum TeacherCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Set how much of a teacher's talks is shown (Spec 03, Display levels): a excluded,
+    /// b excerpts only, c full (the default), d owner only, e export then delete, f full
+    /// removal. Narrowing applies at once; widening needs --evidence pointing to the teacher's
+    /// own request. e writes the owner export, then runs the opt-out takedown; f runs the
+    /// opt-out takedown. Both need --yes.
+    Display {
+        /// Display name or alias.
+        #[arg(long)]
+        teacher: String,
+        /// a, b, c or d, or excluded, excerpts, full, owner_only.
+        #[arg(long, value_parser = parse_display_level)]
+        level: wt_db::display::DisplayLevel,
+        /// Only this talk: a, b or d, no wider than the teacher's level.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Why, in their words or yours.
+        #[arg(long)]
+        reason: String,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Pointer to the teacher's own request, needed to widen a level.
+        #[arg(long)]
+        evidence: Option<String>,
+        /// For e: where the owner export goes before the takedown.
+        #[arg(long, default_value = "data/owner-export")]
+        out: PathBuf,
+        /// For e and f: confirm the takedown and exclusions.
+        #[arg(long)]
+        yes: bool,
+        /// The directory holding pipeline.toml, for e's export.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+}
+
+fn parse_display_level(value: &str) -> Result<wt_db::display::DisplayLevel, String> {
+    wt_db::display::DisplayLevel::parse(value)
+        .ok_or_else(|| format!("unknown display level {value:?}; use a to f or its name"))
 }
 
 #[derive(Debug, Args)]
@@ -877,6 +930,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Takedown(args) => {
             commands::takedown(
                 &pool().await?,
+                &config,
                 args.target.into(),
                 &args.actor,
                 args.dry_run,
@@ -1167,6 +1221,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         } => {
             index_cmds::export_transcripts(&pool().await?, &out).await?;
         }
+        Command::Export {
+            command:
+                ExportCommand::Teacher {
+                    teacher,
+                    out,
+                    config_dir,
+                },
+        } => {
+            let report =
+                index_cmds::export_teacher(&pool().await?, &config, &config_dir, &teacher, &out)
+                    .await?;
+            commands::print_json(&report)?;
+        }
         Command::Segment {
             command:
                 SegmentCommand::Sample {
@@ -1237,7 +1304,108 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     suspend_only,
                     yes,
                 },
-        } => rights::opt_out(&pool().await?, &teacher, &reason, &by, suspend_only, yes).await?,
+        } => {
+            rights::opt_out(
+                &pool().await?,
+                &config,
+                &teacher,
+                &reason,
+                &by,
+                suspend_only,
+                yes,
+            )
+            .await?;
+        }
+        Command::Teacher {
+            command:
+                TeacherCommand::Display {
+                    teacher,
+                    level,
+                    talk,
+                    reason,
+                    by,
+                    evidence: _,
+                    out,
+                    yes,
+                    config_dir,
+                },
+        } if matches!(
+            level,
+            wt_db::display::DisplayLevel::Removed | wt_db::display::DisplayLevel::ExportThenDelete
+        ) =>
+        {
+            if talk.is_some() {
+                anyhow::bail!(
+                    "e and f apply to a teacher; to remove one talk use wt takedown --talk"
+                );
+            }
+            if !yes {
+                anyhow::bail!(
+                    "{level} deletes {teacher}'s passages, segments and transcripts and excludes \
+                     them for good; rerun with --yes"
+                );
+            }
+            let pool = pool().await?;
+            let export = if level == wt_db::display::DisplayLevel::ExportThenDelete {
+                let report =
+                    index_cmds::export_teacher(&pool, &config, &config_dir, &teacher, &out).await?;
+                if !report.skipped.is_empty() {
+                    anyhow::bail!(
+                        "the export skipped {} talks whose transcripts could not be read, so \
+                         nothing was deleted: {:?}",
+                        report.skipped.len(),
+                        report.skipped
+                    );
+                }
+                Some(report)
+            } else {
+                None
+            };
+            let mut conn = pool.acquire().await?;
+            let change =
+                wt_db::display::mark_takedown_level(&mut conn, &teacher, level, &by, &reason)
+                    .await?;
+            drop(conn);
+            let takedown = wt_db::rights::opt_out(&pool, &teacher, &reason, &by, false).await?;
+            let talks = takedown
+                .takedown
+                .as_ref()
+                .map(|t| t.talks.clone())
+                .unwrap_or_default();
+            let deleted = stages::delete_talk_objects(&config, &talks)?;
+            commands::print_json(&serde_json::json!({
+                "level": change,
+                "export": export,
+                "takedown": takedown,
+                "objects_deleted": deleted,
+            }))?;
+        }
+        Command::Teacher {
+            command:
+                TeacherCommand::Display {
+                    teacher,
+                    level,
+                    talk,
+                    reason,
+                    by,
+                    evidence,
+                    ..
+                },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let change = wt_db::display::set_level(
+                &mut conn,
+                &teacher,
+                talk,
+                level,
+                &by,
+                &reason,
+                evidence.as_deref(),
+            )
+            .await?;
+            commands::print_json(&change)?;
+        }
         Command::Exclusion { command } => match command {
             ExclusionCommand::List => rights::exclusions(&pool().await?).await?,
             ExclusionCommand::Lift { id, by, evidence } => {

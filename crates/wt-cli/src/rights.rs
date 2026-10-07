@@ -234,6 +234,7 @@ pub async fn set_talks_basis(pool: &PgPool, basis: &str, by: &str) -> anyhow::Re
 /// `wt teacher opt-out`. The takedown and exclusions need --yes; --suspend-only does not.
 pub async fn opt_out(
     pool: &PgPool,
+    config: &wt_core::Config,
     teacher: &str,
     reason: &str,
     by: &str,
@@ -246,7 +247,14 @@ pub async fn opt_out(
              them for good; rerun with --yes, or with --suspend-only to stop serving only"
         );
     }
-    print_json(&rights::opt_out(pool, teacher, reason, by, suspend_only).await?)
+    let out = rights::opt_out(pool, teacher, reason, by, suspend_only).await?;
+    let talks = out
+        .takedown
+        .as_ref()
+        .map(|t| t.talks.clone())
+        .unwrap_or_default();
+    let deleted = crate::stages::delete_talk_objects(config, &talks)?;
+    print_json(&crate::stages::with_objects(&out, deleted))
 }
 
 /// What `wt rights notice-draft` needs.

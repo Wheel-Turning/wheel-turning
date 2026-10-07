@@ -1,6 +1,6 @@
 //! Two databases in one Postgres cluster. Roles are cluster-wide but migrations run per
 //! database, so a second database used to end up owned by a fresh `dg_owner` that 0010 could not
-//! rename. 0019 repairs it: every database ends up as a database on a fresh cluster does.
+//! rename. 0020 repairs it: every database ends up as a database on a fresh cluster does.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use sqlx::PgPool;
@@ -8,7 +8,7 @@ use sqlx::postgres::PgPoolOptions;
 use wt_db::test_support::TestDb;
 
 /// The last migration before the repair.
-const BEFORE_REPAIR: i64 = 18;
+const BEFORE_REPAIR: i64 = 19;
 
 async fn connect_to(url: &wt_core::Secret, name: &str) -> PgPool {
     let options = wt_db::connect_options(url).unwrap().database(name);
@@ -197,12 +197,12 @@ async fn applied(pool: &PgPool) -> Vec<i64> {
         .unwrap()
 }
 
-/// From 0009 on a login inheriting `wt_owner` runs migrations. On a healthy database 0019 is a
+/// From 0009 on a login inheriting `wt_owner` runs migrations. On a healthy database 0020 is a
 /// no-op for it. A broken database grants `wt_owner` nothing, not even the schema, and moving
 /// `dg_owner`'s objects needs membership in `dg_owner`, so only the bootstrap user that ran
 /// 0008 can repair one: the owner login must fail there without changing anything.
 #[tokio::test]
-async fn a_login_inheriting_wt_owner_runs_0019_but_only_the_bootstrap_user_repairs() {
+async fn a_login_inheriting_wt_owner_runs_0020_but_only_the_bootstrap_user_repairs() {
     const PASSWORD: &str = "test-password-0123456789abcdef";
     let db = TestDb::start()
         .await
@@ -238,7 +238,7 @@ async fn a_login_inheriting_wt_owner_runs_0019_but_only_the_bootstrap_user_repai
     let rest = db.url().expose().split_once('@').unwrap().1;
     let owner_url = wt_core::Secret::new(format!("postgres://wt_owner_login:{PASSWORD}@{rest}"));
 
-    // The healthy database: the owner login applies 0019, which changes nothing there and keeps
+    // The healthy database: the owner login applies 0020, which changes nothing there and keeps
     // the dg_* roles the broken database still depends on.
     let owner_first = connect_to(&owner_url, "wt").await;
     let current: String = sqlx::query_scalar("select current_user::text")

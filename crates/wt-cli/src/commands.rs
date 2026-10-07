@@ -141,6 +141,7 @@ pub async fn exclude(
 
 pub async fn takedown(
     pool: &PgPool,
+    config: &wt_core::Config,
     target: Target,
     actor: &str,
     dry_run: bool,
@@ -162,7 +163,8 @@ pub async fn takedown(
     let report = wt_db::takedown::run(pool, &scope, actor)
         .await
         .context("running the takedown")?;
-    print_json(&report)
+    let deleted = crate::stages::delete_talk_objects(config, &report.talks)?;
+    print_json(&crate::stages::with_objects(&report, deleted))
 }
 
 pub async fn audit(pool: &PgPool, env: Env) -> anyhow::Result<ExitCode> {

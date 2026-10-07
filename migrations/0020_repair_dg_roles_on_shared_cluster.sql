@@ -9,7 +9,7 @@
 --
 -- For each dg_* role this hands what it owns in this database to its wt_* counterpart, copies
 -- every privilege it holds here to the counterpart and revokes it, and drops the dg_* role once
--- nothing in the cluster depends on it. It leaves the database as 0001 to 0018 leave a database
+-- nothing in the cluster depends on it. It leaves the database as 0001 to 0019 leave a database
 -- on a fresh cluster. On a database without dg_* roles it changes nothing.
 --
 -- Only the bootstrap user that ran 0008 (the local superuser, the RDS master user) can repair a
