@@ -5,6 +5,7 @@
 
 pub mod extract;
 pub mod manifest;
+pub mod reference;
 pub mod units;
 
 use std::path::Path;

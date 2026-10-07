@@ -429,6 +429,77 @@ pub async fn import_text(
     .await?)
 }
 
+/// `wt reference import`; a glossary change then queues correction for the talks it affects.
+pub async fn import_reference(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    manifest: &Path,
+    apply: bool,
+    link_teachers: bool,
+    by: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let licenses = wt_ingest::config::LicenseSettings::load(&config_dir.join("pipeline.toml"))?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let (report, glossary_terms) = wt_ingest::texts::reference::import(
+        &mut conn,
+        &objects,
+        manifest,
+        &licenses.allowed_license_codes,
+        by,
+        apply,
+        link_teachers,
+    )
+    .await?;
+    let mut requeued = 0;
+    if report.applied && !glossary_terms.is_empty() {
+        let glossary = Glossary::new(&wt_db::glossary::load(&mut conn).await?)?;
+        requeued =
+            wt_ingest::textjobs::requeue_after_glossary_change(&mut conn, &objects, &glossary)
+                .await?
+                .len();
+    }
+    let mut value = serde_json::to_value(&report)?;
+    if let Some(map) = value.as_object_mut() {
+        map.insert("talks_requeued".into(), serde_json::json!(requeued));
+    }
+    Ok(value)
+}
+
+/// `wt reindex --citations`: links citations to text units, and queues resolution again for
+/// talks with staged citations, keyed by the hand list, so a new locator list or text resolves
+/// citations that matched nothing before.
+pub async fn reindex_citations(
+    pool: &PgPool,
+    config: &Config,
+) -> anyhow::Result<serde_json::Value> {
+    use wt_core::objects::ObjectStore as _;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let linked = wt_db::reference::link_citations(&mut conn).await?;
+    let version = wt_db::reference::locator_version(&mut conn).await?;
+    let mut queued = 0;
+    for talk in wt_db::transcript::corrected_talks(&mut conn).await? {
+        if objects
+            .get(&wt_ingest::textjobs::staging_key(talk))?
+            .is_some()
+            && wt_db::job::enqueue(
+                &mut conn,
+                wt_db::job::JobKind::Resolve,
+                Some(talk),
+                &format!("locators-{version}"),
+                &serde_json::json!({ "reason": "reindex --citations" }),
+            )
+            .await?
+            .is_some()
+        {
+            queued += 1;
+        }
+    }
+    Ok(serde_json::json!({ "citations_relinked": linked, "resolve_queued": queued }))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

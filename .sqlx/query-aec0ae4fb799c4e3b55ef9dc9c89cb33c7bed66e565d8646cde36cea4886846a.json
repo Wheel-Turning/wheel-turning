@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update reference_asset set row_counts = $2 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aec0ae4fb799c4e3b55ef9dc9c89cb33c7bed66e565d8646cde36cea4886846a"
+}

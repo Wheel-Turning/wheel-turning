@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update citation c set text_unit_id = null\n         where c.text_unit_id is not null and not exists (\n           select 1 from work_locator wl\n           join text_edition e on e.work_id = wl.work_id\n           join text_unit u on u.edition_id = e.id and u.locator = wl.locator\n           where wl.id = c.work_locator_id and u.id = c.text_unit_id\n             and e.state = 'ready' and e.excerptable)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "3f0c50868b41e4d1aac7cacd4f324fc363fdde5d052e0b6a85d8b7f68a8a89a5"
+}

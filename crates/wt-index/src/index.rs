@@ -355,6 +355,20 @@ pub async fn write(
     .execute(&mut *conn)
     .await?;
 
+    // A citation whose locator has a unit in a ready, excerptable edition links to it, so its
+    // footnote can open the text (Spec 08, Import pipeline, step 7).
+    sqlx::query!(
+        "update citation c set text_unit_id = u.id
+         from work_locator wl
+         join text_edition e on e.work_id = wl.work_id
+         join text_unit u on u.edition_id = e.id and u.locator = wl.locator
+         where c.talk_id = $1 and c.work_locator_id = wl.id
+           and e.state = 'ready' and e.excerptable",
+        talk
+    )
+    .execute(&mut *conn)
+    .await?;
+
     sqlx::query!(
         "update talk set content_hash = $2, last_verified_at = now() where id = $1",
         talk,

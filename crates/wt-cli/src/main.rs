@@ -94,6 +94,11 @@ enum Command {
         #[command(subcommand)]
         command: TextCommand,
     },
+    /// Reference assets: glossaries, alias lists, lineage and locator lists (Spec 08).
+    Reference {
+        #[command(subcommand)]
+        command: ReferenceCommand,
+    },
     /// Offline transcript review (Spec 04, Transcript review and owner exports).
     Transcript {
         #[command(subcommand)]
@@ -188,7 +193,43 @@ enum AsrCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ReferenceCommand {
+    /// Imports a reference asset from a manifest and its CSV files: a dry run unless --apply.
+    /// A glossary change queues correction for the talks it affects.
+    Import {
+        /// The manifest TOML, beside the files.
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Write; without it, only report.
+        #[arg(long)]
+        apply: bool,
+        /// For a lineage file: link teachers whose display names match a person exactly.
+        #[arg(long)]
+        link_teachers: bool,
+        /// Who is importing.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum TextCommand {
+    /// Records a work read elsewhere, with its locators and no text, so talks can cite it and
+    /// the footnote links out.
+    LinkOut {
+        /// The work's title.
+        #[arg(long)]
+        work: String,
+        /// Where to read it.
+        #[arg(long)]
+        url: String,
+        /// A CSV of locators: locator, label, and optional aliases (semicolon separated) and url.
+        #[arg(long)]
+        locators: Option<PathBuf>,
+    },
     /// Imports a corpus text from a manifest and its source files: a dry run that reports
     /// sections, units and locators unless --apply, which writes the edition, its units with
     /// embeddings and its locators. An unchanged source and manifest make --apply a no-op.
@@ -252,7 +293,7 @@ enum PipelineCommand {
 }
 
 #[derive(Debug, clap::Args)]
-#[command(group(clap::ArgGroup::new("which").required(true).args(["talk", "all"])))]
+#[command(group(clap::ArgGroup::new("which").required(true).args(["talk", "all", "citations"])))]
 struct ReindexArgs {
     /// A talk to reindex. Repeat for several.
     #[arg(long)]
@@ -260,6 +301,10 @@ struct ReindexArgs {
     /// Every talk with corrected segments.
     #[arg(long)]
     all: bool,
+    /// Relink citations to text units after a text or locator import, and queue resolution
+    /// again for talks with staged citations when the hand list changed (Spec 08).
+    #[arg(long)]
+    citations: bool,
     /// The embedding model directory under WT_MODEL_DIR, instead of WT_EMBED_MODEL.
     #[arg(long)]
     model: Option<String>,
@@ -1273,6 +1318,43 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             .await?;
             commands::print_json(&report)?;
         }
+        Command::Text {
+            command:
+                TextCommand::LinkOut {
+                    work,
+                    url,
+                    locators,
+                },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let n =
+                wt_ingest::texts::reference::link_out(&mut conn, &work, &url, locators.as_deref())
+                    .await?;
+            commands::print_json(&serde_json::json!({ "work": work, "locators": n }))?;
+        }
+        Command::Reference {
+            command:
+                ReferenceCommand::Import {
+                    manifest,
+                    apply,
+                    link_teachers,
+                    by,
+                    config_dir,
+                },
+        } => {
+            let report = index_cmds::import_reference(
+                &pool().await?,
+                &config,
+                &config_dir,
+                &manifest,
+                apply,
+                link_teachers,
+                &by,
+            )
+            .await?;
+            commands::print_json(&report)?;
+        }
         Command::Transcript { command } => match command {
             TranscriptCommand::ExportReview {
                 talk,
@@ -1317,6 +1399,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     }
                 }
             }
+        }
+        Command::Reindex(args) if args.citations => {
+            let report = index_cmds::reindex_citations(&pool().await?, &config).await?;
+            commands::print_json(&report)?;
         }
         Command::Reindex(args) => {
             let talks = if args.all { None } else { Some(args.talk) };

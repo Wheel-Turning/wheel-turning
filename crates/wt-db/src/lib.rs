@@ -19,6 +19,7 @@ pub mod ingest;
 pub mod job;
 pub mod llm;
 pub mod locator;
+pub mod reference;
 pub mod registry;
 pub mod rights;
 pub mod takedown;

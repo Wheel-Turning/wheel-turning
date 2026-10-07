@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update glossary_term set source_asset_id = $1\n         where canonical = any($2) and source_asset_id is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "feaf15baebc061a3422b7de8661a189d0598ec7301df68ee300a3e73cff8afc0"
+}

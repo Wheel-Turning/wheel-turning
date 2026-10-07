@@ -247,6 +247,13 @@ Decisions of October 7, 2026, made while building the importer (`wt_ingest::text
 - An applied edition is `ready` but serves only after a passing proofread (`proof_check`), as `servable_text_unit` requires.
 - `[licenses] allowed_license_codes` is now in `config/pipeline.toml`, with Spec 03's list.
 
+Decisions of October 7, 2026, made while building the reference importer (`wt reference import`, `wt text link-out`, `wt reindex --citations`):
+
+- Reference files are CSV with a header row; `columns` maps a field to its header, and a field not mapped is read from the header of its own name. Lists inside a cell, such as variants or aliases, are separated by semicolons. An asset the founder compiled personally needs no evidence; one with evidence needs it approved with an allowed code.
+- A glossary asset records itself on the terms it adds; terms it only adds variants to keep their source. Canonical forms are compared without case or accents, so "Dōgen" against "Dogen" is reported as a conflict, as Spec 04's glossary import always intended.
+- An alias that already names another person is reported and not added. Lineage people are created as `figure`.
+- A citation links to a unit when its resolved locator has a unit of the same locator in a ready, excerptable edition of its work: at index time for each talk, and for every talk with `wt reindex --citations`, which also unlinks citations whose edition left that state. The serving view still shows only proofread units. `wt reindex --citations` also queues `resolve` for talks with staged citations, keyed by a hash of the hand list, so a new locator list resolves citations that matched nothing before.
+
 ## PDFs and OCR
 
 PDFs with a text layer are read directly. Scanned PDFs are run through OCR and then proofread by a person before the edition can be served, because an OCR error in a text unit shows up as a misquotation of the work. Set `format = "pdf"` in the manifest and add a `[pdf]` table.
@@ -713,14 +720,14 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [x] Section filtering excludes introduction, notes and translator material by default, and `include_sections` can restore a section. (`wt-ingest/tests/texts.rs` and `texts::extract` unit tests.)
 - [x] Each unit scheme (verse, numbered, paragraph, heading) produces the expected units and locators on its fixture. Over-long units split into `.a` and `.b`, and a duplicate locator fails the import. (`texts::units` unit tests; the numbered scheme end to end in `wt-ingest/tests/texts.rs`.)
 - [x] An import with evidence that is missing, not approved, or outside `allowed_license_codes` is refused, and a public-domain edition with approved evidence is accepted. (`wt-ingest/tests/texts.rs`.)
-- [ ] A glossary import merges variants, reports a conflicting canonical form without overwriting it, and changes the glossary version so affected talks requeue.
-- [ ] An alias list creates `person` rows and never creates teacher aliases. A lineage file creates edges, and `--link-teachers` links only exact name matches.
-- [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text".
+- [x] A glossary import merges variants, reports a conflicting canonical form without overwriting it, and changes the glossary version so affected talks requeue. (`wt-ingest/tests/reference.rs`; `wt reference import` requeues through `requeue_after_glossary_change`, tested in Spec 04.)
+- [x] An alias list creates `person` rows and never creates teacher aliases. A lineage file creates edges, and `--link-teachers` links only exact name matches. (`wt-ingest/tests/reference.rs`.)
+- [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text". (The link is done and tested in `wt-ingest/tests/reference.rs`; the footnote renders with the answer page in M5.)
 - [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present.
 - [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search.
 - [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
 - [ ] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end.
-- [ ] `wt text link-out` creates a `work` and locators with no text rows.
+- [x] `wt text link-out` creates a `work` and locators with no text rows. (`wt-ingest/tests/reference.rs`.)
 - [x] A guard test fails if git tracks any file under `data-inbox/`. (`wt-core/tests/repo_guards.rs`.)
 
 Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthetic scanned PDF rendered from known text with planted noise, and a mixed one:
