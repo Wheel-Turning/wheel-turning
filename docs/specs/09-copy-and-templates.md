@@ -10,7 +10,7 @@ File: `copy/home.md`.
 - Question label: Your question
 - Help text under the box: Write it the way you would say it. For example: I keep judging myself during zazen.
 - Button: Ask
-- Line under the button: Everything you see is a short excerpt, with a link to where it came from.
+- Line under the button: Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.
 - Privacy line: Your questions are kept so the project can improve. Only totals are read, and one question is opened only if you flag it. You can switch this off or delete your questions at any time. Read how this works
 - Example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
 
@@ -125,7 +125,7 @@ I am building Wheel Turning, a free search tool for Zen teachings. A person desc
 
 I want you to know that [N] of your talks from [Sangha or source] are already in it, in a private test with a small group of invited people. I made that choice myself, before hearing from you. I thought a test without real teachers would teach me nothing, and I would rather tell you plainly than have you find out some other way.
 
-Here is what it holds. A written transcript of each talk, made from the recording. The recording itself is not kept. Questions and voices from students are never stored. Here is what people see. Short excerpts only, never a whole talk, each with your name, your sangha, a link to the talk at that moment, and a link to your sangha's giving page.
+Here is what it holds. A written transcript of each talk, made from the recording. The recording itself is not kept. Questions and voices from students are never stored. Here is what people see. Short excerpts in answers, each with your name, your sangha, a link to the talk at that moment, and a link to your sangha's giving page, and a page with the full written transcript of each talk, carrying the same name, sangha, source and giving links. You can choose less at any time with one message: excerpts only, nothing shown publicly, a copy of your transcripts for your own use, or removal of everything.
 
 Here is what you can do.
 
