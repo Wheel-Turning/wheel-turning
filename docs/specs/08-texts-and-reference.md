@@ -691,7 +691,7 @@ Acceptance criteria for mandated sources:
 - [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent.
 - [x] A noticed document is flagged and listed under `flag`, quarantined on arrival under `hold`, and refused under `block`. (`wt-ingest/tests/notices.rs`.)
 - [x] A non-English document is skipped and reported. (`wt-ingest/tests/notices.rs`.)
-- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The last two are built: `text_source_served_while_off` and `takedown_request_overdue`, `wt-db/tests/audit.rs`. The exposure warning comes with the deployment setting.)
+- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The audit side is built: `mandate_exposed` reads `[deployment] exposure` in `pipeline.toml`, `text_source_served_while_off` and `takedown_request_overdue`, all in `wt-db/tests/audit.rs`. The startup warning comes with the web server in M5.)
 
 ## Rights lifecycle
 

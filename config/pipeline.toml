@@ -61,6 +61,11 @@ word_list = "/usr/share/dict/words"
 proof_random_max_errors = 1
 proof_worst_max_errors = 3
 
+[deployment]
+# Who can reach the tool. With "public" and a mandated source enabled, the audit warns, because
+# a mandated source's exposure grows once the tool is public (Spec 08, Mandated sources).
+exposure = "private"
+
 [url_policy]
 # URL ingestion (Spec 08): at least this long between requests to one host, the largest
 # download, and hosts that republish many rights holders' works, which evidence may never cover

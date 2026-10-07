@@ -83,6 +83,7 @@ async fn a_clean_database_passes_every_check_in_prod() {
             "text_source_served_while_off",
             "text_takedown_completeness",
             "takedown_request_overdue",
+            "mandate_exposed",
             "teacher_unnotified",
         ]
     );
@@ -600,4 +601,45 @@ async fn texts_excluded_or_taken_down_fail_and_old_requests_warn() {
     let report = audit(&fx.pool, Env::Prod).await;
     only(&report, &["takedown_request_overdue"]);
     assert!(!report.failed());
+}
+
+#[tokio::test]
+async fn a_mandated_source_warns_once_the_tool_is_public() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    sqlx::query(
+        "insert into source_policy (key, publisher, url_prefixes, basis)
+         values ('fixturepub', 'Fixture Publisher', '{https://pub.example.invalid/}', 'mandate')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    // A fresh mandate also has no permission request yet, which warns after 14 days only.
+    let private = audit(&fx.pool, Env::Prod).await;
+    assert_eq!(findings(&private, "mandate_exposed"), 0);
+    let public = run(
+        &fx.pool,
+        AuditSettings {
+            public: true,
+            ..AuditSettings::defaults(Env::Prod)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(findings(&public, "mandate_exposed"), 1);
+    assert!(!public.failed(), "a warning never fails the audit");
+    sqlx::query("update source_policy set enabled = false")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let off = run(
+        &fx.pool,
+        AuditSettings {
+            public: true,
+            ..AuditSettings::defaults(Env::Prod)
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(findings(&off, "mandate_exposed"), 0);
 }

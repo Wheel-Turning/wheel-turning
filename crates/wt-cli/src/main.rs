@@ -55,7 +55,11 @@ enum Command {
     Takedown(TakedownArgs),
     /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
     /// fail has findings.
-    Audit,
+    Audit {
+        /// The directory holding pipeline.toml, for `[deployment] exposure`.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// Discovery from the configured sources (Spec 03).
     Ingest {
         #[command(subcommand)]
@@ -1408,7 +1412,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .await?;
             }
         }
-        Command::Audit => return commands::audit(&pool().await?, config.env).await,
+        Command::Audit { config_dir } => {
+            return commands::audit(&pool().await?, config.env, &config_dir).await;
+        }
         Command::Ingest {
             command: IngestCommand::Discover { source, config_dir },
         } => ingest::discover(&pool().await?, &config, &config_dir, source.as_deref()).await?,
