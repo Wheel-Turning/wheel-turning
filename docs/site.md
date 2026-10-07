@@ -22,7 +22,7 @@ Analytics are cookie-free Cloudflare Web Analytics, turned on in the dashboard u
 
 ## Type and the preview image
 
-Headings and the wordmark use Cormorant Garamond, the lockup's face; reading text uses EB Garamond, a book face, so excerpts read like a printed page. Both are self-hosted in `site/fonts/` (Latin and Latin Extended subsets, so Pali and Sanskrit diacritics stay in the same face) with their SIL Open Font License files beside them. `font-display: swap` shows text at once, and metric-matched fallback faces built on local Georgia keep line breaks the same until the fonts load, or if they never do.
+Headings and the wordmark use Cormorant Garamond, the lockup's face, self-hosted in `site/fonts/` (Latin and Latin Extended subsets, so Pali and Sanskrit diacritics stay in the same face) with its SIL Open Font License file beside it. `font-display: swap` shows headings at once, and a metric-matched fallback face built on local Georgia keeps line breaks the same until the font loads, or if it never does. Reading text uses the system sans-serif stack, chosen over a book serif because it stays legible in dark mode.
 
 `site/og.png` is the 1200 by 630 link preview. To regenerate it after a logo or font change, render a page that shows the mark, the wordmark and the tagline at that size in headless Chrome with `--screenshot`, forcing the light theme.
 
