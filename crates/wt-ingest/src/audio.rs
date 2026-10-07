@@ -422,3 +422,64 @@ pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId
     }
     Ok(queued)
 }
+
+/// `wt asr requeue`: queues `audio` with `retranscribe` for every talk whose current transcript
+/// records a model other than `model`, keyed by the model so asking twice queues nothing new.
+/// Returns those talks; with `dry_run`, queues nothing.
+pub async fn requeue_for_model(
+    conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
+    model: &str,
+    dry_run: bool,
+) -> Result<Vec<TalkId>, AudioError> {
+    #[derive(serde::Deserialize)]
+    struct Recorded {
+        model: String,
+    }
+    let mut affected = Vec::new();
+    for (talk, key) in transcript::current_keys(conn).await? {
+        let Some(bytes) = objects.get(&key)? else {
+            tracing::warn!(%talk, %key, "transcript object missing; not requeued");
+            continue;
+        };
+        let recorded = serde_json::from_slice::<Recorded>(&bytes)
+            .map(|r| r.model)
+            .unwrap_or_default();
+        if recorded == model {
+            continue;
+        }
+        if !dry_run {
+            job::enqueue(
+                conn,
+                JobKind::Audio,
+                Some(talk),
+                &sha256_hex(format!("retranscribe:{model}").as_bytes()),
+                &serde_json::json!({ "retranscribe": true, "model": model, "was": recorded }),
+            )
+            .await?;
+        }
+        affected.push(talk);
+    }
+    Ok(affected)
+}
+
+/// Fetches a cleared talk's media into `scratch` and converts it to WAV, for the benchmark's
+/// talk mode. Nothing in the database changes. `None` when the talk has no media route.
+pub async fn fetch_wav(
+    conn: &mut sqlx::PgConnection,
+    talk_id: TalkId,
+    fetcher: &MediaFetcher,
+    converter: &dyn Converter,
+    scratch: &ScratchDir,
+) -> Result<Result<Option<std::path::PathBuf>, GateError>, AudioError> {
+    let talk = match TalkRepo::authorize(conn, talk_id).await? {
+        Ok(talk) => talk,
+        Err(gate) => return Ok(Err(gate)),
+    };
+    let route = feed::media_route(conn, talk_id).await?;
+    let Some(source) = MediaSource::from_route(&route) else {
+        return Ok(Ok(None));
+    };
+    let fetched = fetcher.fetch(&talk, &source, scratch).await?;
+    Ok(Ok(Some(converter.to_wav(scratch, &fetched)?)))
+}

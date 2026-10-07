@@ -16,7 +16,11 @@ async-trait = "0.1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["process"] }
+tracing.workspace = true
+tokio = { workspace = true, features = ["process", "time", "macros", "io-util"] }
+toml = "1"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+unicode-normalization = "0.1"
 
 [dev-dependencies]
-toml = "1"
+uuid.workspace = true

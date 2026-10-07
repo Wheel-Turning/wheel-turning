@@ -14,6 +14,8 @@ use serde::Deserialize;
 use wt_core::scratch::{ScratchDir, wav_duration_ms};
 use wt_core::transcript::Word;
 
+pub mod bench;
+
 /// Recognition errors.
 #[derive(Debug, thiserror::Error)]
 pub enum AsrError {
@@ -100,6 +102,14 @@ pub struct AsrSettings {
     pub use_gpu: bool,
     /// CPU threads.
     pub threads: u32,
+    /// Whether to pass the glossary to whisper-cli as its initial prompt. Off: on the benchmark
+    /// clip it raised large-v3's word error rate from 1.9% to 8.8% on Vulkan and from 1.6% to
+    /// 59.6% on OpenVINO (October 6, 2026), and the glossary pass corrects terms afterwards.
+    pub glossary_prompt: bool,
+    /// Tokens of earlier text whisper-cli conditions each window on (`-mc`); negative leaves
+    /// whisper's default, all of it. 0: with context, large-v3 looped an invented sentence ten
+    /// times on a synthetic talk, and without it did not (October 6, 2026).
+    pub max_context: i32,
 }
 
 impl Default for AsrSettings {
@@ -109,6 +119,8 @@ impl Default for AsrSettings {
             beam_size: 5,
             use_gpu: true,
             threads: 8,
+            glossary_prompt: false,
+            max_context: 0,
         }
     }
 }
@@ -123,6 +135,7 @@ impl WhisperCli {
             threads: settings.threads,
             beam_size: settings.beam_size,
             use_gpu: settings.use_gpu,
+            max_context: settings.max_context,
         }
     }
 }
@@ -140,9 +153,37 @@ pub struct WhisperCli {
     pub beam_size: u32,
     /// Whether to use the GPU.
     pub use_gpu: bool,
+    /// `-mc`, when not negative.
+    pub max_context: i32,
 }
 
 impl WhisperCli {
+    /// The `whisper-cli` invocation for `audio`, writing `<stem>.json`: one word per segment,
+    /// full JSON, no progress output.
+    pub fn command(&self, audio: &Path, stem: &Path, hints: &AsrHints) -> tokio::process::Command {
+        let mut cmd = tokio::process::Command::new(&self.binary);
+        cmd.arg("-m")
+            .arg(&self.model)
+            .arg("-f")
+            .arg(audio)
+            .args(["-l", &hints.language])
+            .args(["-t", &self.threads.to_string()])
+            .args(["-bs", &self.beam_size.to_string()])
+            .args(["-ml", "1", "-sow", "-ojf", "-np"])
+            .arg("-of")
+            .arg(stem);
+        if !hints.glossary_prompt.is_empty() {
+            cmd.arg("--prompt").arg(&hints.glossary_prompt);
+        }
+        if !self.use_gpu {
+            cmd.arg("-ng");
+        }
+        if self.max_context >= 0 {
+            cmd.args(["-mc", &self.max_context.to_string()]);
+        }
+        cmd
+    }
+
     /// The model's name as recorded in the transcript: `ggml-large-v3.bin` is
     /// `whisper-large-v3`.
     pub fn model_name(&self) -> String {
@@ -226,27 +267,14 @@ impl Transcriber for WhisperCli {
         hints: &AsrHints,
     ) -> Result<RawTranscript, AsrError> {
         let stem = scratch.file("asr")?;
-        let mut cmd = tokio::process::Command::new(&self.binary);
-        cmd.arg("-m")
-            .arg(&self.model)
-            .arg("-f")
-            .arg(audio)
-            .args(["-l", &hints.language])
-            .args(["-t", &self.threads.to_string()])
-            .args(["-bs", &self.beam_size.to_string()])
-            .args(["-ml", "1", "-sow", "-ojf", "-np"])
-            .arg("-of")
-            .arg(&stem);
-        if !hints.glossary_prompt.is_empty() {
-            cmd.arg("--prompt").arg(&hints.glossary_prompt);
-        }
-        if !self.use_gpu {
-            cmd.arg("-ng");
-        }
-        let out = cmd.output().await.map_err(|e| AsrError::Start {
-            binary: self.binary.display().to_string(),
-            message: e.to_string(),
-        })?;
+        let out = self
+            .command(audio, &stem, hints)
+            .output()
+            .await
+            .map_err(|e| AsrError::Start {
+                binary: self.binary.display().to_string(),
+                message: e.to_string(),
+            })?;
         if !out.status.success() {
             // The last line of stderr; it names the problem and holds no transcript text.
             let line = String::from_utf8_lossy(&out.stderr)

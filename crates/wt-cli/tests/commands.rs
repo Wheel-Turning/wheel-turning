@@ -35,7 +35,7 @@ async fn start() -> Fx {
 
 impl Fx {
     fn wt(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_wt"))
+        wt_command()
             .args(args)
             .env("DATABASE_URL", self.db.url().expose())
             .env("WT_LOG", "warn")
@@ -47,7 +47,7 @@ impl Fx {
 
     /// Runs `wt` with extra environment variables set and others removed.
     fn wt_env(&self, args: &[&str], set: &[(&str, &str)], remove: &[&str]) -> Output {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_wt"));
+        let mut cmd = wt_command();
         cmd.args(args)
             .env("DATABASE_URL", self.db.url().expose())
             .env("WT_LOG", "warn")
@@ -120,6 +120,17 @@ impl Fx {
             .await
             .unwrap()
     }
+}
+
+/// The `wt` binary with the repository's model license record, since tests run in the crate's
+/// directory.
+fn wt_command() -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_wt"));
+    cmd.env(
+        "WT_MODEL_LICENSES",
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/model-licenses.md"),
+    );
+    cmd
 }
 
 fn registry_file() -> PathBuf {
@@ -378,7 +389,12 @@ fn config_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wt-config-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config");
-    for file in ["pipeline.toml", "series.toml", "llm_prices.toml"] {
+    for file in [
+        "pipeline.toml",
+        "series.toml",
+        "llm_prices.toml",
+        "asr_bench.toml",
+    ] {
         std::fs::copy(repo.join(file), dir.join(file)).unwrap();
     }
     std::fs::write(
@@ -554,7 +570,7 @@ async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
             &lookup,
         ];
         args.extend_from_slice(extra);
-        Command::new(env!("CARGO_BIN_EXE_wt"))
+        wt_command()
             .args(&args)
             .env("DATABASE_URL", fx.db.url().expose())
             .env("WT_LOG", "warn")
@@ -1006,7 +1022,7 @@ async fn glossary_import_llm_cap_and_stage_workers_check_their_settings() {
         "{}",
         stderr(&index)
     );
-    let audio = Command::new(env!("CARGO_BIN_EXE_wt"))
+    let audio = wt_command()
         .args(["worker", "--kinds", "audio", "--drain", "--config-dir", cfg])
         .env("DATABASE_URL", fx.db.url().expose())
         .env("WT_LOG", "warn")
@@ -1022,7 +1038,7 @@ async fn glossary_import_llm_cap_and_stage_workers_check_their_settings() {
         "{}",
         stderr(&audio)
     );
-    let extract = Command::new(env!("CARGO_BIN_EXE_wt"))
+    let extract = wt_command()
         .args([
             "worker",
             "--kinds",
@@ -1173,6 +1189,73 @@ async fn pipeline_export_reindex_and_sample_commands() {
         "{}",
         stderr(&reindex)
     );
+    // A stage with an unlisted model refuses to start, naming it.
+    let unlisted = fx.wt_env(
+        &["worker", "--kinds", "index", "--drain", "--config-dir", cfg],
+        &[("WT_EMBED_MODEL", "bge-small-unlisted")],
+        &[],
+    );
+    assert!(!unlisted.status.success());
+    assert!(
+        stderr(&unlisted).contains("bge-small-unlisted is not listed"),
+        "{}",
+        stderr(&unlisted)
+    );
+    let whisper = fx.wt_env(
+        &["worker", "--kinds", "audio", "--drain", "--config-dir", cfg],
+        &[
+            ("WT_WHISPER_CLI", "whisper-cli"),
+            ("WT_WHISPER_MODEL", "models/ggml-medium.bin"),
+        ],
+        &[],
+    );
+    assert!(
+        stderr(&whisper).contains("ggml-medium.bin is not listed"),
+        "{}",
+        stderr(&whisper)
+    );
+
+    // Requeue needs the model; with it, the ready talk's missing transcript object is skipped.
+    let no_model = fx.wt_env(&["asr", "requeue"], &[], &["WT_WHISPER_MODEL"]);
+    assert!(!no_model.status.success());
+    assert!(
+        stderr(&no_model).contains("WT_WHISPER_MODEL"),
+        "{}",
+        stderr(&no_model)
+    );
+    let requeue = fx.wt_env(
+        &["asr", "requeue", "--dry-run"],
+        &[("WT_WHISPER_MODEL", "models/ggml-large-v3.bin")],
+        &[],
+    );
+    assert!(requeue.status.success(), "{}", stderr(&requeue));
+    let report: serde_json::Value = serde_json::from_slice(&requeue.stdout).unwrap();
+    assert_eq!(
+        (report["model"].as_str(), report["talks"].as_i64()),
+        (Some("whisper-large-v3"), Some(0))
+    );
+
+    // The benchmark refuses when no setup is available.
+    let setups = dir.join("asr_bench.toml");
+    let bench = fx.wt_env(
+        &[
+            "asr",
+            "benchmark",
+            "--clip",
+            "missing.wav",
+            "--setups",
+            setups.to_str().unwrap(),
+            "--bench-root",
+            cfg,
+            "--config-dir",
+            cfg,
+        ],
+        &[],
+        &[],
+    );
+    assert!(!bench.status.success());
+    assert!(stderr(&bench).contains("no setup"), "{}", stderr(&bench));
+
     let sample = fx.wt_env(
         &["segment", "sample", "--count", "1", "--config-dir", cfg],
         &[],

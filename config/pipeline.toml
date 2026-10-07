@@ -103,3 +103,10 @@ language = "en"
 beam_size = 5
 use_gpu = true
 threads = 8
+# Off: the glossary as whisper-cli's initial prompt made large-v3 much worse on the benchmark
+# clip (docs/asr-benchmark.md, October 6, 2026). The glossary pass corrects terms afterwards.
+glossary_prompt = false
+# 0: each window is transcribed without the text before it. With context, large-v3 looped an
+# invented sentence ten times on a synthetic talk (October 6, 2026). -1 restores whisper's
+# default.
+max_context = 0

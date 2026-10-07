@@ -95,3 +95,42 @@ fn audio_is_written_only_under_scratch() {
         "audio written outside wt-core::scratch: {found:?}"
     );
 }
+
+/// Spec 04, Model license record: CI fails when `config/` names a model that
+/// `docs/model-licenses.md` does not list with a revision. The models named are the priced
+/// language models, the benchmark's model files and the default retrieval models.
+#[test]
+fn config_names_only_models_the_license_record_lists_with_a_revision() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let record = wt_core::licenses::LicenseRecord::load(&root.join("docs/model-licenses.md"))
+        .expect("docs/model-licenses.md");
+    let mut named: Vec<String> = Vec::new();
+    let prices = std::fs::read_to_string(root.join("config/llm_prices.toml")).unwrap();
+    named.extend(
+        prices
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("id = "))
+            .map(|v| v.trim_matches('"').to_owned()),
+    );
+    let bench = std::fs::read_to_string(root.join("config/asr_bench.toml")).unwrap();
+    named.extend(
+        bench
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("path = "))
+            .filter_map(|v| v.trim_matches('"').rsplit('/').next().map(str::to_owned)),
+    );
+    let env = std::fs::read_to_string(root.join(".env.example")).unwrap();
+    named.extend(env.lines().filter_map(|l| {
+        ["WT_EMBED_MODEL=", "WT_RERANK_MODEL="]
+            .iter()
+            .find_map(|k| l.strip_prefix(k))
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    }));
+    assert!(named.len() >= 6, "found {named:?}");
+    let missing: Vec<String> = named
+        .iter()
+        .filter_map(|m| record.require(m).err().map(|e| e.to_string()))
+        .collect();
+    assert!(missing.is_empty(), "{missing:#?}");
+}

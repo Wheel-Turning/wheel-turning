@@ -10,6 +10,7 @@ use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
 use wt_core::telemetry::{LogOutput, init_logging};
 
+mod asr_cmds;
 mod commands;
 mod index_cmds;
 mod ingest;
@@ -78,6 +79,11 @@ enum Command {
         #[command(subcommand)]
         command: ExclusionCommand,
     },
+    /// Speech recognition: the benchmark and model changes (Spec 04).
+    Asr {
+        #[command(subcommand)]
+        command: AsrCommand,
+    },
     /// Moves cleared talks into the pipeline and retries failed stages (Spec 03).
     Pipeline {
         #[command(subcommand)]
@@ -110,6 +116,64 @@ enum Command {
     Teacher {
         #[command(subcommand)]
         command: TeacherCommand,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+struct BenchmarkArgs {
+    /// A clip with known text: a public-domain or CC0 recording, never a teacher's talk.
+    #[arg(long, conflicts_with = "talk")]
+    clip: Option<PathBuf>,
+    /// The clip's known text.
+    #[arg(long, requires = "clip")]
+    reference: Option<PathBuf>,
+    /// Cleared talks to fetch instead. Repeat for several.
+    #[arg(long)]
+    talk: Vec<TalkId>,
+    /// Hand-corrected text for talks, as <dir>/<talk id>.txt. Keep it under data/.
+    #[arg(long, requires = "talk")]
+    references: Option<PathBuf>,
+    /// The setups and models.
+    #[arg(long, default_value = "config/asr_bench.toml")]
+    setups: PathBuf,
+    /// Where the file's relative paths start.
+    #[arg(long, default_value = ".")]
+    bench_root: PathBuf,
+    /// Only this setup. Repeat for several.
+    #[arg(long = "setup")]
+    only_setups: Vec<String>,
+    /// Only this model. Repeat for several.
+    #[arg(long = "model")]
+    only_models: Vec<String>,
+    /// Append the result, the date and the hardware to this file.
+    #[arg(long, num_args = 0..=1, default_missing_value = "docs/asr-benchmark.md")]
+    record: Option<PathBuf>,
+    /// A line for the record, such as the GPU and its driver.
+    #[arg(long)]
+    note: Option<String>,
+    /// Run without the glossary prompt, whatever [asr] glossary_prompt says.
+    #[arg(long, conflicts_with = "prompt")]
+    no_prompt: bool,
+    /// Run with the glossary prompt, whatever [asr] glossary_prompt says.
+    #[arg(long)]
+    prompt: bool,
+    /// The directory holding pipeline.toml.
+    #[arg(long, default_value = "config")]
+    config_dir: PathBuf,
+}
+
+#[derive(Debug, Subcommand)]
+enum AsrCommand {
+    /// Runs every available setup and model on a clip, or on talks, and prints the real-time
+    /// factor, peak memory, word error rate and error rates on glossary terms and teacher names,
+    /// then the setup Spec 04's decision rule picks.
+    Benchmark(Box<BenchmarkArgs>),
+    /// Queues retranscription for every talk transcribed with a model other than
+    /// WT_WHISPER_MODEL's.
+    Requeue {
+        /// Count them without queueing anything.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -1029,6 +1093,48 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             RightsCommand::Due { today } => {
                 let today = today.unwrap_or_else(|| chrono::Utc::now().date_naive());
                 rights::due(&pool().await?, today).await?;
+            }
+        },
+        Command::Asr { command } => match command {
+            AsrCommand::Benchmark(args) => {
+                let BenchmarkArgs {
+                    clip,
+                    reference,
+                    talk,
+                    references,
+                    setups,
+                    bench_root,
+                    only_setups,
+                    only_models,
+                    record,
+                    note,
+                    no_prompt,
+                    prompt,
+                    config_dir,
+                } = *args;
+                asr_cmds::benchmark(
+                    &pool().await?,
+                    &config,
+                    &config_dir,
+                    asr_cmds::BenchArgs {
+                        clip,
+                        reference,
+                        talks: talk,
+                        references,
+                        setups_file: setups,
+                        bench_root,
+                        only_setups,
+                        only_models,
+                        record,
+                        note,
+                        no_prompt,
+                        prompt,
+                    },
+                )
+                .await?;
+            }
+            AsrCommand::Requeue { dry_run } => {
+                asr_cmds::requeue(&pool().await?, &config, dry_run).await?;
             }
         },
         Command::Pipeline { command } => {

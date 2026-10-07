@@ -4,6 +4,7 @@ pub mod answer;
 pub mod config;
 pub mod gate;
 pub mod ids;
+pub mod licenses;
 pub mod objects;
 pub mod records;
 pub mod scratch;

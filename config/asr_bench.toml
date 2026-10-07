@@ -1,0 +1,46 @@
+# `wt asr benchmark` (Spec 04, Owner's hardware and the decision rule). Setups run in Spec 04's
+# order: whisper.cpp with Vulkan, with the OpenVINO encoder, then CPU only. Relative paths are
+# taken from --bench-root (default: the current directory); the builds and models live under
+# .bench/, which git ignores, as docs/asr-benchmark.md describes. A setup whose binary is
+# missing is skipped.
+
+# A run whose word error rate on the known text is over this percentage is left out of the
+# decision (owner, October 6, 2026). 5 for now: it must come down as transcription improves, or
+# the answers lose much of their value.
+max_wer_percent = 5.0
+
+[[setup]]
+name = "vulkan"
+binary = ".bench/whisper.cpp/build-vulkan/bin/whisper-cli.exe"
+
+[[setup]]
+name = "vulkan-coopmat-off"
+binary = ".bench/whisper.cpp/build-vulkan/bin/whisper-cli.exe"
+env = { GGML_VK_DISABLE_COOPMAT = "1" }
+
+[[setup]]
+name = "openvino-gpu"
+binary = ".bench/whisper.cpp/build-openvino/bin/whisper-cli.exe"
+args = ["-oved", "GPU"]
+path_prepend = [".bench/ovenv/Lib/site-packages/openvino/libs"]
+
+[[setup]]
+name = "openvino-npu"
+binary = ".bench/whisper.cpp/build-openvino/bin/whisper-cli.exe"
+args = ["-oved", "NPU"]
+path_prepend = [".bench/ovenv/Lib/site-packages/openvino/libs"]
+
+[[setup]]
+name = "cpu"
+binary = ".bench/whisper.cpp/build-cpu/bin/whisper-cli.exe"
+use_gpu = false
+
+# Preferred first: a later model is chosen only if it gets the glossary terms at least as right
+# (Spec 04, Transcription model and where it runs, item 3).
+[[model]]
+name = "large-v3"
+path = ".bench/models/ggml-large-v3.bin"
+
+[[model]]
+name = "distil-large-v3"
+path = ".bench/models/ggml-distil-large-v3.bin"
