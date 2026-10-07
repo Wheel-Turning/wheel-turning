@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id, title from talk where state = 'cleared' order by random() limit $1",
+  "query": "select t.id, t.title from talk t\n         join source_video sv on sv.id = t.source_video_id\n         where t.state = 'cleared'\n           and exists (select 1 from source_video e\n                       where e.platform = 'rss' and e.raw->'match'->>'vimeo_id' = sv.external_id\n                         and sv.platform = 'vimeo'\n                         and e.raw->'item'->'enclosure'->>'url' is not null)\n         order by random() limit $1",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "724f3ac2f43346f3db06d5a6df6d7cb443c0c12344fb95e6bf74741f25323f14"
+  "hash": "d18b98af59cd333737ab60330d46032ed6f6ec2ed4eb73e51e6a6ddc17ac3e70"
 }

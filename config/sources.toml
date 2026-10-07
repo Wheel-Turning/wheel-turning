@@ -8,6 +8,10 @@ platform = "vimeo"
 talks_page = "https://seattlesotozen.org/talks-page/"
 default_sangha = "Seattle Soto Zen"
 link_style = "vimeo"
+# SSZ's talks clear on the owner's mandate when their speaker has not answered (Spec 03,
+# Mandated talks; owner's decision of October 7, 2026). The key is created with
+# `wt source add --kind talks --key ssz-vimeo ...`.
+rights_source = "ssz-vimeo"
 
 # Attaches audio to talks Vimeo lists and never creates a talk. The feed address is set by
 # `wt source resolve-feed` after the owner confirms it.

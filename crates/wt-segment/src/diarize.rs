@@ -158,6 +158,40 @@ pub enum LabelError {
 pub trait WindowLabeler: Send + Sync {
     /// A label for every window given, keyed by its index.
     async fn label(&self, windows: &[Window]) -> Result<BTreeMap<usize, Label>, LabelError>;
+
+    /// Whether its labels are a rule's stand-in for the model's, which the transcript and the
+    /// sample report record.
+    fn is_fallback(&self) -> bool {
+        false
+    }
+}
+
+/// Labels the windows the rules leave ambiguous without any model, for real talks while no
+/// model may see them (owner's decision of October 7, 2026): a window holding the teacher's
+/// words is `talk`, any other is `other`. The talk is kept rather than lost, and the count of
+/// windows labeled this way is recorded so they can be checked.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuleFallbackLabeler;
+
+#[async_trait]
+impl WindowLabeler for RuleFallbackLabeler {
+    async fn label(&self, windows: &[Window]) -> Result<BTreeMap<usize, Label>, LabelError> {
+        Ok(windows
+            .iter()
+            .map(|w| {
+                let label = if w.text.split_whitespace().next().is_some() {
+                    Label::Talk
+                } else {
+                    Label::Other
+                };
+                (w.index, label)
+            })
+            .collect())
+    }
+
+    fn is_fallback(&self) -> bool {
+        true
+    }
 }
 
 /// A labeler that gives every window one label, for tests.
@@ -168,5 +202,29 @@ pub struct FixedLabeler(pub Label);
 impl WindowLabeler for FixedLabeler {
     async fn label(&self, windows: &[Window]) -> Result<BTreeMap<usize, Label>, LabelError> {
         Ok(windows.iter().map(|w| (w.index, self.0)).collect())
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[tokio::test]
+    async fn the_fallback_keeps_teacher_words_as_talk_and_says_it_is_a_fallback() {
+        let window = |index, text: &str| Window {
+            index,
+            start_ms: 0,
+            end_ms: 60_000,
+            text: text.into(),
+        };
+        let labels = RuleFallbackLabeler
+            .label(&[window(3, "we sit together"), window(7, "  ")])
+            .await
+            .unwrap();
+        assert_eq!(labels[&3], Label::Talk);
+        assert_eq!(labels[&7], Label::Other);
+        assert!(RuleFallbackLabeler.is_fallback());
+        assert!(!FixedLabeler(Label::Talk).is_fallback());
     }
 }

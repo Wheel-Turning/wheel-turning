@@ -168,6 +168,13 @@ The model never creates a locator. A hint that matches nothing in the hand list 
 
 Decisions of October 5, 2026, made while building the resolver: text, hints and context are compared after the normalization of Spec 03's rule 1 (lowercase, punctuation as spaces, spaces collapsed), with labels and aliases normalized the same way; the context is the 20 stored words either side of the citation. `config/series.toml` gives a series a `locator` template such as `genjokoan:{part}` where its parts name sections of a text (Genjokoan paragraphs, Blue Cliff Record cases, Song of the Grass Hut verses; not Uji or Bendowa, whose parts are talks). A series-label match needs that locator in the hand list, which Spec 08's imports load, so until then generic citations stay `unresolved`. Resolution is written into the staging object beside each citation.
 
+Real talks before zero data retention (owner's decision of October 7, 2026). Until `WT_LLM_REAL_DATA_OK` may be set, a real talk never reaches the model, and the pipeline still takes it to `ready`:
+
+- Windows the rules leave ambiguous are labeled by `RuleFallbackLabeler`: a window holding the teacher's words is `talk`, any other `other`. The transcript JSON records how many as `label_fallback_windows`, and `wt segment sample` shows the count per talk. Fixtures still go to the model.
+- Extraction is staged as skipped: empty citations, a `skipped` reason and no input hash, so it runs once a model may. The talk goes on through `resolve` and `index` with no citations.
+- A worker starts without `ANTHROPIC_API_KEY` and uses both fallbacks; with a key, the model is used wherever the data class allows.
+- `wt segment sample` picks only cleared talks that have audio to fetch (a matched podcast enclosure), since SSZ's Vimeo files need SSZ's token.
+
 ## Chunking, embedding and indexing
 
 ```rust

@@ -103,6 +103,10 @@ pub struct Staging {
     /// Hash of the corrected text extracted from, so a rerun on the same text skips the model.
     #[serde(default)]
     pub input_hash: Option<String>,
+    /// Why no extraction ran, when the model was unavailable or may not see the talk; the
+    /// citations are empty and extraction runs once it may.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
 }
 
 /// Lowercase letters and digits: the form citations are matched in, so case, spacing and
@@ -188,6 +192,7 @@ pub async fn extract(
         citations: Vec::new(),
         discarded: 0,
         input_hash: None,
+        skipped: None,
     };
     for window in windows(words.len()) {
         let text = words[window.0..window.1]

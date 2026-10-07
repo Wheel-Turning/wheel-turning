@@ -18,7 +18,8 @@ use wt_core::objects::LocalObjects;
 use wt_core::scratch::Ffmpeg;
 use wt_db::job::{Job, JobKind};
 use wt_extract::{
-    ClaudeClient, ClaudeSettings, LlmError, LlmLabeler, LogAlerter, PgLedger, PriceTable,
+    ClaudeClient, ClaudeSettings, DataClass, LlmClient, LlmError, LlmLabeler, LogAlerter, PgLedger,
+    PriceTable, UnavailableLlm,
 };
 use wt_index::ChunkSettings;
 use wt_ingest::audio::{self, AudioDeps, AudioError};
@@ -27,7 +28,9 @@ use wt_ingest::media::MediaFetcher;
 use wt_ingest::textjobs::{self, PgHandList, TextJobError};
 use wt_ml::{Embedder, OnnxEmbedder, OnnxSettings};
 use wt_registry::glossary::Glossary;
-use wt_segment::{LabelError, SegmentSettings, SidecarDiarizer};
+use wt_segment::{
+    LabelError, RuleFallbackLabeler, SegmentSettings, SidecarDiarizer, WindowLabeler,
+};
 
 /// `[segment]`, `[asr]` and `[chunk]` from `config/pipeline.toml`.
 #[derive(Debug, Default, Deserialize)]
@@ -102,6 +105,8 @@ pub struct Stages {
     diarizer: Option<SidecarDiarizer>,
     fetcher: Option<MediaFetcher>,
     llm: Option<ClaudeClient>,
+    /// `WT_LLM_REAL_DATA_OK`: whether real talks may go to the model.
+    real_data_ok: bool,
     embedder: Option<OnnxEmbedder>,
     hand_list: PgHandList,
     actor: String,
@@ -157,9 +162,16 @@ impl Stages {
         let needs_llm = kinds
             .iter()
             .any(|k| matches!(k, JobKind::Audio | JobKind::Extract));
-        let llm = if needs_llm {
+        // Without an API key the worker still runs (owner's decision of October 7, 2026):
+        // ambiguous windows get the rule fallback and extraction is staged as skipped.
+        let llm = if needs_llm && config.anthropic_api_key.is_some() {
             Some(claude(pool, config, config_dir)?)
         } else {
+            if needs_llm {
+                tracing::warn!(
+                    "no ANTHROPIC_API_KEY: ambiguous windows get the rule fallback and                      extraction is skipped"
+                );
+            }
             None
         };
         Ok(Self {
@@ -174,6 +186,7 @@ impl Stages {
             diarizer,
             fetcher,
             llm,
+            real_data_ok: config.llm_real_data_ok,
             embedder,
             hand_list: PgHandList::new(pool.clone()),
             actor: actor.to_owned(),
@@ -190,7 +203,7 @@ impl Stages {
             JobKind::Audio => {
                 let (labeler, hints) = self.audio_parts(conn, talk).await?;
                 let ffmpeg = Ffmpeg::default();
-                let deps = self.audio_deps(&labeler, &hints, &ffmpeg)?;
+                let deps = self.audio_deps(labeler.as_ref(), &hints, &ffmpeg)?;
                 let retranscribe = job
                     .payload
                     .get("retranscribe")
@@ -210,10 +223,11 @@ impl Stages {
                 format!("{outcome:?}")
             }
             JobKind::Extract => {
-                let llm = self
-                    .llm
-                    .as_ref()
-                    .context("this worker has no language model")?;
+                let unavailable = UnavailableLlm;
+                let llm: &dyn LlmClient = match &self.llm {
+                    Some(client) => client,
+                    None => &unavailable,
+                };
                 match textjobs::run_extract(conn, talk, &self.objects, &glossary, llm).await {
                     Ok(o) => format!("{o:?}"),
                     Err(TextJobError::Llm(e @ LlmError::CapReached { .. })) => {
@@ -257,11 +271,7 @@ impl Stages {
         &self,
         conn: &mut sqlx::PgConnection,
         talk: wt_core::ids::TalkId,
-    ) -> anyhow::Result<(LlmLabeler<'_>, AsrHints)> {
-        let llm = self
-            .llm
-            .as_ref()
-            .context("this worker was not started for audio jobs")?;
+    ) -> anyhow::Result<(Box<dyn WindowLabeler + '_>, AsrHints)> {
         let class = textjobs::data_class(conn, talk).await?;
         let terms = wt_db::glossary::load(conn).await?;
         let hints = AsrHints {
@@ -272,12 +282,20 @@ impl Stages {
             },
             language: self.asr.language.clone(),
         };
-        Ok((LlmLabeler::new(llm, class), hints))
+        // The model labels ambiguous windows only when it may see the talk: a fixture, or a
+        // real talk once zero data retention is in place. Otherwise the rule fallback does.
+        let labeler: Box<dyn WindowLabeler + '_> = match &self.llm {
+            Some(llm) if class == DataClass::Synthetic || self.real_data_ok => {
+                Box::new(LlmLabeler::new(llm, class))
+            }
+            _ => Box::new(RuleFallbackLabeler),
+        };
+        Ok((labeler, hints))
     }
 
     fn audio_deps<'a>(
         &'a self,
-        labeler: &'a LlmLabeler<'_>,
+        labeler: &'a dyn WindowLabeler,
         hints: &'a AsrHints,
         ffmpeg: &'a Ffmpeg,
     ) -> anyhow::Result<AudioDeps<'a>> {
@@ -309,7 +327,7 @@ impl Stages {
     ) -> anyhow::Result<audio::SampleOutcome> {
         let (labeler, hints) = self.audio_parts(conn, talk).await?;
         let ffmpeg = Ffmpeg::default();
-        let deps = self.audio_deps(&labeler, &hints, &ffmpeg)?;
+        let deps = self.audio_deps(labeler.as_ref(), &hints, &ffmpeg)?;
         Ok(audio::sample(conn, talk, &deps).await?)
     }
 

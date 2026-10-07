@@ -307,3 +307,35 @@ async fn a_glossary_change_requeues_only_the_talks_it_changes_and_skips_extracti
         "only the first run queued extract"
     );
 }
+
+/// Owner's decision of October 7, 2026: with no model available for a real talk, extraction is
+/// staged as skipped, with no citations and no input hash, and the talk goes on to `resolve`.
+#[tokio::test]
+async fn with_no_model_a_real_talk_is_staged_as_skipped_and_goes_on() {
+    let fx = start().await;
+    let talk = segmented_talk(&fx, "nomodel", "To study the way is to study the self.").await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let g = glossary(None);
+    textjobs::run_correct(&mut conn, talk, &fx.objects, &g, &|_| false)
+        .await
+        .unwrap();
+    let out = textjobs::run_extract(
+        &mut conn,
+        talk,
+        &fx.objects,
+        &g,
+        &wt_extract::UnavailableLlm,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, TextOutcome::Done(Some(wt_db::job::JobKind::Resolve)));
+    let staging: Staging =
+        serde_json::from_slice(&fx.objects.get(&staging_key(talk)).unwrap().unwrap()).unwrap();
+    assert!(staging.citations.is_empty());
+    assert!(staging.skipped.is_some());
+    assert!(
+        staging.input_hash.is_none(),
+        "it runs again once a model may"
+    );
+    assert_eq!(queued(&fx.pool, talk, "resolve").await, 1);
+}

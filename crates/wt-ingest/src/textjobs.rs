@@ -327,8 +327,28 @@ pub async fn run_extract(
     if !unchanged {
         let all: Vec<(Word, (usize, usize))> = fixed.into_iter().flatten().collect();
         let mut staging =
-            extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await?;
-        staging.input_hash = Some(input.clone());
+            match extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await {
+                Ok(staging) => staging,
+                // No model may see this talk yet (owner's decision of October 7, 2026): stage an
+                // empty, skipped extraction so the talk is still indexed; no input hash, so it
+                // runs once a model may.
+                Err(e @ (LlmError::RealDataRefused | LlmError::NoModel(_))) => {
+                    tracing::warn!(talk = %talk_id, reason = %e, "extraction skipped");
+                    Staging {
+                        schema: 1,
+                        talk_id: talk_id.as_uuid().to_string(),
+                        practice_period: None,
+                        citations: Vec::new(),
+                        discarded: 0,
+                        input_hash: None,
+                        skipped: Some(e.to_string()),
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            };
+        if staging.skipped.is_none() {
+            staging.input_hash = Some(input.clone());
+        }
         let json = serde_json::to_vec(&staging).unwrap_or_default();
         objects.put(&staging_key(talk_id), &json)?;
     }
