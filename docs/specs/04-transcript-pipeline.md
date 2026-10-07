@@ -233,6 +233,22 @@ M4 is done when every item below passes in CI with fakes, and one synthetic talk
 - [x] `wt export transcripts --format jsonl --out <dir>` writes the corrected passages of every consented `ready` talk for the Gate A notebook, in the format of Spec 07: one line per passage, read through `servable_passage` (decision of October 6, 2026; Spec 04 said segments, Spec 07 passages). (`wt-cli/tests/commands.rs`.)
 - [x] `wt segment sample --count 10` renders the segmentation report. (The report's rendering is tested in `wt-cli`'s unit tests, and the command's refusal without `WT_WHISPER_CLI` in `wt-cli/tests/commands.rs`; the steps it runs are the `audio` job's, without persisting.)
 
+## Transcript review and owner exports
+
+Owner's decisions of October 7, 2026: transcripts are reviewed offline in v1, by reviewers such as a teacher's priests, without accounts, and a teacher can have their reviewed transcripts for their own use, such as books. Kept simple until Kanshin approves and sanghas show interest.
+
+1. `wt transcript export-review (--talk <id> | --teacher <name>) --out <dir>` writes one self-contained HTML file per talk under `data/`: the title, teacher, sangha and date; the teacher's words paragraph by paragraph, with marked gaps where student speech, chant, announcements or sitting were removed; a "Listen at h:mm:ss" link to the source for each paragraph; and each word editable in place. Saving downloads a JSON file of edits, each naming the stored-word range it replaces and the new words. The file loads no remote script and stores nothing.
+2. `wt transcript import-corrections --file <json> --reviewer <name>` checks each edit against the current transcript's hash, writes a new transcript version with `origin = 'reviewed'`, and logs each edit in `correction_log` with the reviewer. Replaced words take the time span of the words they replace, spread evenly, so passage links still land on their moment. It then queues `correct` and `index`.
+3. A reviewed version is never overwritten by an automated pass. `wt asr requeue` skips talks whose current transcript is reviewed, and the glossary pass leaves reviewed words alone, writing its near misses to the suggestions file as usual.
+4. `wt export teacher --teacher <name> --format markdown --out <dir>` writes the teacher's talks for their own use: one file per talk with the title, date, sangha and source link, the reviewed text where it exists and the corrected text otherwise, in paragraphs, with the gaps marked. It writes no student speech and no audio. Display levels d and e use it.
+
+Acceptance criteria (M4T):
+
+- [ ] A synthetic talk round-trips: export a review file, apply edits to its JSON, import them, and the new reviewed version holds the edits with word times inside the replaced spans, the passages are rebuilt, and `correction_log` names the reviewer.
+- [ ] An import against a transcript that changed since the file was written is refused.
+- [ ] `wt asr requeue` and a glossary change leave a reviewed version untouched.
+- [ ] `wt export teacher` writes one file per talk with no student words and the reviewed text where it exists.
+
 ## Language-model spend cap
 
 The language model is the one metered cost in the system, so v1 caps it. Settings: `WT_LLM_MONTHLY_CAP_USD` (default 25), the per-stage models `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_VISION` (each falls back to `WT_LLM_MODEL`), and a hand-edited price table in `config/llm_prices.toml` with input and output dollars per million tokens for each model and a `checked_on` date.

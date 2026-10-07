@@ -19,7 +19,7 @@ Six properties follow from that sentence, and every design choice is checked aga
 3. Relevance alone ranks. The ranker cannot see sangha, profile status, upload volume, donation links or partnership, because its input has no place for them.
 4. Attribution travels with the text. Teacher, sangha, source moment and donation destination move together as one unit, so no passage can be shown without them.
 5. Teachers can leave. Any teacher can have all their words removed in one operation, and the system can demonstrate that nothing remains.
-6. Nothing is held that the product has no right to hold. Audio and student voices never reach durable storage, and full transcripts are never displayed.
+6. Nothing is held that the product has no right to hold. Audio and student voices never reach durable storage. A full transcript is displayed only at its teacher's display level `full`, and always with its attribution and giving links (decision of October 7, 2026).
 
 ## Invariants
 
@@ -35,7 +35,7 @@ Each PRD rule is enforced by a mechanism that does not depend on anyone remember
 | No money passes through the product | No payment library in the dependency tree. Donation actions are outbound links. | CI deny-list on payment dependencies. |
 | Text only, no audio stored | Audio lives in scratch storage with a lifecycle rule and an explicit delete step. No schema column or bucket prefix holds audio elsewhere. | Test that scratch is empty after a pipeline run. Bucket configuration check. |
 | Student voices never indexed or shown | Student segments are dropped inside segmentation, before chunking and embedding. Q&A question fields are null or paraphrased. | Labeled sample scan. Assertion on embedder input. |
-| Full transcripts never displayed | Serving queries return passage-length rows only, and the view caps length. | Render test against the length cap. |
+| Full transcripts only at display level `full` | Serving queries return passage-length rows; the transcript page assembles a talk's servable passages and refuses any talk below `full`. | Render test at every level; view test per level. |
 | Query logs are read in aggregate | Two database roles. Raw text is reachable only through a function that returns flagged rows. | Permission test on both roles. |
 | Teachers can pull their talks | One transaction deletes passages, embeddings, segments and stored transcripts, flips consent and writes the takedown log. | Post-takedown check that counts are zero in every store. |
 
@@ -100,7 +100,7 @@ The architecture deliberately will not do the following, even if a later request
 - Display a model-written paraphrase as if it were a quotation.
 - Apply any ranking signal other than relevance, including a soft boost for the founder's own sangha.
 - Hold, move or route money. The single-gift payment split is a v3 candidate that needs counsel and a separate service with its own boundary.
-- Store audio or video, or show a full transcript.
+- Store audio or video, or show a full transcript below its teacher's display level `full` or without its attribution and giving links.
 - Index or display student speech in any form.
 - Train or fine-tune models on teachers' words.
 - Add a second system of record. Caches and search engines are derived and rebuildable.

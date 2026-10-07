@@ -357,6 +357,33 @@ Acceptance criteria for mandated talks:
 - [ ] Moved to Spec 06 with the answer page (decision of October 5, 2026), except the last sentence, which stays here: A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
 - [x] `wt rights notice-draft` produces a file from the template and sends nothing. (`wt-cli/tests/commands.rs`.)
 
+## Display levels
+
+Owner's decisions of October 7, 2026 (PRD, Rights, notice and removal). Talks are shown in full by default on every basis, with a teacher able to narrow that. Genzen asked for full transcripts of his talks, on the condition that attribution and giving links appear at the transcript level, and the owner extended the default to all talks, with leaving or narrowing as the opt-out. Texts are unchanged: excerpt-only under Spec 08.
+
+| Level | Value | Serving | Kept | Copy for the teacher |
+| --- | --- | --- | --- | --- |
+| a | `excluded` | Not searchable, not shown | Transcript, segments, passages; restorable | No |
+| b | `excerpts` | Passages in answers; no transcript page | Everything | No |
+| c | `full` | Passages and the transcript page (default) | Everything | On request |
+| d | `owner_only` | Not searchable, not shown | Everything | Yes |
+| e | `export_then_delete` | Not shown; then removed | Nothing after the takedown | Yes, before deletion |
+| f | `removed` | Not shown | Nothing; permanent exclusions | No |
+
+1. `teacher.display_level` holds the teacher's level, default `full`. `talk.display_level` may set a talk narrower; the narrower of the two applies, in the order f, e, a, d, b, c from narrowest. A talk can never be set wider than its teacher.
+2. `servable_passage` gains `display_level` and returns only talks at `excerpts` or `full`. The transcript page reads the same view and refuses any talk not at `full`. Rule 3's guard still holds: the page is built from servable passages in order, not from the `passage` table.
+3. `wt teacher display --teacher <name> --level <a|b|c|d|e|f> --by <name> [--evidence <ref>] [--talk <id>]` sets a level and writes `correction_log`. `e` writes the owner export (Spec 04, Owner exports) and then runs the teacher takedown; `f` is the existing `wt teacher opt-out`. A change to a narrower level takes effect in the serving view at once; a change to a wider one needs `--evidence` when the teacher asked for the narrower one.
+4. A report or a message asking for any narrower level is honored without argument, like a removal, within one business day.
+5. Notices and permission requests say that full transcripts are shown and list the levels (Spec 09).
+
+Migration `0019_display_levels.sql`: the two columns with checks, `'reviewed'` added to `transcript.origin`, and the view replaced with `create or replace view`, keeping 0017's columns in order and adding `display_level` at the end.
+
+Acceptance criteria (M4T):
+
+- [ ] Each level changes what `servable_passage` returns for a teacher's talks, a talk-level setting narrows but never widens its teacher's, and `full` is the default.
+- [ ] `wt teacher display --level e` writes the owner export before the takedown, and the takedown leaves zero rows in every store.
+- [ ] A narrower level from a report is applied without `--evidence`; widening a level the teacher asked to narrow is refused without it.
+
 ## Seattle Soto Zen sources
 
 Decision of October 3, 2026, revised the same day. SSZ publishes every dharma talk on Vimeo, and only some of them on Apple Podcasts and Spotify. Vimeo is therefore the complete list and the listening link, and the podcast feed is a partial source of audio. The v1 route is:

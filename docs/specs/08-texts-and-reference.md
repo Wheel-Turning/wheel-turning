@@ -769,7 +769,7 @@ These values supersede the chunker defaults in Spec 04: `target_words` stays 140
 Rules:
 
 - A talk passage may run to 250 words so that a point that arrives indirectly can arrive whole. The chunker still prefers to end at a sentence break near 140.
-- Talks offer no "more of this talk" control. The source link leads to the talk itself. Texts offer context only through neighbors on the text page, at most 2 on each side for a permission or license edition and 1 for a mandate edition, capped at `text_page_max_words`.
+- Talks at display level `full` link to their transcript page (Spec 03, Display levels; decision of October 7, 2026), and the source link leads to the talk itself. Texts are not affected: they stay excerpt-only. Texts offer context only through neighbors on the text page, at most 2 on each side for a permission or license edition and 1 for a mandate edition, capped at `text_page_max_words`.
 - A rights holder can ask to withhold particular passages through the removal form without removing the whole work. Those requests become unit-level exclusions by content hash, so a request that a heart-of-the-work passage be left out is honored the same way as a full removal.
 - `/text/{unit_id}` is limited to `text_views_per_hour` per tester, and the nightly audit warns when one tester views more than 60 distinct units of one work in a day.
 
