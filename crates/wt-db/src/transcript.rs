@@ -271,15 +271,95 @@ pub async fn title(conn: &mut PgConnection, talk: TalkId) -> Result<Option<Strin
     )
 }
 
-/// Every talk's current transcript object key, for `wt asr requeue`.
-pub async fn current_keys(conn: &mut PgConnection) -> Result<Vec<(TalkId, String)>, DbError> {
-    let rows =
-        sqlx::query!("select talk_id, s3_key from transcript where is_current order by talk_id")
-            .fetch_all(&mut *conn)
-            .await?;
+/// Every talk's current transcript object key and origin, for `wt asr requeue`.
+pub async fn current_keys(
+    conn: &mut PgConnection,
+) -> Result<Vec<(TalkId, String, String)>, DbError> {
+    let rows = sqlx::query!(
+        "select talk_id, s3_key, origin from transcript where is_current order by talk_id"
+    )
+    .fetch_all(&mut *conn)
+    .await?;
     Ok(rows
         .into_iter()
-        .map(|r| (TalkId::from(r.talk_id), r.s3_key))
+        .map(|r| (TalkId::from(r.talk_id), r.s3_key, r.origin))
+        .collect())
+}
+
+/// The current transcript's origin: `asr`, `captions` or `reviewed`.
+pub async fn current_origin(
+    conn: &mut PgConnection,
+    talk: TalkId,
+) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "select origin from transcript where talk_id = $1 and is_current",
+        talk.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await?)
+}
+
+/// What a review file's header shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewFacts {
+    /// The talk's title.
+    pub title: String,
+    /// The teacher's display name, or "Teacher unknown".
+    pub teacher: String,
+    /// The source page.
+    pub source_url: String,
+}
+
+/// The talk's [`ReviewFacts`].
+pub async fn review_facts(conn: &mut PgConnection, talk: TalkId) -> Result<ReviewFacts, DbError> {
+    let row = sqlx::query!(
+        r#"select t.title, te.display_name as "teacher?", sv.url
+           from talk t join source_video sv on sv.id = t.source_video_id
+           left join teacher te on te.id = t.teacher_id where t.id = $1"#,
+        talk.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(ReviewFacts {
+        title: row.title,
+        teacher: row.teacher.unwrap_or_else(|| "Teacher unknown".to_owned()),
+        source_url: row.url,
+    })
+}
+
+/// A segment's kind, times and speaker, for rebuilding segments from a reviewed transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentSpeaker {
+    /// `talk` or `qa_teacher`.
+    pub kind: String,
+    /// Start, milliseconds.
+    pub start_ms: i32,
+    /// End, milliseconds.
+    pub end_ms: i32,
+    /// The teacher's diarizer label.
+    pub speaker_label: String,
+}
+
+/// The talk's segments with their speakers, in order.
+pub async fn segment_speakers(
+    conn: &mut PgConnection,
+    talk: TalkId,
+) -> Result<Vec<SegmentSpeaker>, DbError> {
+    let rows = sqlx::query!(
+        r#"select kind::text as "kind!", start_ms, end_ms, speaker_label from segment
+           where talk_id = $1 order by ordinal"#,
+        talk.as_uuid()
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| SegmentSpeaker {
+            kind: r.kind,
+            start_ms: r.start_ms,
+            end_ms: r.end_ms,
+            speaker_label: r.speaker_label.unwrap_or_else(|| "S1".to_owned()),
+        })
         .collect())
 }
 

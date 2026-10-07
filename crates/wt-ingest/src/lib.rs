@@ -13,6 +13,7 @@ pub mod owner_export;
 pub mod pipeline;
 pub mod podcast;
 pub mod report;
+pub mod review;
 pub mod robots;
 pub mod rss;
 pub mod source;

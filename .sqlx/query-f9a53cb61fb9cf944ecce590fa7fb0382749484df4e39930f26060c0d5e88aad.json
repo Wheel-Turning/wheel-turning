@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select origin from transcript where talk_id = $1 and is_current",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "origin",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transcript",
+            "name": "origin"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f9a53cb61fb9cf944ecce590fa7fb0382749484df4e39930f26060c0d5e88aad"
+}

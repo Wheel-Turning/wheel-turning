@@ -502,3 +502,176 @@ async fn the_owner_export_writes_the_teachers_words_then_level_e_deletes_the_res
         "the export stays"
     );
 }
+
+/// Spec 04, Transcript review: a review file round-trips into a reviewed version that keeps
+/// word times and citations, a stale file is refused, and no automated pass replaces it.
+#[tokio::test]
+async fn a_review_round_trips_into_a_reviewed_version_no_pass_overwrites() {
+    use wt_ingest::review::{self, Corrections, Edit};
+    let fx = start().await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    audio::advance_cleared(&mut conn).await.unwrap();
+    let llm = FakeLlm::new(vec![Ok(extraction_reply())]);
+    while let Some(claimed) = job::claim(&mut conn, &STAGES, "test").await.unwrap() {
+        run_stage(&fx, claimed.kind, &llm).await;
+        job::succeed(&mut conn, &claimed).await.unwrap();
+    }
+    let objects = LocalObjects::new(fx.dir.join("objects"));
+    let (path, file) = review::export_review(
+        &mut conn,
+        &objects,
+        &glossary(),
+        &ChunkSettings::default(),
+        fx.talk,
+        &fx.dir.join("review"),
+    )
+    .await
+    .unwrap();
+    let html = std::fs::read_to_string(&path).unwrap();
+    assert!(html.contains("Listen at 0:00:00"));
+    assert!(
+        html.contains("As Dogen wrote"),
+        "the reviewer sees the corrected text"
+    );
+    assert!(!html.contains("src=\"http"));
+
+    // Edit the first paragraph: one word changed, two added.
+    let p = &file.paragraphs[0];
+    assert!(p.text.contains("in the quiet hall"), "{}", p.text);
+    let edited = p
+        .text
+        .replacen("in the quiet hall", "in the quiet zendo hall together", 1);
+    let corrections = Corrections {
+        schema: review::SCHEMA,
+        talk_id: file.talk_id.clone(),
+        transcript_hash: file.transcript_hash.clone(),
+        edits: vec![Edit {
+            w0: p.w0,
+            w1: p.w1,
+            text: edited.clone(),
+        }],
+    };
+    let report = review::import_corrections(
+        &mut conn,
+        &objects,
+        &glossary(),
+        &corrections,
+        "Priest Fixture",
+    )
+    .await
+    .unwrap();
+    assert_eq!((report.version, report.edits), (2, 1));
+    // The reviewed version keeps the corrected text: each "doe gen" became one "Dogen", and
+    // the reviewer added two words.
+    let v1: serde_json::Value = serde_json::from_slice(
+        &objects
+            .get(&format!("transcripts/{}/v1.json", fx.talk.as_uuid()))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let merges = v1["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["w"] == "doe")
+        .count();
+    assert!(merges > 0);
+    assert_eq!(report.words.1, report.words.0 - merges + 2);
+    assert_eq!(report.citations_moved, 1);
+
+    // The reviewed version: origin, reviewer, and times that stay in order.
+    let origin: String =
+        sqlx::query_scalar("select origin from transcript where talk_id = $1 and is_current")
+            .bind(fx.talk.as_uuid())
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(origin, "reviewed");
+    let doc: serde_json::Value = serde_json::from_slice(
+        &objects
+            .get(&format!("transcripts/{}/v2.json", fx.talk.as_uuid()))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(doc["reviewed_by"], "Priest Fixture");
+    let starts: Vec<i64> = doc["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["s"].as_i64().unwrap())
+        .collect();
+    assert!(
+        starts.windows(2).all(|p| p[0] <= p[1]),
+        "word times stay in order"
+    );
+    let logged: (String, String) = sqlx::query_as(
+        "select actor, new_value #>> '{}' from correction_log where entity = 'transcript'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, ("Priest Fixture".to_owned(), edited));
+
+    // The queued correct and index jobs rebuild the passages; the citation still lands.
+    while let Some(claimed) = job::claim(&mut conn, &STAGES, "test").await.unwrap() {
+        run_stage(&fx, claimed.kind, &FakeLlm::new(vec![])).await;
+        job::succeed(&mut conn, &claimed).await.unwrap();
+    }
+    let served: String = sqlx::query_scalar(
+        "select string_agg(text, ' ' order by ordinal) from servable_passage where talk_id = $1",
+    )
+    .bind(fx.talk.as_uuid())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert!(
+        served.contains("in the quiet zendo hall together"),
+        "{served}"
+    );
+    let span: String = sqlx::query_scalar(
+        "select substr(p.text, c.span_start + 1, c.span_end - c.span_start)
+         from citation c join passage p on p.id = c.passage_id where c.talk_id = $1 limit 1",
+    )
+    .bind(fx.talk.as_uuid())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(span, "To study the self is to forget the self.");
+
+    // The same file again is stale: the transcript changed.
+    let stale = review::import_corrections(
+        &mut conn,
+        &objects,
+        &glossary(),
+        &corrections,
+        "Priest Fixture",
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(stale, review::ReviewError::Stale(_)), "{stale}");
+
+    // No automated pass replaces it: requeue, a retranscribing audio job, a glossary change.
+    let requeued = audio::requeue_for_model(&mut conn, &objects, "whisper-new", false)
+        .await
+        .unwrap();
+    assert!(requeued.is_empty());
+    assert_eq!(
+        run_stage(&fx, JobKind::Audio, &FakeLlm::new(vec![])).await,
+        "Current"
+    );
+    let wider = Glossary::new(&[GlossaryTerm {
+        canonical: "Zendo Hall".into(),
+        kind: TermKind::Term,
+        variants: vec!["zendo hall".into()],
+    }])
+    .unwrap();
+    let affected = textjobs::requeue_after_glossary_change(&mut conn, &objects, &wider)
+        .await
+        .unwrap();
+    assert!(
+        affected.is_empty(),
+        "the glossary leaves reviewed words alone"
+    );
+}

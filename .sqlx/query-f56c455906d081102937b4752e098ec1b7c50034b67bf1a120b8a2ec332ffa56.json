@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select kind::text as \"kind!\", start_ms, end_ms, speaker_label from segment\n           where talk_id = $1 order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "start_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "end_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "end_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "speaker_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "segment",
+            "name": "speaker_label"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f56c455906d081102937b4752e098ec1b7c50034b67bf1a120b8a2ec332ffa56"
+}

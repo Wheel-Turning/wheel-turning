@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select talk_id, s3_key from transcript where is_current order by talk_id",
+  "query": "select talk_id, s3_key, origin from transcript where is_current order by talk_id",
   "describe": {
     "columns": [
       {
@@ -24,6 +24,17 @@
             "name": "s3_key"
           }
         }
+      },
+      {
+        "ordinal": 2,
+        "name": "origin",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transcript",
+            "name": "origin"
+          }
+        }
       }
     ],
     "parameters": {
@@ -31,8 +42,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "23be5058b703f45032cf25059ccc6cde37159e9fcedee7d31bc6aadb7a8e21b4"
+  "hash": "2a503cd380b46bd7a4b9429fc71bc8b68b7c9973c15e623fdcfa50fca20c0621"
 }
