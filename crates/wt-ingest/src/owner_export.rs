@@ -57,6 +57,8 @@ struct StoredDoc {
     spans: Vec<StoredSpan>,
     #[serde(default)]
     model: Option<String>,
+    #[serde(default)]
+    origin: Option<String>,
 }
 
 fn gap_label(kind: &str) -> Option<&'static str> {
@@ -93,7 +95,8 @@ pub async fn talk_blocks(
         .map(|w| Word::new(w.w, w.s, w.e, w.p))
         .collect();
     let segments = transcript::segments(conn, talk).await?;
-    let fixed = corrected(glossary, &words, &segments);
+    let reviewed = doc.origin.as_deref() == Some("reviewed");
+    let fixed = corrected((!reviewed).then_some(glossary), &words, &segments);
 
     let mut blocks = Vec::new();
     let mut previous_end = i32::MIN;

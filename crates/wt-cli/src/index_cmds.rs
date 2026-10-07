@@ -312,6 +312,76 @@ pub async fn export_teacher(
     .await?)
 }
 
+/// `wt transcript export-review`: one review file per talk.
+pub async fn export_review(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    talk: Option<TalkId>,
+    teacher: Option<String>,
+    out: &Path,
+) -> anyhow::Result<serde_json::Value> {
+    let paragraphs = stages::chunk_settings(config_dir)?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let glossary = Glossary::new(&wt_db::glossary::load(&mut conn).await?)?;
+    let talks = match (talk, teacher) {
+        (Some(t), _) => vec![t],
+        (None, Some(name)) => {
+            let (id, _) = wt_db::registry::find_teacher(&mut conn, &name).await?;
+            wt_db::transcript::teacher_transcribed_talks(&mut conn, id)
+                .await?
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        }
+        (None, None) => anyhow::bail!("give --talk or --teacher"),
+    };
+    let mut files = Vec::new();
+    for talk in talks {
+        let (path, file) = wt_ingest::review::export_review(
+            &mut conn,
+            &objects,
+            &glossary,
+            &paragraphs,
+            talk,
+            out,
+        )
+        .await
+        .with_context(|| format!("writing the review file for talk {talk}"))?;
+        files.push(serde_json::json!({
+            "talk": talk,
+            "file": path.display().to_string(),
+            "paragraphs": file.paragraphs.len(),
+        }));
+    }
+    Ok(serde_json::json!({ "files": files }))
+}
+
+/// `wt transcript import-corrections`.
+pub async fn import_corrections(
+    pool: &PgPool,
+    config: &Config,
+    file: &Path,
+    reviewer: &str,
+) -> anyhow::Result<wt_ingest::review::ImportReport> {
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let corrections: wt_ingest::review::Corrections =
+        serde_json::from_str(&text).with_context(|| format!("reading {}", file.display()))?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let glossary = Glossary::new(&wt_db::glossary::load(&mut conn).await?)?;
+    Ok(wt_ingest::review::import_corrections(
+        &mut conn,
+        &objects,
+        &glossary,
+        &corrections,
+        reviewer,
+    )
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

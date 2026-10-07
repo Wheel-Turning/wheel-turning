@@ -272,9 +272,12 @@ pub async fn run(
         Ok(talk) => talk,
         Err(gate) => return Ok(AudioOutcome::NotCleared(gate)),
     };
-    // Rerunning on unchanged input is a no-op; a new model asks for `retranscribe`.
-    if !retranscribe && transcript::current(conn, talk_id).await?.is_some() {
-        return Ok(AudioOutcome::Current);
+    // Rerunning on unchanged input is a no-op; a new model asks for `retranscribe`. A reviewed
+    // transcript is never replaced by recognition, even when asked.
+    match transcript::current_origin(conn, talk_id).await?.as_deref() {
+        Some("reviewed") => return Ok(AudioOutcome::Current),
+        Some(_) if !retranscribe => return Ok(AudioOutcome::Current),
+        _ => {}
     }
     let route = feed::media_route(conn, talk_id).await?;
     let Some(source) = MediaSource::from_route(&route) else {
@@ -437,7 +440,11 @@ pub async fn requeue_for_model(
         model: String,
     }
     let mut affected = Vec::new();
-    for (talk, key) in transcript::current_keys(conn).await? {
+    for (talk, key, origin) in transcript::current_keys(conn).await? {
+        // A reviewed transcript is a person's work: no automated pass replaces it.
+        if origin == "reviewed" {
+            continue;
+        }
         let Some(bytes) = objects.get(&key)? else {
             tracing::warn!(%talk, %key, "transcript object missing; not requeued");
             continue;

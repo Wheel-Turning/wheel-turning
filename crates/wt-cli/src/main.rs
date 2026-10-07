@@ -89,6 +89,11 @@ enum Command {
         #[command(subcommand)]
         command: PipelineCommand,
     },
+    /// Offline transcript review (Spec 04, Transcript review and owner exports).
+    Transcript {
+        #[command(subcommand)]
+        command: TranscriptCommand,
+    },
     /// Reruns the index step from stored segments, with a new glossary or embedding model
     /// (Spec 04).
     Reindex(ReindexArgs),
@@ -174,6 +179,37 @@ enum AsrCommand {
         /// Count them without queueing anything.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TranscriptCommand {
+    /// Writes one review file per talk: an HTML page with the corrected text paragraph by
+    /// paragraph, each editable, and a "Listen at" link to that moment of the recording. Saving
+    /// in the page downloads the corrections as JSON.
+    ExportReview {
+        /// One talk.
+        #[arg(long, conflicts_with = "teacher", required_unless_present = "teacher")]
+        talk: Option<TalkId>,
+        /// Every transcribed talk of this teacher.
+        #[arg(long)]
+        teacher: Option<String>,
+        /// The directory to write into. Keep it under data/: the files hold teachers' words.
+        #[arg(long, default_value = "data/review")]
+        out: PathBuf,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Applies a corrections file as a reviewed transcript version, which no automated pass
+    /// replaces, and queues the talk to be indexed again.
+    ImportCorrections {
+        /// The JSON the review page saved.
+        #[arg(long)]
+        file: PathBuf,
+        /// Who reviewed it.
+        #[arg(long)]
+        reviewer: String,
     },
 }
 
@@ -1189,6 +1225,31 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
             AsrCommand::Requeue { dry_run } => {
                 asr_cmds::requeue(&pool().await?, &config, dry_run).await?;
+            }
+        },
+        Command::Transcript { command } => match command {
+            TranscriptCommand::ExportReview {
+                talk,
+                teacher,
+                out,
+                config_dir,
+            } => {
+                let report = index_cmds::export_review(
+                    &pool().await?,
+                    &config,
+                    &config_dir,
+                    talk,
+                    teacher,
+                    &out,
+                )
+                .await?;
+                commands::print_json(&report)?;
+            }
+            TranscriptCommand::ImportCorrections { file, reviewer } => {
+                let report =
+                    index_cmds::import_corrections(&pool().await?, &config, &file, &reviewer)
+                        .await?;
+                commands::print_json(&report)?;
             }
         },
         Command::Pipeline { command } => {

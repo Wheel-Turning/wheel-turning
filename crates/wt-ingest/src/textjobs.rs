@@ -88,14 +88,33 @@ struct StoredWord {
 #[derive(Debug, Deserialize)]
 struct StoredTranscript {
     words: Vec<StoredWord>,
+    #[serde(default)]
+    origin: Option<String>,
 }
 
-/// The talk's stored teacher words and the current transcript's hash.
-async fn stored_words(
+/// A talk's stored teacher words.
+pub(crate) struct Stored {
+    /// The words.
+    pub words: Vec<Word>,
+    /// The current transcript's hash.
+    pub hash: String,
+    /// Whether a person reviewed them, so the glossary leaves them alone.
+    pub reviewed: bool,
+}
+
+impl Stored {
+    /// The glossary to apply: none to a reviewed transcript.
+    pub fn glossary<'g>(&self, glossary: &'g Glossary) -> Option<&'g Glossary> {
+        (!self.reviewed).then_some(glossary)
+    }
+}
+
+/// The talk's stored teacher words, the current transcript's hash, and whether it was reviewed.
+pub(crate) async fn stored_words(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
     talk: TalkId,
-) -> Result<(Vec<Word>, String), TextJobError> {
+) -> Result<Stored, TextJobError> {
     let (_, key, hash) = transcript::current(conn, talk)
         .await?
         .ok_or_else(|| TextJobError::Missing(format!("talk {talk} has no transcript")))?;
@@ -109,7 +128,11 @@ async fn stored_words(
         .into_iter()
         .map(|w| Word::new(w.w, w.s, w.e, w.p))
         .collect();
-    Ok((words, hash))
+    Ok(Stored {
+        words,
+        hash,
+        reviewed: doc.origin.as_deref() == Some("reviewed"),
+    })
 }
 
 /// The stored words a segment covers: the first and one past the last index.
@@ -120,9 +143,9 @@ fn segment_range(words: &[Word], seg: &SegmentRow) -> (usize, usize) {
 }
 
 /// The corrected words of every segment, in order, each with its source range in the stored
-/// words.
+/// words. With no glossary, as for a reviewed transcript, the words are taken as they are.
 pub(crate) fn corrected(
-    glossary: &Glossary,
+    glossary: Option<&Glossary>,
     words: &[Word],
     segments: &[SegmentRow],
 ) -> Vec<Vec<(Word, (usize, usize))>> {
@@ -130,11 +153,19 @@ pub(crate) fn corrected(
         .iter()
         .map(|seg| {
             let (a, b) = segment_range(words, seg);
-            glossary
-                .apply_mapped(&words[a..b])
-                .into_iter()
-                .map(|(w, (x, y))| (w, (a + x, a + y)))
-                .collect()
+            match glossary {
+                Some(g) => g
+                    .apply_mapped(&words[a..b])
+                    .into_iter()
+                    .map(|(w, (x, y))| (w, (a + x, a + y)))
+                    .collect(),
+                None => words[a..b]
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(i, w)| (w, (a + i, a + i + 1)))
+                    .collect(),
+            }
         })
         .collect()
 }
@@ -200,14 +231,15 @@ pub async fn run_correct(
         Err(gate) => return Ok(TextOutcome::NotCleared(gate)),
     };
     advance_forward(conn, &talk, PipelineState::Correcting).await?;
-    let (words, transcript_hash) = stored_words(conn, objects, talk_id).await?;
+    let stored = stored_words(conn, objects, talk_id).await?;
+    let (words, transcript_hash) = (&stored.words, stored.hash.clone());
     let segments = transcript::segments(conn, talk_id).await?;
-    let fixed = corrected(glossary, &words, &segments);
+    let fixed = corrected(stored.glossary(glossary), words, &segments);
 
     let mut rows = String::from("talk_id,word_index,heard,canonical,distance,context\n");
     let mut suggested = 0;
     for seg in &segments {
-        let (a, b) = segment_range(&words, seg);
+        let (a, b) = segment_range(words, seg);
         for s in glossary.near_misses(&words[a..b], is_english) {
             rows.push_str(&format!(
                 "{},{},{},{},{},\"{}\"\n",
@@ -281,9 +313,10 @@ pub async fn run_extract(
     };
     advance_forward(conn, &talk, PipelineState::Extracting).await?;
     let class = data_class(conn, talk_id).await?;
-    let (words, _) = stored_words(conn, objects, talk_id).await?;
+    let stored = stored_words(conn, objects, talk_id).await?;
+    let words = &stored.words;
     let segments = transcript::segments(conn, talk_id).await?;
-    let fixed = corrected(glossary, &words, &segments);
+    let fixed = corrected(stored.glossary(glossary), words, &segments);
     let input = corrected_hash(&fixed);
     let unchanged = objects
         .get(&staging_key(talk_id))?
@@ -339,7 +372,8 @@ pub async fn run_resolve(
             .and_then(|s| s.locator_for(part)),
         _ => None,
     };
-    let (words, _) = stored_words(conn, objects, talk_id).await?;
+    let stored = stored_words(conn, objects, talk_id).await?;
+    let words = &stored.words;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for c in &mut staging.citations {
         let from = c.w0.saturating_sub(20);
@@ -382,9 +416,10 @@ pub async fn requeue_after_glossary_change(
 ) -> Result<Vec<TalkId>, TextJobError> {
     let mut affected = Vec::new();
     for talk in transcript::corrected_talks(conn).await? {
-        let (words, transcript_hash) = stored_words(conn, objects, talk).await?;
+        let stored = stored_words(conn, objects, talk).await?;
+        let (words, transcript_hash) = (&stored.words, stored.hash.clone());
         let segments = transcript::segments(conn, talk).await?;
-        let changed = corrected(glossary, &words, &segments)
+        let changed = corrected(stored.glossary(glossary), words, &segments)
             .iter()
             .zip(&segments)
             .any(|(ws, seg)| join(ws) != seg.text);
@@ -477,9 +512,10 @@ pub async fn run_index(
         Ok(t) => t,
         Err(gate) => return Ok(Err(gate)),
     };
-    let (words, _) = stored_words(conn, objects, talk_id).await?;
+    let stored = stored_words(conn, objects, talk_id).await?;
+    let words = &stored.words;
     let segments = transcript::segments(conn, talk_id).await?;
-    let index_segments: Vec<IndexSegment> = corrected(glossary, &words, &segments)
+    let index_segments: Vec<IndexSegment> = corrected(stored.glossary(glossary), words, &segments)
         .into_iter()
         .zip(&segments)
         .map(|(words, seg)| IndexSegment {

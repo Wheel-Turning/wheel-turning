@@ -242,11 +242,18 @@ Owner's decisions of October 7, 2026: transcripts are reviewed offline in v1, by
 3. A reviewed version is never overwritten by an automated pass. `wt asr requeue` skips talks whose current transcript is reviewed, and the glossary pass leaves reviewed words alone, writing its near misses to the suggestions file as usual.
 4. `wt export teacher --teacher <name> --format markdown --out <dir>` writes the teacher's talks for their own use: one file per talk with the title, date, sangha and source link, the reviewed text where it exists and the corrected text otherwise, in paragraphs, with the gaps marked. It writes no student speech and no audio. Display levels d and e use it.
 
+Decisions of October 7, 2026, made while building it:
+
+- The review page edits paragraph by paragraph, one text box each, rather than word by word, which keeps the page plain HTML with a little inline script. The import matches each edited paragraph word by word against what was shown: unchanged words keep their times, and each run of new words shares, evenly, the time of the words it replaces.
+- The reviewed version stores the text as the reviewer saw it, glossary corrections included, so the glossary pass then leaves it alone; its near misses still go to the suggestions file. Segments keep their kinds and times and take the reviewed words inside them. Storing the version replaces the segments, so the talk serves nothing until the queued `index` job rebuilds its passages.
+- Staged citations move to the new word positions through the old-to-new word map, and the staging's input hash is cleared, so extraction is not called again but would rerun if ever asked. Transcript spans move the same way.
+- An `audio` job leaves a reviewed transcript alone even with `"retranscribe": true`.
+
 Acceptance criteria (M4T):
 
-- [ ] A synthetic talk round-trips: export a review file, apply edits to its JSON, import them, and the new reviewed version holds the edits with word times inside the replaced spans, the passages are rebuilt, and `correction_log` names the reviewer.
-- [ ] An import against a transcript that changed since the file was written is refused.
-- [ ] `wt asr requeue` and a glossary change leave a reviewed version untouched.
+- [x] A synthetic talk round-trips: export a review file, apply edits to its JSON, import them, and the new reviewed version holds the edits with word times inside the replaced spans, the passages are rebuilt, and `correction_log` names the reviewer. (`wt-ingest/tests/pipeline.rs`; the staged citation still lands on its words after the rebuild.)
+- [x] An import against a transcript that changed since the file was written is refused. (`wt-ingest/tests/pipeline.rs`.)
+- [x] `wt asr requeue` and a glossary change leave a reviewed version untouched. (`wt-ingest/tests/pipeline.rs`; an `audio` job asked to retranscribe leaves it too.)
 - [x] `wt export teacher` writes one file per talk with no student words and the reviewed text where it exists. (`wt-ingest/tests/pipeline.rs`. Decisions of October 7, 2026: the export reads the stored transcript and segments, not the serving view, since a teacher at level d or e has nothing servable; paragraphs come from the chunker and each ends with its time; the transcript's chant, announcement, sitting and other spans and each omitted question are marked by name; the files go to `<out>/<teacher>/` with a `README.md` index, and a talk whose transcript cannot be read is reported, not dropped. The reviewed text arrives with the review files.)
 
 ## Language-model spend cap

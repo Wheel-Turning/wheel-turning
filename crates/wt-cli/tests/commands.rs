@@ -1255,6 +1255,36 @@ async fn pipeline_export_reindex_and_sample_commands() {
     ]);
     assert_eq!(exported["files"].as_array().unwrap().len(), 0);
     assert_eq!(exported["skipped"].as_array().unwrap().len(), 1);
+    // A review file needs the stored transcript; a corrections file must parse.
+    let review = fx.wt(&[
+        "transcript",
+        "export-review",
+        "--talk",
+        &talk.to_string(),
+        "--out",
+        owner.to_str().unwrap(),
+        "--config-dir",
+        cfg,
+    ]);
+    assert!(!review.status.success());
+    assert!(
+        stderr(&review).contains("is missing"),
+        "{}",
+        stderr(&review)
+    );
+    let bad = owner.join("bad.json");
+    std::fs::create_dir_all(&owner).unwrap();
+    std::fs::write(&bad, "{}").unwrap();
+    let import = fx.wt(&[
+        "transcript",
+        "import-corrections",
+        "--file",
+        bad.to_str().unwrap(),
+        "--reviewer",
+        "x",
+    ]);
+    assert!(!import.status.success());
+
     // e and f take the teacher down, so they need --yes, and apply to a teacher only.
     for level in ["e", "f"] {
         let refused = fx.wt(&[
