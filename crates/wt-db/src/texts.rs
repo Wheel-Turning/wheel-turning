@@ -91,6 +91,12 @@ pub struct NewEdition<'a> {
     pub excerptable: bool,
     /// The import key: the source files' and the manifest's hashes.
     pub content_hash: &'a str,
+    /// `native`, `text_layer`, `ocr` or `ocr_vision`.
+    pub extraction: &'a str,
+    /// The OCR engine and version, for an OCR edition.
+    pub ocr_engine: Option<&'a str>,
+    /// The mean OCR word confidence.
+    pub mean_confidence: Option<f32>,
 }
 
 /// The stored import key of an edition, if it exists.
@@ -109,20 +115,23 @@ pub async fn edition_hash(
     .await?)
 }
 
-/// Writes the edition, ready, and returns its id.
+/// Writes the edition and returns its id. It is `imported` until a proofread of its units
+/// passes (Spec 08, the proofread gate).
 pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Result<Uuid, DbError> {
     Ok(sqlx::query_scalar!(
         "insert into text_edition (work_id, edition_label, translator_person_id, language,
                                    source_url, rights_holder, license_evidence_id, excerptable,
-                                   state, content_hash)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'ready', $9)
+                                   state, content_hash, extraction, ocr_engine, mean_confidence)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12)
          on conflict (work_id, edition_label) do update
            set translator_person_id = excluded.translator_person_id,
                language = excluded.language, source_url = excluded.source_url,
                rights_holder = excluded.rights_holder,
                license_evidence_id = excluded.license_evidence_id,
-               excerptable = excluded.excerptable, state = 'ready',
-               content_hash = excluded.content_hash, imported_at = now()
+               excerptable = excluded.excerptable, state = 'imported',
+               content_hash = excluded.content_hash, extraction = excluded.extraction,
+               ocr_engine = excluded.ocr_engine, mean_confidence = excluded.mean_confidence,
+               imported_at = now()
          returning id",
         e.work,
         e.label,
@@ -132,7 +141,10 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
         e.rights_holder,
         e.evidence,
         e.excerptable,
-        e.content_hash
+        e.content_hash,
+        e.extraction,
+        e.ocr_engine,
+        e.mean_confidence
     )
     .fetch_one(&mut *conn)
     .await?)
@@ -157,9 +169,13 @@ pub struct NewUnit<'a> {
     pub content_hash: String,
     /// The embedding, as pgvector's text form.
     pub embedding: String,
+    /// The PDF page it starts on.
+    pub source_page: Option<i32>,
+    /// Its mean OCR confidence.
+    pub confidence: Option<f32>,
 }
 
-/// Replaces the edition's units.
+/// Replaces the edition's units and refreshes its units hash.
 pub async fn replace_units(
     conn: &mut PgConnection,
     edition: Uuid,
@@ -178,12 +194,15 @@ pub async fn replace_units(
     let counts: Vec<i32> = units.iter().map(|u| u.word_count).collect();
     let hashes: Vec<String> = units.iter().map(|u| u.content_hash.clone()).collect();
     let embeddings: Vec<String> = units.iter().map(|u| u.embedding.clone()).collect();
+    let pages: Vec<Option<i32>> = units.iter().map(|u| u.source_page).collect();
+    let confidences: Vec<Option<f32>> = units.iter().map(|u| u.confidence).collect();
     sqlx::query!(
         "insert into text_unit (edition_id, ordinal, locator, label, heading, text, word_count,
-                                content_hash, embedding, embedding_model)
-         select $1, u.ord, u.loc, u.lab, u.head, u.txt, u.wc, u.h, u.emb::vector, $10
+                                content_hash, embedding, embedding_model, source_page, confidence)
+         select $1, u.ord, u.loc, u.lab, u.head, u.txt, u.wc, u.h, u.emb::vector, $10, u.pg, u.cf
          from unnest($2::int4[], $3::text[], $4::text[], $5::text[], $6::text[], $7::int4[],
-                     $8::text[], $9::text[]) as u(ord, loc, lab, head, txt, wc, h, emb)",
+                     $8::text[], $9::text[], $11::int4[], $12::float4[])
+              as u(ord, loc, lab, head, txt, wc, h, emb, pg, cf)",
         edition,
         &ordinals,
         &locators,
@@ -193,11 +212,226 @@ pub async fn replace_units(
         &counts,
         &hashes,
         &embeddings,
-        model
+        model,
+        &pages as &[Option<i32>],
+        &confidences as &[Option<f32>]
     )
     .execute(&mut *conn)
     .await?;
+    refresh_units_hash(conn, edition).await?;
     Ok(())
+}
+
+/// Recomputes the hash of an edition's units, which a proofread must match to count.
+pub async fn refresh_units_hash(conn: &mut PgConnection, edition: Uuid) -> Result<String, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"update text_edition set units_hash = (
+             select coalesce(md5(string_agg(content_hash, ',' order by ordinal)), '')
+             from text_unit where edition_id = $1)
+           where id = $1 returning units_hash as "h!""#,
+        edition
+    )
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
+/// What the proofread commands need to know of an edition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditionSummary {
+    /// Its work's title.
+    pub work_title: String,
+    /// Its label.
+    pub edition_label: String,
+    /// How its text was extracted.
+    pub extraction: String,
+    /// Its units' hash.
+    pub units_hash: Option<String>,
+    /// Its state.
+    pub state: String,
+}
+
+/// The edition, if it exists.
+pub async fn edition_summary(
+    conn: &mut PgConnection,
+    edition: Uuid,
+) -> Result<Option<EditionSummary>, DbError> {
+    let row = sqlx::query!(
+        r#"select w.title, e.edition_label, e.extraction, e.units_hash, e.state::text as "state!"
+           from text_edition e join work w on w.id = e.work_id where e.id = $1"#,
+        edition
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.map(|r| EditionSummary {
+        work_title: r.title,
+        edition_label: r.edition_label,
+        extraction: r.extraction,
+        units_hash: r.units_hash,
+        state: r.state,
+    }))
+}
+
+/// A unit as the proofread sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProofUnit {
+    /// Its id.
+    pub id: Uuid,
+    /// Its place.
+    pub ordinal: i32,
+    /// Its locator.
+    pub locator: String,
+    /// Its label.
+    pub label: String,
+    /// Its text.
+    pub text: String,
+    /// Its OCR confidence.
+    pub confidence: Option<f32>,
+    /// Its page.
+    pub source_page: Option<i32>,
+}
+
+/// An edition's units in order.
+pub async fn proof_units(
+    conn: &mut PgConnection,
+    edition: Uuid,
+) -> Result<Vec<ProofUnit>, DbError> {
+    Ok(sqlx::query_as!(
+        ProofUnit,
+        "select id, ordinal, locator, label, text, confidence, source_page from text_unit
+         where edition_id = $1 order by ordinal",
+        edition
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
+/// A proofread to record.
+#[derive(Debug, Clone)]
+pub struct NewProof<'a> {
+    /// The edition.
+    pub edition: Uuid,
+    /// The units' hash the reviewer read.
+    pub units_hash: &'a str,
+    /// Who read them.
+    pub reviewer: &'a str,
+    /// Whether it passed.
+    pub passed: bool,
+    /// Random units read.
+    pub random_sampled: i32,
+    /// Errors in them.
+    pub random_errors: i32,
+    /// Lowest-confidence units read.
+    pub worst_sampled: i32,
+    /// Errors in them.
+    pub worst_errors: i32,
+    /// The error notes.
+    pub notes: Option<String>,
+}
+
+/// Records a proofread and returns its id.
+pub async fn record_proof(conn: &mut PgConnection, p: &NewProof<'_>) -> Result<Uuid, DbError> {
+    Ok(sqlx::query_scalar!(
+        "insert into proof_check (edition_id, sample_size, errors, reviewer, passed, notes,
+                                  units_hash, random_sampled, random_errors, worst_sampled,
+                                  worst_errors)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id",
+        p.edition,
+        p.random_sampled + p.worst_sampled,
+        p.random_errors + p.worst_errors,
+        p.reviewer,
+        p.passed,
+        p.notes,
+        p.units_hash,
+        p.random_sampled,
+        p.random_errors,
+        p.worst_sampled,
+        p.worst_errors
+    )
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
+/// Sets an edition's state: `imported`, `ready` or `retired`. Returns whether it exists.
+pub async fn set_state(
+    conn: &mut PgConnection,
+    edition: Uuid,
+    state: &str,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query!(
+        "update text_edition set state = $2::text::text_state where id = $1",
+        edition,
+        state
+    )
+    .execute(&mut *conn)
+    .await?
+    .rows_affected()
+        == 1)
+}
+
+/// A correction to one unit.
+#[derive(Debug, Clone)]
+pub struct UnitFix<'a> {
+    /// The unit.
+    pub unit: Uuid,
+    /// Its new text.
+    pub text: &'a str,
+    /// Its word count.
+    pub word_count: i32,
+    /// SHA-256 of the text.
+    pub content_hash: String,
+    /// Its new embedding, as pgvector's text form.
+    pub embedding: String,
+    /// The embedding model.
+    pub model: &'a str,
+    /// Who corrected it.
+    pub actor: &'a str,
+    /// Why.
+    pub reason: &'a str,
+}
+
+/// Corrects a unit, writes `correction_log`, refreshes the units hash and returns the edition
+/// to `imported`, so it needs a new proofread. Returns the edition and locator, or `None` for
+/// an unknown unit.
+pub async fn fix_unit(
+    conn: &mut PgConnection,
+    f: &UnitFix<'_>,
+) -> Result<Option<(Uuid, String)>, DbError> {
+    let Some(old) = sqlx::query!(
+        "select edition_id, locator, text from text_unit where id = $1 for update",
+        f.unit
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query!(
+        "update text_unit set text = $2, word_count = $3, content_hash = $4,
+                              embedding = $5::text::vector, embedding_model = $6
+         where id = $1",
+        f.unit,
+        f.text,
+        f.word_count,
+        f.content_hash,
+        f.embedding,
+        f.model
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!(
+        "insert into correction_log (entity, entity_id, field, old_value, new_value, actor, reason)
+         values ('text_unit', $1, 'text', to_jsonb($2::text), to_jsonb($3::text), $4, $5)",
+        f.unit,
+        old.text,
+        f.text,
+        f.actor,
+        f.reason
+    )
+    .execute(&mut *conn)
+    .await?;
+    refresh_units_hash(conn, old.edition_id).await?;
+    set_state(conn, old.edition_id, "imported").await?;
+    Ok(Some((old.edition_id, old.locator)))
 }
 
 /// Upserts a `work_locator` per unit, with any aliases, so the resolver can match citations.

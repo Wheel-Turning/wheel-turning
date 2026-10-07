@@ -122,7 +122,7 @@ pub fn from_md(text: &str) -> Vec<Section> {
 }
 
 /// Decodes the character references HTML text keeps: the common named ones and numeric ones.
-fn decode_entities(text: &str) -> String {
+pub fn decode_entities(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(i) = rest.find('&') {
@@ -358,7 +358,7 @@ pub fn read(path: &Path, format: Format) -> Result<Vec<Section>, TextError> {
         Format::Html => Ok(from_html(&text()?)),
         Format::Epub => from_epub(path),
         Format::Pdf => Err(TextError::Source(
-            "PDFs are read by the PDF and OCR pipeline, not yet in this build".into(),
+            "a PDF is read page by page through texts::pdf, with its tools".into(),
         )),
     }
 }

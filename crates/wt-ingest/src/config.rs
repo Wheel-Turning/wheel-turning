@@ -1,7 +1,7 @@
 //! The ingest configuration files: `config/sources.toml`, `config/pipeline.toml` (its
 //! `[ingest]` table) and `config/series.toml` (Spec 03).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use regex::{Regex, RegexBuilder};
 use serde::Deserialize;
@@ -309,6 +309,42 @@ impl LicenseSettings {
     /// Reads `[licenses]` from `config/pipeline.toml`; without the section, the defaults.
     pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
         Ok(parse::<LicensesFile>(&read(pipeline)?, &pipeline.display().to_string())?.licenses)
+    }
+}
+
+/// `[texts]` in `config/pipeline.toml` (Spec 08, PDFs and OCR): the English word list the
+/// suspect check reads, and the errors a proofread allows.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct TextSettings {
+    /// One word to a line, such as `/usr/share/dict/words` from `wamerican`.
+    pub word_list: PathBuf,
+    /// Errors allowed in the random part of a proofread sample.
+    pub proof_random_max_errors: u32,
+    /// Errors allowed in its lowest-confidence part.
+    pub proof_worst_max_errors: u32,
+}
+
+impl Default for TextSettings {
+    fn default() -> Self {
+        Self {
+            word_list: PathBuf::from("/usr/share/dict/words"),
+            proof_random_max_errors: 1,
+            proof_worst_max_errors: 3,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct TextsFile {
+    #[serde(default)]
+    texts: TextSettings,
+}
+
+impl TextSettings {
+    /// Reads `[texts]` from `config/pipeline.toml`; without the section, the defaults.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Ok(parse::<TextsFile>(&read(pipeline)?, &pipeline.display().to_string())?.texts)
     }
 }
 

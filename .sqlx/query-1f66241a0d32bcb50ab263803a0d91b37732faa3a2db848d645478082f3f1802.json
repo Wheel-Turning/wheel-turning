@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into correction_log (entity, entity_id, field, old_value, new_value, actor, reason)\n         values ('text_unit', $1, 'text', to_jsonb($2::text), to_jsonb($3::text), $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f66241a0d32bcb50ab263803a0d91b37732faa3a2db848d645478082f3f1802"
+}

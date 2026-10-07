@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select edition_id, locator, text from text_unit where id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "edition_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "text_unit",
+            "name": "edition_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "locator",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_unit",
+            "name": "locator"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_unit",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "739e3c2a497c4e4a494c8df02561444895ce4bd49b2c20bd127e738d7165defd"
+}

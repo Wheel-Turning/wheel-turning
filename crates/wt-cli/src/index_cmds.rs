@@ -417,7 +417,14 @@ pub async fn import_text(
     } else {
         &fake
     };
-    Ok(wt_ingest::texts::import(
+    let texts = wt_ingest::config::TextSettings::load(&config_dir.join("pipeline.toml"))?;
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let env = wt_ingest::texts::PdfEnv {
+        tools: &tools,
+        scratch: config.scratch_dir.join("texts"),
+        word_list: texts.word_list,
+    };
+    let report = wt_ingest::texts::import(
         &mut conn,
         &objects,
         embedder,
@@ -425,6 +432,63 @@ pub async fn import_text(
         &licenses.allowed_license_codes,
         by,
         apply,
+        Some(&env),
+    )
+    .await?;
+    if let Some(reason) = report.pdf.as_ref().and_then(|p| p.stopped.as_ref()) {
+        commands::print_json(&report)?;
+        anyhow::bail!("the import stopped: {reason}");
+    }
+    Ok(report)
+}
+
+/// `wt text proof`: writes the proof sheet and returns its path.
+pub async fn proof_sheet(
+    pool: &PgPool,
+    config: &Config,
+    edition: sqlx::types::Uuid,
+    out_dir: &Path,
+) -> anyhow::Result<std::path::PathBuf> {
+    let objects = stages::objects(config)?;
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let mut conn = pool.acquire().await?;
+    let (_, html) = wt_ingest::texts::proofread::sheet(
+        &mut conn,
+        &objects,
+        &tools,
+        edition,
+        &config.scratch_dir.join("texts"),
+    )
+    .await?;
+    std::fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+    let path = out_dir.join(format!("proof-{edition}.html"));
+    std::fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
+}
+
+/// `wt text proof-import`.
+pub async fn proof_import(
+    pool: &PgPool,
+    edition: sqlx::types::Uuid,
+    file: &Path,
+    reviewer: &str,
+    config_dir: &Path,
+) -> anyhow::Result<wt_ingest::texts::proofread::ProofReport> {
+    let texts = wt_ingest::config::TextSettings::load(&config_dir.join("pipeline.toml"))?;
+    let proof: wt_ingest::texts::pdf::proof::ProofFile = serde_json::from_slice(
+        &std::fs::read(file).with_context(|| format!("reading {}", file.display()))?,
+    )
+    .with_context(|| format!("reading {}", file.display()))?;
+    let mut conn = pool.acquire().await?;
+    Ok(wt_ingest::texts::proofread::import_proof(
+        &mut conn,
+        edition,
+        &proof,
+        reviewer,
+        wt_ingest::texts::proofread::Thresholds {
+            random_max: texts.proof_random_max_errors,
+            worst_max: texts.proof_worst_max_errors,
+        },
     )
     .await?)
 }

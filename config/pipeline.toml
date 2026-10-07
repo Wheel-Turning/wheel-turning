@@ -53,6 +53,14 @@ default_basis_for_new_sources = "mandate"
 # adds public-domain). Noncommercial and no-derivatives variants stay off until counsel answers.
 allowed_license_codes = ["public-domain", "permission-excerpt", "operator-mandate", "cc0", "cc-by-4.0", "cc-by-3.0", "cc-by-sa-4.0", "cc-by-sa-3.0"]
 
+[texts]
+# Texts (Spec 08, PDFs and OCR). The suspect check reads an English word list, one word to a line
+# (apt install wamerican on Linux; on Windows point this at any such list). A proofread passes
+# with at most these errors in its random and lowest-confidence units.
+word_list = "/usr/share/dict/words"
+proof_random_max_errors = 1
+proof_worst_max_errors = 3
+
 [segment]
 # Segmentation (Spec 04, Diarization and segmentation). The window thresholds are starting
 # points to tune on the ten-video sample (decision of October 5, 2026). A window with no words
