@@ -1,0 +1,17 @@
+// The public static site in site/, served at the apex by Workers static assets.
+// Deploy with: npx wrangler deploy (see docs/site.md).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wheel-turning-site",
+  "compatibility_date": "2026-10-07",
+  "assets": {
+    "directory": "./site",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "wheelturning.org", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}

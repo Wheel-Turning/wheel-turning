@@ -1,0 +1,397 @@
+/* Wheel Turning static site. Colors come from the logo files in docs/brand: ink #1B1D1F,
+   accent #B8730A on light grounds and #E3A62B on dark ones. */
+
+/* Fonts. Cormorant Garamond, self-hosted under the SIL Open Font License (see /fonts), sets
+   headings and the wordmark as in the lockup; Latin Extended is included so Pali and Sanskrit
+   diacritics render in the same face. Reading text uses the system sans-serif, which stays
+   legible on dark grounds.
+
+   Degradation: font-display: swap shows headings at once in a fallback. The fallback face is
+   local Georgia scaled to Cormorant's proportions, so lines barely move when the web font
+   arrives and still read well if it never does. Without Georgia, the stack falls through to
+   other book serifs and finally the generic serif. */
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-600-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-600-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/cormorant-garamond-latin-ext-600-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond Fallback";
+  src: local("Georgia"), local("Georgia Regular");
+  size-adjust: 76.36%;
+  ascent-override: 120.48%;
+  descent-override: 37.98%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --ground: #f7f6f3;
+  --surface: #ffffff;
+  --ink: #1b1d1f;
+  --text: #1b1d1f;
+  --muted: #4d5156;
+  --rule: #dddad3;
+  --accent: #b8730a;
+  --focus: #1b1d1f;
+  --display: "Cormorant Garamond", "Cormorant Garamond Fallback", Garamond, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #161718;
+    --surface: #1f2123;
+    --ink: #ffffff;
+    --text: #e8e7e3;
+    --muted: #b6b4ae;
+    --rule: #34373a;
+    --accent: #e3a62b;
+    --focus: #e3a62b;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+}
+
+.skip {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px solid var(--focus);
+  z-index: 10;
+}
+
+.skip:focus {
+  top: 1rem;
+}
+
+a {
+  color: var(--ink);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.wrap {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Header */
+
+.site-header {
+  padding: 1.5rem 0;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: none;
+  font-family: var(--display);
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.brand .mark {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
+/* The inline mark: strokes follow the text color, dots take the accent */
+
+.mark {
+  color: var(--ink);
+}
+
+h1 em,
+.brand em {
+  color: var(--accent);
+  font-style: italic;
+  font-weight: inherit;
+}
+
+/* Home */
+
+.hero {
+  padding: 3rem 0 2.5rem;
+  text-align: center;
+}
+
+.hero .mark {
+  width: 160px;
+  height: 160px;
+  margin-bottom: 1.5rem;
+}
+
+.hero h1 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: clamp(2.5rem, 9vw, 4rem);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+}
+
+.tagline {
+  max-width: 30rem;
+  margin: 1.25rem auto 0;
+  font-family: var(--display);
+  font-size: clamp(1.25rem, 4vw, 1.5rem);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.status {
+  display: inline-block;
+  margin-top: 2rem;
+  padding: 0.375rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.status::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 0.1em;
+}
+
+.principles {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 40rem) {
+  .principles {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.principles li {
+  padding: 1.25rem 1.25rem 1.125rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.principles h3 {
+  margin: 0 0 0.375rem;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.principles p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+/* Long-form pages */
+
+.page {
+  padding-top: 1.5rem;
+  padding-bottom: 3rem;
+}
+
+.page h1,
+.home-section h2,
+.page h2 {
+  color: var(--ink);
+  font-family: var(--display);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.page h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(2rem, 7vw, 2.75rem);
+}
+
+.page h2,
+.home-section h2 {
+  margin: 2.5rem 0 0.5rem;
+  font-size: 1.5rem;
+}
+
+.home-section {
+  padding-bottom: 1rem;
+}
+
+.home-section h2 {
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.updated {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.summary {
+  margin: 0 0 2rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.summary p {
+  margin: 0;
+}
+
+.page ul,
+.page ol {
+  padding-left: 1.5rem;
+}
+
+.page li + li {
+  margin-top: 0.375rem;
+}
+
+.contact {
+  margin: 2rem 0 0;
+  padding: 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.contact p {
+  margin: 0;
+}
+
+.contact p + p {
+  margin-top: 0.5rem;
+}
+
+/* Footer */
+
+.site-footer {
+  margin-top: 2rem;
+  padding: 2rem 0 3rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.site-footer nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.site-footer nav a {
+  display: inline-block;
+  padding: 0.625rem 0;
+  color: var(--muted);
+}
+
+.site-footer p {
+  margin: 0;
+}
+
+@media (forced-colors: active) {
+  .mark {
+    color: CanvasText;
+  }
+
+  .mark [fill^="var"] {
+    fill: CanvasText;
+  }
+}
+
+.contact h2 {
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 1.375rem;
+  font-weight: 600;
+}
