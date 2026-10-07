@@ -235,8 +235,13 @@ async fn run_worker(
             continue;
         };
         let result: anyhow::Result<()> = if claimed.kind == JobKind::Classify {
-            pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name)
-                .await
+            job::with_heartbeat(
+                pool,
+                &claimed,
+                job::HEARTBEAT_EVERY,
+                pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name),
+            )
+            .await
                 .map(|outcome| {
                     tracing::info!(job = %claimed.id, kind = %claimed.kind, outcome = ?outcome, "job done");
                 })
@@ -244,7 +249,14 @@ async fn run_worker(
         } else {
             match stages {
                 None => Err(anyhow::anyhow!("no handler for {} jobs", claimed.kind)),
-                Some(stages) => match stages.run(&mut conn, &claimed).await {
+                Some(stages) => match job::with_heartbeat(
+                    pool,
+                    &claimed,
+                    job::HEARTBEAT_EVERY,
+                    stages.run(&mut conn, &claimed),
+                )
+                .await
+                {
                     Ok(crate::stages::Ran::Done(outcome)) => {
                         job::succeed(&mut conn, &claimed).await?;
                         tracing::info!(job = %claimed.id, kind = %claimed.kind, %outcome, "job done");

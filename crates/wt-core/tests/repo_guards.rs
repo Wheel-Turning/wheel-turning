@@ -134,3 +134,87 @@ fn config_names_only_models_the_license_record_lists_with_a_revision() {
         .collect();
     assert!(missing.is_empty(), "{missing:#?}");
 }
+
+/// Where Rust source may read the `passage` table directly (CLAUDE.md and Spec 00, rule 3):
+/// `wt-index` writes it, the takedown routine deletes from it, and `wt audit` looks in it for
+/// passages that exist but must not be served, which the view by design cannot show (decision of
+/// October 7, 2026). Everything else goes through `servable_passage`.
+const PASSAGE_READERS: &[&str] = &[
+    "crates/wt-index/",
+    "crates/wt-db/src/takedown.rs",
+    "crates/wt-db/src/audit.rs",
+];
+
+/// The SQL in `text` that names the `passage` table itself, not a view or table whose name only
+/// ends in it, such as `servable_passage` or `answer_passage`.
+fn direct_passage_sql(text: &str) -> Vec<String> {
+    let flat: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let mut found = Vec::new();
+    for keyword in ["from", "join", "update", "into", "table"] {
+        let needle = format!("{keyword} passage");
+        let mut at = 0;
+        while let Some(i) = flat[at..].find(&needle) {
+            let start = at + i;
+            let end = start + needle.len();
+            let before = flat[..start].chars().next_back();
+            let after = flat[end..].chars().next();
+            let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+            if !word(before) && !word(after) {
+                found.push(flat[start.saturating_sub(20)..(end + 30).min(flat.len())].to_owned());
+            }
+            at = end;
+        }
+    }
+    found
+}
+
+#[test]
+fn the_passage_guard_catches_direct_reads_and_spares_the_views() {
+    assert_eq!(
+        direct_passage_sql("select text from passage where id = $1").len(),
+        1
+    );
+    assert_eq!(
+        direct_passage_sql("SELECT p.id FROM\n    Passage p").len(),
+        1
+    );
+    assert_eq!(
+        direct_passage_sql("select * from t join passage p on true").len(),
+        1
+    );
+    assert!(direct_passage_sql("select text from servable_passage").is_empty());
+    assert!(direct_passage_sql("select * from answer_passage").is_empty());
+    assert!(direct_passage_sql("select * from passages").is_empty());
+    assert!(direct_passage_sql("a passage from passage_text").is_empty());
+}
+
+/// CLAUDE.md rule 3: serving code reads passages only through `servable_passage`. Library and
+/// binary source outside [`PASSAGE_READERS`] may not name the `passage` table in SQL. Tests and
+/// migrations are not serving code and are not scanned; a file's `#[cfg(test)]` module is
+/// skipped too.
+#[test]
+fn only_the_named_modules_read_the_passage_table() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut offenders = Vec::new();
+    for path in tracked_files() {
+        let is_source =
+            path.starts_with("crates/") && path.contains("/src/") && path.ends_with(".rs");
+        if !is_source || PASSAGE_READERS.iter().any(|p| path.starts_with(p)) {
+            continue;
+        }
+        let text = std::fs::read_to_string(root.join(&path)).unwrap();
+        let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+        for hit in direct_passage_sql(code) {
+            offenders.push(format!("{path}: …{hit}…"));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "direct reads of the passage table outside {PASSAGE_READERS:?}; use servable_passage:\n{}",
+        offenders.join("\n")
+    );
+}
