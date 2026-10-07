@@ -9,6 +9,7 @@ pub mod manifest;
 pub mod pdf;
 pub mod proofread;
 pub mod reference;
+pub mod takedown;
 pub mod units;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +44,9 @@ pub enum TextError {
     /// Nothing to import after filtering.
     #[error("no units: {0}")]
     Empty(String),
+    /// An active exclusion covers it (Spec 08, Rights lifecycle).
+    #[error("excluded: {0}")]
+    Excluded(String),
     /// A PDF tool failed.
     #[error("PDF tools: {0}")]
     Tool(String),
@@ -159,6 +163,9 @@ pub struct ImportReport {
 fn source_prefix(work: &str, edition: &str) -> String {
     format!("texts-source/{}/{}", slug(work), slug(edition))
 }
+
+/// The work file listing an edition's source files and their hashes, which a takedown reads.
+const FILES: &str = "files.json";
 
 /// Where an edition's working files are kept: geometry and text, never images.
 fn work_prefix(work: &str, edition: &str) -> String {
@@ -345,6 +352,19 @@ pub async fn import_with(
         let plan = large::plan(env.tools, &m, dir)?;
         if plan.large(&m) && !plan.done(objects, &m)? {
             check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
+            let mut hashes: Vec<String> = plan.chunks.iter().map(|c| c.sha256.clone()).collect();
+            hashes.dedup();
+            takedown::check_exclusions(
+                conn,
+                &takedown::Incoming {
+                    work: &m.work.title,
+                    edition: &m.edition.label,
+                    source_url: m.edition.source_url.as_deref(),
+                    file_hashes: &hashes,
+                    unit_hashes: &[],
+                },
+            )
+            .await?;
             for p in &m.parts {
                 if let Some(e) = &p.license_evidence_id {
                     check_evidence(conn, e, opts.allowed_codes).await?;
@@ -526,6 +546,34 @@ async fn import_one(
             kept.len()
         )));
     }
+
+    // Nothing taken down comes back: not the work, not the source, not the same content at
+    // another address (Spec 08, Rights lifecycle, "Never use it again").
+    let file_hashes: Vec<String> = files.iter().map(|(_, b)| sha256_hex(b)).collect();
+    let unit_hashes: Vec<String> = units
+        .iter()
+        .map(|u| sha256_hex(u.text.as_bytes()))
+        .collect();
+    takedown::check_exclusions(
+        conn,
+        &takedown::Incoming {
+            work: &m.work.title,
+            edition: &m.edition.label,
+            source_url: m.edition.source_url.as_deref(),
+            file_hashes: &file_hashes,
+            unit_hashes: &unit_hashes,
+        },
+    )
+    .await?;
+    if let Some(key) = &m.edition.source_key
+        && wt_db::text_takedown::source_enabled(conn, key)
+            .await?
+            .is_none()
+    {
+        return Err(TextError::Manifest(format!(
+            "source_key {key:?} is not a source"
+        )));
+    }
     let mut lengths: Vec<usize> = units.iter().map(|u| u.word_count).collect();
     lengths.sort_unstable();
     let mut warnings = Vec::new();
@@ -678,6 +726,7 @@ async fn import_one(
             evidence: evidence_id,
             excerptable: true,
             content_hash: &key,
+            source_key: m.edition.source_key.as_deref(),
             extraction: report
                 .pdf
                 .as_ref()
@@ -743,6 +792,19 @@ async fn import_one(
     for (name, bytes) in &files {
         objects.put(&format!("{prefix}/{name}"), bytes)?;
     }
+    let listed: Vec<takedown::StoredFile> = files
+        .iter()
+        .map(|(name, bytes)| takedown::StoredFile {
+            name: name.clone(),
+            sha256: sha256_hex(bytes),
+        })
+        .collect();
+    let listed =
+        serde_json::to_vec(&listed).map_err(|e| TextError::Source(format!("files.json: {e}")))?;
+    objects.put(
+        &format!("{}/{FILES}", work_prefix(&m.work.title, &m.edition.label)),
+        &listed,
+    )?;
     // Where each unit stands, for the proof sheet's crops: geometry only.
     if is_pdf {
         let mut stored = pdf::Placements {

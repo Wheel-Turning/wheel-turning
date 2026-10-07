@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select edition_id from text_unit where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "edition_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "text_unit",
+            "name": "edition_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "24ba2bad3caaf1f98e247eefcc64368794f018f1adf9615d111b4c1473c63a63"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.state::text as \"s!\" from text_edition e join work w on w.id = e.work_id\n           where w.title = $1 and e.edition_label = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "s!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "be8fc7064225ab3cf5e720ab905c7a2771f65563fcbc8fa31873b6168b18df12"
+}

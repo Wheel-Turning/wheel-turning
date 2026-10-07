@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sp.source_retention from text_edition e join source_policy sp on sp.key = e.source_key\n         where e.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_retention",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "source_retention"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4f941158b99812dba150b94a27ed951dd51112424a774d47c2c9d23810ef0a6a"
+}

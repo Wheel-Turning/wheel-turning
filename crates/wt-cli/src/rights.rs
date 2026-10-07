@@ -156,6 +156,7 @@ pub async fn grant(
 /// `wt rights decline`. It disables the source and excludes it permanently, so it needs --yes.
 pub async fn decline(
     pool: &PgPool,
+    config: &wt_core::Config,
     records: &LocalRecords,
     key: &str,
     statement: &Path,
@@ -169,11 +170,24 @@ pub async fn decline(
     }
     let stored = records.store_file(statement)?;
     let out = rights::decline(pool, key, &stored, by).await?;
+    // A texts source loses its editions too (Spec 08, Rights lifecycle).
+    let objects = crate::stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let texts = wt_ingest::texts::takedown::take_down(
+        &mut conn,
+        &objects,
+        &wt_db::text_takedown::TextScope::Source(key.to_owned()),
+        "permission declined",
+        by,
+        false,
+    )
+    .await?;
     print_json(&serde_json::json!({
         "source": key,
         "enabled": false,
         "exclusions": out.exclusions,
         "statement": stored.key,
+        "texts": texts,
     }))
 }
 

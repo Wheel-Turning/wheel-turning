@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, received_at, requester_name, requester_email, organization, target, message,\n                text_unit_id, status, handled_by, action_taken\n         from takedown_request where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "received_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "received_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "requester_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "requester_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "requester_email",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "requester_email"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "organization",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "organization"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "target",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "target"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "message",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "message"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "text_unit_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "text_unit_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "handled_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "handled_by"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "action_taken",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "action_taken"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c219d61d857af464b062a2e6f73d3e45ffeee89e03e125a9e5d8d4af29aab751"
+}

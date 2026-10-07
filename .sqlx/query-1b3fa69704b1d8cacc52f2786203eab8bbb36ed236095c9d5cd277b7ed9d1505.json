@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.id, w.title as work_title, e.edition_label, e.source_url, e.source_key\n         from text_edition e join work w on w.id = e.work_id\n         where ($1::uuid is null or e.id = $1)\n           and ($2::text is null or e.source_key = $2)\n           and ($3::text is null or starts_with(e.source_url, $3))\n           and ($1::uuid is not null or $2::text is not null or $3::text is not null)\n         order by w.title, e.edition_label",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "work_title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "edition_label",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "edition_label"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "source_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "source_url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "source_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1b3fa69704b1d8cacc52f2786203eab8bbb36ed236095c9d5cd277b7ed9d1505"
+}

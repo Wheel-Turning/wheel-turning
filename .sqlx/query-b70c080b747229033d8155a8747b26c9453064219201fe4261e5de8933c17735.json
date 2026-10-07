@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_policy set enabled = false, disabled_reason = $2, disabled_at = now(),\n                                  updated_at = now()\n         where key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b70c080b747229033d8155a8747b26c9453064219201fe4261e5de8933c17735"
+}

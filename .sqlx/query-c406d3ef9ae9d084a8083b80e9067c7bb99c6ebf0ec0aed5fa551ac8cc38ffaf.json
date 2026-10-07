@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select content_hash from text_unit where edition_id = $1 order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_unit",
+            "name": "content_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c406d3ef9ae9d084a8083b80e9067c7bb99c6ebf0ec0aed5fa551ac8cc38ffaf"
+}

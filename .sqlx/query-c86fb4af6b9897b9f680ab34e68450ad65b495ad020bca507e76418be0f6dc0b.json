@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into takedown_log (scope, edition_id, source_key, actor, counts)\n         values ('edition', $1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c86fb4af6b9897b9f680ab34e68450ad65b495ad020bca507e76418be0f6dc0b"
+}

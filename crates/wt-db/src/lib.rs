@@ -26,6 +26,7 @@ pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod text_takedown;
 pub mod texts;
 pub mod transcript;
 

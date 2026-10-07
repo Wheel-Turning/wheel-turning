@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update takedown_request set status = $2, action_taken = $3, handled_by = $4,\n                                     handled_at = now()\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "26b4023f52c141c3a8253ef674a617c6d79baf25fb2d858090ecbed9fa87de19"
+}

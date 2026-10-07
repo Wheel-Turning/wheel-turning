@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into takedown_log (scope, source_key, actor, counts) values ('source', $1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "90c01a4a50f58a558a520b1727df4f2a01890a94be905fb26ed99b7d82bd9165"
+}

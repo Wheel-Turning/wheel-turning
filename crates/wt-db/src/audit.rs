@@ -342,6 +342,63 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
+    // Texts (Spec 08): nothing excluded or switched off serves, takedowns leave no units, and
+    // removal requests are answered within a business day.
+    checks.push(
+        check(
+            pool,
+            "text_excluded_served",
+            Severity::Fail,
+            "select s.text_unit_id::text from servable_text_unit s
+             join text_unit u on u.id = s.text_unit_id
+             join text_edition e on e.id = s.edition_id
+             where exists (
+               select 1 from source_exclusion x where x.lifted_at is null and (
+                    (x.scope = 'work' and lower(x.pattern) = lower(s.work_title))
+                 or (x.scope = 'edition' and x.pattern = e.id::text)
+                 or (x.scope = 'content' and x.pattern = u.content_hash)
+                 or (x.scope = 'prefix' and starts_with(lower(e.source_url), lower(x.pattern)))))",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "text_source_served_while_off",
+            Severity::Fail,
+            "select s.text_unit_id::text from servable_text_unit s
+             join text_edition e on e.id = s.edition_id
+             join source_policy sp on sp.key = e.source_key
+             where not sp.enabled",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "text_takedown_completeness",
+            Severity::Fail,
+            "select e.id::text from text_edition e
+             where e.state = 'withdrawn'
+               and (exists (select 1 from text_unit u where u.edition_id = e.id)
+                    or e.legal_text is not null)",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "takedown_request_overdue",
+            Severity::Warn,
+            // More than one business day: count the weekdays since it arrived.
+            "select r.id::text from takedown_request r
+             where r.status = 'open'
+               and (select count(*) from generate_series(r.received_at::date + 1, now()::date,
+                                                         interval '1 day') d
+                    where extract(isodow from d) < 6) > 1",
+        )
+        .await?,
+    );
     checks.push(
         check(
             pool,

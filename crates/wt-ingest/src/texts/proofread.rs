@@ -149,17 +149,31 @@ pub async fn sheet(
                 let (all, place) = p;
                 let file = all.files.get(place.file).cloned().unwrap_or_default();
                 let local = match pdfs.get(&file) {
-                    Some(path) => path.clone(),
-                    None => {
-                        let bytes = objects.get(&format!("{prefix}/{file}"))?.ok_or_else(|| {
-                            TextError::Proof(format!("the stored source {file} is gone"))
-                        })?;
-                        let path = scratch.join(format!("proof-{}.pdf", pdfs.len()));
-                        std::fs::write(&path, bytes)
-                            .map_err(|e| TextError::Source(format!("{}: {e}", path.display())))?;
-                        pdfs.insert(file.clone(), path.clone());
-                        path
-                    }
+                    Some(path) => Some(path.clone()),
+                    // A mandated source's originals are deleted after its proofread; a later
+                    // sheet reads the text against the source itself.
+                    None => match objects.get(&format!("{prefix}/{file}"))? {
+                        Some(bytes) => {
+                            let path = scratch.join(format!("proof-{}.pdf", pdfs.len()));
+                            std::fs::write(&path, bytes).map_err(|e| {
+                                TextError::Source(format!("{}: {e}", path.display()))
+                            })?;
+                            pdfs.insert(file.clone(), path.clone());
+                            Some(path)
+                        }
+                        None => None,
+                    },
+                };
+                let Some(local) = local else {
+                    out.push(SheetUnit {
+                        id: *id,
+                        group: *group,
+                        label: u.label.clone(),
+                        text: u.text.clone(),
+                        page: u.source_page,
+                        crop_png_base64: None,
+                    });
+                    continue;
                 };
                 let png = scratch.join(format!("crop-{id}.png"));
                 let rect = crop_of(place.frac, place.w_pts, place.h_pts, CROP_DPI);
@@ -208,6 +222,8 @@ pub struct ProofReport {
     pub ready: bool,
     /// Citations linked to its units after a pass.
     pub citations_linked: u64,
+    /// Whether the source files were deleted, as a mandated source's retention asks.
+    pub source_deleted: bool,
 }
 
 /// Records a proofread from the sheet's file. A pass makes the edition ready; a failure lists
@@ -271,6 +287,20 @@ pub async fn import_proof(
     .await?;
     let ready = verdict.passed && texts::set_state(&mut tx, edition, "ready").await?;
     tx.commit().await?;
+    // A mandated source keeps no originals once the proofread passes (Spec 08, Source copies
+    // and legal pages): the hashes stay in files.json, the files go.
+    let mut source_deleted = false;
+    if ready
+        && wt_db::text_takedown::retention(conn, edition)
+            .await?
+            .as_deref()
+            == Some("delete_after_proof")
+    {
+        let prefix = super::source_prefix(&info.work_title, &info.edition_label);
+        objects.delete_prefix(&format!("{prefix}/"))?;
+        wt_db::text_takedown::mark_source_deleted(conn, edition).await?;
+        source_deleted = true;
+    }
     let citations_linked = if ready {
         wt_db::reference::link_citations(conn).await?
     } else {
@@ -281,6 +311,7 @@ pub async fn import_proof(
         verdict,
         ready,
         citations_linked,
+        source_deleted,
     })
 }
 

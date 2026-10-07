@@ -97,6 +97,8 @@ pub struct NewEdition<'a> {
     pub ocr_engine: Option<&'a str>,
     /// The mean OCR word confidence.
     pub mean_confidence: Option<f32>,
+    /// The source it came through, whose `enabled` flag the serving view reads.
+    pub source_key: Option<&'a str>,
 }
 
 /// The stored import key of an edition, if it exists.
@@ -121,8 +123,9 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
     Ok(sqlx::query_scalar!(
         "insert into text_edition (work_id, edition_label, translator_person_id, language,
                                    source_url, rights_holder, license_evidence_id, excerptable,
-                                   state, content_hash, extraction, ocr_engine, mean_confidence)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12)
+                                   state, content_hash, extraction, ocr_engine, mean_confidence,
+                                   source_key)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12, $13)
          on conflict (work_id, edition_label) do update
            set translator_person_id = excluded.translator_person_id,
                language = excluded.language, source_url = excluded.source_url,
@@ -131,7 +134,7 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
                excerptable = excluded.excerptable, state = 'imported',
                content_hash = excluded.content_hash, extraction = excluded.extraction,
                ocr_engine = excluded.ocr_engine, mean_confidence = excluded.mean_confidence,
-               imported_at = now()
+               source_key = excluded.source_key, imported_at = now()
          returning id",
         e.work,
         e.label,
@@ -144,7 +147,8 @@ pub async fn upsert_edition(conn: &mut PgConnection, e: &NewEdition<'_>) -> Resu
         e.content_hash,
         e.extraction,
         e.ocr_engine,
-        e.mean_confidence
+        e.mean_confidence,
+        e.source_key
     )
     .fetch_one(&mut *conn)
     .await?)
