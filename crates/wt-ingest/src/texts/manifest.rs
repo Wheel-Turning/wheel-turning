@@ -27,6 +27,31 @@ pub struct CorpusManifest {
     /// For a PDF: how its pages are read (Spec 08, PDFs and OCR).
     #[serde(default)]
     pub pdf: Option<super::pdf::PdfSettings>,
+    /// For a PDF that binds several texts: each becomes its own work or edition, with its own
+    /// pages, locators, evidence and proofread (Spec 08, Large documents, step 5).
+    #[serde(default)]
+    pub parts: Vec<PartSection>,
+}
+
+/// `[[parts]]`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PartSection {
+    /// The part's work title.
+    pub title: String,
+    /// Its edition label; the manifest's by default.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Its pages, such as `1-120`.
+    pub pages: String,
+    /// Its locators' prefix.
+    pub locator_prefix: String,
+    /// Its author, when not the manifest's.
+    #[serde(default)]
+    pub author: Option<String>,
+    /// Its evidence, when not the manifest's.
+    #[serde(default)]
+    pub license_evidence_id: Option<String>,
 }
 
 /// `[work]`.
@@ -173,6 +198,22 @@ impl CorpusManifest {
                 ));
             }
             (None, _) => {}
+        }
+        if !m.parts.is_empty() {
+            if m.source.format != Format::Pdf {
+                return Err(TextError::Manifest("[[parts]] split a PDF by pages".into()));
+            }
+            let mut titles = std::collections::BTreeSet::new();
+            let mut prefixes = std::collections::BTreeSet::new();
+            for p in &m.parts {
+                super::pdf::skipped(std::slice::from_ref(&p.pages))?;
+                if !titles.insert(p.title.as_str()) || !prefixes.insert(p.locator_prefix.as_str()) {
+                    return Err(TextError::Manifest(format!(
+                        "part {:?}: titles and locator prefixes must differ between parts",
+                        p.title
+                    )));
+                }
+            }
         }
         if text.contains("REPLACE_ME") {
             return Err(TextError::Manifest(

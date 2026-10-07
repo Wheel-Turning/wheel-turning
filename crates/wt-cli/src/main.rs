@@ -237,9 +237,15 @@ enum TextCommand {
         /// The manifest TOML, beside the source files.
         #[arg(long)]
         manifest: PathBuf,
-        /// Write; without it, only report.
-        #[arg(long)]
+        /// Write; without it, only report. A large PDF is queued as ocr_chunk jobs.
+        #[arg(long, conflicts_with = "estimate")]
         apply: bool,
+        /// For a PDF: measure pages, OCR needs and speed, and queue nothing.
+        #[arg(long)]
+        estimate: bool,
+        /// The worker concurrency the estimate assumes.
+        #[arg(long, default_value_t = 1)]
+        concurrency: usize,
         /// Who is importing.
         #[arg(long, visible_alias = "actor")]
         by: String,
@@ -268,6 +274,25 @@ enum TextCommand {
         /// Who read the units.
         #[arg(long)]
         reviewer: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Reads a page range of a PDF edition again at a higher resolution and imports the
+    /// edition again; it then needs a new proofread.
+    Reocr {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// The pages, such as `120-180`.
+        #[arg(long)]
+        pages: String,
+        /// The resolution.
+        #[arg(long, default_value_t = 400)]
+        dpi: u32,
+        /// Who is doing it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
         /// The directory holding pipeline.toml.
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
@@ -1342,9 +1367,28 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             command:
                 TextCommand::Import {
                     manifest,
+                    estimate: true,
+                    concurrency,
+                    ..
+                },
+        } => {
+            let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+            let estimate = wt_ingest::texts::large::estimate(
+                &tools,
+                &manifest,
+                &config.scratch_dir.join("texts"),
+                concurrency,
+            )?;
+            commands::print_json(&estimate)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Import {
+                    manifest,
                     apply,
                     by,
                     config_dir,
+                    ..
                 },
         } => {
             let report = index_cmds::import_text(
@@ -1373,9 +1417,37 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     config_dir,
                 },
         } => {
-            let report =
-                index_cmds::proof_import(&pool().await?, edition, &file, &reviewer, &config_dir)
-                    .await?;
+            let report = index_cmds::proof_import(
+                &pool().await?,
+                &config,
+                edition,
+                &file,
+                &reviewer,
+                &config_dir,
+            )
+            .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Reocr {
+                    edition,
+                    pages,
+                    dpi,
+                    by,
+                    config_dir,
+                },
+        } => {
+            let report = index_cmds::reocr(
+                &pool().await?,
+                &config,
+                &config_dir,
+                edition,
+                &pages,
+                dpi,
+                &by,
+            )
+            .await?;
             commands::print_json(&report)?;
         }
         Command::Text {

@@ -39,17 +39,23 @@ pub enum JobKind {
     Resolve,
     /// Chunking, embedding and indexing.
     Index,
+    /// OCR of one page range of a large PDF (Spec 08, Large documents).
+    OcrChunk,
+    /// The import of a large PDF once every chunk is read.
+    TextAssemble,
 }
 
 impl JobKind {
     /// Every kind, in pipeline order.
-    pub const ALL: [JobKind; 6] = [
+    pub const ALL: [JobKind; 8] = [
         JobKind::Classify,
         JobKind::Audio,
         JobKind::Correct,
         JobKind::Extract,
         JobKind::Resolve,
         JobKind::Index,
+        JobKind::OcrChunk,
+        JobKind::TextAssemble,
     ];
 
     /// The value stored in `job.kind`.
@@ -61,6 +67,8 @@ impl JobKind {
             JobKind::Extract => "extract",
             JobKind::Resolve => "resolve",
             JobKind::Index => "index",
+            JobKind::OcrChunk => "ocr_chunk",
+            JobKind::TextAssemble => "text_assemble",
         }
     }
 

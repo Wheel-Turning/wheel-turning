@@ -4,6 +4,7 @@
 //! source and manifest make it a no-op.
 
 pub mod extract;
+pub mod large;
 pub mod manifest;
 pub mod pdf;
 pub mod proofread;
@@ -48,6 +49,9 @@ pub enum TextError {
     /// A proofread could not be made or recorded.
     #[error("proofread: {0}")]
     Proof(String),
+    /// The job queue refused.
+    #[error(transparent)]
+    Job(#[from] wt_db::job::JobError),
     /// The embedder failed.
     #[error(transparent)]
     Ml(#[from] wt_ml::MlError),
@@ -102,6 +106,9 @@ pub struct PdfReport {
     pub suspect_share: f32,
     /// Why the import stopped, when too many units are suspect.
     pub stopped: Option<String>,
+    /// Tenths of the OCR pages still under `range_min_confidence` after a second reading,
+    /// which the proofread spot-checks.
+    pub low_ranges: Vec<pdf::LowRange>,
 }
 
 /// What a PDF import needs besides the manifest: the tools, a scratch directory for page
@@ -142,6 +149,10 @@ pub struct ImportReport {
     pub unchanged: bool,
     /// For a PDF: pages, exclusions and suspect units.
     pub pdf: Option<PdfReport>,
+    /// For a large PDF not yet read: the chunk jobs queued.
+    pub queued: Option<large::Queued>,
+    /// For a manifest with parts: each part's report.
+    pub parts: Vec<ImportReport>,
 }
 
 /// Where an edition's source files are kept.
@@ -183,9 +194,24 @@ fn slug(s: &str) -> String {
     out.trim_matches('-').to_owned()
 }
 
+/// How an import runs.
+pub struct ImportOptions<'a> {
+    /// `[licenses] allowed_license_codes`.
+    pub allowed_codes: &'a [String],
+    /// Who is importing.
+    pub actor: &'a str,
+    /// Write; without it, only report.
+    pub apply: bool,
+    /// Import again even when the files and manifest are unchanged: `wt text reocr`, whose new
+    /// pages live in the cache.
+    pub force: bool,
+    /// For PDFs: the tools, scratch and the word list.
+    pub pdf_env: Option<&'a PdfEnv<'a>>,
+}
+
 /// Runs an import. `allowed_codes` is `[licenses] allowed_license_codes`. Without `apply` it
 /// only reports. A PDF needs `pdf_env`.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub async fn import(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
@@ -196,15 +222,29 @@ pub async fn import(
     apply: bool,
     pdf_env: Option<&PdfEnv<'_>>,
 ) -> Result<ImportReport, TextError> {
-    let manifest_text = std::fs::read_to_string(manifest_path)
-        .map_err(|e| TextError::Manifest(format!("reading {}: {e}", manifest_path.display())))?;
-    let m = CorpusManifest::parse(&manifest_text)?;
-    let dir = manifest_path.parent().unwrap_or(Path::new("."));
+    import_with(
+        conn,
+        objects,
+        embedder,
+        manifest_path,
+        &ImportOptions {
+            allowed_codes,
+            actor,
+            apply,
+            force: false,
+            pdf_env,
+        },
+    )
+    .await
+}
 
-    // 1. The evidence must exist, be approved, and carry an allowed code.
-    let evidence_id: sqlx::types::Uuid = m
-        .edition
-        .license_evidence_id
+/// Checks that evidence exists, is approved and carries an allowed code.
+async fn check_evidence(
+    conn: &mut sqlx::PgConnection,
+    id: &str,
+    allowed_codes: &[String],
+) -> Result<sqlx::types::Uuid, TextError> {
+    let evidence_id: sqlx::types::Uuid = id
         .parse()
         .map_err(|e| TextError::Evidence(format!("license_evidence_id: {e}")))?;
     let ev = texts::evidence(conn, evidence_id)
@@ -221,14 +261,176 @@ pub async fn import(
             ev.license_code
         )));
     }
+    Ok(evidence_id)
+}
+
+impl ImportReport {
+    /// A report with no units yet.
+    fn empty(work: &str, edition: &str) -> Self {
+        Self {
+            work: work.to_owned(),
+            edition: edition.to_owned(),
+            sections_kept: Vec::new(),
+            sections_excluded: Vec::new(),
+            units: 0,
+            first: Vec::new(),
+            last: Vec::new(),
+            words: (0, 0, 0),
+            warnings: Vec::new(),
+            applied: false,
+            unchanged: false,
+            pdf: None,
+            queued: None,
+            parts: Vec::new(),
+        }
+    }
+}
+
+/// One part of a compilation as a manifest of its own: its work, edition, evidence, locators,
+/// and only its pages (Spec 08, Large documents, step 5).
+fn part_manifest(
+    m: &CorpusManifest,
+    p: &manifest::PartSection,
+) -> Result<CorpusManifest, TextError> {
+    let (first, last) = pdf::skipped(std::slice::from_ref(&p.pages))?
+        .first()
+        .copied()
+        .ok_or_else(|| TextError::Manifest(format!("part {:?} names no pages", p.title)))?;
+    let mut d = m.clone();
+    d.parts.clear();
+    d.work.title.clone_from(&p.title);
+    if p.author.is_some() {
+        d.work.author.clone_from(&p.author);
+    }
+    if let Some(label) = &p.label {
+        d.edition.label.clone_from(label);
+    }
+    if let Some(evidence) = &p.license_evidence_id {
+        d.edition.license_evidence_id.clone_from(evidence);
+    }
+    d.units.locator_prefix.clone_from(&p.locator_prefix);
+    let mut settings = d.pdf.take().unwrap_or_default();
+    if first > 1 {
+        settings.skip_pages.push(format!("1-{}", first - 1));
+    }
+    settings
+        .skip_pages
+        .push(format!("{}-{}", last.saturating_add(1), u32::MAX / 2));
+    d.pdf = Some(settings);
+    let prefix = format!("{}:", p.locator_prefix);
+    d.aliases.retain(|k, _| k.starts_with(&prefix));
+    Ok(d)
+}
+
+/// Runs an import with options: a large PDF not yet read is queued as chunk jobs, a manifest
+/// with parts imports each part as its own edition, and anything else imports at once.
+pub async fn import_with(
+    conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
+    embedder: &dyn Embedder,
+    manifest_path: &Path,
+    opts: &ImportOptions<'_>,
+) -> Result<ImportReport, TextError> {
+    let manifest_text = std::fs::read_to_string(manifest_path)
+        .map_err(|e| TextError::Manifest(format!("reading {}: {e}", manifest_path.display())))?;
+    let m = CorpusManifest::parse(&manifest_text)?;
+    let dir = manifest_path.parent().unwrap_or(Path::new("."));
+    let manifest_hash = sha256_hex(manifest_text.as_bytes());
+
+    // A large PDF is read by chunk jobs first (Spec 08, Large documents, step 2).
+    if m.source.format == Format::Pdf {
+        let env = opts.pdf_env.ok_or_else(|| {
+            TextError::Source("a PDF import needs poppler and Tesseract (PdfEnv)".into())
+        })?;
+        let plan = large::plan(env.tools, &m, dir)?;
+        if plan.large(&m) && !plan.done(objects, &m)? {
+            check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
+            for p in &m.parts {
+                if let Some(e) = &p.license_evidence_id {
+                    check_evidence(conn, e, opts.allowed_codes).await?;
+                }
+            }
+            let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
+            if opts.apply {
+                report.queued = Some(
+                    large::queue(conn, objects, &m, &manifest_text, dir, &plan, opts.actor).await?,
+                );
+            } else {
+                report.warnings.push(format!(
+                    "{} pages in {} chunks are not read yet: --estimate measures them, and \
+                     --apply queues ocr_chunk jobs for `wt worker --kinds ocr_chunk`",
+                    plan.pages,
+                    plan.chunks.len()
+                ));
+            }
+            return Ok(report);
+        }
+    }
+
+    if m.parts.is_empty() {
+        return import_one(
+            conn,
+            objects,
+            embedder,
+            &m,
+            &manifest_text,
+            &manifest_hash,
+            manifest_path,
+            opts,
+        )
+        .await;
+    }
+    let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
+    report.unchanged = true;
+    for (i, p) in m.parts.iter().enumerate() {
+        let part = part_manifest(&m, p)?;
+        let seed = sha256_hex(format!("{manifest_hash}:part:{i}").as_bytes());
+        let r = import_one(
+            conn,
+            objects,
+            embedder,
+            &part,
+            &manifest_text,
+            &seed,
+            manifest_path,
+            opts,
+        )
+        .await?;
+        report.units += r.units;
+        report.applied |= r.applied;
+        report.unchanged &= r.unchanged;
+        report.parts.push(r);
+    }
+    Ok(report)
+}
+
+/// Imports one edition.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn import_one(
+    conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
+    embedder: &dyn Embedder,
+    m: &CorpusManifest,
+    manifest_text: &str,
+    key_seed: &str,
+    manifest_path: &Path,
+    opts: &ImportOptions<'_>,
+) -> Result<ImportReport, TextError> {
+    let (apply, pdf_env) = (opts.apply, opts.pdf_env);
+    let dir = manifest_path.parent().unwrap_or(Path::new("."));
+
+    // 1. The evidence must exist, be approved, and carry an allowed code.
+    let evidence_id =
+        check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
 
     // 2 and 3. Extract and filter.
-    let mut key_input = sha256_hex(manifest_text.as_bytes());
+    let mut key_input = key_seed.to_owned();
     let mut sections = Vec::new();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     let is_pdf = m.source.format == Format::Pdf;
     let settings = m.pdf.clone().unwrap_or_default();
     let mut pdf_pages = PdfPages::default();
+    let mut low_ranges: Vec<pdf::LowRange> = Vec::new();
     for (index, name) in m.source.files.iter().enumerate() {
         let path = dir.join(name);
         let bytes = std::fs::read(&path)
@@ -242,7 +444,50 @@ pub async fn import(
         let env = pdf_env.ok_or_else(|| {
             TextError::Source("a PDF import needs poppler and Tesseract (PdfEnv)".into())
         })?;
-        let read = pdf::read(env.tools, &path, &settings, &env.scratch)?;
+        // Pages come from the cache when an earlier run or chunk job read them.
+        let cache = pdf::PageCache::new(objects, &sha256_hex(bytes_of(&files, name)), &settings);
+        let cached = pdf::ReadOptions {
+            cache: Some(&cache),
+            ..pdf::ReadOptions::default()
+        };
+        let mut read = pdf::read(env.tools, &path, &settings, &env.scratch, cached)?;
+        // The per-range check (Spec 08, Large documents, step 6): a weak tenth is read once
+        // more at `reocr_dpi`, and if still weak, named for the proofread.
+        let mut reread = false;
+        for (first, last, _) in pdf::weak_ranges(&read, settings.range_min_confidence) {
+            let low_dpi = read
+                .pages
+                .iter()
+                .zip(&read.dpis)
+                .any(|(p, d)| (first..=last).contains(&p.number) && *d < settings.reocr_dpi);
+            if low_dpi {
+                pdf::read(
+                    env.tools,
+                    &path,
+                    &settings,
+                    &env.scratch,
+                    pdf::ReadOptions {
+                        cache: Some(&cache),
+                        pages: Some((first, last)),
+                        force_dpi: Some(settings.reocr_dpi),
+                    },
+                )?;
+                reread = true;
+            }
+        }
+        if reread {
+            read = pdf::read(env.tools, &path, &settings, &env.scratch, cached)?;
+        }
+        low_ranges.extend(
+            pdf::weak_ranges(&read, settings.range_min_confidence)
+                .into_iter()
+                .map(|(first, last, mean_confidence)| pdf::LowRange {
+                    file: index,
+                    first,
+                    last,
+                    mean_confidence,
+                }),
+        );
         let mut rebuilt = pdf::rebuild::rebuild(
             &read.pages,
             settings.strip_running_heads,
@@ -251,10 +496,10 @@ pub async fn import(
         for w in &mut rebuilt.words {
             w.file = index;
         }
-        for page in &read.pages {
+        for (page, dpi) in read.pages.iter().zip(&read.dpis) {
             pdf_pages
                 .sizes
-                .insert((index, page.number), pdf::page_points(page, settings.dpi));
+                .insert((index, page.number), pdf::page_points(page, *dpi));
             if page.origin == pdf::layout::Origin::Ocr {
                 pdf_pages.ocr.insert((index, page.number));
                 pdf_pages
@@ -314,6 +559,8 @@ pub async fn import(
         applied: false,
         unchanged: false,
         pdf: None,
+        queued: None,
+        parts: Vec::new(),
     };
 
     // PDFs: each unit's page and confidence, and the suspect check (steps 4 and 6).
@@ -381,6 +628,7 @@ pub async fn import(
             suspect,
             suspect_share,
             stopped,
+            low_ranges: low_ranges.clone(),
         });
     }
     if report.pdf.as_ref().is_some_and(|p| p.stopped.is_some()) {
@@ -390,7 +638,9 @@ pub async fn import(
     if !apply {
         return Ok(report);
     }
-    if texts::edition_hash(conn, &m.work.title, &m.edition.label).await? == Some(Some(key.clone()))
+    if !opts.force
+        && texts::edition_hash(conn, &m.work.title, &m.edition.label).await?
+            == Some(Some(key.clone()))
     {
         report.unchanged = true;
         return Ok(report);
@@ -483,7 +733,7 @@ pub async fn import(
         "corpus",
         false,
         &counts,
-        actor,
+        opts.actor,
     )
     .await?;
     tx.commit().await?;
@@ -498,6 +748,7 @@ pub async fn import(
         let mut stored = pdf::Placements {
             files: m.source.files.clone(),
             units: BTreeMap::new(),
+            low_ranges,
         };
         for (u, p) in units.iter().zip(&placements) {
             if let Some(p) = p {
@@ -520,15 +771,18 @@ pub async fn import(
         }
         let json = serde_json::to_vec(&stored)
             .map_err(|e| TextError::Source(format!("placements: {e}")))?;
-        objects.put(
-            &format!(
-                "{}/{}",
-                work_prefix(&m.work.title, &m.edition.label),
-                pdf::PLACEMENTS
-            ),
-            &json,
-        )?;
+        let work = work_prefix(&m.work.title, &m.edition.label);
+        objects.put(&format!("{work}/{}", pdf::PLACEMENTS), &json)?;
+        // The manifest, so `wt text reocr` can read a range again and import it.
+        objects.put(&format!("{work}/manifest.toml"), manifest_text.as_bytes())?;
     }
     report.applied = true;
     Ok(report)
+}
+
+fn bytes_of<'a>(files: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
+    files
+        .iter()
+        .find(|(n, _)| n == name)
+        .map_or(&[], |(_, b)| b.as_slice())
 }
