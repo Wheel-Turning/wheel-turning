@@ -69,7 +69,7 @@ These rules go into `CLAUDE.md` verbatim.
 
 1. Read the matching spec tab and the PRD section before writing code. If the two conflict, stop and ask. Do not resolve it silently.
 2. No `unwrap` or `expect` outside tests. Library crates use `thiserror`, binaries use `anyhow`.
-3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `wt-index` and the takedown routine.
+3. Serving code reads passages only through the `servable_passage` view. A CI test greps for direct reads of the `passage` table outside `wt-index`, the takedown routine and `wt audit`, which looks for passages that must not be served (decision of October 7, 2026; `wt-core/tests/repo_guards.rs`).
 4. The ranker input type has no field for sangha, profile status, upload volume or donation link. Do not add one.
 5. A language model never produces text that is displayed as a quotation. It returns passage IDs and JSON only.
 6. Audio exists only under the configured scratch directory, and the pipeline deletes it explicitly on success and failure. No schema column or bucket holds audio.

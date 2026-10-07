@@ -6,6 +6,7 @@ mod common;
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use common::{ADA, state, state_reason, talk};
 use sqlx::types::chrono::Utc;
@@ -508,4 +509,48 @@ async fn a_capped_job_waits_for_next_month_without_using_an_attempt() {
             .unwrap()
             .is_some()
     );
+}
+
+/// Spec 03, rule 4: a long job refreshes its lease while it runs.
+#[tokio::test]
+async fn a_long_job_keeps_its_lease_fresh_while_it_runs() {
+    let fx = common::start().await;
+    let pool = fx.pool.clone();
+    let mut conn = pool.acquire().await.unwrap();
+    job::enqueue(
+        &mut conn,
+        JobKind::Index,
+        None,
+        "long",
+        &serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    let claimed = job::claim(&mut conn, &[JobKind::Index], "w")
+        .await
+        .unwrap()
+        .unwrap();
+    // Pretend the lease was taken long ago.
+    sqlx::query("update job set locked_at = now() - interval '3 hours' where id = $1")
+        .bind(claimed.id.as_uuid())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let out = job::with_heartbeat(&pool, &claimed, Duration::from_millis(200), async {
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        "done"
+    })
+    .await;
+    assert_eq!(out, "done");
+    let age: f64 = sqlx::query_scalar(
+        "select extract(epoch from now() - locked_at)::float8 from job where id = $1",
+    )
+    .bind(claimed.id.as_uuid())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(age < 5.0, "lease is {age} s old");
+    // The reaper leaves it alone.
+    let reaped = job::reap(&mut conn, Duration::from_secs(60)).await.unwrap();
+    assert_eq!((reaped.requeued, reaped.dead), (0, 0));
 }

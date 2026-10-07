@@ -21,6 +21,8 @@ pub const BASE_BACKOFF: Duration = Duration::from_secs(30);
 pub const MAX_BACKOFF: Duration = Duration::from_secs(3600);
 /// `job_lock_timeout_s` default: a `running` job unrefreshed for this long is reaped.
 pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(7200);
+/// How often a running job refreshes its lease (Spec 03, Job queue, rule 4).
+pub const HEARTBEAT_EVERY: Duration = Duration::from_secs(60);
 
 /// The pipeline job kinds. `audio` runs fetch, transcribe, diarize and segment on one machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -213,6 +215,36 @@ pub async fn claim(
         max_attempts: row.max_attempts,
         worker: worker.to_owned(),
     }))
+}
+
+/// Runs `work` while refreshing `job`'s lease every `every` on a separate connection from
+/// `pool`, so the reaper leaves a long job such as ASR alone. A failed refresh is logged and the
+/// work carries on: if the lock was lost, finishing the job reports it.
+pub async fn with_heartbeat<F: std::future::Future>(
+    pool: &sqlx::PgPool,
+    job: &Job,
+    every: Duration,
+    work: F,
+) -> F::Output {
+    let mut work = std::pin::pin!(work);
+    let mut tick = tokio::time::interval(every);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The first tick fires at once; the lease was just taken.
+    tick.tick().await;
+    loop {
+        tokio::select! {
+            out = &mut work => return out,
+            _ = tick.tick() => {
+                let refreshed = match pool.acquire().await {
+                    Ok(mut conn) => heartbeat(&mut conn, job).await.map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+                if let Err(error) = refreshed {
+                    tracing::warn!(job = %job.id, %error, "could not refresh the job's lease");
+                }
+            }
+        }
+    }
 }
 
 /// Refreshes the lease so the reaper leaves a long job alone. Long jobs such as ASR call it
