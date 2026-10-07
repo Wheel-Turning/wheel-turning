@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select c.id as \"evidence!\", c.kind as \"kind!\", c.license_code as \"license_code!\",\n                  c.publisher, c.grantor, c.source_key, c.prefix as \"prefix!\"\n           from (\n             select le.id, le.kind, le.license_code, le.publisher, le.grantor,\n                    null::text as source_key, p as prefix\n             from license_evidence le, unnest(le.url_prefixes) p\n             where le.allowed and starts_with($1, lower(p))\n             union all\n             select le.id, le.kind, le.license_code, coalesce(le.publisher, sp.publisher),\n                    le.grantor, sp.key, p\n             from source_policy sp\n             join license_evidence le on le.id = sp.license_evidence_id,\n                  unnest(sp.url_prefixes) p\n             where sp.enabled and le.allowed and starts_with($1, lower(p))\n           ) c\n           order by length(c.prefix) desc, c.source_key nulls last\n           limit 1",
+  "query": "select c.id as \"evidence!\", c.kind as \"kind!\", c.license_code as \"license_code!\",\n                  c.publisher, c.grantor, c.source_key, c.prefix as \"prefix!\"\n           from (\n             select le.id, le.kind, le.license_code, le.publisher, le.grantor,\n                    null::text as source_key, p as prefix\n             from license_evidence le, unnest(le.url_prefixes) p\n             where le.allowed and le.kind <> 'mandate' and starts_with($1, lower(p))\n             union all\n             select le.id, le.kind, le.license_code, coalesce(le.publisher, sp.publisher),\n                    le.grantor, sp.key, p\n             from source_policy sp\n             join license_evidence le on le.id = sp.license_evidence_id,\n                  unnest(sp.url_prefixes) p\n             where sp.enabled and le.allowed and starts_with($1, lower(p))\n           ) c\n           order by length(c.prefix) desc, c.source_key nulls last\n           limit 1",
   "describe": {
     "columns": [
       {
@@ -61,5 +61,5 @@
       null
     ]
   },
-  "hash": "06b9b975f4524cc2b19dc64a0534080be85c9354e5001a2daed821d0e668627f"
+  "hash": "8ca3b44fb11e8ad89377337f16619ef646f7037b0c947789607b35099bf2c2bf"
 }

@@ -276,7 +276,10 @@ async fn an_edition_takedown_removes_everything_and_nothing_brings_it_back() {
         done.exclusions, 6,
         "the work, the edition, three units and the file: {done:?}"
     );
-    assert_eq!(done.objects_deleted, 2, "the text file and files.json");
+    assert_eq!(
+        done.objects_deleted, 3,
+        "the text file, files.json and the stored manifest"
+    );
     assert_eq!(fx.served().await, 0);
     assert_eq!(fx.count("select count(*) from text_unit").await, 0);
     assert_eq!(

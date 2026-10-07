@@ -493,8 +493,9 @@ pub async fn sync_locators(
     Ok(usize::try_from(n).unwrap_or(usize::MAX))
 }
 
-/// What covers a URL for import: approved evidence listing a prefix of it, or an enabled
-/// source whose evidence is approved. The longest prefix wins.
+/// What covers a URL for import: approved license or permission evidence listing a prefix of
+/// it, or an enabled source whose evidence is approved. A mandate covers only through its
+/// source, so switching the source off stops it at once. The longest prefix wins.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Covering {
     /// The evidence.
@@ -526,7 +527,7 @@ pub async fn covering_evidence(
              select le.id, le.kind, le.license_code, le.publisher, le.grantor,
                     null::text as source_key, p as prefix
              from license_evidence le, unnest(le.url_prefixes) p
-             where le.allowed and starts_with($1, lower(p))
+             where le.allowed and le.kind <> 'mandate' and starts_with($1, lower(p))
              union all
              select le.id, le.kind, le.license_code, coalesce(le.publisher, sp.publisher),
                     le.grantor, sp.key, p
@@ -541,6 +542,41 @@ pub async fn covering_evidence(
     )
     .fetch_optional(&mut *conn)
     .await?)
+}
+
+/// Each unit's locator and content hash.
+pub async fn unit_digest(
+    conn: &mut PgConnection,
+    edition: Uuid,
+) -> Result<Vec<(String, String)>, DbError> {
+    Ok(sqlx::query!(
+        "select locator, content_hash from text_unit where edition_id = $1 order by ordinal",
+        edition
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.locator, r.content_hash))
+    .collect())
+}
+
+/// Records what was fetched for an edition.
+pub async fn set_fetch_info(
+    conn: &mut PgConnection,
+    edition: Uuid,
+    sha256: &str,
+    etag: Option<&str>,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "update text_edition set source_sha256 = $2, source_etag = $3, fetched_at = now()
+         where id = $1",
+        edition,
+        sha256,
+        etag
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Writes the audit row of an importer run.

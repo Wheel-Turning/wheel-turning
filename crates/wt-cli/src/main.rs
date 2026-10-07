@@ -94,6 +94,17 @@ enum Command {
         #[command(subcommand)]
         command: TextCommand,
     },
+    /// A walkthrough that builds manifests for folders in data-inbox/texts/: work, edition,
+    /// license evidence approved by your typed name, unit scheme, dry run and apply (Spec 08,
+    /// Guided loading).
+    Intake {
+        /// The inbox.
+        #[arg(long, default_value = "data-inbox")]
+        inbox: PathBuf,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// License evidence: capture a license page, record a permission, approve either (Spec 03,
     /// Licensed sources; Spec 08, Ingesting from URLs).
     License {
@@ -376,6 +387,19 @@ enum TextCommand {
         /// A file of URLs, one to a line, `#` for comments.
         #[arg(long)]
         urls_file: Option<PathBuf>,
+        /// An index page to crawl instead: its links are listed for a person to choose from,
+        /// and nothing is imported.
+        #[arg(long, conflicts_with_all = ["url", "urls_file", "yes"])]
+        crawl: Option<String>,
+        /// Link levels below the index to read.
+        #[arg(long, default_value_t = 1)]
+        depth: u32,
+        /// A regular expression for links that are documents.
+        #[arg(long)]
+        follow_pattern: Option<String>,
+        /// The most documents listed.
+        #[arg(long, default_value_t = 50)]
+        max_pages: usize,
         /// Import a born-digital HTML page with a clear title without asking.
         #[arg(long)]
         yes: bool,
@@ -383,6 +407,23 @@ enum TextCommand {
         #[arg(long, default_value = "data-inbox")]
         inbox: PathBuf,
         /// Who is fetching.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Refetches an edition's source with a conditional request. Unchanged is a no-op; a
+    /// changed document is compared unit by unit, and --apply imports it, which then needs its
+    /// proofread.
+    Refresh {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// Import the new version.
+        #[arg(long)]
+        apply: bool,
+        /// Who.
         #[arg(long, visible_alias = "actor")]
         by: String,
         /// The directory holding pipeline.toml.
@@ -1726,12 +1767,37 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Text {
             command:
                 TextCommand::Fetch {
+                    crawl: Some(start),
+                    depth,
+                    follow_pattern,
+                    max_pages,
+                    inbox,
+                    config_dir,
+                    ..
+                },
+        } => {
+            let report = index_cmds::crawl_texts(
+                &pool().await?,
+                &config_dir,
+                &start,
+                depth,
+                follow_pattern.as_deref(),
+                max_pages,
+                &inbox,
+            )
+            .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Fetch {
                     url,
                     urls_file,
                     yes,
                     inbox,
                     by,
                     config_dir,
+                    ..
                 },
         } => {
             let mut urls = url;
@@ -1754,6 +1820,23 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             commands::print_json(&reports)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Refresh {
+                    edition,
+                    apply,
+                    by,
+                    config_dir,
+                },
+        } => {
+            let report =
+                index_cmds::refresh_text(&pool().await?, &config, &config_dir, edition, apply, &by)
+                    .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Intake { inbox, config_dir } => {
+            index_cmds::intake(&pool().await?, &config, &records, &config_dir, &inbox).await?;
         }
         Command::License { command } => {
             index_cmds::license(&pool().await?, &records, command).await?;

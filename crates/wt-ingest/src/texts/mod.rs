@@ -4,13 +4,16 @@
 //! source and manifest make it a no-op.
 
 pub mod convert;
+pub mod crawl;
 pub mod extract;
+pub mod intake;
 pub mod large;
 pub mod manifest;
 pub mod notice;
 pub mod pdf;
 pub mod proofread;
 pub mod reference;
+pub mod refresh;
 pub mod takedown;
 pub mod units;
 pub mod url;
@@ -172,6 +175,9 @@ pub struct ImportReport {
     pub notice_outcome: Option<String>,
     /// Why nothing was imported, such as a text that is not English.
     pub skipped: Option<String>,
+    /// Every unit's locator and content hash, for `wt text refresh`'s diff.
+    #[serde(skip)]
+    pub digest: Vec<(String, String)>,
 }
 
 /// Where an edition's source files are kept.
@@ -308,6 +314,7 @@ impl ImportReport {
             notices: Vec::new(),
             notice_outcome: None,
             skipped: None,
+            digest: Vec::new(),
         }
     }
 }
@@ -682,6 +689,10 @@ async fn import_one(
             _ => "blocked: third_party_notice".to_owned(),
         }),
         skipped: None,
+        digest: units
+            .iter()
+            .map(|u| (u.locator.clone(), sha256_hex(u.text.as_bytes())))
+            .collect(),
     };
     if action.as_deref() == Some("block") {
         return Ok(report);
@@ -911,6 +922,14 @@ async fn import_one(
         &format!("{}/{FILES}", work_prefix(&m.work.title, &m.edition.label)),
         &listed,
     )?;
+    // The manifest, so `wt text reocr` and `wt text refresh` can import the edition again.
+    objects.put(
+        &format!(
+            "{}/manifest.toml",
+            work_prefix(&m.work.title, &m.edition.label)
+        ),
+        manifest_text.as_bytes(),
+    )?;
     // Where each unit stands, for the proof sheet's crops: geometry only.
     if is_pdf {
         let mut stored = pdf::Placements {
@@ -941,8 +960,6 @@ async fn import_one(
             .map_err(|e| TextError::Source(format!("placements: {e}")))?;
         let work = work_prefix(&m.work.title, &m.edition.label);
         objects.put(&format!("{work}/{}", pdf::PLACEMENTS), &json)?;
-        // The manifest, so `wt text reocr` can read a range again and import it.
-        objects.put(&format!("{work}/manifest.toml"), manifest_text.as_bytes())?;
     }
     report.applied = true;
     Ok(report)
