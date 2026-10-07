@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update citation c set text_unit_id = u.id\n         from work_locator wl\n         join text_edition e on e.work_id = wl.work_id\n         join text_unit u on u.edition_id = e.id and u.locator = wl.locator\n         where c.work_locator_id = wl.id and e.state = 'ready' and e.excerptable\n           and c.text_unit_id is distinct from u.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5f62028214b761a2bde4d7d011573b169677987ea6c6da8f30f3e26a1dac43c8"
+}

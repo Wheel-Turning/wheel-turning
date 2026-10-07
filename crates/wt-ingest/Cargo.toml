@@ -23,6 +23,7 @@ wt-registry.workspace = true
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 regex = "1"
+csv = "1"
 tl = "0.7"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 rss = { version = "2", default-features = false }

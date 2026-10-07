@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into lineage_edge (parent_person_id, child_person_id, kind, source_asset_id, note)\n         values ($1, $2, $3, $4, $5) on conflict do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a051c307a5ce71a4d39d3b0702db3684dfc7b0b973684b1cdd6e5b5c98d3e975"
+}

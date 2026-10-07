@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update citation c set text_unit_id = u.id\n         from work_locator wl\n         join text_edition e on e.work_id = wl.work_id\n         join text_unit u on u.edition_id = e.id and u.locator = wl.locator\n         where c.talk_id = $1 and c.work_locator_id = wl.id\n           and e.state = 'ready' and e.excerptable",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "392dbe47e91e7de89d10bec822e6e3be8d295d1a44568624113858ac058d4cce"
+}

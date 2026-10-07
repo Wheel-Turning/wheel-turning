@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update teacher t set person_id = p.id from person p\n         where p.id = any($1) and p.display_name = t.display_name and t.person_id is null\n         returning t.display_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7020da36e77740d86656e1c51dbd20784cc12712666b994c7265bbcf9f47a500"
+}

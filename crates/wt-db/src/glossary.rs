@@ -51,9 +51,11 @@ pub struct ImportReport {
     pub conflicts: Vec<String>,
 }
 
-/// Lowercase letters and digits, the form canonical forms are compared in.
+/// Lowercase letters and digits without accents, the form canonical forms are compared in, so
+/// "Dōgen" and "Dogen" are one term.
 fn key(text: &str) -> String {
-    text.chars()
+    use unicode_normalization::UnicodeNormalization;
+    text.nfd()
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()

@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into work_locator (work_id, locator, label, aliases, link_out_url,\n                                       source_asset_id)\n             values ($1, $2, $3, $4, $5, $6)\n             on conflict (work_id, locator) do update\n               set label = excluded.label, aliases = excluded.aliases,\n                   link_out_url = coalesce(excluded.link_out_url, work_locator.link_out_url),\n                   source_asset_id = coalesce(excluded.source_asset_id,\n                                              work_locator.source_asset_id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28f207988ff4b0908f59d4b42e68c7dc64d306f4da27ede9897da3a597a97363"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce(md5(string_agg(w.title || chr(31) || wl.locator || chr(31)\n                                          || array_to_string(wl.aliases, chr(30)), chr(29)\n                                          order by w.title, wl.locator)), '') as \"v!\"\n           from work_locator wl join work w on w.id = wl.work_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a19c42eb2f07f3425423a299e035085035ba6b1827ae286e800577da513de13c"
+}
