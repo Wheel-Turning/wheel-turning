@@ -44,3 +44,7 @@ path = ".bench/models/ggml-large-v3.bin"
 [[model]]
 name = "distil-large-v3"
 path = ".bench/models/ggml-distil-large-v3.bin"
+
+[[model]]
+name = "large-v3-turbo"
+path = ".bench/models/ggml-large-v3-turbo.bin"

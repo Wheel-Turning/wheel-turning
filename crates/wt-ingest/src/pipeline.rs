@@ -11,7 +11,7 @@ use wt_db::registry::{self, RegistryDbError, SpeakerOutcome};
 use crate::classify::{self, DupFacts, Exclusion};
 use crate::config::{ClassifyConfig, ConfigError, SourceConfig, SourcesFile};
 use crate::dates;
-use crate::source::{DiscoveredVideo, IngestError, SourceAdapter};
+use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
 
 /// Errors from a discovery run or a classify job.
 #[derive(Debug, thiserror::Error)]
@@ -175,6 +175,27 @@ pub async fn discover(
         ..DiscoveryReport::default()
     };
     let mut tx = conn.begin().await?;
+    // A source that names its speakers makes each a teacher of its sangha under its mandate;
+    // a talk naming several stays for a person (Spec 03, EngageWisdom sources, rule 3).
+    if adapter.platform() == SourcePlatform::EngageWisdom {
+        let single: Vec<String> = videos
+            .iter()
+            .filter_map(|v| v.raw.get("speakers").and_then(|s| s.as_array()))
+            .filter(|s| s.len() == 1)
+            .filter_map(|s| s[0].as_str().map(str::to_owned))
+            .filter(|name| !name.eq_ignore_ascii_case("community"))
+            .collect();
+        let added = wt_db::registry::ensure_teachers(
+            &mut tx,
+            &source.default_sangha,
+            &single,
+            "wt ingest discover",
+        )
+        .await?;
+        if !added.is_empty() {
+            tracing::info!(source = %source.name, teachers = added.len(), "new teachers from the source's speakers");
+        }
+    }
     for v in &videos {
         let hash = input_hash(v);
         let recorded = ingest::record_video(
@@ -235,12 +256,14 @@ pub enum Classified {
     Skipped,
 }
 
-/// Runs rules 1 to 6 on one talk. `venue` is the sangha where the source's talks were given.
+/// Runs rules 1 to 6 on one talk. `venue` is the sangha where the source's talks were given;
+/// `default_talk_type` is the source's type for a talk nothing else types.
 pub async fn classify_talk(
     conn: &mut PgConnection,
     cfg: &ClassifyConfig,
     talk: TalkId,
     venue: SanghaId,
+    default_talk_type: Option<&str>,
     actor: &str,
 ) -> Result<Classified, PipelineError> {
     let facts = ingest::facts(conn, talk).await?;
@@ -279,7 +302,17 @@ pub async fn classify_talk(
         return Ok(Classified::Duplicate { of: kept });
     }
 
-    let decision = classify::talk_type(cfg, &title, facts.duration_s);
+    let mut decision = classify::talk_type(cfg, &title, facts.duration_s);
+    // A source that lists only talks says so, and no title pattern or length is needed
+    // (Spec 03, EngageWisdom sources); a review pattern still holds the talk.
+    if let Some(default) = default_talk_type
+        && decision.review.as_deref() == Some("talk_type_unclear")
+    {
+        decision = classify::TypeDecision {
+            talk_type: default.to_owned(),
+            review: None,
+        };
+    }
     ingest::set_classification(
         conn,
         talk,
@@ -433,7 +466,16 @@ pub async fn run_classify_job(
     if reopen {
         ingest::reopen(&mut tx, talk, actor).await?;
     }
-    let outcome = classify_talk(&mut tx, cfg, talk, venue, actor).await?;
+    let source = sources.get(source)?;
+    let outcome = classify_talk(
+        &mut tx,
+        cfg,
+        talk,
+        venue,
+        source.default_talk_type.as_deref(),
+        actor,
+    )
+    .await?;
     job::succeed(&mut tx, job).await?;
     tx.commit().await?;
     Ok(outcome)

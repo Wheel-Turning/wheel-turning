@@ -59,6 +59,16 @@ pub async fn discover(
                 VimeoEndpoints::vimeo()?,
                 exclusions.clone(),
             )?),
+            SourcePlatform::EngageWisdom => {
+                let Some(collection) = source.collection_url.as_deref() else {
+                    bail!("source {} has no collection_url", source.name);
+                };
+                Box::new(wt_ingest::engagewisdom::EngageWisdomAdapter::new(
+                    collection,
+                    source.max_talks,
+                    exclusions.clone(),
+                )?)
+            }
             SourcePlatform::Rss => {
                 let Some(feed_url) = source.feed_url.as_deref() else {
                     if only.is_some() {

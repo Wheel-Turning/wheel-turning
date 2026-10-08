@@ -21,6 +21,9 @@ pub enum SourcePlatform {
     Rss,
     /// Vimeo, SSZ's canonical list.
     Vimeo,
+    /// An EngageWisdom collection: talk pages with transcripts and audio.
+    #[serde(rename = "engagewisdom")]
+    EngageWisdom,
 }
 
 impl SourcePlatform {
@@ -31,6 +34,7 @@ impl SourcePlatform {
             SourcePlatform::Storage => "storage",
             SourcePlatform::Rss => "rss",
             SourcePlatform::Vimeo => "vimeo",
+            SourcePlatform::EngageWisdom => "engagewisdom",
         }
     }
 }

@@ -185,10 +185,32 @@ async fn run(
     transcriber: &FakeTranscriber,
     turns: Vec<Turn>,
 ) -> Result<AudioOutcome, audio::AudioError> {
-    let diarizer = FakeDiarizer::new(turns);
+    run_scoped(
+        fx,
+        talk,
+        transcriber,
+        &FakeDiarizer::new(turns),
+        &FakeConverter,
+        "full",
+    )
+    .await
+}
+
+/// The job with a chosen diarizer, converter and diarization scope.
+async fn run_scoped(
+    fx: &Fx,
+    talk: TalkId,
+    transcriber: &FakeTranscriber,
+    diarizer: &dyn wt_segment::Diarizer,
+    converter: &dyn Converter,
+    scope: &str,
+) -> Result<AudioOutcome, audio::AudioError> {
     let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
     let objects = fx.objects();
-    let segment = SegmentSettings::default();
+    let segment = SegmentSettings {
+        diarize_scope: scope.into(),
+        ..SegmentSettings::default()
+    };
     let hints = AsrHints {
         glossary_prompt: "Dogen".into(),
         language: "en".into(),
@@ -196,9 +218,9 @@ async fn run(
     let scratch = fx.scratch();
     let deps = AudioDeps {
         transcriber,
-        diarizer: &diarizer,
+        diarizer,
         labeler: &FixedLabeler(Label::Talk),
-        converter: &FakeConverter,
+        converter,
         fetcher: &fetcher,
         objects: &objects,
         scratch_root: &scratch,
@@ -480,7 +502,10 @@ async fn a_new_model_requeues_only_talks_transcribed_with_another() {
     );
     let diarizer = FakeDiarizer::new(turns);
     let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
-    let segment = SegmentSettings::default();
+    let segment = SegmentSettings {
+        diarize_scope: "full".into(),
+        ..SegmentSettings::default()
+    };
     let hints = AsrHints {
         glossary_prompt: String::new(),
         language: "en".into(),
@@ -503,5 +528,284 @@ async fn a_new_model_requeues_only_talks_transcribed_with_another() {
     assert!(
         matches!(out, AudioOutcome::Segmented { version: 2, .. }),
         "{out:?}"
+    );
+}
+
+/// A cleared EngageWisdom talk by Ada whose source transcript says what the timeline says, with
+/// the source's own spelling of three teacher words and the student's question in it too.
+async fn cleared_engagewisdom_talk(fx: &Fx, transcript: &str) -> TalkId {
+    let video: Uuid = sqlx::query_scalar(
+        "insert into source_video (platform, external_id, url, title, raw)
+         values ('engagewisdom', 'FX-00042', 'https://fx.example.invalid/talks/fixture',
+                 'Fixture Talk', $1)
+         returning id",
+    )
+    .bind(serde_json::json!({ "item": {
+        "audio_url": format!("{}/AudioFiles/talk.mp3", fx.server.uri()),
+        "transcript": transcript,
+        "speakers": ["Ada Fixture"],
+    }}))
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let talk: Uuid = sqlx::query_scalar(
+        "insert into talk (source_video_id, title, teacher_id, sangha_id, rights_holder, state)
+         select $1, 'Fixture Talk', id, sangha_id, 'Ada Fixture', 'awaiting_consent'
+         from teacher where display_name = 'Ada Fixture' returning id",
+    )
+    .bind(video)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    wt_db::consent::set_consent(
+        &fx.pool,
+        "Ada",
+        ConsentStatus::Granted,
+        Some("fixture"),
+        None,
+        "test",
+    )
+    .await
+    .unwrap();
+    TalkId::from(talk)
+}
+
+#[tokio::test]
+async fn an_aligned_source_transcript_keeps_its_teacher_words_and_drops_the_student() {
+    let fx = start().await;
+    let (words, turns) = timeline();
+    // The source writes every word the recording holds, but spells three teacher words its own
+    // way and adds a stage direction and a marker; the student's question is in it too.
+    let mut source: Vec<String> = words.iter().map(|w| w.text.clone()).collect();
+    source[10] = "Dōgen".into();
+    source[400] = "zazen".into();
+    source[1000] = "shikantaza".into();
+    let text = format!(
+        "[00:00]\n\n{} [laughs]\n\n{}",
+        source[..750].join(" "),
+        source[750..].join(" ")
+    );
+    let talk = cleared_engagewisdom_talk(&fx, &text).await;
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    let outcome = run(&fx, talk, &transcriber, turns).await.unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert!(fx.scratch_is_empty());
+
+    let json: serde_json::Value = serde_json::from_slice(
+        &fx.objects()
+            .get(&audio::transcript_key(talk, 1))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json["origin"], "aligned");
+    assert!(json["alignment_share"].as_f64().unwrap() > 0.99);
+    assert!(
+        json["model"]
+            .as_str()
+            .unwrap()
+            .starts_with("source-aligned/")
+    );
+    let stored: Vec<&str> = json["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["w"].as_str().unwrap())
+        .collect();
+    for kept in ["Dōgen", "zazen", "shikantaza"] {
+        assert!(
+            stored.contains(&kept),
+            "the source's wording of {kept} is kept"
+        );
+    }
+    assert!(
+        !stored
+            .iter()
+            .any(|w| w.starts_with('s') && w[1..].parse::<u32>().is_ok()),
+        "no student word"
+    );
+    assert!(!stored.contains(&"[laughs]"));
+    let origin: String = sqlx::query_scalar("select origin from transcript where talk_id = $1")
+        .bind(talk.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(origin, "aligned");
+}
+
+#[tokio::test]
+async fn a_source_transcript_of_another_recording_is_held_for_review() {
+    let fx = start().await;
+    let (words, turns) = timeline();
+    let other: Vec<String> = (0..1400).map(|i| format!("other{i}")).collect();
+    let talk = cleared_engagewisdom_talk(&fx, &other.join(" ")).await;
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    let outcome = run(&fx, talk, &transcriber, turns).await.unwrap();
+    assert_eq!(outcome, AudioOutcome::Held("alignment_failed".into()));
+    assert_eq!(
+        state(&fx.pool, talk).await,
+        ("needs_review".into(), Some("alignment_failed".into()))
+    );
+    assert!(fx.scratch_is_empty());
+}
+
+/// Writes a real PCM WAV of silence, 100 frames a second, so the job can cut its tail.
+struct WavConverter {
+    seconds: usize,
+}
+
+impl Converter for WavConverter {
+    fn to_wav(&self, dir: &ScratchDir, input: &Path) -> Result<PathBuf, ScratchError> {
+        let path = dir.file(WAV_NAME)?;
+        let rate: u32 = 100;
+        let data = vec![0u8; self.seconds * 100 * 2];
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&u32::try_from(36 + data.len()).unwrap().to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        wav.extend_from_slice(&data);
+        std::fs::write(&path, wav).unwrap();
+        std::fs::remove_file(input).unwrap();
+        Ok(path)
+    }
+}
+
+/// Records the length of what it was asked to diarize, and answers with fixed turns.
+struct MeasuringDiarizer {
+    turns: Vec<Turn>,
+    seconds: std::sync::Mutex<Vec<u64>>,
+}
+
+#[async_trait::async_trait]
+impl wt_segment::Diarizer for MeasuringDiarizer {
+    async fn diarize(&self, audio: &Path) -> Result<Vec<Turn>, wt_segment::DiarizeError> {
+        let bytes = std::fs::metadata(audio).unwrap().len();
+        self.seconds.lock().unwrap().push((bytes - 44) / 200);
+        Ok(self.turns.clone())
+    }
+}
+
+/// The timeline with the teacher inviting questions just before the student speaks at 5:00.
+fn timeline_with_invitation() -> (Vec<Word>, Vec<Turn>) {
+    let (mut words, turns) = timeline();
+    // The teacher's last words before the question: "...are there any questions?"
+    let i = words.iter().rposition(|w| w.start_ms < 299_000).unwrap();
+    for (k, w) in ["are", "there", "any", "questions?"].iter().enumerate() {
+        words[i - 3 + k].text = (*w).into();
+    }
+    (words, turns)
+}
+
+#[tokio::test]
+async fn only_the_questions_are_diarized_and_the_student_is_still_dropped() {
+    let fx = start().await;
+    let talk = cleared_talk(&fx, true).await;
+    let (words, _) = timeline_with_invitation();
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    // Turns relative to the cut, a minute before the invitation near 4:58.
+    let diarizer = MeasuringDiarizer {
+        turns: vec![
+            Turn {
+                speaker: "S1".into(),
+                start_ms: 0,
+                end_ms: 61_500,
+            },
+            Turn {
+                speaker: "S2".into(),
+                start_ms: 61_500,
+                end_ms: 81_500,
+            },
+            Turn {
+                speaker: "S1".into(),
+                start_ms: 81_500,
+                end_ms: 361_500,
+            },
+        ],
+        seconds: std::sync::Mutex::new(Vec::new()),
+    };
+    let outcome = run_scoped(
+        &fx,
+        talk,
+        &transcriber,
+        &diarizer,
+        &WavConverter { seconds: 600 },
+        "qa",
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    let diarized = diarizer.seconds.lock().unwrap().clone();
+    assert_eq!(diarized.len(), 1);
+    assert!(
+        diarized[0] < 370,
+        "only the tail was diarized: {diarized:?}"
+    );
+    assert!(fx.scratch_is_empty(), "the cut is deleted with the rest");
+    let json: serde_json::Value = serde_json::from_slice(
+        &fx.objects()
+            .get(&audio::transcript_key(talk, 1))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let stored: Vec<&str> = json["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["w"].as_str().unwrap())
+        .collect();
+    assert!(stored.iter().any(|w| w.starts_with('t')));
+    assert!(
+        !stored
+            .iter()
+            .any(|w| w.starts_with('s') && w[1..].parse::<u32>().is_ok()),
+        "no student word"
+    );
+}
+
+#[tokio::test]
+async fn a_monologue_is_not_diarized_at_all() {
+    let fx = start().await;
+    let talk = cleared_talk(&fx, true).await;
+    let words: Vec<Word> = (0..1400)
+        .map(|i| Word::new(format!("t{i}"), i * 400, i * 400 + 320, 0.9))
+        .collect();
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    let diarizer = MeasuringDiarizer {
+        turns: Vec::new(),
+        seconds: std::sync::Mutex::new(Vec::new()),
+    };
+    let outcome = run_scoped(
+        &fx,
+        talk,
+        &transcriber,
+        &diarizer,
+        &WavConverter { seconds: 600 },
+        "qa",
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert!(
+        diarizer.seconds.lock().unwrap().is_empty(),
+        "no diarization for a monologue"
     );
 }

@@ -4285,6 +4285,7 @@ name = "wt-asr"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "regex",
  "serde",
  "serde_json",
  "sysinfo",
@@ -4467,6 +4468,7 @@ name = "wt-segment"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

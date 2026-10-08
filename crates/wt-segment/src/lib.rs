@@ -2,6 +2,7 @@
 //! segmentation).
 
 pub mod diarize;
+pub mod scope;
 pub mod segmenter;
 
 pub use diarize::{

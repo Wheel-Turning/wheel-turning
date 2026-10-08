@@ -211,7 +211,8 @@ pub async fn assign_speaker(
     actor: &str,
 ) -> Result<SpeakerOutcome, RegistryDbError> {
     let talk = sqlx::query!(
-        r#"select t.title, sv.description, t.state::text as "state!", t.state_reason
+        r#"select t.title, sv.description, t.state::text as "state!", t.state_reason,
+                  sv.platform::text = 'engagewisdom' as "byline_only!"
            from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1"#,
         talk_id.as_uuid()
     )
@@ -229,7 +230,10 @@ pub async fn assign_speaker(
         return Ok(SpeakerOutcome::NeedsReview);
     }
 
-    match matcher.resolve(&talk.title, talk.description.as_deref()) {
+    // A source that names its speaker is read from that line alone, so a title naming another
+    // teacher does not make the talk ambiguous (Spec 03, EngageWisdom sources, rule 3).
+    let title = if talk.byline_only { "" } else { &talk.title };
+    match matcher.resolve(title, talk.description.as_deref()) {
         SpeakerMatch::Resolved { teacher, alias } => {
             sqlx::query!(
                 r#"update talk set teacher_id = $2, sangha_id = $3, speaker_guess = $4,
@@ -278,6 +282,68 @@ pub async fn assign_speaker(
             Ok(SpeakerOutcome::NeedsReview)
         }
     }
+}
+
+/// Makes each speaker a teacher of `sangha`, with their name as an alias, unless a teacher of
+/// that name or alias exists (Spec 03, EngageWisdom sources, rule 3). The sangha is created if
+/// new, unlisted until its donation link is checked. Returns the names added.
+pub async fn ensure_teachers(
+    conn: &mut PgConnection,
+    sangha: &str,
+    speakers: &[String],
+    actor: &str,
+) -> Result<Vec<String>, RegistryDbError> {
+    sqlx::query!(
+        "insert into sangha (name, listed) values ($1, false) on conflict (name) do nothing",
+        sangha
+    )
+    .execute(&mut *conn)
+    .await?;
+    let mut added = Vec::new();
+    for name in speakers {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let known = sqlx::query_scalar!(
+            r#"select exists (select 1 from teacher where lower(display_name) = lower($1))
+                   or exists (select 1 from teacher_alias where lower(alias) = lower($1)) as "x!""#,
+            name
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if known {
+            continue;
+        }
+        let id = sqlx::query_scalar!(
+            "insert into teacher (display_name, sangha_id)
+             select $1, id from sangha where name = $2 returning id",
+            name,
+            sangha
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        sqlx::query!(
+            "insert into teacher_alias (teacher_id, alias) values ($1, $2)",
+            id,
+            name
+        )
+        .execute(&mut *conn)
+        .await?;
+        log_change(
+            conn,
+            "teacher",
+            id,
+            "display_name",
+            None,
+            Some(serde_json::json!({ "display_name": name, "sangha": sangha })),
+            actor,
+            "speaker named by a mandated source",
+        )
+        .await?;
+        added.push(name.to_owned());
+    }
+    Ok(added)
 }
 
 /// Every display name and alias of teachers who have not opted out, for scoring recognition of

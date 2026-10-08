@@ -257,7 +257,7 @@ async fn the_committed_seed_imports_and_is_idempotent() {
     .await
     .unwrap();
     assert_eq!(
-        unverified, 5,
+        unverified, 8,
         "every seeded donation link starts unverified"
     );
 }

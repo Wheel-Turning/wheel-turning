@@ -6,6 +6,7 @@ pub mod classify;
 pub mod completeness;
 pub mod config;
 pub mod dates;
+pub mod engagewisdom;
 pub mod feedmatch;
 pub mod http;
 pub mod media;

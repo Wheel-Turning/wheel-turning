@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select t.title, sv.description, t.state::text as \"state!\", t.state_reason\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
+  "query": "select t.title, sv.description, t.state::text as \"state!\", t.state_reason,\n                  sv.platform::text = 'engagewisdom' as \"byline_only!\"\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
   "describe": {
     "columns": [
       {
@@ -41,6 +41,12 @@
             "name": "state_reason"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "byline_only!",
+        "type_info": "Bool",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -52,8 +58,9 @@
       false,
       true,
       null,
-      true
+      true,
+      null
     ]
   },
-  "hash": "bd62839cdbbd2e2ee6ecb5ec6fcbac03c89ab42540c956c1b8a7f38066b26ed7"
+  "hash": "dbe9038cfbc4e90edffa61f27cef8597bfd79c7d7866bf3f07be494ddf860099"
 }

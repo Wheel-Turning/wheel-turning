@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sv.raw->'item'->>'transcript' as \"text\"\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where t.id = $1 and sv.platform = 'engagewisdom'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "text",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "df994017d209ca46192079e82bd45a5ab4c09611f5fbabeb15039285af3ef719"
+}
