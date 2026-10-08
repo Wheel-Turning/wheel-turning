@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select url as \"url!\" from source_video where raw->>'source' = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cb6b15b50faa1f08bf710d42402669b1e201da41b8325b44f012874d2b3e3795"
+}

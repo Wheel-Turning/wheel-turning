@@ -63,11 +63,37 @@ pub async fn discover(
                 let Some(collection) = source.collection_url.as_deref() else {
                     bail!("source {} has no collection_url", source.name);
                 };
-                Box::new(wt_ingest::engagewisdom::EngageWisdomAdapter::new(
+                // A whole collection takes hours at the crawl delay: talks are recorded in
+                // batches, and a rerun skips those already recorded.
+                let known = {
+                    let mut conn = pool.acquire().await?;
+                    wt_db::ingest::recorded_urls(&mut conn, &source.name).await?
+                };
+                let adapter = wt_ingest::engagewisdom::EngageWisdomAdapter::new(
                     collection,
                     source.max_talks,
                     exclusions.clone(),
-                )?)
+                )?
+                .with_known(known)
+                .with_batch(EW_BATCH);
+                let mut total = pipeline::DiscoveryReport::default();
+                loop {
+                    let mut conn = pool.acquire().await?;
+                    let report = pipeline::discover(&mut conn, source, &adapter, None)
+                        .await
+                        .with_context(|| format!("discovering {}", source.name))?;
+                    if report.listed == 0 {
+                        break;
+                    }
+                    total.listed += report.listed;
+                    total.new += report.new;
+                    total.changed += report.changed;
+                    total.unchanged += report.unchanged;
+                    total.withdrawn += report.withdrawn;
+                    tracing::info!(source = %source.name, recorded = total.listed, "discovery batch recorded");
+                }
+                reports.insert(source.name.clone(), report_json(&total));
+                continue;
             }
             SourcePlatform::Rss => {
                 let Some(feed_url) = source.feed_url.as_deref() else {
@@ -126,15 +152,19 @@ pub async fn discover(
         let report = pipeline::discover(&mut conn, source, adapter.as_ref(), None)
             .await
             .with_context(|| format!("discovering {}", source.name))?;
-        reports.insert(
-            source.name.clone(),
-            serde_json::json!({
-                "listed": report.listed, "new": report.new, "changed": report.changed,
-                "unchanged": report.unchanged, "withdrawn": report.withdrawn,
-            }),
-        );
+        reports.insert(source.name.clone(), report_json(&report));
     }
     print_json(&reports)
+}
+
+/// Talks an EngageWisdom discovery records at a time.
+const EW_BATCH: usize = 25;
+
+fn report_json(report: &pipeline::DiscoveryReport) -> serde_json::Value {
+    serde_json::json!({
+        "listed": report.listed, "new": report.new, "changed": report.changed,
+        "unchanged": report.unchanged, "withdrawn": report.withdrawn,
+    })
 }
 
 /// Runs jobs of the named kinds with `concurrency` workers until stopped, or with `drain`

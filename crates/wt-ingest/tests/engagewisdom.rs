@@ -168,6 +168,35 @@ async fn discovery_reads_every_listing_page_and_each_talk_page() {
 }
 
 #[tokio::test]
+async fn batches_skip_known_and_unreadable_talks_until_the_listing_is_done() {
+    let server = server().await;
+    Mock::given(method("GET"))
+        .and(path("/talks/the-pond"))
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let known = format!("{}/talks/remembering-ada", server.uri());
+    let adapter = adapter(&server, None).with_known([known]).with_batch(1);
+    let first = adapter.discover(None).await.unwrap();
+    let ids: Vec<&str> = first.iter().map(|v| v.external_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["FX-00003"],
+        "the known talk and the broken page are skipped"
+    );
+    assert!(adapter.discover(None).await.unwrap().is_empty());
+    let listings = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/fx")
+        .count();
+    assert_eq!(listings, 3, "the listing is read once: its three pages");
+}
+
+#[tokio::test]
 async fn the_crawl_delay_is_kept_between_requests() {
     let server = server().await;
     let started = std::time::Instant::now();
