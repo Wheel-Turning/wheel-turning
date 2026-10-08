@@ -5,7 +5,8 @@ POST /diarize takes a WAV upload and returns the speaker turns:
 
 It runs pyannote's speaker-diarization pipeline (`WT_DIARIZE_PIPELINE`, by default
 pyannote/speaker-diarization-community-1, see docs/model-licenses.md) with the Hugging Face
-token in HF_TOKEN. The upload is decoded in memory with soundfile and handed to pyannote as a
+token in HF_TOKEN, on the GPU when torch sees one (`WT_DIARIZE_DEVICE` overrides: "cpu", "cuda").
+The upload is decoded in memory with soundfile and handed to pyannote as a
 waveform, so nothing is written to disk, not even a temporary file. The token is never logged.
 """
 
@@ -25,6 +26,15 @@ _pipeline = None
 _lock = threading.Lock()
 
 
+def device(requested=None, cuda_available=None):
+    """The torch device to run on: `WT_DIARIZE_DEVICE` if set, else the GPU when there is one."""
+    name = (requested if requested is not None else os.environ.get("WT_DIARIZE_DEVICE", "")).strip()
+    if not name:
+        available = torch.cuda.is_available() if cuda_available is None else cuda_available
+        name = "cuda" if available else "cpu"
+    return torch.device(name)
+
+
 def pipeline():
     """Loads the pipeline once, on first use."""
     global _pipeline
@@ -38,6 +48,7 @@ def pipeline():
             loaded = Pipeline.from_pretrained(PIPELINE_NAME, token=token)
             if loaded is None:
                 raise RuntimeError(f"no access to {PIPELINE_NAME}; check the token and terms")
+            loaded.to(device())
             _pipeline = loaded
         return _pipeline
 
@@ -92,7 +103,7 @@ app = FastAPI(title="wt-diarize", lifespan=lifespan)
 def healthz() -> JSONResponse:
     if _pipeline is None:
         return JSONResponse({"status": "loading", "pipeline": PIPELINE_NAME}, status_code=503)
-    return JSONResponse({"status": "ok", "pipeline": PIPELINE_NAME})
+    return JSONResponse({"status": "ok", "pipeline": PIPELINE_NAME, "device": str(device())})
 
 
 @app.post("/diarize")

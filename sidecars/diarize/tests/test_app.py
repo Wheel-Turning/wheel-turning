@@ -58,3 +58,9 @@ def test_empty_turns_are_dropped():
     turns, count = app.relabel([(1.0, 1.0, "A"), (1.0, 2.0, "B")])
     assert turns == [{"speaker": "S2", "start_ms": 1000, "end_ms": 2000}]
     assert count == 2
+
+
+def test_device_prefers_the_gpu_and_honours_the_override():
+    assert str(app.device("", cuda_available=True)) == "cuda"
+    assert str(app.device("", cuda_available=False)) == "cpu"
+    assert str(app.device("cpu", cuda_available=True)) == "cpu"
