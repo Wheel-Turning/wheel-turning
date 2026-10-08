@@ -236,7 +236,34 @@ async fn steps(
     if let Some(c) = conn.as_deref_mut() {
         TalkRepo::advance(c, talk, PipelineState::Diarizing).await?;
     }
-    let turns = deps.diarizer.diarize(&wav).await?;
+    // Diarization is the slow step, so only the questions are diarized (Spec 04, Diarization
+    // and segmentation; owner's decision of October 8, 2026).
+    let audio_len = i32::try_from(raw.audio_ms).unwrap_or(i32::MAX);
+    let scope = if deps.segment.diarize_scope == "full" {
+        wt_segment::scope::Scope::Full
+    } else {
+        wt_segment::scope::scope(
+            &raw.words,
+            audio_len,
+            deps.segment.qa_preroll_s.saturating_mul(1000),
+            deps.segment.monologue_max_replies_per_hour,
+        )
+    };
+    tracing::info!(talk = %talk.id, ?scope, "diarization scope");
+    let turns = match scope {
+        wt_segment::scope::Scope::Monologue => wt_segment::scope::assemble(scope, audio_len, &[]),
+        wt_segment::scope::Scope::From { start_ms, .. } => {
+            match wt_core::scratch::wav_tail(&scratch, &wav, start_ms)? {
+                Some(tail) => {
+                    let turns = deps.diarizer.diarize(&tail).await;
+                    let _ = std::fs::remove_file(&tail);
+                    wt_segment::scope::assemble(scope, audio_len, &turns?)
+                }
+                None => deps.diarizer.diarize(&wav).await?,
+            }
+        }
+        wt_segment::scope::Scope::Full => deps.diarizer.diarize(&wav).await?,
+    };
 
     if let Some(c) = conn {
         TalkRepo::advance(c, talk, PipelineState::Segmenting).await?;

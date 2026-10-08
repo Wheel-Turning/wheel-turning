@@ -119,6 +119,23 @@ Acceptance criteria for aligned source transcripts:
 - [x] With a `FakeDiarizer` that returns a student turn, the stored transcript holds the source's teacher words, no student words, and the gap before the teacher's answer is marked "A student asked a question". (`wt-ingest/tests/audio.rs`; the label in `owner_export` and `pipeline.rs`.)
 - [x] The timing words never reach any store. (`wt-ingest/tests/audio.rs`: the stored words are the source's, with its own spellings.)
 
+## Diarizing only the questions
+
+Owner's decision of October 8, 2026. Diarization is the slow step: pyannote ran at 1.9 times real time on a 69-minute talk on the owner's PC, 36 minutes against about 11 for transcription with `large-v3-turbo`, and sherpa-onnx, though four times faster, split one teacher into two speakers or merged everyone into one depending on its threshold. A dharma talk is one voice until its questions begin, so with `[segment] diarize_scope = "qa"`:
+
+1. After transcription (or alignment, for a source transcript), the words are read for a phrase that opens the floor ("any questions", "I invite you to unmute", "raise your hand", "time for questions" and the like), ignoring the first fifth of the talk, where questions are announced rather than invited.
+2. With one, only the audio from `qa_preroll_s` (60) before it is diarized, cut from the scratch WAV into `tail.wav` and deleted after. The tail's speaker who holds most of that minute is the teacher, and the teacher holds everything before the cut.
+3. With none, a talk with at most `monologue_max_replies_per_hour` (4) short replies ("yes.", "thank you.", one after a question) is a monologue and is not diarized: one teacher turn covers it. A talk with more is diarized whole.
+4. `diarize_scope = "full"` diarizes every recording whole, as before.
+
+The risk the owner accepted: a student who speaks mid-talk, with no invitation and too few replies to flag a conversation, is kept as the teacher's words. The transcript review and the audit's student-speech check are the backstops.
+
+Acceptance criteria:
+
+- [x] A talk that invites questions has only its tail diarized, and the student is still dropped. (`wt-ingest/tests/audio.rs` and `wt-segment` `scope` unit tests.)
+- [x] A monologue is not diarized, and an early mention of questions does not count as an invitation. (Same.)
+- [x] A conversation with no invitation is diarized whole. (`wt-segment` `scope` unit tests.)
+
 ## Glossary correction
 
 The glossary is a standing asset in the `glossary_term` table, loaded from `scripts/seed_glossary.toml` and maintained with `wt glossary import` and `wt glossary add`. Each term has a canonical spelling, a kind (`term`, `name` or `text_title`) and a list of known variants, which are mis-hearings and alternate spellings. The seed file starts with the terms the PRD names (Dogen, shikantaza, Genjokoan) plus the series titles and common practice vocabulary, and grows from the suggestions file below.
@@ -335,6 +352,8 @@ Decision of October 3, 2026, following the GPU quota refusal in Spec 01.
 2. The first full run uses `large-v3` on the owner's Windows PC, built with whisper.cpp's Vulkan support on the Arc GPU and run with `GGML_VK_DISABLE_COOPMAT=1`, the setup the owner chose below, with `wt worker --kinds audio --concurrency 1`. The speed figures on the model card are for a Mac M1, so measure the real speed on this PC with the sample before planning. A CPU-only run could take weeks, and then renting a GPU machine by the hour is the better route.
 3. `wt asr benchmark --talks <ids>` runs both models over the ten-talk sample and compares each with a manual caption or a hand-corrected passage where one exists, and prints word error rate on the glossary terms, on teacher names and overall. Keep `large-v3` for the full run if `distil-large-v3` misses core vocabulary.
 4. Whichever model runs, the transcript JSON records its name and version, so a later switch to a better model can reprocess only the affected talks.
+
+Decision of October 8, 2026 (owner): the corpus runs on `large-v3-turbo` (`ggml-large-v3-turbo.bin` in `WT_WHISPER_MODEL`), for speed at scale. On the 10-minute benchmark clip it ran at 6.05 times real time against `large-v3`'s 3.49, with a word error rate of 1.88% against 1.18%, under the 5% cap. Talks already transcribed with `large-v3` stay as they are, and `wt asr requeue` can redo them.
 
 Decisions of October 6, 2026, made while building the benchmark and the model switch:
 

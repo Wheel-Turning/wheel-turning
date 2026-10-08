@@ -216,7 +216,10 @@ async fn run_stage(fx: &Fx, kind: JobKind, llm: &FakeLlm) -> String {
     let diarizer = FakeDiarizer::new(turns);
     let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
     let objects = LocalObjects::new(fx.dir.join("objects"));
-    let segment = SegmentSettings::default();
+    let segment = SegmentSettings {
+        diarize_scope: "full".into(),
+        ..SegmentSettings::default()
+    };
     let hints = AsrHints {
         glossary_prompt: "Dogen".into(),
         language: "en".into(),
