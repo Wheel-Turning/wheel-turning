@@ -953,3 +953,172 @@ fn a_text_layer_loses_hyphens_heads_page_numbers_and_footnotes() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A journal page: wide margins, so the running head stands at 13 percent of the page, below
+/// the fixed margin; the journal's name on even pages and the article's title on odd ones,
+/// each with the page number on the outer side. A line given with a leading `>` is indented.
+fn journal_page(n: u32, body: &[&str], foot: Option<&str>) -> Vec<fixture::TextLine> {
+    let printed = 224 + n;
+    let mut lines = vec![if n % 2 == 1 {
+        line(380.0, 105.0, 9.0, &format!("THE LOTUS SUTRA {printed}"))
+    } else {
+        line(72.0, 105.0, 9.0, &format!("{printed} THE SYNTHETIC REVIEW"))
+    }];
+    for (i, text) in body.iter().enumerate() {
+        let (x, text) = text.strip_prefix('>').map_or((72.0, *text), |t| (96.0, t));
+        lines.push(line(x, 140.0 + 17.0 * i as f32, 12.0, text));
+    }
+    if let Some(text) = foot {
+        lines.push(line(72.0, 660.0, 8.0, text));
+    }
+    lines
+}
+
+#[test]
+fn a_journal_scan_loses_alternating_heads_and_footnotes_and_joins_across_pages() {
+    let Some(tools) = real_tools() else { return };
+    let dir = temp();
+    let pages = [
+        journal_page(
+            1,
+            &[
+                ">Then the teacher said to the student that he should go",
+                "to the hall and ask after the health of the old monk.",
+                ">The student replied that the moon is one and is not",
+                "divided in any way at all, nor is",
+            ],
+            None,
+        ),
+        journal_page(
+            2,
+            &[
+                "Suchness divided into parts by the mind of the student.",
+                "Then he sat down and the bell rang twice in the hall",
+            ],
+            Some("1 The moon here stands for the mind, as the old commentaries hold."),
+        ),
+        journal_page(
+            3,
+            &[
+                ">Morning came and the student rose early to sweep.",
+                "He swept the hall and lit the lamps before the bell.",
+            ],
+            None,
+        ),
+        journal_page(
+            4,
+            &[">The old monk smiled at him and nothing more was said."],
+            None,
+        ),
+        journal_page(
+            5,
+            &[">Then the rain stopped and the student went home again."],
+            None,
+        ),
+        journal_page(
+            6,
+            &[">The book ends here, and thus have I heard it told."],
+            None,
+        ),
+    ];
+    let path = dir.join("journal.pdf");
+    std::fs::write(&path, fixture::pdf(&scan_of(&dir, &pages))).unwrap();
+    let settings = PdfSettings {
+        ocr: OcrMode::Always,
+        ..PdfSettings::default()
+    };
+    let read = pdf::read(
+        &tools,
+        &path,
+        &settings,
+        &dir.join("scratch"),
+        pdf::ReadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(read.ocr_pages, 6);
+    let rebuilt = pdf::rebuild::rebuild(&read.pages, true, false);
+    let blocks: Vec<String> = rebuilt
+        .sections
+        .iter()
+        .flat_map(|s| s.blocks.clone())
+        .collect();
+    let text = blocks.join("\n");
+    assert!(
+        !text.contains("LOTUS") && !text.contains("SYNTHETIC") && !text.contains("commentaries"),
+        "{text}"
+    );
+    let kinds = |k: &str| rebuilt.excluded.iter().filter(|e| e.kind == k).count();
+    assert_eq!(
+        (kinds("running_head"), kinds("footnote")),
+        (6, 1),
+        "{:?}",
+        rebuilt.excluded
+    );
+    // The paragraph that runs over the page break is one block; planted noise may add a
+    // stray mark between its halves.
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b.contains("in any way at all, nor is")
+                && b.contains("Suchness divided into parts")),
+        "{blocks:#?}"
+    );
+    assert!(
+        blocks.iter().any(|b| b.starts_with("Morning came")),
+        "{blocks:#?}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Tools that must not be reached.
+struct Untouched;
+
+impl PdfTools for Untouched {
+    fn page_count(&self, _: &Path) -> Result<u32, TextError> {
+        panic!("the PDF was read before the word list was checked")
+    }
+
+    fn text_layer(&self, _: &Path, _: u32) -> Result<Page, TextError> {
+        panic!("the PDF was read before the word list was checked")
+    }
+
+    fn render(&self, _: &Path, _: u32, _: u32, _: Option<Crop>, _: &Path) -> Result<(), TextError> {
+        panic!("the PDF was read before the word list was checked")
+    }
+
+    fn ocr(&self, _: &Path, _: &[String], _: u32) -> Result<Page, TextError> {
+        panic!("the PDF was read before the word list was checked")
+    }
+
+    fn engine(&self) -> Result<String, TextError> {
+        panic!("the PDF was read before the word list was checked")
+    }
+}
+
+#[tokio::test]
+async fn a_missing_word_list_refuses_the_import_before_any_page_is_read() {
+    let fx = start().await;
+    let ev = evidence(&fx.pool).await;
+    let manifest = write_manifest(&fx.dir, ev, 0.1);
+    let env = PdfEnv {
+        tools: &Untouched,
+        scratch: fx.dir.join("scratch"),
+        word_list: fx.dir.join("no-such-words"),
+    };
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let err = texts::import(
+        &mut conn,
+        &fx.objects,
+        &FakeEmbedder::new("fake"),
+        &manifest,
+        &allowed(),
+        "owner",
+        false,
+        Some(&env),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("no-such-words"), "{err}");
+    assert!(err.contains("[texts] word_list"), "{err}");
+}

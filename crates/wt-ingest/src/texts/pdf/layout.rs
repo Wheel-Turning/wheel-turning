@@ -70,6 +70,11 @@ impl Line {
     pub fn bottom(&self) -> f32 {
         self.words.iter().map(|w| w.y1).fold(0.0, f32::max)
     }
+
+    /// Its left edge.
+    pub fn left(&self) -> f32 {
+        self.words.iter().map(|w| w.x0).fold(f32::MAX, f32::min)
+    }
 }
 
 /// A block, which both tools take for a paragraph.
@@ -90,10 +95,35 @@ impl Block {
         self.lines.iter().map(Line::top).fold(f32::MAX, f32::min)
     }
 
-    /// The median height of its words.
+    /// Its type size: see [`type_size`].
     pub fn type_size(&self) -> f32 {
-        median(self.words().map(Word::height).collect())
+        type_size(self.words())
     }
+}
+
+/// Whether a word's box spans exactly the ascender height: letters with an ascender or a
+/// capital, none with a descender, and no punctuation that reaches below the baseline.
+fn ascender_word(text: &str) -> bool {
+    let mut letters = text.chars().filter(|c| c.is_alphabetic()).peekable();
+    letters.peek().is_some()
+        && text
+            .chars()
+            .all(|c| c.is_alphabetic() || ".:!?'\"\u{2018}\u{2019}\u{201C}\u{201D}".contains(c))
+        && text
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .any(|c| c.is_uppercase() || "bdfhklt".contains(c))
+        && !letters.any(|c| "gjpqyJQ".contains(c))
+}
+
+/// The type size of some words: the median height of those that span the ascender height, or
+/// of all of them when none do. A word's box grows with its ascenders and descenders, so a
+/// plain median of all words drifts with the wording; Tesseract's boxes for a footnote in 9
+/// point type under 11 point body type came within a few percent of the body that way.
+pub fn type_size<'a>(words: impl Iterator<Item = &'a Word>) -> f32 {
+    let (tall, all): (Vec<&Word>, Vec<&Word>) = words.partition(|w| ascender_word(&w.text));
+    let pick = if tall.is_empty() { all } else { tall };
+    median(pick.into_iter().map(Word::height).collect())
 }
 
 /// One page.
