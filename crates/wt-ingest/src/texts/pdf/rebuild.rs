@@ -55,7 +55,7 @@ pub struct Placed {
 pub struct Excluded {
     /// Its page.
     pub page: u32,
-    /// `page_number`, `running_head` or `footnote`.
+    /// `page_number`, `running_head`, `footnote` or `noise`.
     pub kind: &'static str,
     /// Its text, up to 80 characters.
     pub text: String,
@@ -286,7 +286,9 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
             }
         };
     for (page, edge) in pages.iter().zip(&edges) {
-        let mut kept: Vec<Vec<&Line>> = Vec::new();
+        // Each kept block, with whether only noise stood between it and the block before.
+        let mut kept: Vec<(bool, Vec<&Line>)> = Vec::new();
+        let mut after_noise = false;
         for (b, block) in page.blocks.iter().enumerate() {
             let mut lines = Vec::new();
             for (l, line) in block.lines.iter().enumerate() {
@@ -307,8 +309,24 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
                     lines.push(line);
                 }
             }
-            if !lines.is_empty() {
-                kept.push(lines);
+            // Noise: a block with no letter or digit, such as a speck Tesseract reads as "?".
+            // It goes, and the text on either side of it is read as if it were not there.
+            let noise = !lines.is_empty()
+                && !lines
+                    .iter()
+                    .flat_map(|l| l.words.iter())
+                    .any(|w| w.text.chars().any(char::is_alphanumeric));
+            if noise {
+                let text: Vec<String> = lines.iter().map(|l| l.text()).collect();
+                out.excluded.push(Excluded {
+                    page: page.number,
+                    kind: "noise",
+                    text: short(&text.join(" ")),
+                });
+                after_noise = true;
+            } else if !lines.is_empty() {
+                kept.push((after_noise, lines));
+                after_noise = false;
             }
         }
         let size = |lines: &[&Line]| type_size(lines.iter().flat_map(|l| l.words.iter()));
@@ -318,17 +336,16 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
         let small = |lines: &[&Line]| body > 0.0 && size(lines) < body * FOOTNOTE_SIZE;
         let body_bottom = kept
             .iter()
-            .filter(|lines| !small(lines))
-            .map(|lines| top(lines))
+            .filter(|(_, lines)| !small(lines))
+            .map(|(_, lines)| top(lines))
             .fold(f32::MIN, f32::max);
-        let (feet, kept): (Vec<Vec<&Line>>, Vec<Vec<&Line>>) =
-            kept.into_iter().partition(|lines| {
-                small(lines)
-                    && page.height > 0.0
-                    && top(lines) >= page.height * FOOT
-                    && top(lines) > body_bottom
-            });
-        for lines in feet {
+        let (feet, kept): (Vec<_>, Vec<_>) = kept.into_iter().partition(|(_, lines)| {
+            small(lines)
+                && page.height > 0.0
+                && top(lines) >= page.height * FOOT
+                && top(lines) > body_bottom
+        });
+        for (_, lines) in feet {
             let text: Vec<String> = lines.iter().map(|l| l.text()).collect();
             out.excluded.push(Excluded {
                 page: page.number,
@@ -339,11 +356,15 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
         // The page's text edge, against which an indented first line starts a paragraph: the
         // lower quartile of the lines' left edges, since most lines are flush and a stray
         // speck can stand further left.
-        let mut lefts: Vec<f32> = kept.iter().flatten().map(|l| l.left()).collect();
+        let mut lefts: Vec<f32> = kept
+            .iter()
+            .flat_map(|(_, lines)| lines)
+            .map(|l| l.left())
+            .collect();
         lefts.sort_by(f32::total_cmp);
         let text_left = lefts.get(lefts.len() / 4).copied().unwrap_or(0.0);
         let indented = |line: &Line| body > 0.0 && line.left() - text_left > body * INDENT;
-        for (i, lines) in kept.into_iter().enumerate() {
+        for (i, (after_noise, lines)) in kept.into_iter().enumerate() {
             let words: usize = lines.iter().map(|l| l.words.len()).sum();
             if body > 0.0 && size(&lines) >= body * HEADING_SIZE && words <= HEADING_WORDS {
                 flush(&mut title, &mut paragraphs, &mut out);
@@ -355,10 +376,11 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
             if para.is_empty() {
                 continue;
             }
-            // A paragraph that runs over a page break continues the last one: the last does not
-            // end a sentence and this page's first line is not indented. Verse, whose lines
-            // seldom end in a stop, also needs the line to start in lower case.
-            let continues = i == 0
+            // A paragraph that runs over a page break, or past noise, continues the last one:
+            // the last does not end a sentence and this block's first line is not indented.
+            // Verse, whose lines seldom end in a stop, also needs the line to start in lower
+            // case.
+            let continues = (i == 0 || after_noise)
                 && paragraphs
                     .last()
                     .and_then(|p| p.last())
@@ -808,6 +830,83 @@ mod tests {
         // Short lines must match exactly.
         assert!(!same_head("notes", "note"));
         assert!(same_head("notes", "notes"));
+    }
+
+    /// One page as Tesseract read a journal page: a paragraph split into two blocks by a speck
+    /// read as "?", which stands level with the second block's first line.
+    fn speck_page(second_first_line: &str) -> Page {
+        let mut speck = ocr_block(&["?"], 746.0, 824.0, 11.0);
+        speck.lines[0].words[0].y0 = 824.0;
+        Page {
+            number: 1,
+            width: 1830.0,
+            height: 2774.0,
+            blocks: vec![
+                ocr_block(
+                    &[
+                        ">The teacher asked: \"What is the meaning of emptiness?\"",
+                        "The student replied: \"It is empty",
+                    ],
+                    342.0,
+                    716.0,
+                    30.0,
+                ),
+                speck,
+                ocr_block(
+                    &[second_first_line, "And the teacher said nothing more."],
+                    342.0,
+                    824.0,
+                    30.0,
+                ),
+            ],
+            origin: Origin::Ocr,
+        }
+    }
+
+    #[test]
+    fn a_speck_between_blocks_is_noise_and_the_paragraph_goes_on() {
+        let r = rebuild(
+            &[speck_page("because it is empty.\" Then he bowed.")],
+            true,
+            false,
+        );
+        assert_eq!(
+            all_text(&r),
+            vec![
+                "The teacher asked: \"What is the meaning of emptiness?\" The student replied: \
+                 \"It is empty because it is empty.\" Then he bowed. And the teacher said \
+                 nothing more."
+            ]
+        );
+        assert_eq!(
+            r.excluded,
+            vec![Excluded {
+                page: 1,
+                kind: "noise",
+                text: "?".into()
+            }]
+        );
+        assert!(r.words.iter().all(|w| w.text != "?"));
+    }
+
+    #[test]
+    fn past_a_speck_an_indented_line_still_starts_a_paragraph() {
+        let r = rebuild(
+            &[speck_page(">Because it is empty, he bowed.")],
+            true,
+            false,
+        );
+        assert_eq!(all_text(&r).len(), 2, "{:?}", all_text(&r));
+        assert_eq!(r.excluded.len(), 1);
+    }
+
+    #[test]
+    fn without_a_speck_blocks_on_one_page_stay_apart() {
+        let mut page = speck_page("because it is empty.\" Then he bowed.");
+        page.blocks.remove(1);
+        let r = rebuild(&[page], true, false);
+        assert_eq!(all_text(&r).len(), 2, "{:?}", all_text(&r));
+        assert!(r.excluded.is_empty());
     }
 
     #[test]
