@@ -30,7 +30,9 @@ feed_url = "https://feeds.feedburner.com/SeattleSotoZen"
 [[source]]
 name = "sfzc"
 platform = "engagewisdom"
-collection_url = "https://sfzc.engagewisdom.com/sf"
+# Newest first: the default order opens on the Suzuki archive's talks, which the suzuki-roshi
+# source already lists under the same serials.
+collection_url = "https://sfzc.engagewisdom.com/sf?search_api_views_fulltext=&order=field_date_timestamp_1&sort=desc"
 default_sangha = "San Francisco Zen Center"
 link_style = "engagewisdom"
 default_talk_type = "dharma_talk"
