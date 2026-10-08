@@ -6,6 +6,7 @@
 pub mod extract;
 pub mod large;
 pub mod manifest;
+pub mod notice;
 pub mod pdf;
 pub mod proofread;
 pub mod reference;
@@ -157,6 +158,14 @@ pub struct ImportReport {
     pub queued: Option<large::Queued>,
     /// For a manifest with parts: each part's report.
     pub parts: Vec<ImportReport>,
+    /// Legal pages and notice blocks kept apart from the units.
+    pub legal_blocks: usize,
+    /// Copyright notices naming a holder the evidence does not cover.
+    pub notices: Vec<notice::Notice>,
+    /// What the notices did: `blocked: third_party_notice`, `flagged` or `held`.
+    pub notice_outcome: Option<String>,
+    /// Why nothing was imported, such as a text that is not English.
+    pub skipped: Option<String>,
 }
 
 /// Where an edition's source files are kept.
@@ -250,7 +259,7 @@ async fn check_evidence(
     conn: &mut sqlx::PgConnection,
     id: &str,
     allowed_codes: &[String],
-) -> Result<sqlx::types::Uuid, TextError> {
+) -> Result<(sqlx::types::Uuid, texts::ImportEvidence), TextError> {
     let evidence_id: sqlx::types::Uuid = id
         .parse()
         .map_err(|e| TextError::Evidence(format!("license_evidence_id: {e}")))?;
@@ -268,7 +277,7 @@ async fn check_evidence(
             ev.license_code
         )));
     }
-    Ok(evidence_id)
+    Ok((evidence_id, ev))
 }
 
 impl ImportReport {
@@ -289,6 +298,10 @@ impl ImportReport {
             pdf: None,
             queued: None,
             parts: Vec::new(),
+            legal_blocks: 0,
+            notices: Vec::new(),
+            notice_outcome: None,
+            skipped: None,
         }
     }
 }
@@ -440,7 +453,7 @@ async fn import_one(
     let dir = manifest_path.parent().unwrap_or(Path::new("."));
 
     // 1. The evidence must exist, be approved, and carry an allowed code.
-    let evidence_id =
+    let (evidence_id, evidence) =
         check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
 
     // 2 and 3. Extract and filter.
@@ -534,9 +547,55 @@ async fn import_one(
         sections.extend(rebuilt.sections);
     }
     let key = sha256_hex(key_input.as_bytes());
-    let (kept, excluded): (Vec<_>, Vec<_>) = sections
+    let (mut kept, excluded): (Vec<_>, Vec<_>) = sections
         .into_iter()
         .partition(|s| extract::keep(s.title.as_deref(), &m.source.include_sections));
+
+    // Legal pages are kept apart, whole, and never embedded or shown (Spec 08, Source copies
+    // and legal pages).
+    let (legal, legal_places) = notice::take_legal(&mut kept);
+
+    // Only English in v1 (Spec 08, Mandated sources).
+    let sample: String = kept
+        .iter()
+        .flat_map(|s| s.blocks.iter())
+        .take(200)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !m.edition.language.eq_ignore_ascii_case("en") || !notice::is_english(&sample) {
+        let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
+        report.skipped = Some(format!(
+            "not English (language {:?}, {:.0}% common English words): only English is loaded \
+             in v1",
+            m.edition.language,
+            notice::english_share(&sample) * 100.0
+        ));
+        return Ok(report);
+    }
+
+    // The notice scan: the legal pages and the first and last blocks. A notice naming a holder
+    // the evidence does not cover blocks the document, unless its mandated source flags or
+    // holds noticed documents instead.
+    let found = notice::notices(
+        legal
+            .iter()
+            .map(String::as_str)
+            .chain(notice::edges(&kept, 3)),
+    );
+    let mut covers: Vec<&str> = vec![m.edition.rights_holder.as_str()];
+    covers.extend(evidence.publisher.as_deref());
+    covers.extend(evidence.grantor.as_deref());
+    let third = notice::third_party(&found, &covers);
+    let action = if third.is_empty() {
+        None
+    } else {
+        let source_action = match &m.edition.source_key {
+            Some(key) => wt_db::text_takedown::notice_action(conn, key).await?,
+            None => None,
+        };
+        Some(source_action.unwrap_or_else(|| "block".to_owned()))
+    };
 
     // 4 and 5. Units and locators.
     let units = units::cut(&kept, &m.units, &m.work.title)?;
@@ -609,7 +668,26 @@ async fn import_one(
         pdf: None,
         queued: None,
         parts: Vec::new(),
+        legal_blocks: legal.len(),
+        notices: third.clone(),
+        notice_outcome: action.as_deref().map(|a| match a {
+            "flag" => "flagged".to_owned(),
+            "hold" => "held".to_owned(),
+            _ => "blocked: third_party_notice".to_owned(),
+        }),
+        skipped: None,
     };
+    if action.as_deref() == Some("block") {
+        return Ok(report);
+    }
+    let notice_text: Option<String> = (!third.is_empty()).then(|| {
+        third
+            .iter()
+            .map(|n| n.line.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    let legal_text: Option<String> = (!legal.is_empty()).then(|| legal.join("\n\n"));
 
     // PDFs: each unit's page and confidence, and the suspect check (steps 4 and 6).
     let placements = if is_pdf {
@@ -727,6 +805,9 @@ async fn import_one(
             excerptable: true,
             content_hash: &key,
             source_key: m.edition.source_key.as_deref(),
+            legal_text: legal_text.as_deref(),
+            legal_pages: serde_json::json!(legal_places),
+            notice: notice_text.as_deref(),
             extraction: report
                 .pdf
                 .as_ref()
@@ -786,6 +867,20 @@ async fn import_one(
     )
     .await?;
     tx.commit().await?;
+    // A held document waits in quarantine to be released one at a time.
+    if action.as_deref() == Some("hold") {
+        wt_db::text_takedown::set_state_logged(
+            conn,
+            edition,
+            "quarantined",
+            &format!(
+                "held for a notice: {}",
+                notice_text.as_deref().unwrap_or("")
+            ),
+            opts.actor,
+        )
+        .await?;
+    }
 
     // The source files, kept so the import can be repeated (Spec 08, step 6).
     let prefix = source_prefix(&m.work.title, &m.edition.label);

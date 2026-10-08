@@ -638,6 +638,65 @@ async fn too_many_suspect_units_stop_the_import_with_a_report() {
     assert_eq!(report.pdf.unwrap().suspect.len(), 6);
 }
 
+#[tokio::test]
+async fn a_pdf_whose_first_page_names_another_holder_is_blocked_until_evidence_names_it() {
+    let fx = start().await;
+    let ev = evidence(&fx.pool).await;
+    let mut pages = book();
+    pages[0].blocks.insert(
+        1,
+        block(
+            &["Copyright 1994 by Fixture Holder Estate. All rights reserved."],
+            60.0,
+            12.0,
+            1.0,
+        ),
+    );
+    let tools = FakeTools { pages };
+    let env = PdfEnv {
+        tools: &tools,
+        scratch: fx.dir.join("scratch"),
+        word_list: word_list(&fx.dir),
+    };
+    let manifest = write_manifest(&fx.dir, ev, 0.2);
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let blocked = texts::import(
+        &mut conn,
+        &fx.objects,
+        &FakeEmbedder::new("fake"),
+        &manifest,
+        &allowed(),
+        "owner",
+        true,
+        Some(&env),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        blocked.notice_outcome.as_deref(),
+        Some("blocked: third_party_notice")
+    );
+    assert!(!blocked.applied);
+    let text = std::fs::read_to_string(&manifest).unwrap().replace(
+        "rights_holder = \"public domain\"",
+        "rights_holder = \"Fixture Holder Estate\"",
+    );
+    std::fs::write(&manifest, text).unwrap();
+    let cleared = texts::import(
+        &mut conn,
+        &fx.objects,
+        &FakeEmbedder::new("fake"),
+        &manifest,
+        &allowed(),
+        "owner",
+        true,
+        Some(&env),
+    )
+    .await
+    .unwrap();
+    assert!(cleared.applied && cleared.legal_blocks == 1, "{cleared:?}");
+}
+
 #[test]
 fn the_vision_pass_is_refused() {
     let err = texts::manifest::CorpusManifest::parse(

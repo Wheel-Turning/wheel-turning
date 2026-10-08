@@ -733,6 +733,13 @@ enum ExclusionCommand {
 
 #[derive(Debug, Subcommand)]
 enum SourceCommand {
+    /// Lists text editions with a copyright notice the evidence does not cover, and those in
+    /// quarantine, for one source or all.
+    Report {
+        /// One source.
+        #[arg(long)]
+        key: Option<String>,
+    },
     /// Add a source of texts or talks. By default it is used on the owner's mandate, recorded
     /// with a rationale and the attribution line shown on excerpts; --basis license or
     /// permission uses approved evidence instead. Refused if an exclusion covers a prefix.
@@ -1375,6 +1382,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Source {
             command: SourceCommand::Enable { key, by },
         } => rights::set_enabled(&pool().await?, &key, true, None, &by).await?,
+        Command::Source {
+            command: SourceCommand::Report { key },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let rows = wt_db::text_takedown::noticed(&mut conn, key.as_deref()).await?;
+            commands::print_json(&rows)?;
+        }
         Command::Rights { command } => match command {
             RightsCommand::Request {
                 source,

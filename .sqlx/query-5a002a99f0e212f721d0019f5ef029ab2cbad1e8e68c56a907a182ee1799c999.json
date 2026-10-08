@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select allowed, license_code, publisher, grantor from license_evidence where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "allowed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "allowed"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "license_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "license_code"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "publisher",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "publisher"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "grantor",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "grantor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "5a002a99f0e212f721d0019f5ef029ab2cbad1e8e68c56a907a182ee1799c999"
+}
