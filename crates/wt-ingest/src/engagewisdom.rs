@@ -124,10 +124,19 @@ pub fn parse_talk(html: &str, url: &str) -> Result<TalkPage, IngestError> {
             .ok()
             .map(|d| d.format("%Y-%m-%d").to_string())
     });
-    let serial = re(&SERIAL)?
-        .captures(html)
-        .map(|c| c[1].to_owned())
-        .ok_or_else(|| parse("serial"))?;
+    // A few pages carry no serial; their address is their identity then.
+    let serial = match re(&SERIAL)?.captures(html) {
+        Some(c) => c[1].to_owned(),
+        None => {
+            let slug = url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| parse("serial or address"))?;
+            format!("page:{slug}")
+        }
+    };
     let body = re(&TRANSCRIPT)?
         .captures(html)
         .map(|c| c[1].to_owned())
@@ -307,6 +316,13 @@ mod tests {
                 .unwrap()
                 .contains("machine summary")
         );
+    }
+
+    #[test]
+    fn a_page_without_a_serial_is_known_by_its_address() {
+        let page = PAGE.replace("FX-00042", "");
+        let t = parse_talk(&page, "https://fx.example.invalid/talks/sunday-talk-18").unwrap();
+        assert_eq!(t.serial, "page:sunday-talk-18");
     }
 
     #[test]
