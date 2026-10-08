@@ -8,7 +8,7 @@ use serde::Deserialize;
 use super::TextError;
 
 /// A corpus text's manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorpusManifest {
     /// Always `corpus`.
@@ -24,6 +24,9 @@ pub struct CorpusManifest {
     /// Extra citation aliases per locator, for the resolver.
     #[serde(default)]
     pub aliases: BTreeMap<String, Vec<String>>,
+    /// For a PDF: how its pages are read (Spec 08, PDFs and OCR).
+    #[serde(default)]
+    pub pdf: Option<super::pdf::PdfSettings>,
 }
 
 /// `[work]`.
@@ -65,7 +68,7 @@ fn english() -> String {
     "en".into()
 }
 
-/// The source formats read in this build. PDFs come with Spec 08's PDF and OCR pipeline.
+/// The source formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
@@ -161,6 +164,15 @@ impl CorpusManifest {
             return Err(TextError::Manifest(
                 "the numbered scheme needs number_pattern".into(),
             ));
+        }
+        match (&m.pdf, m.source.format) {
+            (Some(pdf), Format::Pdf) => pdf.check()?,
+            (Some(_), _) => {
+                return Err(TextError::Manifest(
+                    "[pdf] is for a PDF source; set format = \"pdf\" or remove it".into(),
+                ));
+            }
+            (None, _) => {}
         }
         if text.contains("REPLACE_ME") {
             return Err(TextError::Manifest(

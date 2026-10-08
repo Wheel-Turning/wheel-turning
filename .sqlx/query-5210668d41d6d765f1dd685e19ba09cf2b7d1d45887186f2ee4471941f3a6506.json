@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_edition set units_hash = (\n             select coalesce(md5(string_agg(content_hash, ',' order by ordinal)), '')\n             from text_unit where edition_id = $1)\n           where id = $1 returning units_hash as \"h!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "h!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "units_hash"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "5210668d41d6d765f1dd685e19ba09cf2b7d1d45887186f2ee4471941f3a6506"
+}

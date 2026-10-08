@@ -53,6 +53,9 @@ async fn edition(pool: &PgPool, evidence: Uuid, excerptable: bool) -> (Uuid, Uui
     .execute(pool)
     .await
     .unwrap();
+    wt_db::texts::refresh_units_hash(&mut pool.acquire().await.unwrap(), edition)
+        .await
+        .unwrap();
     (work, edition)
 }
 
@@ -66,8 +69,8 @@ async fn served(pool: &PgPool, edition: Uuid) -> i64 {
 
 async fn proofread(pool: &PgPool, edition: Uuid, passed: bool) {
     sqlx::query(
-        "insert into proof_check (edition_id, sample_size, errors, reviewer, passed)
-         values ($1, 24, 0, 'reviewer', $2)",
+        "insert into proof_check (edition_id, sample_size, errors, reviewer, passed, units_hash)
+         select $1, 24, 0, 'reviewer', $2, units_hash from text_edition where id = $1",
     )
     .bind(edition)
     .bind(passed)
@@ -139,6 +142,23 @@ async fn servable_text_units_need_ready_allowed_excerptable_proofread_and_an_ena
     set_ready(&fx.pool, unproofed).await.unwrap();
     proofread(&fx.pool, unproofed, false).await;
     assert_eq!(served(&fx.pool, unproofed).await, 0);
+    proofread(&fx.pool, unproofed, true).await;
+    assert_eq!(served(&fx.pool, unproofed).await, 1);
+
+    // A passing proofread holds only for the units it read.
+    sqlx::query("update text_unit set content_hash = 'changed' where edition_id = $1")
+        .bind(unproofed)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    wt_db::texts::refresh_units_hash(&mut fx.pool.acquire().await.unwrap(), unproofed)
+        .await
+        .unwrap();
+    assert_eq!(
+        served(&fx.pool, unproofed).await,
+        0,
+        "changed units need a new proofread"
+    );
     proofread(&fx.pool, unproofed, true).await;
     assert_eq!(served(&fx.pool, unproofed).await, 1);
 

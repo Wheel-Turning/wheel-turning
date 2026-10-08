@@ -190,6 +190,7 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &allowed(),
         "owner",
         false,
+        None,
     )
     .await
     .unwrap();
@@ -210,6 +211,7 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &allowed(),
         "owner",
         true,
+        None,
     )
     .await
     .unwrap();
@@ -220,7 +222,7 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
     .fetch_one(&fx.pool)
     .await
     .unwrap();
-    assert_eq!((state.as_str(), excerptable), ("ready", true));
+    assert_eq!((state.as_str(), excerptable), ("imported", true));
     assert_eq!(count(&fx.pool, "text_unit").await, 3);
     let aliases: Vec<String> =
         sqlx::query_scalar("select aliases from work_locator where locator = 'fixture:1'")
@@ -254,6 +256,7 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &allowed(),
         "owner",
         true,
+        None,
     )
     .await
     .unwrap();
@@ -290,6 +293,7 @@ async fn evidence_must_exist_be_approved_and_carry_an_allowed_code() {
             &allowed(),
             "o",
             true,
+            None,
         )
         .await
         .unwrap_err();
@@ -315,6 +319,7 @@ async fn include_sections_restores_an_excluded_section() {
         &allowed(),
         "o",
         false,
+        None,
     )
     .await
     .unwrap();

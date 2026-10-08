@@ -12,3 +12,4 @@ pn = "pn" # P1..Pn, passage references
 cleary = "cleary" # Thomas Cleary, translator
 gya = "gya" # romanized Japanese, the Heart Sutra mantra "gya tei gya tei"
 maka = "maka" # romanized Japanese, "maka hannya haramita" (Maha Prajna Paramita)
+flate = "flate" # the PDF FlateDecode filter

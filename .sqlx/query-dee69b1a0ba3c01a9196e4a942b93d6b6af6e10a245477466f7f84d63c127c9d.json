@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_edition set state = $2::text::text_state where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dee69b1a0ba3c01a9196e4a942b93d6b6af6e10a245477466f7f84d63c127c9d"
+}

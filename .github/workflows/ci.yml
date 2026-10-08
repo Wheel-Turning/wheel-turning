@@ -69,7 +69,11 @@ jobs:
       # Database tests start their own pgvector container through testcontainers, using the
       # runner's Docker. Pull once up front so the first test does not time out on the pull.
       - run: docker pull pgvector/pgvector:pg16
+      # The PDF tests run poppler and Tesseract on synthetic PDFs (Spec 08, PDFs and OCR).
+      - run: sudo apt-get install --yes --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng
       - run: cargo test --workspace --locked
+        env:
+          WT_REQUIRE_OCR_TOOLS: "1"
 
   sqlx-prepare:
     name: cargo sqlx prepare --check

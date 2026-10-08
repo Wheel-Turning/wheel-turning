@@ -332,6 +332,17 @@ where e.state = 'ready' and e.excerptable and le.allowed
 
 The grants in `0010` extend to `proof_check` for `dg_pipeline` only.
 
+As built (decisions of October 7, 2026):
+
+- The vision pass is deferred. Its text could reach a displayed quotation, which CLAUDE.md rule 5 forbids, so a manifest with `vision_pass = "flagged"` is refused, and suspect pages go to the proofread and `wt text fix`. `DataClass::PublicText` comes with the vision pass, if it is ever built.
+- A proofread holds only for the units it read. Migration `0022_proof_gate.sql` adds `text_edition.units_hash`, which is refreshed whenever units are replaced or fixed, and `proof_check.units_hash`. `servable_text_unit` needs a passing check with a matching hash. It also adds the per-group counts `random_sampled`, `random_errors`, `worst_sampled` and `worst_errors` beside the totals.
+- An import leaves the edition `imported`. A passing `proof-import` sets it `ready` and links citations to its units; `wt text fix` sets it back to `imported`.
+- The proof sheet takes each sample group's error count as the number of wrong, missing or extra words, not just correct or error. The sample is drawn from a seed of the edition and its units hash, so the sheet and `proof-import` agree without storing it. The sheet is written as `data-inbox/_proof/proof-<edition>.html`.
+- The English word list is `[texts] word_list` in `pipeline.toml`, defaulting to `/usr/share/dict/words` (apt `wamerican`). A PDF import without it is refused, never silently unchecked.
+- Text-layer pages are read with `pdftotext -bbox-layout`, so running heads, page numbers and footnotes are found the same way on both kinds of page. Deskewing and columns are left to Tesseract's automatic page segmentation (`--psm 3`). `columns` accepts `auto`, `1` or `2` but is not yet passed to Tesseract.
+- Each unit's box on its page is stored as geometry in `texts-work/<work>/<edition>/placements.json`, never as an image, for the proof sheet's crops. Crops are rendered at 150 dpi in scratch and deleted there.
+- The tools are found on the `PATH`, or through `WT_POPPLER_BIN` and `WT_TESSERACT`. CI installs `poppler-utils` and `tesseract-ocr` and sets `WT_REQUIRE_OCR_TOOLS`, so the real-tool tests cannot skip there.
+
 ## Large documents
 
 A 2,500-page scan is a batch job, not a single import. These rules keep it resumable, bounded and checkable.
@@ -732,16 +743,16 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 
 Acceptance criteria for PDFs and OCR, using a synthetic text-layer PDF, a synthetic scanned PDF rendered from known text with planted noise, and a mixed one:
 
-- [ ] A page with a good text layer is read directly, and a page with no text layer goes to OCR, including inside one mixed PDF.
-- [ ] On the synthetic scan, OCR output matches the known source text at a character error rate under 2 percent, measured in the test.
-- [ ] Hyphenation at line breaks is removed, running heads and page numbers are dropped, and small-type foot blocks are excluded and listed in the dry run.
-- [ ] Units under `min_unit_confidence` or under `min_dictionary_share` are flagged suspect, and an import with more than `max_suspect_share` suspect units stops with a report.
-- [ ] The vision pass, tested with a fake client, replaces a page only at 0.75 similarity or higher, and a fake hallucinated page is rejected and left for proofreading.
-- [ ] `DataClass::PublicText` is refused without approved license evidence for the edition.
-- [ ] The proof sheet shows each sampled unit beside its page crop, the sample is 12 random and 12 lowest-confidence units, and `proof-import` computes pass or fail correctly from at most 1 error in the random 12 and at most 3 in the worst 12.
+- [x] A page with a good text layer is read directly, and a page with no text layer goes to OCR, including inside one mixed PDF. (`wt-ingest/tests/pdf.rs`, with real poppler and Tesseract.)
+- [x] On the synthetic scan, OCR output matches the known source text at a character error rate under 2 percent, measured in the test. (`wt-ingest/tests/pdf.rs`: a text PDF rendered by `pdftoppm` at 300 dpi with planted noise.)
+- [x] Hyphenation at line breaks is removed, running heads and page numbers are dropped, and small-type foot blocks are excluded and listed in the dry run. (`texts::pdf::rebuild` unit tests and `wt-ingest/tests/pdf.rs`, on fake and real tools.)
+- [x] Units under `min_unit_confidence` or under `min_dictionary_share` are flagged suspect, and an import with more than `max_suspect_share` suspect units stops with a report. (`texts::pdf::quality` unit tests and `wt-ingest/tests/pdf.rs`.)
+- [ ] The vision pass, tested with a fake client, replaces a page only at 0.75 similarity or higher, and a fake hallucinated page is rejected and left for proofreading. (Deferred, decision of October 7, 2026; `vision_pass = "flagged"` is refused.)
+- [ ] `DataClass::PublicText` is refused without approved license evidence for the edition. (Deferred with the vision pass.)
+- [x] The proof sheet shows each sampled unit beside its page crop, the sample is 12 random and 12 lowest-confidence units, and `proof-import` computes pass or fail correctly from at most 1 error in the random 12 and at most 3 in the worst 12. (`texts::pdf::proof` unit tests and `wt-ingest/tests/pdf.rs`.)
 - [x] An edition with no passing `proof_check` returns nothing from `servable_text_unit`, and one with a passing check serves. (`wt-db/tests/texts_schema.rs`.)
-- [ ] `wt text fix` changes the unit, writes `correction_log` and requires a new proofread before the edition serves again.
-- [ ] Units from a PDF edition show their page number, and no page image is stored in the database.
+- [x] `wt text fix` changes the unit, writes `correction_log` and requires a new proofread before the edition serves again. (`wt-ingest/tests/pdf.rs`; `wt-db/tests/texts_schema.rs` for the hash in the view.)
+- [x] Units from a PDF edition show their page number, and no page image is stored in the database. (`servable_text_unit.source_page`, set from the page each unit starts on; `wt-ingest/tests/pdf.rs` checks that no image is stored anywhere. The page shows it with the answer page in M5.)
 
 ## Source copies and legal pages
 

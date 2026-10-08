@@ -247,6 +247,46 @@ enum TextCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Writes a standalone proof sheet for an edition: each sampled unit beside a crop of its
+    /// page, to mark and save as proof.json.
+    Proof {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// Where the sheet goes.
+        #[arg(long, default_value = "data-inbox/_proof")]
+        out_dir: PathBuf,
+    },
+    /// Records a proofread from the sheet's proof.json. A pass makes the edition ready.
+    ProofImport {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// The saved proof.json.
+        #[arg(long)]
+        file: PathBuf,
+        /// Who read the units.
+        #[arg(long)]
+        reviewer: String,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
+    /// Corrects one unit's text. Its edition then needs a new proofread before it serves.
+    Fix {
+        /// The unit.
+        #[arg(long)]
+        unit: sqlx::types::Uuid,
+        /// The corrected text.
+        #[arg(long)]
+        text: String,
+        /// Who is correcting it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Why.
+        #[arg(long, default_value = "proofread correction")]
+        reason: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1314,6 +1354,44 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 &manifest,
                 apply,
                 &by,
+            )
+            .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Text {
+            command: TextCommand::Proof { edition, out_dir },
+        } => {
+            let path = index_cmds::proof_sheet(&pool().await?, &config, edition, &out_dir).await?;
+            commands::print_json(&serde_json::json!({ "sheet": path }))?;
+        }
+        Command::Text {
+            command:
+                TextCommand::ProofImport {
+                    edition,
+                    file,
+                    reviewer,
+                    config_dir,
+                },
+        } => {
+            let report =
+                index_cmds::proof_import(&pool().await?, edition, &file, &reviewer, &config_dir)
+                    .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Fix {
+                    unit,
+                    text,
+                    by,
+                    reason,
+                },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let embedder = stages::embedder(&config)?;
+            let report = wt_ingest::texts::proofread::fix_unit(
+                &mut conn, &embedder, unit, &text, &by, &reason,
             )
             .await?;
             commands::print_json(&report)?;
