@@ -68,6 +68,9 @@ pub struct AuditSettings {
     pub quarantine_days: i32,
     /// Days a mandated source may go without a permission request, default 14 (Spec 08).
     pub mandate_request_days: i32,
+    /// `[deployment] exposure = "public"`: a mandated source's exposure grows once the tool is
+    /// public, so the audit warns (Spec 08, Mandated sources).
+    pub public: bool,
 }
 
 impl AuditSettings {
@@ -80,6 +83,7 @@ impl AuditSettings {
             job_lock_timeout_s: 7200,
             quarantine_days: 7,
             mandate_request_days: 14,
+            public: false,
         }
     }
 }
@@ -396,6 +400,19 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
                and (select count(*) from generate_series(r.received_at::date + 1, now()::date,
                                                          interval '1 day') d
                     where extract(isodow from d) < 6) > 1",
+        )
+        .await?,
+    );
+    checks.push(
+        check(
+            pool,
+            "mandate_exposed",
+            Severity::Warn,
+            &format!(
+                "select sp.key from source_policy sp
+                 where {} and sp.enabled and sp.basis = 'mandate'",
+                settings.public
+            ),
         )
         .await?,
     );

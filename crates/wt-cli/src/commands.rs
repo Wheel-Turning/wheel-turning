@@ -167,8 +167,19 @@ pub async fn takedown(
     print_json(&crate::stages::with_objects(&report, deleted))
 }
 
-pub async fn audit(pool: &PgPool, env: Env) -> anyhow::Result<ExitCode> {
-    let report = wt_db::audit::run(pool, AuditSettings::defaults(env))
+pub async fn audit(pool: &PgPool, env: Env, config_dir: &Path) -> anyhow::Result<ExitCode> {
+    // Without a pipeline.toml, as in a bare checkout, the tool is private.
+    let pipeline = config_dir.join("pipeline.toml");
+    let deployment = if pipeline.exists() {
+        wt_ingest::config::Deployment::load(&pipeline)?
+    } else {
+        wt_ingest::config::Deployment::default()
+    };
+    let settings = AuditSettings {
+        public: deployment.public(),
+        ..AuditSettings::defaults(env)
+    };
+    let report = wt_db::audit::run(pool, settings)
         .await
         .context("running the audit")?;
     print_json(&report)?;

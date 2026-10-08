@@ -348,6 +348,51 @@ impl TextSettings {
     }
 }
 
+/// `[deployment]` in `config/pipeline.toml` (Spec 08, Mandated sources).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Deployment {
+    /// `private`, the default, or `public`.
+    pub exposure: String,
+}
+
+impl Default for Deployment {
+    fn default() -> Self {
+        Self {
+            exposure: "private".into(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct DeploymentFile {
+    #[serde(default)]
+    deployment: Deployment,
+}
+
+impl Deployment {
+    /// Reads `[deployment]` from `config/pipeline.toml`; without the section, private.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        let d =
+            parse::<DeploymentFile>(&read(pipeline)?, &pipeline.display().to_string())?.deployment;
+        if !matches!(d.exposure.as_str(), "private" | "public") {
+            return Err(ConfigError::Parse {
+                origin: pipeline.display().to_string(),
+                message: format!(
+                    "[deployment] exposure = {:?}; use private or public",
+                    d.exposure
+                ),
+            });
+        }
+        Ok(d)
+    }
+
+    /// Whether the tool is public.
+    pub fn public(&self) -> bool {
+        self.exposure == "public"
+    }
+}
+
 /// `[url_policy]` in `config/pipeline.toml` (Spec 08, Ingesting from URLs and Source policy):
 /// politeness, the download cap, and aggregator hosts, which evidence may not cover host-wide.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
