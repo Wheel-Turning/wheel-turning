@@ -103,6 +103,22 @@ Decisions of October 5, 2026, made while building the segmenter:
 
 `wt segment sample --count 10 --out report.html` picks ten cleared talks, runs steps 1 to 5 without persisting, and writes an HTML timeline per talk showing labeled spans with the first words of each. It is the tool for the PRD's ten-video segmentation check on talks that have passed the gate.
 
+## Aligned source transcripts
+
+Decision of October 7, 2026. When a source supplies its own transcript (Spec 03, EngageWisdom sources), the teacher's words come from that text and the audio supplies only timing and speakers, so the source's human-reviewed wording is kept and student speech is still never stored.
+
+1. Timing. The audio is transcribed in scratch by the configured Whisper model for word timestamps only; its words are never stored. A smaller model would be faster and is a later setting. The source text's `[mm:ss]` markers, where present, are removed from the text and kept as anchors.
+2. Alignment. The source text's words are aligned to the timing words by a monotonic sequence alignment on normalized tokens, constrained by the markers where they exist. Each source word takes the time of the timing word it matches, and unmatched words take times interpolated between their matched neighbors. A talk whose aligned share is under 0.6 goes to `needs_review` with reason `alignment_failed`, since the text and the recording may differ.
+3. Speakers. Diarization runs on the audio as usual, and each source word takes the speaker of the turn its time falls in. The words with times and speakers then go through segmentation exactly as ASR words do, so student turns, chant, announcements and sitting are labeled and removed by the same rules, and only the teacher's words are persisted.
+4. Student questions. A removed student turn leaves the gap every transcript already has before a teacher's answer, which exports, review files and the transcript page now mark "A student asked a question" (it was "Question omitted"). The paraphrase in rule 5 fills it later; the student's words exist only in scratch and are deleted with the audio.
+5. Paraphrases (deferred until zero data retention, decision of October 7, 2026). A `paraphrase` job sends a student turn's words, with the teacher's answer as context, to the model, which returns JSON holding a short paraphrase in the third person. A second call checks that the paraphrase is faithful to the question and holds no name, place or other identifying detail, returning JSON with a verdict and reasons. Only a paraphrase that passes is stored, in `student_question` (talk, start, end, paraphrase, model, checker verdict), attributed to "a student". It is shown before the teacher's answer as "A student asked, in paraphrase:" and is never embedded, searched or shown as a quotation. Until then the job is not queued, because the student's words would go to the model; the scratch copy needed for it is not kept, so paraphrasing later means fetching and aligning the audio again.
+
+Acceptance criteria for aligned source transcripts:
+
+- [x] A synthetic source text aligned to fake timing words gets each word's time, with markers honored and unmatched words interpolated; a mismatched recording goes to `needs_review` with `alignment_failed`. (`wt-asr` `align` unit tests and `wt-ingest/tests/audio.rs`.)
+- [x] With a `FakeDiarizer` that returns a student turn, the stored transcript holds the source's teacher words, no student words, and the gap before the teacher's answer is marked "A student asked a question". (`wt-ingest/tests/audio.rs`; the label in `owner_export` and `pipeline.rs`.)
+- [x] The timing words never reach any store. (`wt-ingest/tests/audio.rs`: the stored words are the source's, with its own spellings.)
+
 ## Glossary correction
 
 The glossary is a standing asset in the `glossary_term` table, loaded from `scripts/seed_glossary.toml` and maintained with `wt glossary import` and `wt glossary add`. Each term has a canonical spelling, a kind (`term`, `name` or `text_title`) and a list of known variants, which are mis-hearings and alternate spellings. The seed file starts with the terms the PRD names (Dogen, shikantaza, Genjokoan) plus the series titles and common practice vocabulary, and grows from the suggestions file below.

@@ -105,6 +105,17 @@ pub struct SourceConfig {
     /// (Spec 03, Mandated talks; decision of October 5, 2026).
     #[serde(default)]
     pub rights_source: Option<String>,
+    /// An EngageWisdom collection's listing page, such as `https://sfzc.engagewisdom.com/sf`.
+    #[serde(default)]
+    pub collection_url: Option<String>,
+    /// The most talks discovery reads, newest first: the sample's ten (Spec 03, EngageWisdom
+    /// sources). Unset reads every talk.
+    #[serde(default)]
+    pub max_talks: Option<usize>,
+    /// The type a talk takes when no title pattern or length decides, for a source that lists
+    /// only talks, such as `dharma_talk`.
+    #[serde(default)]
+    pub default_talk_type: Option<String>,
 }
 
 impl SourceConfig {

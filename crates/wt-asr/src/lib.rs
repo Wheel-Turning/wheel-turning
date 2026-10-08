@@ -14,6 +14,7 @@ use serde::Deserialize;
 use wt_core::scratch::{ScratchDir, wav_duration_ms};
 use wt_core::transcript::Word;
 
+pub mod align;
 pub mod bench;
 
 /// Recognition errors.

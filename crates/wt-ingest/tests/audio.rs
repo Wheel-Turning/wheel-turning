@@ -505,3 +505,123 @@ async fn a_new_model_requeues_only_talks_transcribed_with_another() {
         "{out:?}"
     );
 }
+
+/// A cleared EngageWisdom talk by Ada whose source transcript says what the timeline says, with
+/// the source's own spelling of three teacher words and the student's question in it too.
+async fn cleared_engagewisdom_talk(fx: &Fx, transcript: &str) -> TalkId {
+    let video: Uuid = sqlx::query_scalar(
+        "insert into source_video (platform, external_id, url, title, raw)
+         values ('engagewisdom', 'FX-00042', 'https://fx.example.invalid/talks/fixture',
+                 'Fixture Talk', $1)
+         returning id",
+    )
+    .bind(serde_json::json!({ "item": {
+        "audio_url": format!("{}/AudioFiles/talk.mp3", fx.server.uri()),
+        "transcript": transcript,
+        "speakers": ["Ada Fixture"],
+    }}))
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let talk: Uuid = sqlx::query_scalar(
+        "insert into talk (source_video_id, title, teacher_id, sangha_id, rights_holder, state)
+         select $1, 'Fixture Talk', id, sangha_id, 'Ada Fixture', 'awaiting_consent'
+         from teacher where display_name = 'Ada Fixture' returning id",
+    )
+    .bind(video)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    wt_db::consent::set_consent(
+        &fx.pool,
+        "Ada",
+        ConsentStatus::Granted,
+        Some("fixture"),
+        None,
+        "test",
+    )
+    .await
+    .unwrap();
+    TalkId::from(talk)
+}
+
+#[tokio::test]
+async fn an_aligned_source_transcript_keeps_its_teacher_words_and_drops_the_student() {
+    let fx = start().await;
+    let (words, turns) = timeline();
+    // The source writes every word the recording holds, but spells three teacher words its own
+    // way and adds a stage direction and a marker; the student's question is in it too.
+    let mut source: Vec<String> = words.iter().map(|w| w.text.clone()).collect();
+    source[10] = "Dōgen".into();
+    source[400] = "zazen".into();
+    source[1000] = "shikantaza".into();
+    let text = format!(
+        "[00:00]\n\n{} [laughs]\n\n{}",
+        source[..750].join(" "),
+        source[750..].join(" ")
+    );
+    let talk = cleared_engagewisdom_talk(&fx, &text).await;
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    let outcome = run(&fx, talk, &transcriber, turns).await.unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert!(fx.scratch_is_empty());
+
+    let json: serde_json::Value = serde_json::from_slice(
+        &fx.objects()
+            .get(&audio::transcript_key(talk, 1))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json["origin"], "aligned");
+    assert!(
+        json["model"]
+            .as_str()
+            .unwrap()
+            .starts_with("source-aligned/")
+    );
+    let stored: Vec<&str> = json["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["w"].as_str().unwrap())
+        .collect();
+    for kept in ["Dōgen", "zazen", "shikantaza"] {
+        assert!(
+            stored.contains(&kept),
+            "the source's wording of {kept} is kept"
+        );
+    }
+    assert!(
+        !stored
+            .iter()
+            .any(|w| w.starts_with('s') && w[1..].parse::<u32>().is_ok()),
+        "no student word"
+    );
+    assert!(!stored.contains(&"[laughs]"));
+    let origin: String = sqlx::query_scalar("select origin from transcript where talk_id = $1")
+        .bind(talk.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(origin, "aligned");
+}
+
+#[tokio::test]
+async fn a_source_transcript_of_another_recording_is_held_for_review() {
+    let fx = start().await;
+    let (words, turns) = timeline();
+    let other: Vec<String> = (0..1400).map(|i| format!("other{i}")).collect();
+    let talk = cleared_engagewisdom_talk(&fx, &other.join(" ")).await;
+    let transcriber = FakeTranscriber::new(words, 600_000);
+    let outcome = run(&fx, talk, &transcriber, turns).await.unwrap();
+    assert_eq!(outcome, AudioOutcome::Held("alignment_failed".into()));
+    assert_eq!(
+        state(&fx.pool, talk).await,
+        ("needs_review".into(), Some("alignment_failed".into()))
+    );
+    assert!(fx.scratch_is_empty());
+}

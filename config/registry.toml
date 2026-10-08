@@ -31,6 +31,21 @@ donation_url = "https://everydayzen.org/donate/"
 name = "Prairie Mountain Zen Center"
 # No donation link recorded yet.
 
+# EngageWisdom collections (Spec 03, EngageWisdom sources; decision of October 7, 2026). Their
+# teachers are added from each talk's byline at discovery. Donation links are recorded once
+# checked by a person.
+[[sangha]]
+name = "San Francisco Zen Center"
+# No donation link recorded yet.
+
+[[sangha]]
+name = "Berkeley Zen Center"
+# No donation link recorded yet.
+
+[[sangha]]
+name = "Peaceful Sea Sangha"
+# No donation link recorded yet.
+
 [[teacher]]
 display_name = "Kanshin Allison Tait"
 sangha = "Seattle Soto Zen"

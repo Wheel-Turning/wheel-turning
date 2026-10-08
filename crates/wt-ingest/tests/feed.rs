@@ -281,7 +281,7 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
             assert_eq!(url, "https://example.invalid/1.mp3");
             assert_eq!(mime_type.as_deref(), Some("audio/mpeg"));
         }
-        MediaRoute::None => panic!("expected the enclosure"),
+        other => panic!("expected the enclosure, got {other:?}"),
     }
     assert_eq!(
         feed::media_route(&mut conn, talk_of(&fx.pool, "700000003").await)

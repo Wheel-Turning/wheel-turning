@@ -22,3 +22,47 @@ default_sangha = "Seattle Soto Zen"
 link_style = "none"
 role = "audio_only"
 feed_url = "https://feeds.feedburner.com/SeattleSotoZen"
+
+# EngageWisdom collections (Spec 03, EngageWisdom sources; owner's decision of October 7, 2026).
+# Each talk page holds its transcript and audio; discovery waits robots.txt's 10-second crawl
+# delay between pages. All four are used on the owner's mandate: the keys are created with
+# `wt source add --kind talks`. `max_talks` is the ten-talk sample; remove it for the full run.
+[[source]]
+name = "sfzc"
+platform = "engagewisdom"
+collection_url = "https://sfzc.engagewisdom.com/sf"
+default_sangha = "San Francisco Zen Center"
+link_style = "engagewisdom"
+default_talk_type = "dharma_talk"
+rights_source = "sfzc"
+max_talks = 10
+
+[[source]]
+name = "suzuki-roshi"
+platform = "engagewisdom"
+collection_url = "https://suzukiroshi.engagewisdom.com/sr"
+default_sangha = "San Francisco Zen Center"
+link_style = "engagewisdom"
+default_talk_type = "dharma_talk"
+rights_source = "sfzc"
+max_talks = 10
+
+[[source]]
+name = "berkeleyzen"
+platform = "engagewisdom"
+collection_url = "https://berkeleyzen.engagewisdom.com/"
+default_sangha = "Berkeley Zen Center"
+link_style = "engagewisdom"
+default_talk_type = "dharma_talk"
+rights_source = "berkeleyzen"
+max_talks = 10
+
+[[source]]
+name = "peacefulsea"
+platform = "engagewisdom"
+collection_url = "https://peacefulsea.engagewisdom.com/eb"
+default_sangha = "Peaceful Sea Sangha"
+link_style = "engagewisdom"
+default_talk_type = "dharma_talk"
+rights_source = "peacefulsea"
+max_talks = 10

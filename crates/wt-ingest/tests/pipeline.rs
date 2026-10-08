@@ -447,7 +447,10 @@ async fn the_owner_export_writes_the_teachers_words_then_level_e_deletes_the_res
         text.contains("As Dogen wrote"),
         "the glossary's corrections"
     );
-    assert!(text.contains("_[Question omitted, 0:05:20]_"), "{text}");
+    assert!(
+        text.contains("_[A student asked a question, 0:05:20]_"),
+        "{text}"
+    );
     assert!(
         !text.split_whitespace().any(|w| w.len() > 1
             && w.starts_with('s')

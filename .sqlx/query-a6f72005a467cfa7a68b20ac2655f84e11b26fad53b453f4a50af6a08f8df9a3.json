@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into teacher (display_name, sangha_id)\n             select $1, id from sangha where name = $2 returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a6f72005a467cfa7a68b20ac2655f84e11b26fad53b453f4a50af6a08f8df9a3"
+}
