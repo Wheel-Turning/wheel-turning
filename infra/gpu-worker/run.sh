@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # From the PC: sets up a GPU machine and drains the audio queue on it (Spec 01, GPU access).
 #
-#   infra/gpu-worker/run.sh ubuntu@<address> [workers]
+#   infra/gpu-worker/run.sh ubuntu@<address> [workers] [hours]
+#
+# `hours` stops the workers after that long, so a run cannot pass its share of the spending cap.
 #
 # The machine is one the owner rented or launched, reached by SSH with the owner's key. This
 # script copies the repository's committed files to it, runs setup.sh, sends the Hugging Face
@@ -10,8 +12,9 @@
 # exposed. Every two minutes, and at the end, it copies the transcripts back into data/objects.
 # Delete the machine afterwards: it is billed by the hour.
 set -euo pipefail
-HOST=${1:?usage: run.sh user@host [workers]}
+HOST=${1:?usage: run.sh user@host [workers] [hours]}
 WORKERS=${2:-3}
+HOURS=${3:-0}
 MAIN=$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 # The key the provider was given; ~/.ssh/wt-gpu unless WT_GPU_SSH_KEY names another.
 KEY=${WT_GPU_SSH_KEY:-$HOME/.ssh/wt-gpu}
@@ -47,7 +50,9 @@ SYNC=$!
 trap 'kill $SYNC 2> /dev/null || true' EXIT
 
 step "work: $WORKERS workers"
-"${SSH[@]}" -o ExitOnForwardFailure=yes -R 55433:localhost:55433 "$HOST" \
+LIMIT=()
+[ "$HOURS" != 0 ] && LIMIT=(timeout "${HOURS}h")
+"${LIMIT[@]}" "${SSH[@]}" -o ExitOnForwardFailure=yes -R 55433:localhost:55433 "$HOST" \
   "bash ~/wt/infra/gpu-worker/work.sh $WORKERS" || echo "work.sh ended with an error"
 step "copy transcripts back"
 sync_objects
