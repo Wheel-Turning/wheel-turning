@@ -356,15 +356,30 @@ A 2,500-page scan is a batch job, not a single import. These rules keep it resum
 7. Memory and disk. Pages are processed one at a time and the document is never loaded whole. Scratch needs room for one chunk of page images only.
 8. Hardware. OCR is CPU work and needs no GPU. Wall time scales with pages divided by cores, so use the estimate instead of guessing.
 
+As built (October 7, 2026):
+
+- **Page cache.** Every page read, by an inline import or a chunk job, is cached as layout JSON (words, confidences, geometry; never an image) under `texts-work/_pages/<pdf sha256>/<settings hash>/<page>.json`. The settings hash covers the OCR mode, resolution, languages and `min_layer_chars`. A rerun, a retried chunk, another part of the same file, and assembly all read from the cache, so assembled text is the single-pass text and a killed chunk resumes at its first unread page.
+- **Queued imports.** A queued import keeps its manifest, sources and chunk plan under `texts-work/_imports/<id>/`, so a worker on any machine can run it.
+  - Chunk keys are `ocr:<import id>:<pdf sha256>:<first>-<last>`; the import id stands in for the edition, since a manifest with parts holds several.
+  - Each chunk marks itself done in the cache. The chunk that finds every chunk done queues `text_assemble`.
+  - `[pdf] chunk_pages` (default 50) sets the size. A dry run of a large PDF reads nothing and says what `--apply` would queue.
+- **`--estimate`.** It checks every page's text layer, OCRs the first three pages that need it to measure speed, and reports the projected time at `--concurrency`. It reports zero vision calls while the vision pass is deferred.
+- **Parts.** Parts are `[[parts]]` tables with `title`, `pages`, `locator_prefix`, and optional `label`, `author` and `license_evidence_id`. The file is read once through the cache.
+- **Weak ranges.** The per-range check runs in every PDF import over tenths of the OCR pages.
+  - A weak tenth read below `reocr_dpi` (default 400) is read again at that resolution. If it is still under `range_min_confidence`, it is reported and stored with the placements.
+  - The proof sheet then adds up to 6 units from it in a `range` group that are not already drawn. The weak ranges together may hold at most `proof_random_max_errors` errors per range.
+  - `wt text reocr --edition --pages --dpi` replaces those cached pages and imports the edition again.
+- **Workers.** `ocr_chunk` and `text_assemble` jobs run in `wt worker`. `vision_max_pages` is accepted and unused while the vision pass is deferred.
+
 Acceptance criteria for large documents:
 
-- [ ] A synthetic 300-page PDF split at 50 pages per chunk queues 6 jobs, completes with 3 workers, and assembles to text identical to a single-pass run.
-- [ ] Killing a worker mid-chunk and restarting reruns only the unfinished chunks.
-- [ ] `--estimate` queues nothing and prints every figure listed above.
-- [ ] Flagged pages beyond `vision_max_pages` skip the vision pass and go to proofreading, lowest confidence first.
-- [ ] A manifest with two parts creates two editions with separate locators and separate proofread requirements.
-- [ ] A synthetic scan with one badly degraded page range fails the per-range check and names it, and `reocr` on that range then passes.
-- [ ] Peak scratch usage during a run stays within one chunk of images.
+- [x] A synthetic 300-page PDF split at 50 pages per chunk queues 6 jobs, completes with 3 workers, and assembles to text identical to a single-pass run. (`wt-ingest/tests/large.rs`.)
+- [x] Killing a worker mid-chunk and restarting reruns only the unfinished chunks. (`wt-ingest/tests/large.rs`: only the unread pages of the unfinished chunk.)
+- [x] `--estimate` queues nothing and prints every figure listed above. (`wt-ingest/tests/large.rs`.)
+- [ ] Flagged pages beyond `vision_max_pages` skip the vision pass and go to proofreading, lowest confidence first. (Deferred with the vision pass; every flagged page goes to proofreading.)
+- [x] A manifest with two parts creates two editions with separate locators and separate proofread requirements. (`wt-ingest/tests/large.rs`.)
+- [x] A synthetic scan with one badly degraded page range fails the per-range check and names it, and `reocr` on that range then passes. (`wt-ingest/tests/large.rs`, with fake tools whose pages read well only at 600 dpi.)
+- [x] Peak scratch usage during a run stays within one chunk of images. (`wt-ingest/tests/large.rs`: one page image at a time.)
 
 ## Retrieval and answer changes
 

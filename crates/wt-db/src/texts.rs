@@ -324,6 +324,10 @@ pub struct NewProof<'a> {
     pub worst_sampled: i32,
     /// Errors in them.
     pub worst_errors: i32,
+    /// Units read from weak page ranges, counted in the totals.
+    pub range_sampled: i32,
+    /// Errors in them.
+    pub range_errors: i32,
     /// The error notes.
     pub notes: Option<String>,
 }
@@ -336,8 +340,8 @@ pub async fn record_proof(conn: &mut PgConnection, p: &NewProof<'_>) -> Result<U
                                   worst_errors)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id",
         p.edition,
-        p.random_sampled + p.worst_sampled,
-        p.random_errors + p.worst_errors,
+        p.random_sampled + p.worst_sampled + p.range_sampled,
+        p.random_errors + p.worst_errors + p.range_errors,
         p.reviewer,
         p.passed,
         p.notes,

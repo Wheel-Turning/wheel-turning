@@ -442,6 +442,46 @@ pub async fn import_text(
     Ok(report)
 }
 
+/// `wt text reocr`.
+pub async fn reocr(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    edition: sqlx::types::Uuid,
+    pages: &str,
+    dpi: u32,
+    by: &str,
+) -> anyhow::Result<wt_ingest::texts::ImportReport> {
+    let range = wt_ingest::texts::pdf::skipped(&[pages.to_owned()])?
+        .first()
+        .copied()
+        .context("--pages names no pages")?;
+    let pipeline = config_dir.join("pipeline.toml");
+    let licenses = wt_ingest::config::LicenseSettings::load(&pipeline)?;
+    let texts = wt_ingest::config::TextSettings::load(&pipeline)?;
+    let objects = stages::objects(config)?;
+    let embedder = stages::embedder(config)?;
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let env = wt_ingest::texts::PdfEnv {
+        tools: &tools,
+        scratch: config.scratch_dir.join("texts"),
+        word_list: texts.word_list,
+    };
+    let mut conn = pool.acquire().await?;
+    Ok(wt_ingest::texts::large::reocr(
+        &mut conn,
+        &objects,
+        &embedder,
+        &env,
+        &licenses.allowed_license_codes,
+        edition,
+        range,
+        dpi,
+        by,
+    )
+    .await?)
+}
+
 /// `wt text proof`: writes the proof sheet and returns its path.
 pub async fn proof_sheet(
     pool: &PgPool,
@@ -469,6 +509,7 @@ pub async fn proof_sheet(
 /// `wt text proof-import`.
 pub async fn proof_import(
     pool: &PgPool,
+    config: &Config,
     edition: sqlx::types::Uuid,
     file: &Path,
     reviewer: &str,
@@ -479,9 +520,11 @@ pub async fn proof_import(
         &std::fs::read(file).with_context(|| format!("reading {}", file.display()))?,
     )
     .with_context(|| format!("reading {}", file.display()))?;
+    let objects = stages::objects(config)?;
     let mut conn = pool.acquire().await?;
     Ok(wt_ingest::texts::proofread::import_proof(
         &mut conn,
+        &objects,
         edition,
         &proof,
         reviewer,

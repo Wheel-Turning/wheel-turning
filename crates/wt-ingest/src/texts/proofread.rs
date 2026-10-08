@@ -36,17 +36,20 @@ fn is_ocr(extraction: &str) -> bool {
     matches!(extraction, "ocr" | "ocr_vision")
 }
 
+/// What a proofread works from: the edition, its units, the sample, and the placements kept at
+/// import, which carry the weak page ranges.
+struct Drawn {
+    info: texts::EditionSummary,
+    units: Vec<texts::ProofUnit>,
+    sample: Vec<(Uuid, Group)>,
+    placements: Option<Placements>,
+}
+
 async fn drawn(
     conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
     edition: Uuid,
-) -> Result<
-    (
-        texts::EditionSummary,
-        Vec<texts::ProofUnit>,
-        Vec<(Uuid, Group)>,
-    ),
-    TextError,
-> {
+) -> Result<Drawn, TextError> {
     let info = texts::edition_summary(conn, edition)
         .await?
         .ok_or_else(|| TextError::Proof(format!("edition {edition} does not exist")))?;
@@ -63,13 +66,37 @@ async fn drawn(
             source_page: u.source_page,
         })
         .collect();
+    let placements: Option<Placements> = objects
+        .get(&format!(
+            "{}/{PLACEMENTS}",
+            super::work_prefix(&info.work_title, &info.edition_label)
+        ))?
+        .map(|b| serde_json::from_slice(&b))
+        .transpose()
+        .map_err(|e| TextError::Proof(format!("the stored placements: {e}")))?;
+    let ranges: Vec<(i32, i32)> = placements
+        .iter()
+        .flat_map(|p| p.low_ranges.iter())
+        .map(|r| {
+            (
+                i32::try_from(r.first).unwrap_or(i32::MAX),
+                i32::try_from(r.last).unwrap_or(i32::MAX),
+            )
+        })
+        .collect();
     let hash = info.units_hash.clone().unwrap_or_default();
-    let sample = proof::sample(
+    let sample = proof::sample_with_ranges(
         &candidates,
         is_ocr(&info.extraction),
         proof::seed(edition, &hash),
+        &ranges,
     );
-    Ok((info, units, sample))
+    Ok(Drawn {
+        info,
+        units,
+        sample,
+        placements,
+    })
 }
 
 /// The pixel rectangle of a box on a page rendered at `dpi`.
@@ -99,16 +126,13 @@ pub async fn sheet(
     edition: Uuid,
     scratch: &Path,
 ) -> Result<(String, String), TextError> {
-    let (info, units, sample) = drawn(conn, edition).await?;
+    let Drawn {
+        info,
+        units,
+        sample,
+        placements,
+    } = drawn(conn, objects, edition).await?;
     let prefix = super::source_prefix(&info.work_title, &info.edition_label);
-    let placements: Option<Placements> = objects
-        .get(&format!(
-            "{}/{PLACEMENTS}",
-            super::work_prefix(&info.work_title, &info.edition_label)
-        ))?
-        .map(|b| serde_json::from_slice(&b))
-        .transpose()
-        .map_err(|e| TextError::Proof(format!("the stored placements: {e}")))?;
     std::fs::create_dir_all(scratch)
         .map_err(|e| TextError::Source(format!("{}: {e}", scratch.display())))?;
     let mut pdfs: BTreeMap<String, std::path::PathBuf> = BTreeMap::new();
@@ -190,6 +214,7 @@ pub struct ProofReport {
 /// the error notes.
 pub async fn import_proof(
     conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
     edition: Uuid,
     file: &ProofFile,
     reviewer: &str,
@@ -204,17 +229,27 @@ pub async fn import_proof(
             file.edition_id
         )));
     }
-    let (info, _, sample) = drawn(conn, edition).await?;
+    let Drawn {
+        info,
+        sample,
+        placements,
+        ..
+    } = drawn(conn, objects, edition).await?;
+    let ranges = placements.map_or(0, |p| p.low_ranges.len());
     if info.units_hash.as_deref() != Some(file.units_hash.as_str()) {
         return Err(TextError::Proof(
             "the edition's units changed since the sheet was made; run wt text proof again".into(),
         ));
     }
-    let verdict = proof::score(
+    // Each weak range's spot check allows what the random sample does.
+    let verdict = proof::score_with_ranges(
         &sample,
         &file.answers,
         thresholds.random_max,
         thresholds.worst_max,
+        thresholds
+            .random_max
+            .saturating_mul(u32::try_from(ranges).unwrap_or(u32::MAX)),
     )?;
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     texts::record_proof(
@@ -228,6 +263,8 @@ pub async fn import_proof(
             random_errors: verdict.random_errors,
             worst_sampled: verdict.worst_sampled,
             worst_errors: verdict.worst_errors,
+            range_sampled: verdict.range_sampled,
+            range_errors: verdict.range_errors,
             notes: (!verdict.notes.is_empty()).then(|| verdict.notes.join("\n")),
         },
     )

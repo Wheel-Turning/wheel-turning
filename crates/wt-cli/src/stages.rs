@@ -112,6 +112,15 @@ pub struct Stages {
     actor: String,
     /// Talks indexed since the last `ANALYZE passage`.
     indexed: AtomicUsize,
+    /// For `ocr_chunk` and `text_assemble` jobs.
+    texts: Option<TextJobs>,
+}
+
+/// What text jobs need (Spec 08, Large documents).
+struct TextJobs {
+    tools: wt_ingest::texts::pdf::tools::Poppler,
+    word_list: PathBuf,
+    allowed_codes: Vec<String>,
 }
 
 impl Stages {
@@ -154,7 +163,20 @@ impl Stages {
         } else {
             (None, None, None)
         };
-        let embedder = if kinds.contains(&JobKind::Index) {
+        let texts = if kinds.contains(&JobKind::OcrChunk) || kinds.contains(&JobKind::TextAssemble)
+        {
+            let pipeline = config_dir.join("pipeline.toml");
+            Some(TextJobs {
+                tools: wt_ingest::texts::pdf::tools::Poppler::from_env(),
+                word_list: wt_ingest::config::TextSettings::load(&pipeline)?.word_list,
+                allowed_codes: wt_ingest::config::LicenseSettings::load(&pipeline)?
+                    .allowed_license_codes,
+            })
+        } else {
+            None
+        };
+        let embedder = if kinds.contains(&JobKind::Index) || kinds.contains(&JobKind::TextAssemble)
+        {
             Some(embedder(config)?)
         } else {
             None
@@ -191,11 +213,15 @@ impl Stages {
             hand_list: PgHandList::new(pool.clone()),
             actor: actor.to_owned(),
             indexed: AtomicUsize::new(0),
+            texts,
         })
     }
 
     /// Runs one claimed job of a stage kind.
     pub async fn run(&self, conn: &mut sqlx::PgConnection, job: &Job) -> anyhow::Result<Ran> {
+        if matches!(job.kind, JobKind::OcrChunk | JobKind::TextAssemble) {
+            return self.run_text(conn, job).await;
+        }
         let talk = job.talk_id.context("a stage job has no talk")?;
         let mut db = self.pool.acquire().await?;
         let glossary = Glossary::new(&wt_db::glossary::load(&mut db).await?)?;
@@ -262,6 +288,56 @@ impl Stages {
                 format!("{outcome:?}")
             }
             other => bail!("no stage handler for {other} jobs"),
+        };
+        Ok(Ran::Done(outcome))
+    }
+
+    /// Runs an `ocr_chunk` or `text_assemble` job. OCR is CPU work in subprocesses, one page at
+    /// a time; run `wt worker --kinds ocr_chunk --concurrency <cores>`.
+    async fn run_text(&self, conn: &mut sqlx::PgConnection, job: &Job) -> anyhow::Result<Ran> {
+        use wt_ingest::texts::large;
+        let texts = self
+            .texts
+            .as_ref()
+            .context("this worker was not started for text jobs")?;
+        let scratch = self.scratch_root.join("texts");
+        let outcome = match job.kind {
+            JobKind::OcrChunk => {
+                let input: large::ChunkJob = serde_json::from_value(job.payload.clone())
+                    .context("reading the ocr_chunk payload")?;
+                let o =
+                    large::run_chunk(conn, &self.objects, &texts.tools, &scratch, &input).await?;
+                format!("{o:?}")
+            }
+            JobKind::TextAssemble => {
+                let input: large::AssembleJob = serde_json::from_value(job.payload.clone())
+                    .context("reading the text_assemble payload")?;
+                let embedder = self
+                    .embedder
+                    .as_ref()
+                    .context("this worker was not started for text_assemble jobs")?;
+                let env = wt_ingest::texts::PdfEnv {
+                    tools: &texts.tools,
+                    scratch,
+                    word_list: texts.word_list.clone(),
+                };
+                let report = large::run_assemble(
+                    conn,
+                    &self.objects,
+                    embedder as &dyn Embedder,
+                    &env,
+                    &texts.allowed_codes,
+                    &input,
+                )
+                .await?;
+                format!(
+                    "applied {}, {} units, {} parts",
+                    report.applied,
+                    report.units,
+                    report.parts.len()
+                )
+            }
+            other => bail!("{other} is not a text job"),
         };
         Ok(Ran::Done(outcome))
     }

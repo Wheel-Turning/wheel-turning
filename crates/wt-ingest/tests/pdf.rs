@@ -477,6 +477,7 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
     // A failing proofread records the errors and keeps the edition out.
     let failed = proofread::import_proof(
         &mut conn,
+        &fx.objects,
         edition,
         &answer_sheet(&html, edition, 2),
         "Reviewer",
@@ -494,6 +495,7 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
     // A passing one serves it, with page numbers.
     let passed = proofread::import_proof(
         &mut conn,
+        &fx.objects,
         edition,
         &answer_sheet(&html, edition, 1),
         "Reviewer",
@@ -543,6 +545,7 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
     );
     let stale = proofread::import_proof(
         &mut conn,
+        &fx.objects,
         edition,
         &answer_sheet(&html, edition, 0),
         "Reviewer",
@@ -566,6 +569,7 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
     .unwrap();
     let again = proofread::import_proof(
         &mut conn,
+        &fx.objects,
         edition,
         &answer_sheet(&html, edition, 0),
         "Reviewer",
@@ -743,7 +747,14 @@ fn a_mixed_pdf_reads_its_text_layer_and_ocrs_its_scanned_page() {
     specs.extend(scan_of(&dir, &[prose_page()]));
     let path = dir.join("mixed.pdf");
     std::fs::write(&path, fixture::pdf(&specs)).unwrap();
-    let read = pdf::read(&tools, &path, &PdfSettings::default(), &dir.join("scratch")).unwrap();
+    let read = pdf::read(
+        &tools,
+        &path,
+        &PdfSettings::default(),
+        &dir.join("scratch"),
+        pdf::ReadOptions::default(),
+    )
+    .unwrap();
     let origins: Vec<Origin> = read.pages.iter().map(|p| p.origin).collect();
     assert_eq!(origins, vec![Origin::TextLayer, Origin::Ocr]);
     assert!(files_under(&dir.join("scratch")).is_empty());
@@ -765,7 +776,14 @@ fn ocr_of_a_synthetic_scan_is_within_two_percent_of_its_source() {
         strip_running_heads: false,
         ..PdfSettings::default()
     };
-    let read = pdf::read(&tools, &path, &settings, &dir.join("scratch")).unwrap();
+    let read = pdf::read(
+        &tools,
+        &path,
+        &settings,
+        &dir.join("scratch"),
+        pdf::ReadOptions::default(),
+    )
+    .unwrap();
     assert_eq!(read.ocr_pages, 2);
     let got: Vec<String> = read
         .pages
@@ -831,7 +849,14 @@ fn a_text_layer_loses_hyphens_heads_page_numbers_and_footnotes() {
         min_layer_chars: 50,
         ..PdfSettings::default()
     };
-    let read = pdf::read(&tools, &path, &settings, &dir.join("scratch")).unwrap();
+    let read = pdf::read(
+        &tools,
+        &path,
+        &settings,
+        &dir.join("scratch"),
+        pdf::ReadOptions::default(),
+    )
+    .unwrap();
     assert_eq!(read.text_layer_pages, 3);
     let rebuilt = pdf::rebuild::rebuild(&read.pages, true, false);
     let text = rebuilt

@@ -25,7 +25,12 @@ pub enum Group {
     Random,
     /// Among the lowest OCR confidence.
     Worst,
+    /// From a page range still weak after a second reading (Spec 08, Large documents).
+    Range,
 }
+
+/// Units spot-checked from each weak page range.
+pub const RANGE_UNITS: usize = 6;
 
 /// A unit the sampler can choose.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +74,38 @@ pub fn seed(edition: Uuid, units_hash: &str) -> u64 {
 /// the book is long enough, and the 12 lowest-confidence units among the rest; otherwise 10 at
 /// random.
 pub fn sample(units: &[Candidate], ocr: bool, seed: u64) -> Vec<(Uuid, Group)> {
+    sample_with_ranges(units, ocr, seed, &[])
+}
+
+/// The sample, plus up to 6 units from each weak page range (first and last page) among the
+/// units not already drawn.
+pub fn sample_with_ranges(
+    units: &[Candidate],
+    ocr: bool,
+    seed: u64,
+    ranges: &[(i32, i32)],
+) -> Vec<(Uuid, Group)> {
+    let mut out = draw(units, ocr, seed);
+    let mut rng = Rng(seed ^ 0x5241_4E47_4553);
+    for &(first, last) in ranges {
+        let mut pool: Vec<&Candidate> = units
+            .iter()
+            .filter(|u| u.source_page.is_some_and(|p| (first..=last).contains(&p)))
+            .filter(|u| !out.iter().any(|(id, _)| *id == u.id))
+            .collect();
+        pool.sort_by_key(|u| u.ordinal);
+        for _ in 0..RANGE_UNITS {
+            if pool.is_empty() {
+                break;
+            }
+            let u = pool.remove(rng.below(pool.len()));
+            out.push((u.id, Group::Range));
+        }
+    }
+    out
+}
+
+fn draw(units: &[Candidate], ocr: bool, seed: u64) -> Vec<(Uuid, Group)> {
     let mut rng = Rng(seed);
     let mut sorted: Vec<&Candidate> = units.iter().collect();
     sorted.sort_by_key(|u| u.ordinal);
@@ -170,6 +207,10 @@ pub struct Verdict {
     pub worst_sampled: i32,
     /// Errors in them.
     pub worst_errors: i32,
+    /// Units read from weak page ranges.
+    pub range_sampled: i32,
+    /// Errors in them.
+    pub range_errors: i32,
     /// Whether the edition passes.
     pub passed: bool,
     /// The notes on units with errors, as the report's error patterns.
@@ -184,6 +225,17 @@ pub fn score(
     answers: &[Answer],
     random_max: u32,
     worst_max: u32,
+) -> Result<Verdict, TextError> {
+    score_with_ranges(sample, answers, random_max, worst_max, 0)
+}
+
+/// [`score`], with at most `range_max` errors allowed across the weak-range units.
+pub fn score_with_ranges(
+    sample: &[(Uuid, Group)],
+    answers: &[Answer],
+    random_max: u32,
+    worst_max: u32,
+    range_max: u32,
 ) -> Result<Verdict, TextError> {
     for a in answers {
         if !sample.contains(&(a.unit_id, a.group)) {
@@ -212,7 +264,7 @@ pub fn score(
             .sum()
     };
     let count = |g: Group| sample.iter().filter(|(_, x)| *x == g).count();
-    let (re, we) = (sum(Group::Random), sum(Group::Worst));
+    let (re, we, ge) = (sum(Group::Random), sum(Group::Worst), sum(Group::Range));
     let to_i32 = |n: u32| i32::try_from(n).unwrap_or(i32::MAX);
     let to_i32u = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     Ok(Verdict {
@@ -220,7 +272,9 @@ pub fn score(
         random_errors: to_i32(re),
         worst_sampled: to_i32u(count(Group::Worst)),
         worst_errors: to_i32(we),
-        passed: re <= random_max && we <= worst_max,
+        range_sampled: to_i32u(count(Group::Range)),
+        range_errors: to_i32(ge),
+        passed: re <= random_max && we <= worst_max && ge <= range_max,
         notes: answers
             .iter()
             .filter(|a| a.errors > 0)
@@ -274,6 +328,7 @@ pub fn sheet(title: &str, edition: Uuid, units_hash: &str, units: &[SheetUnit]) 
         let group = match u.group {
             Group::Random => "random",
             Group::Worst => "lowest confidence",
+            Group::Range => "weak page range",
         };
         let _ = writeln!(
             rows,
@@ -469,5 +524,47 @@ mod tests {
         assert!(html.contains("page 14"));
         assert!(html.contains("The moon &amp; the water"));
         assert!(html.contains("data:image/png;base64,iVBORw0KGgo="));
+    }
+
+    #[test]
+    fn weak_ranges_add_six_units_each() {
+        let us = units(300);
+        let s = sample_with_ranges(&us, true, 5, &[(40, 45)]);
+        let range: Vec<&Uuid> = s
+            .iter()
+            .filter(|(_, g)| *g == Group::Range)
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(range.len(), 6);
+        assert!(range.iter().all(|id| {
+            let p = us
+                .iter()
+                .find(|u| u.id == **id)
+                .unwrap()
+                .source_page
+                .unwrap();
+            (40..=45).contains(&p)
+        }));
+        let mut a: Vec<Answer> = s
+            .iter()
+            .map(|(id, g)| Answer {
+                unit_id: *id,
+                group: *g,
+                errors: 0,
+                note: None,
+            })
+            .collect();
+        a.iter_mut()
+            .find(|x| x.group == Group::Range)
+            .unwrap()
+            .errors = 2;
+        assert!(!score_with_ranges(&s, &a, 1, 3, 1).unwrap().passed);
+        a.iter_mut()
+            .find(|x| x.group == Group::Range && x.errors == 2)
+            .unwrap()
+            .errors = 1;
+        let v = score_with_ranges(&s, &a, 1, 3, 1).unwrap();
+        assert!(v.passed);
+        assert_eq!((v.range_sampled, v.range_errors), (6, 1));
     }
 }
