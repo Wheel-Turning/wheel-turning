@@ -632,6 +632,139 @@ pub async fn fetch_texts(
     Ok(out)
 }
 
+/// `wt text fetch --crawl`.
+pub async fn crawl_texts(
+    pool: &PgPool,
+    config_dir: &Path,
+    start: &str,
+    depth: u32,
+    follow_pattern: Option<&str>,
+    max_pages: usize,
+    inbox: &Path,
+) -> anyhow::Result<wt_ingest::texts::crawl::CrawlReport> {
+    let policy = wt_ingest::config::UrlPolicy::load(&config_dir.join("pipeline.toml"))?;
+    let follow = follow_pattern
+        .map(wt_ingest::texts::crawl::pattern)
+        .transpose()?;
+    let mut conn = pool.acquire().await?;
+    let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+    let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
+    Ok(wt_ingest::texts::crawl::crawl(
+        &mut conn,
+        &fetcher,
+        &wt_ingest::texts::crawl::Crawl {
+            start,
+            depth,
+            follow: follow.as_ref(),
+            max_pages,
+            inbox,
+        },
+    )
+    .await?)
+}
+
+/// `wt text refresh`.
+pub async fn refresh_text(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    edition: sqlx::types::Uuid,
+    apply: bool,
+    by: &str,
+) -> anyhow::Result<wt_ingest::texts::refresh::RefreshReport> {
+    let pipeline = config_dir.join("pipeline.toml");
+    let policy = wt_ingest::config::UrlPolicy::load(&pipeline)?;
+    let licenses = wt_ingest::config::LicenseSettings::load(&pipeline)?;
+    let texts = wt_ingest::config::TextSettings::load(&pipeline)?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+    let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
+    let fake = wt_ml::FakeEmbedder::new("dry-run");
+    let real;
+    let embedder: &dyn Embedder = if apply {
+        real = stages::embedder(config)?;
+        &real
+    } else {
+        &fake
+    };
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let env = wt_ingest::texts::PdfEnv {
+        tools: &tools,
+        scratch: config.scratch_dir.join("texts"),
+        word_list: texts.word_list,
+    };
+    Ok(wt_ingest::texts::refresh::refresh(
+        &mut conn,
+        &objects,
+        embedder,
+        &fetcher,
+        Some(&env),
+        &licenses.allowed_license_codes,
+        edition,
+        apply,
+        by,
+    )
+    .await?)
+}
+
+/// `wt intake`: every pending folder, in the terminal.
+pub async fn intake(
+    pool: &PgPool,
+    config: &Config,
+    records: &wt_core::records::LocalRecords,
+    config_dir: &Path,
+    inbox: &Path,
+) -> anyhow::Result<()> {
+    use wt_ingest::texts::intake;
+    let pipeline = config_dir.join("pipeline.toml");
+    let policy = wt_ingest::config::UrlPolicy::load(&pipeline)?;
+    let licenses = wt_ingest::config::LicenseSettings::load(&pipeline)?;
+    let texts = wt_ingest::config::TextSettings::load(&pipeline)?;
+    let objects = stages::objects(config)?;
+    let embedder = stages::embedder(config)?;
+    let mut conn = pool.acquire().await?;
+    let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+    let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let pdf_env = wt_ingest::texts::PdfEnv {
+        tools: &tools,
+        scratch: config.scratch_dir.join("texts"),
+        word_list: texts.word_list,
+    };
+    let env = intake::IntakeEnv {
+        allowed_codes: &licenses.allowed_license_codes,
+        records,
+        fetcher: &fetcher,
+        pdf_env: Some(&pdf_env),
+    };
+    let folders = intake::pending(inbox);
+    if folders.is_empty() {
+        eprintln!("Nothing to take in under {}", inbox.join("texts").display());
+        return Ok(());
+    }
+    let stdin = std::io::stdin();
+    // The walkthrough talks on stderr, so stdout carries only the closing JSON.
+    let mut prompt = intake::Terminal::new(stdin.lock(), std::io::stderr());
+    let mut out = Vec::new();
+    for folder in folders {
+        out.push(
+            intake::walk(
+                &mut conn,
+                &objects,
+                &embedder,
+                &mut prompt,
+                &env,
+                inbox,
+                &folder,
+            )
+            .await?,
+        );
+    }
+    commands::print_json(&out)?;
+    Ok(())
+}
+
 /// `wt license ...`.
 pub async fn license(
     pool: &PgPool,

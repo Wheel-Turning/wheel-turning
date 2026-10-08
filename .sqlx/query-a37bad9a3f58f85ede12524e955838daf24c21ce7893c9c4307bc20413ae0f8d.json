@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_edition set source_sha256 = $2, source_etag = $3, fetched_at = now()\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a37bad9a3f58f85ede12524e955838daf24c21ce7893c9c4307bc20413ae0f8d"
+}

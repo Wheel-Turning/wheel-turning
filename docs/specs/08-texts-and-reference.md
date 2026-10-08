@@ -429,6 +429,15 @@ After `--apply`, the importer uploads the originals to S3 (`texts-source/` or `r
 3. It asks where the license statement lives. It runs the capture step from Spec 03, shows you the saved page, and records your approval only when you type your name as reviewer. For a public-domain claim it asks for the basis, such as the translator's death year or the publisher's own statement. With no evidence the folder is marked blocked, the walkthrough says exactly what is missing, and nothing proceeds.
 4. It proposes a unit scheme by inspecting the text (numbered verses, paragraphs or headings), shows five sample units, and asks you to confirm or adjust.
 5. It writes `manifest.toml`, runs the dry run, shows the report, and asks whether to apply.
+
+As built (October 7, 2026):
+
+- **Scope.** `wt intake [--inbox data-inbox]` walks every folder under `texts/` that lacks a usable manifest. Reference folders are marked blocked with a note to write their manifest by hand.
+- **Questions.** It asks for the work and edition. For evidence it takes an approved evidence id, or a URL to capture. The captured page is shown, and approval is recorded only when the reviewer types their name.
+- **Scheme.** It proposes numbered, heading or paragraph and shows five sample units.
+- **Dialogue.** It talks on stderr and prints the outcomes as JSON.
+- **Blocked.** A blocked folder gets `BLOCKED.txt` saying what is missing.
+- **Applied.** An applied folder moves to `_done/`. `wt text import --apply` leaves its folder where it is.
 6. After applying, it prints a summary: units loaded, locators synced, citations relinked and where the originals went.
 
 `wt intake --manifest-only` writes manifests with `REPLACE_ME` fields for you to fill later. The walkthrough never makes a legal judgment. It records evidence, requires a person to approve it, and defaults to blocked.
@@ -509,6 +518,14 @@ As built (October 7, 2026):
 - **Raw copies.** They go to `texts-source/<host>/<sha256>`, with the sidecar at the same key plus `.json`. A takedown deletes both.
 - **Conversion.** HTML takes `<article>`, `<main>` or `role="main"` if it holds 20 words, otherwise the element whose own paragraphs hold the most words. The HTML reader skips `nav`, `header`, `footer`, `aside`, `form` and `noscript` everywhere, local files included. DOCX reads `word/document.xml`, with `Heading*` and `Title` styles as sections. Not yet built: DOC, RTF and ODT through LibreOffice; they are reported as unsupported.
 - **Drafts.** A draft goes to `data-inbox/texts/<title slug>/`. Its rights holder is the evidence's grantor, else its publisher, else "public domain" for that code. A draft that fails to import is reported, not raised.
+- **Mandates.** A mandate covers a URL only through its enabled source, so switching the source off stops new fetches as well as serving.
+- **Crawl.** `wt text fetch --crawl <index> [--depth] [--follow-pattern] [--max-pages]` reads index pages in scope. It lists matching links that evidence covers, and lists uncovered ones apart without fetching them. It writes `data-inbox/_crawl/<host>-<time>.txt` with every line commented out, to be uncommented and passed to `--urls-file`.
+- **Refresh.** `wt text refresh --edition <id> [--apply]` sends the ETag and Last-Modified from the raw copy's sidecar.
+  - A 304 or the same hash is a no-op.
+  - Otherwise the new version runs as a dry run, and the report lists added, removed and changed units by locator and content hash.
+  - `--apply` imports it with the stored manifest and records `source_sha256`, `source_etag` and `fetched_at`. The new version then waits for its proofread, as every changed edition does.
+  - The nightly audit's reachability warning is not built yet.
+- **Stored manifests.** Every import now stores its manifest beside the edition's work files.
 - **License commands.** `wt license capture --publisher --url --code --scope [--prefix]` saves the page through the fetcher to the records directory. `wt license record-permission` and `wt license approve` follow this section. `capture` and `record-permission` refuse a host-wide prefix on an aggregator host.
 
 Acceptance criteria for URL ingestion:
@@ -519,11 +536,11 @@ Acceptance criteria for URL ingestion:
 - [x] Audio and video content types are refused. (`wt-ingest/tests/url_fetch.rs`.)
 - [x] A PDF served under an `.html` name is detected as a PDF by its signature. (`wt-ingest/tests/url_fetch.rs`.)
 - [ ] Fixtures convert correctly: an HTML page loses its navigation and footer, a DOCX keeps headings and paragraphs, and an EPUB works. DOC and RTF conversion through LibreOffice runs nightly where it is installed. (HTML, DOCX and EPUB pass in `url_fetch.rs`, `texts.rs` and `texts::convert`; LibreOffice conversion is not built.)
-- [ ] A crawl of an index fixture lists links, applies the pattern and the prefix scope, honors `--max-pages`, and requires a selection before importing.
+- [x] A crawl of an index fixture lists links, applies the pattern and the prefix scope, honors `--max-pages`, and requires a selection before importing. (`wt-ingest/tests/intake.rs`.)
 - [x] The manifest draft takes title and author from meta tags, never guesses a translator, and `--yes` applies only to born-digital HTML. (`wt-ingest/tests/url_fetch.rs` and `texts::url` unit tests.)
 - [x] An HTML unit's source link carries a text fragment, and a PDF unit's carries a page number. (`wt-ingest/tests/url_fetch.rs` and `pdf.rs`; `text_unit.source_anchor` holds the fragment, joined to the edition's source URL.)
 - [ ] A permission record without a grantor or URL prefixes violates the database constraint, needs a person's approval before use, and renders "Used with permission of" on the page. (The constraint and the approval: `url_fetch.rs`. The rendering comes with the page in M5.)
-- [ ] Refresh is a no-op for an unchanged document. A changed one produces a diff and does not replace the served edition until approved.
+- [x] Refresh is a no-op for an unchanged document. A changed one produces a diff and does not replace the served edition until approved. (`wt-ingest/tests/intake.rs`.)
 - [x] A local test server confirms the `User-Agent`, the per-host delay and the connection limit. (`wt-ingest/tests/url_fetch.rs`.)
 
 ## Source policy for URL ingestion
@@ -666,7 +683,7 @@ As built for texts (October 7, 2026):
 
 Acceptance criteria for mandated sources:
 
-- [ ] `wt source mandate` creates the evidence and `source_policy` rows, and a URL under a mandated prefix is fetched and cleared with no per-URL evidence.
+- [x] `wt source mandate` creates the evidence and `source_policy` rows, and a URL under a mandated prefix is fetched and cleared with no per-URL evidence. (The rows: M3R, `wt-db/tests/rights.rs`. The fetch: `wt-ingest/tests/intake.rs`, which also shows a disabled source covering nothing.)
 - [x] `wt source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them. (`wt-ingest/tests/text_takedown.rs`.)
 - [x] `wt takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left. (`wt-ingest/tests/text_takedown.rs`; the takedown itself checks that no object of the edition is left, and the audit's `text_takedown_completeness` finds no units.)
 - [ ] `GET /rights` works with no session, `POST /rights/request` stores a row, rate limits at 5 per hour per address and rejects a filled honeypot, and no other route is reachable without a session.
@@ -789,7 +806,7 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present.
 - [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search.
 - [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
-- [ ] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end.
+- [x] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end. (`wt-ingest/tests/intake.rs`, with scripted answers.)
 - [x] `wt text link-out` creates a `work` and locators with no text rows. (`wt-ingest/tests/reference.rs`.)
 - [x] A guard test fails if git tracks any file under `data-inbox/`. (`wt-core/tests/repo_guards.rs`.)
 

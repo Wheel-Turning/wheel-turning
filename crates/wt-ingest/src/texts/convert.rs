@@ -128,6 +128,21 @@ pub fn html_main(html: &str) -> String {
     }
 }
 
+/// Every link's target on a page, as written.
+pub fn links(html: &str) -> Vec<String> {
+    let Ok(dom) = tl::parse(html, tl::ParserOptions::default()) else {
+        return Vec::new();
+    };
+    dom.nodes()
+        .iter()
+        .filter_map(Node::as_tag)
+        .filter(|t| t.name().as_utf8_str().eq_ignore_ascii_case("a"))
+        .filter_map(|t| t.attributes().get("href").flatten())
+        .map(|v| decode_entities(&v.as_utf8_str()).trim().to_owned())
+        .filter(|h| !h.is_empty() && !h.starts_with('#'))
+        .collect()
+}
+
 /// What an HTML page says about itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Meta {
