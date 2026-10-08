@@ -132,6 +132,9 @@ struct TranscriptJson<'a> {
     /// Ambiguous windows labeled by the rule fallback instead of the model.
     #[serde(skip_serializing_if = "is_zero")]
     label_fallback_windows: usize,
+    /// For an aligned source transcript, the share of its words matched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alignment_share: Option<f32>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -178,9 +181,9 @@ pub enum Steps {
         audio_ms: i64,
         /// Ambiguous windows labeled by the rule fallback instead of the model.
         fallback_windows: usize,
-        /// Whether the words are the source's own text, aligned (Spec 04, Aligned source
-        /// transcripts).
-        aligned: bool,
+        /// For the source's own text, aligned: the share of its words matched (Spec 04,
+        /// Aligned source transcripts).
+        aligned: Option<f32>,
     },
 }
 
@@ -213,6 +216,7 @@ async fn steps(
     let (raw, aligned) = match source_text {
         Some(text) => {
             let a = wt_asr::align::align(text, &raw.words);
+            tracing::info!(talk = %talk.id, share = a.share, "source transcript aligned");
             if a.share < wt_asr::align::MIN_ALIGNMENT_SHARE {
                 scratch.finish()?;
                 return Ok(Steps::Held("alignment_failed".to_owned()));
@@ -223,10 +227,10 @@ async fn steps(
                     audio_ms: raw.audio_ms,
                     words: a.words,
                 },
-                true,
+                Some(a.share),
             )
         }
-        None => (raw, false),
+        None => (raw, None),
     };
 
     if let Some(c) = conn.as_deref_mut() {
@@ -356,7 +360,7 @@ pub async fn run(
         audio_ms,
         &seg,
         fallback_windows,
-        if aligned { "aligned" } else { "asr" },
+        aligned,
     );
     let hash = sha256_hex(json.as_bytes());
     deps.objects.put(&key, json.as_bytes())?;
@@ -378,7 +382,7 @@ pub async fn run(
         talk_id,
         &NewTranscript {
             version,
-            origin: if aligned { "aligned" } else { "asr" },
+            origin: if aligned.is_some() { "aligned" } else { "asr" },
             key: &key,
             content_hash: &hash,
             word_count: i32::try_from(seg.words.len()).unwrap_or(i32::MAX),
@@ -412,13 +416,14 @@ fn transcript_json(
     audio_ms: i64,
     seg: &Segmentation,
     fallback_windows: usize,
-    origin: &str,
+    aligned: Option<f32>,
 ) -> String {
     let doc = TranscriptJson {
         schema: 1,
         talk_id: talk.as_uuid().to_string(),
         version,
-        origin,
+        origin: if aligned.is_some() { "aligned" } else { "asr" },
+        alignment_share: aligned,
         model,
         language,
         audio_ms,

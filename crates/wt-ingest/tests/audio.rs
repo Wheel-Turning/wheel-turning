@@ -577,6 +577,7 @@ async fn an_aligned_source_transcript_keeps_its_teacher_words_and_drops_the_stud
     )
     .unwrap();
     assert_eq!(json["origin"], "aligned");
+    assert!(json["alignment_share"].as_f64().unwrap() > 0.99);
     assert!(
         json["model"]
             .as_str()
