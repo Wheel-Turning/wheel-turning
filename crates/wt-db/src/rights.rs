@@ -1010,8 +1010,11 @@ pub async fn clear_waiting(
     key: &str,
     actor: &str,
 ) -> Result<Vec<TalkId>, RightsError> {
+    // Locked, skipping talks another run is clearing: two sources share one mandate and
+    // discover at once (Spec 03, EngageWisdom sources).
     let waiting = sqlx::query_scalar!(
-        "select id from talk where source_key = $1 and state = 'awaiting_consent' order by id",
+        "select id from talk where source_key = $1 and state = 'awaiting_consent' order by id
+         for update skip locked",
         key
     )
     .fetch_all(&mut *conn)
