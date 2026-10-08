@@ -66,6 +66,9 @@ impl SidecarDiarizer {
     }
 }
 
+/// How often a diarization request that did not reach the sidecar is sent.
+const SEND_ATTEMPTS: u32 = 4;
+
 #[derive(Debug, Deserialize)]
 struct SidecarResponse {
     turns: Vec<Turn>,
@@ -80,18 +83,31 @@ impl Diarizer for SidecarDiarizer {
                 path: audio.display().to_string(),
                 message: e.to_string(),
             })?;
-        let part = reqwest::multipart::Part::bytes(bytes)
-            .file_name("audio")
-            .mime_str("audio/wav")
-            .map_err(|e| self.error(e))?;
-        let form = reqwest::multipart::Form::new().part("file", part);
-        let response = self
-            .client
-            .post(format!("{}/diarize", self.url))
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| self.error(e.without_url()))?;
+        // A request that never reached the sidecar is sent again rather than failing the job,
+        // which would fetch and transcribe the talk again.
+        let mut attempt = 0;
+        let response = loop {
+            attempt += 1;
+            let part = reqwest::multipart::Part::bytes(bytes.clone())
+                .file_name("audio")
+                .mime_str("audio/wav")
+                .map_err(|e| self.error(e))?;
+            let form = reqwest::multipart::Form::new().part("file", part);
+            match self
+                .client
+                .post(format!("{}/diarize", self.url))
+                .multipart(form)
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(e) if attempt < SEND_ATTEMPTS && (e.is_connect() || e.is_request()) => {
+                    tracing::warn!(attempt, error = %e.without_url(), "diarization request not sent; again");
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+                Err(e) => return Err(self.error(e.without_url())),
+            }
+        };
         if !response.status().is_success() {
             return Err(DiarizeError::Sidecar {
                 url: self.url.clone(),

@@ -106,11 +106,18 @@ def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok", "pipeline": PIPELINE_NAME, "device": str(device())})
 
 
+# One diarization at a time on the device. The endpoint is a plain function, so FastAPI runs it
+# in a worker thread and the event loop keeps accepting the other workers' requests; blocking
+# the loop for a whole talk let uvicorn drop connections that were waiting.
+_run_lock = threading.Lock()
+
+
 @app.post("/diarize")
-async def diarize(file: UploadFile = File(...)) -> JSONResponse:  # noqa: B008
-    data = await file.read()
+def diarize(file: UploadFile = File(...)) -> JSONResponse:  # noqa: B008
+    data = file.file.read()
     try:
-        result = diarize_bytes(data)
+        with _run_lock:
+            result = diarize_bytes(data)
     except soundfile.LibsndfileError as error:
         raise HTTPException(status_code=400, detail="the upload is not readable audio") from error
     except RuntimeError as error:
