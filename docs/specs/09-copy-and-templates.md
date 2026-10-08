@@ -42,6 +42,13 @@ File: `copy/rights.md`.
 
 **Summary.** If you hold rights in any talk or text shown here, you can have it removed. Tell us and we will remove it, without argument.
 
+**What we add.** We add a talk or text only where, in our judgement, the rights holder's terms allow it. Some terms allow it explicitly, such as a license or written permission. Others allow it implicitly, such as material shared freely so that anyone can hear or read it. Either way, we ask the rights holder for permission.
+
+- Where the rights are unclear, we ask first and add nothing until the rights holder says yes. This is called opting in.
+- Where the terms are more permissive, we add the material, ask for permission, and remove it at once if the rights holder says no. This is called opting out. Foundational texts are in this group: their teachings have been passed on freely for hundreds of years, some for thousands, and the project exists to make them easier to find.
+
+Our judgement that terms allow something is our own decision, not the rights holder's permission, and we never describe it as permission.
+
 **How it works.**
 
 1. Within one business day of your request, the material you name stops appearing. We do this before checking who you are.
