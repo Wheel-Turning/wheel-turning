@@ -4407,6 +4407,7 @@ dependencies = [
  "csv",
  "flate2",
  "fs4",
+ "percent-encoding",
  "regex",
  "reqwest",
  "rss",

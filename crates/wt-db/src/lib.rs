@@ -17,6 +17,7 @@ pub mod feed;
 pub mod glossary;
 pub mod ingest;
 pub mod job;
+pub mod license;
 pub mod llm;
 pub mod locator;
 pub mod reference;

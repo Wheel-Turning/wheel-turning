@@ -127,8 +127,18 @@ fn delete_objects(
     let source = source_prefix(&e.work_title, &e.edition_label);
     let work = work_prefix(&e.work_title, &e.edition_label);
     let mut n = objects.delete_prefix(&format!("{source}/"))?;
+    // A fetched document's raw copy and sidecar live under its host (Spec 08, Ingesting from
+    // URLs, raw copy).
+    let host = e
+        .source_url
+        .as_deref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .and_then(|u| u.host_str().map(str::to_owned));
     for f in files {
         n += objects.delete_prefix(&format!("texts-work/_pages/{}/", f.sha256))?;
+        if let Some(host) = &host {
+            n += objects.delete_prefix(&format!("texts-source/{host}/{}", f.sha256))?;
+        }
     }
     n += objects.delete_prefix(&format!("{work}/"))?;
     let mut left: Vec<String> = files

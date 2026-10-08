@@ -61,6 +61,14 @@ word_list = "/usr/share/dict/words"
 proof_random_max_errors = 1
 proof_worst_max_errors = 3
 
+[url_policy]
+# URL ingestion (Spec 08): at least this long between requests to one host, the largest
+# download, and hosts that republish many rights holders' works, which evidence may never cover
+# host-wide.
+fetch_delay_ms = 1000
+max_download_mb = 200
+aggregator_hosts = ["terebess.hu"]
+
 [segment]
 # Segmentation (Spec 04, Diarization and segmentation). The window thresholds are starting
 # points to tune on the ten-video sample (decision of October 5, 2026). A window with no words

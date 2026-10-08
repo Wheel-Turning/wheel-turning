@@ -37,6 +37,7 @@ toml = "1"
 tracing.workspace = true
 unicode-normalization = "0.1"
 base64 = "0.22"
+percent-encoding = "2"
 url = "2"
 
 [dev-dependencies]

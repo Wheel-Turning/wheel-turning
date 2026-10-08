@@ -3,6 +3,7 @@
 //! run reports and changes nothing; `--apply` writes in one transaction, and an unchanged
 //! source and manifest make it a no-op.
 
+pub mod convert;
 pub mod extract;
 pub mod large;
 pub mod manifest;
@@ -12,6 +13,8 @@ pub mod proofread;
 pub mod reference;
 pub mod takedown;
 pub mod units;
+pub mod url;
+pub mod web;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -57,6 +60,9 @@ pub enum TextError {
     /// The job queue refused.
     #[error(transparent)]
     Job(#[from] wt_db::job::JobError),
+    /// A fetch failed or was refused.
+    #[error(transparent)]
+    Fetch(#[from] crate::source::IngestError),
     /// The embedder failed.
     #[error(transparent)]
     Ml(#[from] wt_ml::MlError),
@@ -835,6 +841,11 @@ async fn import_one(
                 .and_then(Option::as_ref)
                 .and_then(|p| i32::try_from(p.page).ok()),
             confidence: unit_confidence(i),
+            source_anchor: source_anchor(
+                m.source.format,
+                &u.text,
+                placements.get(i).and_then(Option::as_ref).map(|p| p.page),
+            ),
         })
         .collect();
     texts::replace_units(&mut tx, edition, &new_units, embedder.model_id()).await?;
@@ -942,4 +953,26 @@ fn bytes_of<'a>(files: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
         .iter()
         .find(|(n, _)| n == name)
         .map_or(&[], |(_, b)| b.as_slice())
+}
+
+/// Where a unit starts in its original (Spec 08, Ingesting from URLs, source links): a text
+/// fragment of its opening words for HTML, so a browser highlights the excerpt, and the page for
+/// a PDF. The page joins it to the edition's source URL.
+fn source_anchor(format: Format, text: &str, page: Option<u32>) -> Option<String> {
+    match format {
+        Format::Html => {
+            let opening: Vec<&str> = text.split_whitespace().take(6).collect();
+            (!opening.is_empty()).then(|| {
+                format!(
+                    "#:~:text={}",
+                    percent_encoding::utf8_percent_encode(
+                        &opening.join(" "),
+                        percent_encoding::NON_ALPHANUMERIC
+                    )
+                )
+            })
+        }
+        Format::Pdf => page.map(|p| format!("#page={p}")),
+        _ => None,
+    }
 }

@@ -577,6 +577,164 @@ pub async fn takedown_requests(
     Ok(())
 }
 
+/// `wt text fetch`: each URL through the gate, one fetcher for the run so its per-host slots
+/// hold. A failure is reported beside the others rather than stopping the batch.
+pub async fn fetch_texts(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    urls: &[String],
+    yes: bool,
+    inbox: &Path,
+    by: &str,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let pipeline = config_dir.join("pipeline.toml");
+    let licenses = wt_ingest::config::LicenseSettings::load(&pipeline)?;
+    let texts = wt_ingest::config::TextSettings::load(&pipeline)?;
+    let policy = wt_ingest::config::UrlPolicy::load(&pipeline)?;
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+    let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
+    let fake = wt_ml::FakeEmbedder::new("dry-run");
+    let real;
+    let embedder: &dyn Embedder = if yes {
+        real = stages::embedder(config)?;
+        &real
+    } else {
+        &fake
+    };
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let env = wt_ingest::texts::PdfEnv {
+        tools: &tools,
+        scratch: config.scratch_dir.join("texts"),
+        word_list: texts.word_list,
+    };
+    let opts = wt_ingest::texts::url::FetchOptions {
+        allowed_codes: &licenses.allowed_license_codes,
+        actor: by,
+        yes,
+        inbox,
+        pdf_env: Some(&env),
+    };
+    let mut out = Vec::new();
+    for url in urls {
+        let value = match wt_ingest::texts::url::fetch_one(
+            &mut conn, &objects, embedder, &fetcher, url, &opts,
+        )
+        .await
+        {
+            Ok(report) => serde_json::to_value(&report)?,
+            Err(e) => serde_json::json!({ "url": url, "error": e.to_string() }),
+        };
+        out.push(value);
+    }
+    Ok(out)
+}
+
+/// `wt license ...`.
+pub async fn license(
+    pool: &PgPool,
+    records: &wt_core::records::LocalRecords,
+    command: crate::LicenseCommand,
+) -> anyhow::Result<()> {
+    use crate::LicenseCommand as L;
+    let mut conn = pool.acquire().await?;
+    match command {
+        L::Capture {
+            publisher,
+            url,
+            code,
+            scope,
+            prefix,
+            config_dir,
+        } => {
+            let policy = wt_ingest::config::UrlPolicy::load(&config_dir.join("pipeline.toml"))?;
+            for p in &prefix {
+                policy.check_prefix(p).map_err(anyhow::Error::msg)?;
+            }
+            let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+            let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
+            let page = wt_ingest::http::parse_url(&url)?;
+            let wt_ingest::texts::web::Got::Body(fetched) = fetcher
+                .get(&page, &wt_ingest::texts::web::Validators::default())
+                .await?
+            else {
+                anyhow::bail!("{url} answered 304 to an unconditional request");
+            };
+            let snapshot = records.store(&fetched.bytes)?;
+            let id = wt_db::license::capture(
+                &mut conn,
+                &wt_db::license::Captured {
+                    publisher: &publisher,
+                    code: &code,
+                    url: &fetched.final_url,
+                    scope: &scope,
+                    snapshot: &snapshot,
+                    prefixes: &prefix,
+                },
+            )
+            .await?;
+            commands::print_json(&serde_json::json!({
+                "evidence": id, "snapshot": snapshot.key, "allowed": false,
+                "next": "read the snapshot, then wt license approve --id <evidence> --reviewer <name>"
+            }))?;
+        }
+        L::RecordPermission {
+            grantor,
+            scope_urls,
+            covers,
+            statement_file,
+            given_on,
+            recorded_by,
+            config_dir,
+        } => {
+            let policy = wt_ingest::config::UrlPolicy::load(&config_dir.join("pipeline.toml"))?;
+            for p in &scope_urls {
+                policy.check_prefix(p).map_err(anyhow::Error::msg)?;
+            }
+            let statement = records.store_file(&statement_file)?;
+            let id = wt_db::license::record_permission(
+                &mut conn,
+                &wt_db::license::Permission {
+                    grantor: &grantor,
+                    prefixes: &scope_urls,
+                    covers: &covers,
+                    statement: &statement,
+                    given_on: &given_on.to_string(),
+                    recorded_by: &recorded_by,
+                },
+            )
+            .await?;
+            commands::print_json(&serde_json::json!({
+                "evidence": id, "grantor": grantor, "scope_urls": scope_urls,
+                "statement": statement.key, "allowed": false,
+                "note": "a permission covers only what the grantor can authorize; each edition keeps its own rights_holder"
+            }))?;
+        }
+        L::Approve {
+            id,
+            reviewer,
+            config_dir,
+        } => {
+            let licenses =
+                wt_ingest::config::LicenseSettings::load(&config_dir.join("pipeline.toml"))?;
+            let outcome =
+                wt_db::license::approve(&mut conn, id, &reviewer, &licenses.allowed_license_codes)
+                    .await?;
+            commands::print_json(&serde_json::json!({ "evidence": id, "outcome": outcome }))?;
+            match outcome {
+                wt_db::license::Approval::CodeNotAllowed(code) => {
+                    anyhow::bail!("{code} is not in allowed_license_codes; nothing was approved")
+                }
+                wt_db::license::Approval::Missing => anyhow::bail!("no evidence {id}"),
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `wt text reocr`.
 pub async fn reocr(
     pool: &PgPool,

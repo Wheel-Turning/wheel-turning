@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select license_code, allowed from license_evidence where id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "license_code",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "license_code"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "allowed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "license_evidence",
+            "name": "allowed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c0674c147a413ef31a84f04dfb73b1fcbe75a4bf045ca30e477ab561657e23b3"
+}
