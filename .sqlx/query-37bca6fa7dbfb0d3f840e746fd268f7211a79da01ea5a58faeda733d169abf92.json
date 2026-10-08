@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_edition set source_deleted_at = now() where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37bca6fa7dbfb0d3f840e746fd268f7211a79da01ea5a58faeda733d169abf92"
+}

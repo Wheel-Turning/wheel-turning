@@ -79,6 +79,10 @@ async fn a_clean_database_passes_every_check_in_prod() {
             "request_follow_up",
             "opted_out_served",
             "mandate_served_while_off",
+            "text_excluded_served",
+            "text_source_served_while_off",
+            "text_takedown_completeness",
+            "takedown_request_overdue",
             "teacher_unnotified",
         ]
     );
@@ -478,4 +482,122 @@ async fn a_teacher_used_on_a_mandate_without_a_notice_warns_after_fourteen_days(
     .await
     .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
+}
+
+/// A served text unit: an edition with approved evidence, ready and proofread.
+async fn served_text(pool: &PgPool) -> sqlx::types::Uuid {
+    let ev: sqlx::types::Uuid = sqlx::query_scalar(
+        "insert into license_evidence (publisher, license_code, license_url, evidence_url,
+                                       evidence_snapshot_ref, snapshot_sha256, captured_at,
+                                       reviewed_by, reviewed_at, allowed)
+         values ('Fixture Press', 'public-domain', 'https://example.invalid/l',
+                 'https://example.invalid/e', 'records/x', 'x', now(), 'reviewer', now(), true)
+         returning id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let edition: sqlx::types::Uuid = sqlx::query_scalar(
+        "with w as (insert into work (title) values ('Audit Fixture Sutra') returning id)
+         insert into text_edition (work_id, edition_label, rights_holder, license_evidence_id,
+                                   excerptable, source_url)
+         select id, 'Fixture 1901', 'public domain', $1, true, 'https://texts.example.invalid/a'
+         from w returning id",
+    )
+    .bind(ev)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into text_unit (edition_id, ordinal, locator, label, text, word_count,
+                                content_hash, embedding, embedding_model)
+         values ($1, 0, 'audit:1', 'Audit Fixture Sutra, verse 1',
+                 'All conditioned things are impermanent, the fixture says.', 8, 'unit-hash',
+                 array_fill(0.03125::real, array[1024])::vector, 'fake')",
+    )
+    .bind(edition)
+    .execute(pool)
+    .await
+    .unwrap();
+    wt_db::texts::refresh_units_hash(&mut pool.acquire().await.unwrap(), edition)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into proof_check (edition_id, sample_size, errors, reviewer, passed, units_hash)
+         select id, 1, 0, 'reviewer', true, units_hash from text_edition where id = $1",
+    )
+    .bind(edition)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("update text_edition set state = 'ready' where id = $1")
+        .bind(edition)
+        .execute(pool)
+        .await
+        .unwrap();
+    edition
+}
+
+#[tokio::test]
+async fn texts_excluded_or_taken_down_fail_and_old_requests_warn() {
+    let fx = common::start().await;
+    clean(&fx.pool).await;
+    let edition = served_text(&fx.pool).await;
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
+
+    // An exclusion the view does not know about: the unit still serves, so the audit fails.
+    for (scope, pattern) in [
+        ("work", "audit fixture sutra"),
+        ("content", "unit-hash"),
+        ("prefix", "https://texts.example.invalid/"),
+    ] {
+        sqlx::query(
+            "insert into source_exclusion (scope, pattern, reason, created_by)
+             values ($1, $2, 'test', 'auditor')",
+        )
+        .bind(scope)
+        .bind(pattern)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+        let report = audit(&fx.pool, Env::Prod).await;
+        only(&report, &["text_excluded_served"]);
+        assert!(report.failed());
+        sqlx::query("update source_exclusion set lifted_at = now(), lifted_by = 'auditor'")
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+    }
+
+    // A withdrawn edition that kept its units.
+    sqlx::query("update text_edition set state = 'withdrawn' where id = $1")
+        .bind(edition)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    only(
+        &audit(&fx.pool, Env::Prod).await,
+        &["text_takedown_completeness"],
+    );
+    sqlx::query("delete from text_unit")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
+
+    // A removal request open for more than a business day warns; a fresh one does not.
+    sqlx::query("insert into takedown_request (target) values ('fresh')")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
+    sqlx::query(
+        "insert into takedown_request (target, received_at) values ('old', now() - interval '6 days')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["takedown_request_overdue"]);
+    assert!(!report.failed());
 }

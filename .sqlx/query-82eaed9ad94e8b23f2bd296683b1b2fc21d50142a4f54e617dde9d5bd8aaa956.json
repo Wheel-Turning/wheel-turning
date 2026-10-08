@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into text_edition (work_id, edition_label, translator_person_id, language,\n                                   source_url, rights_holder, license_evidence_id, excerptable,\n                                   state, content_hash, extraction, ocr_engine, mean_confidence,\n                                   source_key)\n         values ($1, $2, $3, $4, $5, $6, $7, $8, 'imported', $9, $10, $11, $12, $13)\n         on conflict (work_id, edition_label) do update\n           set translator_person_id = excluded.translator_person_id,\n               language = excluded.language, source_url = excluded.source_url,\n               rights_holder = excluded.rights_holder,\n               license_evidence_id = excluded.license_evidence_id,\n               excerptable = excluded.excerptable, state = 'imported',\n               content_hash = excluded.content_hash, extraction = excluded.extraction,\n               ocr_engine = excluded.ocr_engine, mean_confidence = excluded.mean_confidence,\n               source_key = excluded.source_key, imported_at = now()\n         returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "text_edition",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Float4",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "82eaed9ad94e8b23f2bd296683b1b2fc21d50142a4f54e617dde9d5bd8aaa956"
+}

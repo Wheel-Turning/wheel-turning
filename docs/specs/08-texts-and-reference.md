@@ -627,17 +627,30 @@ where e.state = 'ready' and e.excerptable and le.allowed
 
 Grants: `dg_web` may insert into `takedown_request` and select `source_policy`, nothing more on the new tables. `dg_pipeline` has full access.
 
+As built for texts (October 7, 2026):
+
+- **What a takedown does.** `wt takedown --edition <id> | --source <key> | --url <prefix>` deletes each edition's units (and so their embeddings) and unlinks citations. It leaves the edition as a `withdrawn` stub with its import hash and no legal text. It then deletes the raw copies under `texts-source/`, the work files and the cached pages, and checks that none is left. Exclusions are added for the work, the edition, each unit's content hash, and each source file's hash. Each file's hash is kept in the edition's `files.json` work file until the takedown. One `takedown_log` row is written per edition with scope `edition`.
+- **Source and prefix scope.** A source takedown also switches the source off, excludes its prefixes, and logs a `source` row. A URL takedown excludes the prefix.
+- **Decline.** `wt rights decline` runs the source takedown for texts.
+- **What every import checks first.** Active exclusions by work title, by source URL (prefix or host), and by the content hash of each file and unit, so the same document is refused at any address. A `withdrawn` stub of the same work and label is refused too.
+- **Quarantine.** `wt text quarantine --edition --reason --by` and `wt text release` are reversible and logged in `correction_log`. A release returns the edition to `ready` only if a proofread of its current units passed.
+- **Removal requests.** `wt takedown requests list|show|suspend|remove|decline` handle them.
+  - Suspend quarantines the reported excerpt's edition, or switches off a named source.
+  - Decline restores such a suspension.
+  - Remove runs the takedown and needs `--yes`.
+- **Source files.** A manifest may name `[edition] source_key`, so the source's switch governs the edition. A source with `source_retention = 'delete_after_proof'` loses its raw files when the edition's proofread passes, which sets `source_deleted_at`; `files.json` keeps the hashes. A queued large import's copy is deleted once it is assembled.
+
 Acceptance criteria for mandated sources:
 
 - [ ] `wt source mandate` creates the evidence and `source_policy` rows, and a URL under a mandated prefix is fetched and cleared with no per-URL evidence.
-- [ ] `wt source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them.
-- [ ] `wt takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left.
+- [x] `wt source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them. (`wt-ingest/tests/text_takedown.rs`.)
+- [x] `wt takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left. (`wt-ingest/tests/text_takedown.rs`; the takedown itself checks that no object of the edition is left, and the audit's `text_takedown_completeness` finds no units.)
 - [ ] `GET /rights` works with no session, `POST /rights/request` stores a row, rate limits at 5 per hour per address and rejects a filled honeypot, and no other route is reachable without a session.
 - [ ] Each text hit carries a "Report this excerpt" link whose form arrives prefilled.
 - [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent.
 - [ ] A noticed document is flagged and listed under `flag`, quarantined on arrival under `hold`, and refused under `block`.
 - [ ] A non-English document is skipped and reported.
-- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns.
+- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The last two are built: `text_source_served_while_off` and `takedown_request_overdue`, `wt-db/tests/audit.rs`. The exposure warning comes with the deployment setting.)
 
 ## Rights lifecycle
 
@@ -726,13 +739,13 @@ Acceptance criteria for the rights lifecycle:
 - [x] `wt source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event. (`wt-db/tests/rights.rs`; the mandate's evidence points to the stored record of the decision.)
 - [x] `wt rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `wt rights ledger` prints them in order. (`wt-db/tests/rights.rs` and `wt-cli/tests/commands.rs`. `wt rights no-response` records silence the same way.)
 - [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent. (The evidence and the switch are tested in `wt-db/tests/rights.rs`; the rendering moves to Spec 06's credit-line snapshot tests, decision of October 5, 2026.)
-- [ ] `decline` and a takedown remove the units and raw copies and add exclusions for the prefix, the work and each content hash.
-- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited. (M3R covers `wt source add` and a direct fetch by prefix and host; the crawl, the import, works and content hashes come with M4b's text importer and M3R's opt-out.)
+- [x] `decline` and a takedown remove the units and raw copies and add exclusions for the prefix, the work and each content hash. (Texts: `wt-ingest/tests/text_takedown.rs`, with `wt rights decline` running the source takedown.)
+- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited. (M3R covers `wt source add` and a direct fetch by prefix and host. The import now refuses the same work, a source URL under an excluded prefix, and the same file or unit by content hash at another address (`wt-ingest/tests/text_takedown.rs`). The crawl comes with URL ingestion.)
 - [x] A compile-fail test shows the fetch functions cannot be called with a raw URL. (`wt-ingest/tests/fetch_target.rs`: `get`, `check_robots`, and building a `FetchTarget` around `Exclusions::clear`.)
 - [x] `wt exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again. (The command requires `--evidence` and refuses an empty file.)
 - [x] A silent source stays a mandate, labeled as one, and `wt rights due` lists its follow-up.
 - [ ] Moved to Spec 06 with the rights page (decision of October 5, 2026): `GET /rights` lists each source with the correct plain-language status and uses no permission language for a mandate.
-- [ ] The audit warns on a mandate with no request after 14 days, and fails on a servable unit that matches an active exclusion. (The warning, and a warning for a request past its follow-up date, are in M3R's audit; the servable-unit check comes with `servable_text_unit` in M4b.)
+- [x] The audit warns on a mandate with no request after 14 days, and fails on a servable unit that matches an active exclusion. (The warnings are in M3R's audit; `text_excluded_served` checks work, edition, content and prefix exclusions, `wt-db/tests/audit.rs`.)
 
 ## Acceptance criteria
 

@@ -325,7 +325,7 @@ pub async fn run_assemble(
             job.bundle
         )));
     }
-    super::import_with(
+    let report = super::import_with(
         conn,
         objects,
         embedder,
@@ -338,7 +338,10 @@ pub async fn run_assemble(
             pdf_env: Some(env),
         },
     )
-    .await
+    .await?;
+    // The queued copy has served its purpose: the edition keeps its own.
+    objects.delete_prefix(&format!("{IMPORTS}/{}/", job.bundle))?;
+    Ok(report)
 }
 
 /// What `wt text import --estimate` prints.

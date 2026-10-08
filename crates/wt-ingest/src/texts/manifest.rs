@@ -87,6 +87,10 @@ pub struct EditionSection {
     pub rights_holder: String,
     /// The approved evidence.
     pub license_evidence_id: String,
+    /// The source it comes through, such as a mandated publisher, so disabling the source
+    /// stops it serving.
+    #[serde(default)]
+    pub source_key: Option<String>,
 }
 
 fn english() -> String {

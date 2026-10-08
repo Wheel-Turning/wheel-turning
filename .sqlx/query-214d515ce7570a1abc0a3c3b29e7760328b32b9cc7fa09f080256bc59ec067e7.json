@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_edition set state = 'withdrawn', legal_text = null, legal_pages = '[]',\n                                 units_hash = null\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "214d515ce7570a1abc0a3c3b29e7760328b32b9cc7fa09f080256bc59ec067e7"
+}

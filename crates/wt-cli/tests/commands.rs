@@ -1427,3 +1427,146 @@ async fn pipeline_export_reindex_and_sample_commands() {
         stderr(&sample)
     );
 }
+
+/// A ready, proofread text edition with one unit, and a removal request reporting that unit.
+async fn reported_text(pool: &PgPool) -> (Uuid, Uuid, Uuid) {
+    let ev: Uuid = sqlx::query_scalar(
+        "insert into license_evidence (publisher, license_code, license_url, evidence_url,
+                                       evidence_snapshot_ref, snapshot_sha256, captured_at,
+                                       reviewed_by, reviewed_at, allowed)
+         values ('Fixture Press', 'public-domain', 'https://example.invalid/l',
+                 'https://example.invalid/e', 'records/x', 'x', now(), 'reviewer', now(), true)
+         returning id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let edition: Uuid = sqlx::query_scalar(
+        "with w as (insert into work (title) values ('Request Fixture Sutra') returning id)
+         insert into text_edition (work_id, edition_label, rights_holder, license_evidence_id,
+                                   excerptable)
+         select id, 'Fixture 1903', 'public domain', $1, true from w returning id",
+    )
+    .bind(ev)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let unit: Uuid = sqlx::query_scalar(
+        "insert into text_unit (edition_id, ordinal, locator, label, text, word_count,
+                                content_hash, embedding, embedding_model)
+         values ($1, 0, 'request:1', 'Request Fixture Sutra, verse 1',
+                 'A reported fixture excerpt about mountains and water.', 8, 'request-hash',
+                 array_fill(0.03125::real, array[1024])::vector, 'fake')
+         returning id",
+    )
+    .bind(edition)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    wt_db::texts::refresh_units_hash(&mut pool.acquire().await.unwrap(), edition)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into proof_check (edition_id, sample_size, errors, reviewer, passed, units_hash)
+         select id, 1, 0, 'reviewer', true, units_hash from text_edition where id = $1",
+    )
+    .bind(edition)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("update text_edition set state = 'ready' where id = $1")
+        .bind(edition)
+        .execute(pool)
+        .await
+        .unwrap();
+    let request: Uuid = sqlx::query_scalar(
+        "insert into takedown_request (target, text_unit_id) values ('reported excerpt', $1)
+         returning id",
+    )
+    .bind(unit)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (edition, unit, request)
+}
+
+async fn edition_state(pool: &PgPool, edition: Uuid) -> String {
+    sqlx::query_scalar("select state::text from text_edition where id = $1")
+        .bind(edition)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn removal_requests_suspend_decline_and_remove_text() {
+    let fx = start().await;
+    let (edition, unit, request) = reported_text(&fx.pool).await;
+    let id = request.to_string();
+    let listed = fx.json(&["takedown", "requests", "list"]);
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["text_unit_id"], serde_json::json!(unit));
+
+    // Suspended at once, from the reported excerpt, and restored by a decline.
+    fx.json(&[
+        "takedown", "requests", "suspend", "--id", &id, "--by", "owner",
+    ]);
+    assert_eq!(edition_state(&fx.pool, edition).await, "quarantined");
+    fx.json(&[
+        "takedown",
+        "requests",
+        "decline",
+        "--id",
+        &id,
+        "--by",
+        "owner",
+        "--reason",
+        "the sender holds no rights",
+    ]);
+    assert_eq!(edition_state(&fx.pool, edition).await, "ready");
+    assert!(
+        fx.json(&["takedown", "requests", "list"])
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    // A takedown by edition previews, then a request removes it for good.
+    let e = edition.to_string();
+    let preview = fx.json(&["takedown", "--edition", &e, "--actor", "owner", "--dry-run"]);
+    assert_eq!(preview["units"], 1);
+    let second: Uuid = sqlx::query_scalar(
+        "insert into takedown_request (target, text_unit_id) values ('again', $1) returning id",
+    )
+    .bind(unit)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let second = second.to_string();
+    let refused = fx.wt(&[
+        "takedown", "requests", "remove", "--id", &second, "--by", "owner",
+    ]);
+    assert!(!refused.status.success());
+    assert_eq!(edition_state(&fx.pool, edition).await, "ready");
+    let out = fx.wt(&[
+        "takedown",
+        "requests",
+        "remove",
+        "--id",
+        &second,
+        "--by",
+        "owner",
+        "--edition",
+        &e,
+        "--yes",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(edition_state(&fx.pool, edition).await, "withdrawn");
+    let status: String =
+        sqlx::query_scalar("select status from takedown_request where id = $1::uuid")
+            .bind(&second)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "removed");
+}

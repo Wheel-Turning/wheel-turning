@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select enabled from source_policy where key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "source_policy",
+            "name": "enabled"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8b69639385ce5706a57d385aaeac0a210bd4f4d1debf2663b897b5ded7b228e1"
+}

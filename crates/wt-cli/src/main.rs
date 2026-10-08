@@ -297,6 +297,27 @@ enum TextCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Stops an edition serving at once, keeping everything, until released.
+    Quarantine {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// Why.
+        #[arg(long)]
+        reason: String,
+        /// Who.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Releases a quarantined edition: ready again if its proofread still holds.
+    Release {
+        /// The edition.
+        #[arg(long)]
+        edition: sqlx::types::Uuid,
+        /// Who.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
     /// Corrects one unit's text. Its edition then needs a new proofread before it serves.
     Fix {
         /// The unit.
@@ -980,18 +1001,115 @@ struct TalkOrTeacher {
 }
 
 #[derive(Debug, Args)]
+#[group(id = "takedown_target", required = true, multiple = false)]
+struct TakedownTarget {
+    /// One talk, by id.
+    #[arg(long)]
+    talk: Option<TalkId>,
+    /// Every talk of a teacher, by display name or alias.
+    #[arg(long)]
+    teacher: Option<String>,
+    /// One text edition, by id (Spec 08).
+    #[arg(long)]
+    edition: Option<sqlx::types::Uuid>,
+    /// Every text edition of a source, which is also switched off and its prefixes excluded.
+    #[arg(long)]
+    source: Option<String>,
+    /// Every text edition whose source URL starts with this prefix, which is excluded.
+    #[arg(long)]
+    url: Option<String>,
+}
+
+#[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 struct TakedownArgs {
+    #[command(subcommand)]
+    requests: Option<TakedownSubcommand>,
     #[command(flatten)]
-    target: TalkOrTeacher,
+    target: TakedownTarget,
     /// Who asked for it or ran it, for takedown_log.
-    #[arg(long, visible_alias = "by")]
-    actor: String,
+    #[arg(long, visible_alias = "by", required = true)]
+    actor: Option<String>,
+    /// For texts: why, kept with the exclusions.
+    #[arg(long, default_value = "takedown")]
+    reason: String,
     /// Print the counts and change nothing.
     #[arg(long, conflicts_with = "yes")]
     dry_run: bool,
     /// Confirm a real run.
     #[arg(long)]
     yes: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum TakedownSubcommand {
+    /// Removal requests from the rights page (Spec 08, Mandated sources, Handling).
+    Requests {
+        #[command(subcommand)]
+        command: RequestsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum RequestsCommand {
+    /// Open and suspended requests, or all with --all.
+    List {
+        /// Every request, handled ones too.
+        #[arg(long)]
+        all: bool,
+    },
+    /// One request.
+    Show {
+        /// The request.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+    },
+    /// Suspends what a request names at once, before checking who sent it: the edition is
+    /// quarantined, or the source switched off. Reversible.
+    Suspend {
+        /// The request.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// The edition; by default the one holding the reported excerpt.
+        #[arg(long, conflicts_with = "source")]
+        edition: Option<sqlx::types::Uuid>,
+        /// A whole source instead.
+        #[arg(long)]
+        source: Option<String>,
+        /// Who is handling it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Takes down what a request names, permanently.
+    Remove {
+        /// The request.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// The edition; by default the one holding the reported excerpt.
+        #[arg(long, conflicts_with = "source")]
+        edition: Option<sqlx::types::Uuid>,
+        /// A whole source instead.
+        #[arg(long)]
+        source: Option<String>,
+        /// Who is handling it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Confirm.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Declines a request, for example when the sender holds no rights; restores a suspension.
+    Decline {
+        /// The request.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// Who is handling it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Why.
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 fn parse_basis(value: &str) -> Result<wt_db::rights::Basis, String> {
@@ -1008,12 +1126,21 @@ fn parse_status(value: &str) -> Result<ConsentStatus, String> {
 fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     // The dispatch future holds every command's state, more than the 1 MB main-thread stack a
-    // Windows debug build gets, so it lives on the heap.
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("starting the async runtime")?
-        .block_on(Box::pin(run(cli)))
+    // Windows debug build gets, so it lives on the heap, and polling it runs on a thread with
+    // room for the dispatch's frames.
+    std::thread::Builder::new()
+        .name("wt".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .context("starting the async runtime")?
+                .block_on(Box::pin(run(cli)))
+        })
+        .context("starting the main thread")?
+        .join()
+        .map_err(|_| anyhow::anyhow!("the main thread panicked"))?
 }
 
 async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
@@ -1099,16 +1226,47 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     yes,
                 },
         } => commands::exclude(&pool().await?, talk, &reason, &by, yes).await?,
+        Command::Takedown(TakedownArgs {
+            requests: Some(TakedownSubcommand::Requests { command }),
+            ..
+        }) => {
+            index_cmds::takedown_requests(&pool().await?, &config, command).await?;
+        }
         Command::Takedown(args) => {
-            commands::takedown(
-                &pool().await?,
-                &config,
-                args.target.into(),
-                &args.actor,
-                args.dry_run,
-                args.yes,
-            )
-            .await?;
+            let actor = args.actor.unwrap_or_default();
+            let t = args.target;
+            let text_scope = match (t.edition, t.source, t.url) {
+                (Some(e), _, _) => Some(wt_db::text_takedown::TextScope::Edition(e)),
+                (_, Some(s), _) => Some(wt_db::text_takedown::TextScope::Source(s)),
+                (_, _, Some(u)) => Some(wt_db::text_takedown::TextScope::UrlPrefix(u)),
+                _ => None,
+            };
+            if let Some(scope) = text_scope {
+                index_cmds::takedown_texts(
+                    &pool().await?,
+                    &config,
+                    &scope,
+                    &args.reason,
+                    &actor,
+                    args.dry_run,
+                    args.yes,
+                )
+                .await?;
+            } else {
+                let target = match t.talk {
+                    Some(talk) => Target::Talk(talk),
+                    None => Target::Teacher(t.teacher.unwrap_or_default()),
+                };
+                commands::takedown(
+                    &pool().await?,
+                    &config,
+                    target,
+                    &actor,
+                    args.dry_run,
+                    args.yes,
+                )
+                .await?;
+            }
         }
         Command::Audit => return commands::audit(&pool().await?, config.env).await,
         Command::Ingest {
@@ -1272,8 +1430,16 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 by,
                 yes,
             } => {
-                rights::decline(&pool().await?, &records, &source, &statement_file, &by, yes)
-                    .await?;
+                rights::decline(
+                    &pool().await?,
+                    &config,
+                    &records,
+                    &source,
+                    &statement_file,
+                    &by,
+                    yes,
+                )
+                .await?;
             }
             RightsCommand::NoResponse { to, by } => {
                 rights::no_response(
@@ -1449,6 +1615,30 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             commands::print_json(&report)?;
+        }
+        Command::Text {
+            command:
+                TextCommand::Quarantine {
+                    edition,
+                    reason,
+                    by,
+                },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let was =
+                wt_ingest::texts::takedown::quarantine(&mut conn, edition, &reason, &by).await?;
+            commands::print_json(&serde_json::json!({
+                "edition": edition, "was": was, "state": "quarantined"
+            }))?;
+        }
+        Command::Text {
+            command: TextCommand::Release { edition, by },
+        } => {
+            let pool = pool().await?;
+            let mut conn = pool.acquire().await?;
+            let state = wt_ingest::texts::takedown::release(&mut conn, edition, &by).await?;
+            commands::print_json(&serde_json::json!({ "edition": edition, "state": state }))?;
         }
         Command::Text {
             command:

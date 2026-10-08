@@ -442,6 +442,141 @@ pub async fn import_text(
     Ok(report)
 }
 
+/// `wt takedown --edition | --source | --url`: texts out of every store. A real run needs
+/// `--yes`; without it the counts print and nothing changes.
+pub async fn takedown_texts(
+    pool: &PgPool,
+    config: &Config,
+    scope: &wt_db::text_takedown::TextScope,
+    reason: &str,
+    actor: &str,
+    dry_run: bool,
+    yes: bool,
+) -> anyhow::Result<()> {
+    let objects = stages::objects(config)?;
+    let mut conn = pool.acquire().await?;
+    let real = !dry_run && yes;
+    let report =
+        wt_ingest::texts::takedown::take_down(&mut conn, &objects, scope, reason, actor, !real)
+            .await?;
+    commands::print_json(&report)?;
+    if !dry_run && !yes {
+        anyhow::bail!(
+            "a takedown removes {} edition(s), counted above, and excludes them permanently; \
+             nothing was changed. Rerun with --yes",
+            report.editions.len()
+        );
+    }
+    Ok(())
+}
+
+/// The scope a request's handling acts on: an edition or source named, or the edition of the
+/// reported excerpt.
+async fn request_scope(
+    conn: &mut sqlx::PgConnection,
+    request: &wt_db::text_takedown::Request,
+    edition: Option<sqlx::types::Uuid>,
+    source: Option<String>,
+) -> anyhow::Result<wt_db::text_takedown::TextScope> {
+    use wt_db::text_takedown::TextScope;
+    if let Some(s) = source {
+        return Ok(TextScope::Source(s));
+    }
+    if let Some(e) = edition {
+        return Ok(TextScope::Edition(e));
+    }
+    let unit = request
+        .text_unit_id
+        .context("the request names no excerpt; give --edition or --source")?;
+    let e = wt_db::text_takedown::edition_of_unit(conn, unit)
+        .await?
+        .context("the reported excerpt is gone; give --edition or --source")?;
+    Ok(TextScope::Edition(e))
+}
+
+/// `wt takedown requests ...`.
+pub async fn takedown_requests(
+    pool: &PgPool,
+    config: &Config,
+    command: crate::RequestsCommand,
+) -> anyhow::Result<()> {
+    use crate::RequestsCommand as R;
+    use wt_db::text_takedown::{self as td, TextScope};
+    let mut conn = pool.acquire().await?;
+    let find = |r: Option<td::Request>, id| r.with_context(|| format!("no request {id}"));
+    match command {
+        R::List { all } => commands::print_json(&td::requests(&mut conn, all).await?)?,
+        R::Show { id } => commands::print_json(&find(td::request(&mut conn, id).await?, id)?)?,
+        R::Suspend {
+            id,
+            edition,
+            source,
+            by,
+        } => {
+            let request = find(td::request(&mut conn, id).await?, id)?;
+            let reason = format!("removal request {id}");
+            let action = match request_scope(&mut conn, &request, edition, source).await? {
+                TextScope::Source(key) => {
+                    wt_db::rights::set_enabled(pool, &key, false, Some(&reason), &by).await?;
+                    format!("source {key} disabled")
+                }
+                TextScope::Edition(e) => {
+                    wt_ingest::texts::takedown::quarantine(&mut conn, e, &reason, &by).await?;
+                    format!("edition {e} quarantined")
+                }
+                TextScope::UrlPrefix(_) => anyhow::bail!("suspend an edition or a source"),
+            };
+            td::handle_request(&mut conn, id, "suspended", &action, &by).await?;
+            commands::print_json(&serde_json::json!({ "request": id, "action": action }))?;
+        }
+        R::Remove {
+            id,
+            edition,
+            source,
+            by,
+            yes,
+        } => {
+            let request = find(td::request(&mut conn, id).await?, id)?;
+            let scope = request_scope(&mut conn, &request, edition, source).await?;
+            let reason = format!("removal request {id}");
+            let objects = stages::objects(config)?;
+            let report = wt_ingest::texts::takedown::take_down(
+                &mut conn, &objects, &scope, &reason, &by, !yes,
+            )
+            .await?;
+            commands::print_json(&report)?;
+            if !yes {
+                anyhow::bail!("a removal is permanent; nothing was changed. Rerun with --yes");
+            }
+            let action = format!("{} edition(s) taken down", report.editions.len());
+            td::handle_request(&mut conn, id, "removed", &action, &by).await?;
+        }
+        R::Decline { id, by, reason } => {
+            let request = find(td::request(&mut conn, id).await?, id)?;
+            // A suspension made for this request is undone.
+            if request.status == "suspended"
+                && let Some(action) = &request.action_taken
+            {
+                if let Some(key) = action
+                    .strip_prefix("source ")
+                    .and_then(|r| r.strip_suffix(" disabled"))
+                {
+                    wt_db::rights::set_enabled(pool, key, true, None, &by).await?;
+                } else if let Some(e) = action
+                    .strip_prefix("edition ")
+                    .and_then(|r| r.strip_suffix(" quarantined"))
+                    .and_then(|e| e.parse().ok())
+                {
+                    wt_ingest::texts::takedown::release(&mut conn, e, &by).await?;
+                }
+            }
+            td::handle_request(&mut conn, id, "declined", &reason, &by).await?;
+            commands::print_json(&serde_json::json!({ "request": id, "status": "declined" }))?;
+        }
+    }
+    Ok(())
+}
+
 /// `wt text reocr`.
 pub async fn reocr(
     pool: &PgPool,

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update citation set text_unit_id = null\n             where text_unit_id in (select id from text_unit where edition_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62430eee3ecd4fcb622db67e4ceeaa10c7294c1a86456550538a59769eb4e677"
+}
