@@ -72,7 +72,7 @@ fn gap_label(kind: &str) -> Option<&'static str> {
 }
 
 /// A talk's text as blocks: each segment's corrected words packed into paragraphs by the
-/// chunker, the transcript's non-talk spans between segments as gaps, and "Question omitted"
+/// chunker, the transcript's non-talk spans between segments as gaps, and "A student asked a question"
 /// before each teacher answer. Also returns the recognition model's name.
 pub async fn talk_blocks(
     conn: &mut sqlx::PgConnection,
@@ -115,7 +115,7 @@ pub async fn talk_blocks(
         }
         if seg.kind == "qa_teacher" {
             blocks.push(Block::Gap {
-                label: "Question omitted",
+                label: "A student asked a question",
                 start_ms: seg.start_ms,
             });
         }
@@ -298,7 +298,7 @@ mod tests {
                 text: "We sit together.".into(),
             },
             Block::Gap {
-                label: "Question omitted",
+                label: "A student asked a question",
                 start_ms: 600_000,
             },
         ];
@@ -308,7 +308,7 @@ mod tests {
         assert!(md.contains("(whisper-large-v3)"));
         assert!(md.contains("_[Chanting, 0:00:00]_"));
         assert!(md.contains("We sit together. [0:01:05]"));
-        assert!(md.contains("_[Question omitted, 0:10:00]_"));
+        assert!(md.contains("_[A student asked a question, 0:10:00]_"));
         assert_eq!(
             file_name(&talk),
             "2026-10-07-beginning-again-a-fixture-00000000.md"

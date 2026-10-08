@@ -36,7 +36,7 @@ impl MediaSource {
     /// The source for a stored route, if there is one.
     pub fn from_route(route: &MediaRoute) -> Option<Self> {
         match route {
-            MediaRoute::FeedEnclosure { url, .. } => {
+            MediaRoute::FeedEnclosure { url, .. } | MediaRoute::Direct { url } => {
                 Some(MediaSource::Enclosure { url: url.clone() })
             }
             MediaRoute::None => None,

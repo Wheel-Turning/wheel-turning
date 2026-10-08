@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sv.raw->'item'->>'audio_url' as \"url\"\n               from talk t join source_video sv on sv.id = t.source_video_id\n               where t.id = $1 and sv.platform = 'engagewisdom'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "98cc5c24137ce1a08f146b337fe42c557c75cfa2df5f8fab96c9672264907cb0"
+}

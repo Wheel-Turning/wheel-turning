@@ -234,3 +234,15 @@ Chosen setup: vulkan-coopmat-off, at 2.72 times real time, so run the first 20 t
 Best real-time factor: 3.18, large-v3 on vulkan-coopmat-off. On speed alone the rule says: run the whole corpus on this PC.
 Model: large-v3 (fastest model that keeps the glossary terms).
 Chosen setup: vulkan-coopmat-off, at 3.18 times real time, so run the whole corpus on this PC.
+
+## October 8, 2026: large-v3-turbo
+
+- Clip: clip.wav, 10.0 minutes, without the glossary prompt, scored against its known text; vulkan-coopmat-off, on a rested PC.
+
+| Setup | Model | RTF | Wall time | Peak RAM | Words | WER |
+| --- | --- | --- | --- | --- | --- | --- |
+| vulkan-coopmat-off | large-v3 | 3.49 | 171.9 s | 4.5 GB | 1700 | 1.18% (20/1701) |
+| vulkan-coopmat-off | distil-large-v3 | 7.57 | 79.2 s | 2.1 GB | 1749 | 2.65% (45/1701) |
+| vulkan-coopmat-off | large-v3-turbo | 6.05 | 99.2 s | 2.2 GB | 1696 | 1.88% (32/1701) |
+
+**Decision (owner, October 8, 2026): run the corpus on `large-v3-turbo`.** Diarization, not transcription, set the pace: on a 69-minute Berkeley Zen Center talk pyannote took 36 minutes (1.9 times real time) and sherpa-onnx 6 to 9 minutes but with unreliable speakers, so the owner also chose to diarize only from a minute before questions are invited (Spec 04, Diarizing only the questions).

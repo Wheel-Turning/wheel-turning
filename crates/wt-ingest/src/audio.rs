@@ -132,6 +132,9 @@ struct TranscriptJson<'a> {
     /// Ambiguous windows labeled by the rule fallback instead of the model.
     #[serde(skip_serializing_if = "is_zero")]
     label_fallback_windows: usize,
+    /// For an aligned source transcript, the share of its words matched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alignment_share: Option<f32>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -178,6 +181,9 @@ pub enum Steps {
         audio_ms: i64,
         /// Ambiguous windows labeled by the rule fallback instead of the model.
         fallback_windows: usize,
+        /// For the source's own text, aligned: the share of its words matched (Spec 04,
+        /// Aligned source transcripts).
+        aligned: Option<f32>,
     },
 }
 
@@ -188,6 +194,7 @@ async fn steps(
     mut conn: Option<&mut sqlx::PgConnection>,
     talk: &wt_core::gate::Talk<wt_core::gate::Consented>,
     source: &MediaSource,
+    source_text: Option<&str>,
     deps: &AudioDeps<'_>,
 ) -> Result<Steps, AudioError> {
     if let Some(c) = conn.as_deref_mut() {
@@ -204,11 +211,59 @@ async fn steps(
         .transcriber
         .transcribe(&scratch, &wav, deps.hints)
         .await?;
+    // A source's own transcript keeps its wording: the recognized words only lend it times, and
+    // they never leave scratch (Spec 04, Aligned source transcripts).
+    let (raw, aligned) = match source_text {
+        Some(text) => {
+            let a = wt_asr::align::align(text, &raw.words);
+            tracing::info!(talk = %talk.id, share = a.share, "source transcript aligned");
+            if a.share < wt_asr::align::MIN_ALIGNMENT_SHARE {
+                scratch.finish()?;
+                return Ok(Steps::Held("alignment_failed".to_owned()));
+            }
+            (
+                wt_asr::RawTranscript {
+                    model: format!("source-aligned/{}", raw.model),
+                    audio_ms: raw.audio_ms,
+                    words: a.words,
+                },
+                Some(a.share),
+            )
+        }
+        None => (raw, None),
+    };
 
     if let Some(c) = conn.as_deref_mut() {
         TalkRepo::advance(c, talk, PipelineState::Diarizing).await?;
     }
-    let turns = deps.diarizer.diarize(&wav).await?;
+    // Diarization is the slow step, so only the questions are diarized (Spec 04, Diarization
+    // and segmentation; owner's decision of October 8, 2026).
+    let audio_len = i32::try_from(raw.audio_ms).unwrap_or(i32::MAX);
+    let scope = if deps.segment.diarize_scope == "full" {
+        wt_segment::scope::Scope::Full
+    } else {
+        wt_segment::scope::scope(
+            &raw.words,
+            audio_len,
+            deps.segment.qa_preroll_s.saturating_mul(1000),
+            deps.segment.monologue_max_replies_per_hour,
+        )
+    };
+    tracing::info!(talk = %talk.id, ?scope, "diarization scope");
+    let turns = match scope {
+        wt_segment::scope::Scope::Monologue => wt_segment::scope::assemble(scope, audio_len, &[]),
+        wt_segment::scope::Scope::From { start_ms, .. } => {
+            match wt_core::scratch::wav_tail(&scratch, &wav, start_ms)? {
+                Some(tail) => {
+                    let turns = deps.diarizer.diarize(&tail).await;
+                    let _ = std::fs::remove_file(&tail);
+                    wt_segment::scope::assemble(scope, audio_len, &turns?)
+                }
+                None => deps.diarizer.diarize(&wav).await?,
+            }
+        }
+        wt_segment::scope::Scope::Full => deps.diarizer.diarize(&wav).await?,
+    };
 
     if let Some(c) = conn {
         TalkRepo::advance(c, talk, PipelineState::Segmenting).await?;
@@ -245,6 +300,7 @@ async fn steps(
         model: raw.model,
         audio_ms: raw.audio_ms,
         fallback_windows,
+        aligned,
     })
 }
 
@@ -274,7 +330,10 @@ pub async fn sample(
     let Some(source) = MediaSource::from_route(&route) else {
         return Ok(SampleOutcome::NoMedia);
     };
-    Ok(SampleOutcome::Ran(steps(None, &talk, &source, deps).await?))
+    let text = feed::source_transcript(conn, talk_id).await?;
+    Ok(SampleOutcome::Ran(
+        steps(None, &talk, &source, text.as_deref(), deps).await?,
+    ))
 }
 
 /// Runs the `audio` job for one talk.
@@ -302,8 +361,9 @@ pub async fn run(
         return Ok(AudioOutcome::NoMedia);
     };
 
-    let (seg, model, audio_ms, fallback_windows) =
-        match steps(Some(&mut *conn), &talk, &source, deps).await? {
+    let text = feed::source_transcript(conn, talk_id).await?;
+    let (seg, model, audio_ms, fallback_windows, aligned) =
+        match steps(Some(&mut *conn), &talk, &source, text.as_deref(), deps).await? {
             Steps::Held(reason) => {
                 transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
                 return Ok(AudioOutcome::Held(reason));
@@ -313,7 +373,8 @@ pub async fn run(
                 model,
                 audio_ms,
                 fallback_windows,
-            } => (seg, model, audio_ms, fallback_windows),
+                aligned,
+            } => (seg, model, audio_ms, fallback_windows, aligned),
         };
 
     let version = transcript::next_version(conn, talk_id).await?;
@@ -326,6 +387,7 @@ pub async fn run(
         audio_ms,
         &seg,
         fallback_windows,
+        aligned,
     );
     let hash = sha256_hex(json.as_bytes());
     deps.objects.put(&key, json.as_bytes())?;
@@ -347,7 +409,7 @@ pub async fn run(
         talk_id,
         &NewTranscript {
             version,
-            origin: "asr",
+            origin: if aligned.is_some() { "aligned" } else { "asr" },
             key: &key,
             content_hash: &hash,
             word_count: i32::try_from(seg.words.len()).unwrap_or(i32::MAX),
@@ -372,6 +434,7 @@ pub async fn run(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn transcript_json(
     talk: TalkId,
     version: i32,
@@ -380,12 +443,14 @@ fn transcript_json(
     audio_ms: i64,
     seg: &Segmentation,
     fallback_windows: usize,
+    aligned: Option<f32>,
 ) -> String {
     let doc = TranscriptJson {
         schema: 1,
         talk_id: talk.as_uuid().to_string(),
         version,
-        origin: "asr",
+        origin: if aligned.is_some() { "aligned" } else { "asr" },
+        alignment_share: aligned,
         model,
         language,
         audio_ms,
@@ -430,6 +495,16 @@ pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId
     for talk in job::cleared_talks(conn).await? {
         let route = match feed::media_route(conn, talk).await? {
             feed::MediaRoute::FeedEnclosure { url, .. } => format!("enclosure:{url}"),
+            // The source's text is input too: a changed transcript queues the talk again.
+            feed::MediaRoute::Direct { url } => format!(
+                "direct:{url}:{}",
+                sha256_hex(
+                    feed::source_transcript(conn, talk)
+                        .await?
+                        .unwrap_or_default()
+                        .as_bytes()
+                )
+            ),
             feed::MediaRoute::None => "none".to_owned(),
         };
         let key = sha256_hex(route.as_bytes());

@@ -53,11 +53,21 @@ pub struct SegmentSettings {
     pub talk_max_chant_share: f64,
     /// Lines of the service's chants, matched word by word, ignoring case and punctuation.
     pub chant_phrases: Vec<String>,
+    /// `qa` diarizes only from a minute before questions are invited, and not at all for a
+    /// monologue; `full` diarizes every recording whole (owner's decision of October 8, 2026).
+    pub diarize_scope: String,
+    /// How long before the invitation diarization starts.
+    pub qa_preroll_s: i32,
+    /// With no invitation, at most this many short replies an hour make a monologue.
+    pub monologue_max_replies_per_hour: f64,
 }
 
 impl Default for SegmentSettings {
     fn default() -> Self {
         Self {
+            diarize_scope: "qa".into(),
+            qa_preroll_s: 60,
+            monologue_max_replies_per_hour: 4.0,
             multi_speaker_share: 0.35,
             sitting_silence_s: 120,
             window_s: 60,

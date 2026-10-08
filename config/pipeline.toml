@@ -79,6 +79,13 @@ aggregator_hosts = ["terebess.hu"]
 # points to tune on the ten-video sample (decision of October 5, 2026). A window with no words
 # is "other"; chant is slow, repetitive speech or a high share of chant phrases; talk is
 # brisk, varied speech; everything else goes to the language model.
+# Diarization is the slow step: "qa" diarizes only from qa_preroll_s before the transcript invites
+# questions, and not at all when it reads as a monologue (at most
+# monologue_max_replies_per_hour short replies); "full" diarizes every recording whole (owner's
+# decision of October 8, 2026).
+diarize_scope = "qa"
+qa_preroll_s = 60
+monologue_max_replies_per_hour = 4.0
 multi_speaker_share = 0.35
 sitting_silence_s = 120
 window_s = 60

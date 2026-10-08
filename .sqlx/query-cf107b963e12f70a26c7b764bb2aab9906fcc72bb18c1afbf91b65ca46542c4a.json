@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into sangha (name, listed) values ($1, false) on conflict (name) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf107b963e12f70a26c7b764bb2aab9906fcc72bb18c1afbf91b65ca46542c4a"
+}

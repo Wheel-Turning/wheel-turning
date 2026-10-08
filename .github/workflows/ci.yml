@@ -70,6 +70,7 @@ jobs:
       # runner's Docker. Pull once up front so the first test does not time out on the pull.
       - run: docker pull pgvector/pgvector:pg16
       # The PDF tests run poppler and Tesseract on synthetic PDFs (Spec 08, PDFs and OCR).
+      # Refresh the package index first: a stale mirror list fails the fetch (October 8, 2026).
       - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng
       - run: cargo test --workspace --locked
         env:

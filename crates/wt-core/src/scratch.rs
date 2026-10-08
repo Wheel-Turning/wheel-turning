@@ -59,6 +59,73 @@ pub enum ScratchError {
 /// The audio file the pipeline transcribes and diarizes: mono, 16 kHz, 16-bit PCM.
 pub const WAV_NAME: &str = "audio.wav";
 
+/// The tail of the scratch WAV.
+pub const TAIL_WAV_NAME: &str = "tail.wav";
+
+/// Writes the part of a PCM WAV from `from_ms` on as `tail.wav` in `dir`, for diarizing only a
+/// talk's questions (Spec 04, Diarization and segmentation). Returns `None` when the file is not
+/// a PCM WAV this can read, so the caller diarizes the whole file instead.
+pub fn wav_tail(
+    dir: &ScratchDir,
+    wav: &Path,
+    from_ms: i32,
+) -> Result<Option<PathBuf>, ScratchError> {
+    let Ok(bytes) = std::fs::read(wav) else {
+        return Ok(None);
+    };
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Ok(None);
+    }
+    let le16 = |b: &[u8], i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
+    let le32 = |b: &[u8], i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+    let mut pos = 12;
+    let mut fmt: Option<(u16, u32, u16)> = None;
+    let mut data: Option<(usize, usize)> = None;
+    while pos + 8 <= bytes.len() {
+        let id = &bytes[pos..pos + 4];
+        let len = le32(&bytes, pos + 4) as usize;
+        let body = pos + 8;
+        if id == b"fmt " && body + 16 <= bytes.len() {
+            fmt = Some((
+                le16(&bytes, body),
+                le32(&bytes, body + 4),
+                le16(&bytes, body + 12),
+            ));
+        } else if id == b"data" {
+            data = Some((body, len.min(bytes.len().saturating_sub(body))));
+            break;
+        }
+        pos = body + len + (len % 2);
+    }
+    let (Some((1, rate, block_align)), Some((data_at, data_len))) = (fmt, data) else {
+        return Ok(None);
+    };
+    if block_align == 0 {
+        return Ok(None);
+    }
+    let block = usize::from(block_align);
+    let frames = u64::try_from(from_ms.max(0)).unwrap_or(0) * u64::from(rate) / 1000;
+    let skip = usize::try_from(frames)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(block)
+        .min(data_len);
+    let tail = &bytes[data_at + skip..data_at + data_len];
+    let mut out = Vec::with_capacity(data_at + tail.len());
+    out.extend_from_slice(&bytes[..data_at]);
+    // Patch the RIFF and data lengths.
+    let riff_len = u32::try_from(out.len() - 8 + tail.len()).unwrap_or(u32::MAX);
+    out[4..8].copy_from_slice(&riff_len.to_le_bytes());
+    let data_len_new = u32::try_from(tail.len()).unwrap_or(u32::MAX);
+    out[data_at - 4..data_at].copy_from_slice(&data_len_new.to_le_bytes());
+    out.extend_from_slice(tail);
+    let path = dir.file(TAIL_WAV_NAME)?;
+    std::fs::write(&path, out).map_err(|source| ScratchError::Create {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(Some(path))
+}
+
 /// Turns a fetched media file into the WAV the pipeline reads. The fetched file is deleted as
 /// soon as the WAV exists (Spec 04, Media handling, rule 2).
 pub trait Converter: Send + Sync {

@@ -214,6 +214,11 @@ pub enum MediaRoute {
         /// The episode's row.
         episode: SourceVideoId,
     },
+    /// The talk page's own audio file: an EngageWisdom talk (Spec 03, EngageWisdom sources).
+    Direct {
+        /// The file's address.
+        url: String,
+    },
     /// No route is known yet. Vimeo downloads and the storage adapter arrive with M4.
     None,
 }
@@ -235,6 +240,20 @@ pub async fn media_route(
     )
     .fetch_optional(&mut *conn)
     .await?;
+    if row.is_none() {
+        let direct = sqlx::query_scalar!(
+            r#"select sv.raw->'item'->>'audio_url' as "url"
+               from talk t join source_video sv on sv.id = t.source_video_id
+               where t.id = $1 and sv.platform = 'engagewisdom'"#,
+            talk.as_uuid()
+        )
+        .fetch_optional(&mut *conn)
+        .await?
+        .flatten();
+        if let Some(url) = direct {
+            return Ok(MediaRoute::Direct { url });
+        }
+    }
     Ok(match row {
         Some(r) => match r.url {
             Some(url) => MediaRoute::FeedEnclosure {
@@ -246,6 +265,24 @@ pub async fn media_route(
         },
         None => MediaRoute::None,
     })
+}
+
+/// The source's own transcript of a talk, when it has one: the text Spec 04's aligned
+/// transcripts keep for the teacher's words.
+pub async fn source_transcript(
+    conn: &mut PgConnection,
+    talk: TalkId,
+) -> Result<Option<String>, IngestDbError> {
+    Ok(sqlx::query_scalar!(
+        r#"select sv.raw->'item'->>'transcript' as "text"
+           from talk t join source_video sv on sv.id = t.source_video_id
+           where t.id = $1 and sv.platform = 'engagewisdom'"#,
+        talk.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten()
+    .filter(|t| !t.trim().is_empty()))
 }
 
 /// One episode, for the completeness check.

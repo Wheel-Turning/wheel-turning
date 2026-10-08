@@ -216,7 +216,10 @@ async fn run_stage(fx: &Fx, kind: JobKind, llm: &FakeLlm) -> String {
     let diarizer = FakeDiarizer::new(turns);
     let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
     let objects = LocalObjects::new(fx.dir.join("objects"));
-    let segment = SegmentSettings::default();
+    let segment = SegmentSettings {
+        diarize_scope: "full".into(),
+        ..SegmentSettings::default()
+    };
     let hints = AsrHints {
         glossary_prompt: "Dogen".into(),
         language: "en".into(),
@@ -447,7 +450,10 @@ async fn the_owner_export_writes_the_teachers_words_then_level_e_deletes_the_res
         text.contains("As Dogen wrote"),
         "the glossary's corrections"
     );
-    assert!(text.contains("_[Question omitted, 0:05:20]_"), "{text}");
+    assert!(
+        text.contains("_[A student asked a question, 0:05:20]_"),
+        "{text}"
+    );
     assert!(
         !text.split_whitespace().any(|w| w.len() > 1
             && w.starts_with('s')

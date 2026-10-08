@@ -426,6 +426,43 @@ Acceptance criteria for the SSZ sources:
 
 Feed finding of October 5, 2026. The feed Apple lists for SSZ (id 1472964846) is `https://feeds.feedburner.com/SeattleSotoZen`. It was last built on February 15, 2021 and holds 50 episodes from September 2019 to January 17, 2021, with no `itunes:duration` and enclosure lengths of zero, though the audio file names carry recording dates. Matched by recording date it supplies audio for 13 talks. Route (a) therefore covers little of the archive, and most SSZ audio needs route (b) or (c); whether a current feed exists is asked in the same conversation as the Vimeo token (PRD open items).
 
+## EngageWisdom sources
+
+Decision of October 7, 2026. San Francisco Zen Center, the Shunryu Suzuki archive, Berkeley Zen Center and Peaceful Sea Sangha publish their talk archives through one platform, EngageWisdom (one subdomain per center; the centers' own audio pages embed it). Each talk page carries the title, speaker, date, location and a serial such as `BZ-02832`, a full transcript in the page's HTML, often with `[mm:ss]` markers every minute or so, and an `.mp4` audio file whose address sits in the page's player settings. There is no feed or API. The footer of each says the talks "are shared with the permission of" the center; none carries a license.
+
+1. Rights. The four collections are used on the owner's mandate, as SSZ is: each is added with `wt source add --kind talks`, a notice and permission request is drafted to each center, and an opt-out triggers a takedown with exclusions. Yvonne Rand's archive (`yvonnerand.engagewisdom.com/yr`) is not loaded: her site says its material may not be used without express permission from The Callipeplon Society, so a permission request is drafted and nothing is fetched until a grant is recorded. Red Cedar Zen Community's YouTube channel (`UCw8K00tjhgA_NVPGM3ZW1Jg`) is discovered through the Data API once `YOUTUBE_API_KEY` is set, and a request asks Red Cedar for the audio files or owner OAuth; `third_party` mode stays off.
+2. The adapter. `EngageWisdomAdapter` (platform `engagewisdom`) reads a collection's listing pages (`/<collection>?page=N`, 50 talks a page) and each talk page, obeying `robots.txt` and its `Crawl-delay` of 10 seconds, with one connection to the host. Each talk becomes a `source_video` with `external_id` the serial, the talk page as its URL, and in `raw` the speaker, date, location, transcript text and audio address. The transcript is the source text of the talk; the AI summaries and keywords on the page are never read.
+3. Teachers. A speaker becomes a teacher of the collection's sangha by exact display name on first sight, under the source's mandate, and gets a notice draft like any mandated teacher. A speaker listed as several people, or as the community, makes the talk `needs_review`.
+4. Duplicates. SFZC's collection holds most of the Suzuki archive. Talks are keyed by their EngageWisdom serial, so a talk both collections list under one serial is one record. Both collections are one source key, `sfzc`, with one mandate and one permission request. The sample confirmed that both sites use the same serials.
+5. Talk type. Every talk a collection lists is a dharma talk unless a title pattern says otherwise (`default_talk_type = "dharma_talk"`), since the pages give no length.
+6. Media and text. Classification and the gate run as for any talk. The transcript route in Spec 04, Aligned source transcripts, uses the source's text for the teacher's words and the audio only for timing and speakers, so the audio is fetched into scratch and deleted as rule 6 requires.
+7. Link style. `link_style = "engagewisdom"` links the talk page; the page's player has no time parameter, so the page shows "starts at h:mm:ss".
+
+```toml
+[[source]]
+name = "sfzc"
+platform = "engagewisdom"
+collection_url = "https://sfzc.engagewisdom.com/sf"
+default_sangha = "San Francisco Zen Center"
+link_style = "engagewisdom"
+
+[[source]]
+name = "suzuki-roshi"
+platform = "engagewisdom"
+collection_url = "https://suzukiroshi.engagewisdom.com/sr"
+default_sangha = "San Francisco Zen Center"
+link_style = "engagewisdom"
+```
+
+Berkeley Zen Center (`https://berkeleyzen.engagewisdom.com/`) and Peaceful Sea Sangha (`https://peacefulsea.engagewisdom.com/eb`) follow the same form. The first run takes ten talks from each of the four collections as a segmentation sample, and the owner decides on the full run after reading it.
+
+Acceptance criteria for EngageWisdom sources:
+
+- [x] Discovery from recorded listing and talk-page fixtures yields one `source_video` per talk with serial, speaker, date, location, transcript and audio address, pages past 50, waits the crawl delay, and makes no request to a disallowed path. (`wt-ingest/tests/engagewisdom.rs`, with synthetic pages in EngageWisdom's markup.)
+- [x] The AI summary and keyword fields never reach `raw` or any stored text. (`wt-ingest/tests/engagewisdom.rs` and `engagewisdom` unit tests.)
+- [x] A talk listed in both SFZC collections is kept once. (Confirmed on the sample of October 7, 2026: SFZC's default listing opens on the Suzuki archive's talks under the same `SR-` serials, and they were recorded once. The `sfzc` source therefore lists newest first.)
+- [x] A new speaker becomes a teacher of the collection's sangha under the mandate; a multi-speaker or community listing goes to `needs_review`. (`wt-ingest/tests/engagewisdom.rs`, which also shows the byline deciding over a title that names another teacher.)
+
 ## SSZ inventory of October 5, 2026
 
 Read from the full list of the SSZ Vimeo account after loading every page, and compared with the SSZ talks page. The importer's completeness report must reproduce these figures within a small tolerance, and any change is explained.

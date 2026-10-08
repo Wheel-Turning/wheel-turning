@@ -6,11 +6,12 @@ Revisions are Hugging Face commit hashes, or for a single file its SHA-256 as Hu
 
 ## Speech recognition
 
-Run with whisper.cpp, so the files loaded are the ggml conversions. Spec 04 keeps `large-v3` for the corpus (decision of October 4, 2026, `docs/asr-benchmark.md`); `distil-large-v3` is allowed through `asr.model_path`.
+Run with whisper.cpp, so the files loaded are the ggml conversions. Spec 04 runs the corpus on `large-v3-turbo` (owner's decision of October 8, 2026, replacing `large-v3`, `docs/asr-benchmark.md`); the others are allowed through `asr.model_path`.
 
 | Model | Loaded as | License | Source and revision | File SHA-256 |
 | --- | --- | --- | --- | --- |
 | Whisper large-v3 | `ggml-large-v3.bin` | Apache-2.0, https://www.apache.org/licenses/LICENSE-2.0 | Weights `openai/whisper-large-v3` at `06f233fe06e710322aca913c1bc4249a0d71fce1`; ggml file from `ggerganov/whisper.cpp` at `5359861c739e955e79d9a303bcbc70fb988958b1` (MIT) | `64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2`, matching the file in `.bench/models` |
+| Whisper large-v3-turbo | `ggml-large-v3-turbo.bin` | MIT, https://opensource.org/license/mit | Weights `openai/whisper-large-v3-turbo`; ggml file from `ggerganov/whisper.cpp` (MIT), downloaded October 8, 2026. The worker's model since the owner's decision of October 8, 2026 | `1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69`, the file in `.bench/models` |
 | distil-large-v3 | `ggml-distil-large-v3.bin` | MIT, https://opensource.org/license/mit | `distil-whisper/distil-large-v3-ggml` at `0d78dd96ed9fc152325f63b53788fec3b43de031`; weights `distil-whisper/distil-large-v3` at `8031d2e6ce6631b7fc45629dddfc00271116d981` | `2883a11b90fb10ed592d826edeaee7d2929bf1ab985109fe9e1e7b4d2b69a298`, as in `docs/asr-benchmark.md` |
 | distil-large-v3, OpenVINO encoder | `ggml-distil-large-v3-encoder-openvino.bin` | MIT | Converted from `distil-whisper/distil-large-v3-openai` at `81941037893cb90dc82af45bc5dc5146ab0a818f` with whisper.cpp's `convert_encoder`. Benchmark only; the worker does not load it | Not recorded: a local conversion |
 
