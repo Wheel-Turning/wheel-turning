@@ -10,6 +10,12 @@ variable "domain_name" {
   default     = "app.wheelturning.org"
 }
 
+variable "alternate_domain_names" {
+  description = "Further hostnames that reach the same service. demo.wheelturning.org is the name in Spec 01 and the fetcher's user agent."
+  type        = list(string)
+  default     = ["demo.wheelturning.org"]
+}
+
 variable "alert_email" {
   description = "Receives CloudWatch alarm notifications."
   type        = string

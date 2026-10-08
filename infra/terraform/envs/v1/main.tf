@@ -85,16 +85,17 @@ module "iam" {
 }
 
 module "service" {
-  source             = "../../modules/service"
-  name               = local.name
-  vpc_id             = module.network.vpc_id
-  public_subnet_ids  = module.network.public_subnet_ids
-  security_group_ids = module.network.security_group_ids
-  domain_name        = var.domain_name
-  image_tag          = var.image_tag
-  migrate_image_tag  = var.migrate_image_tag
-  web_cpu            = var.web_cpu
-  web_memory         = var.web_memory
+  source                 = "../../modules/service"
+  name                   = local.name
+  vpc_id                 = module.network.vpc_id
+  public_subnet_ids      = module.network.public_subnet_ids
+  security_group_ids     = module.network.security_group_ids
+  domain_name            = var.domain_name
+  alternate_domain_names = var.alternate_domain_names
+  image_tag              = var.image_tag
+  migrate_image_tag      = var.migrate_image_tag
+  web_cpu                = var.web_cpu
+  web_memory             = var.web_memory
 
   web_exec_role_arn   = module.iam.web_exec_role_arn
   admin_exec_role_arn = module.iam.admin_exec_role_arn
