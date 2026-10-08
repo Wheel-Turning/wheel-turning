@@ -246,3 +246,7 @@ Chosen setup: vulkan-coopmat-off, at 3.18 times real time, so run the whole corp
 | vulkan-coopmat-off | large-v3-turbo | 6.05 | 99.2 s | 2.2 GB | 1696 | 1.88% (32/1701) |
 
 **Decision (owner, October 8, 2026): run the corpus on `large-v3-turbo`.** Diarization, not transcription, set the pace: on a 69-minute Berkeley Zen Center talk pyannote took 36 minutes (1.9 times real time) and sherpa-onnx 6 to 9 minutes but with unreliable speakers, so the owner also chose to diarize only from a minute before questions are invited (Spec 04, Diarizing only the questions).
+
+## October 8, 2026: a rented A10
+
+The first run of `infra/gpu-worker` on one rented NVIDIA A10 (24 GB, Ubuntu 22.04), with `large-v3-turbo` on whisper.cpp's CUDA build and the diarization sidecar on the GPU, three workers sharing the queue. Setup took 11 minutes, including installing the driver and rebooting. The workers finished 14 EngageWisdom talks, each 40 to 65 minutes, in about 11.5 minutes: about 2.5 minutes per talk per worker, or 70 talks an hour for the machine, against about 15 minutes per talk on the PC. At about $0.75 an hour that is about a cent per talk. Fetching from the source, not the GPU, is now most of each job.

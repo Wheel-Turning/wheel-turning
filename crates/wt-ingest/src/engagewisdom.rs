@@ -146,7 +146,12 @@ pub fn parse_talk(html: &str, url: &str) -> Result<TalkPage, IngestError> {
         .map(|c| text(&c[1]))
         .filter(|p| !p.is_empty())
         .collect();
-    let audio_url = re(&AUDIO)?.captures(html).map(|c| c[1].replace("\\/", "/"));
+    // The address sits in a JSON string, so `\/` and `'` are escapes. Left in, a URL
+    // parser reads the backslash as a slash and the file is not found.
+    let audio_url = re(&AUDIO)?.captures(html).map(|c| {
+        serde_json::from_str::<String>(&format!("\"{}\"", &c[1]))
+            .unwrap_or_else(|_| c[1].replace("\\/", "/"))
+    });
     Ok(TalkPage {
         serial,
         title,
@@ -323,6 +328,16 @@ mod tests {
         let page = PAGE.replace("FX-00042", "");
         let t = parse_talk(&page, "https://fx.example.invalid/talks/sunday-talk-18").unwrap();
         assert_eq!(t.serial, "page:sunday-talk-18");
+    }
+
+    #[test]
+    fn json_escapes_in_the_audio_address_are_decoded() {
+        let page = PAGE.replace("FX-00042.mp4", r"What-I-Don't-Know.mp4");
+        let t = parse_talk(&page, "https://fx.example.invalid/talks/fixture-pond").unwrap();
+        assert_eq!(
+            t.audio_url.as_deref(),
+            Some("https://media.example.invalid/s3fs-public/audio/What-I-Don't-Know.mp4")
+        );
     }
 
     #[test]

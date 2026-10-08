@@ -48,10 +48,12 @@ pub struct SidecarDiarizer {
 
 impl SidecarDiarizer {
     /// A client for the sidecar at `url`, such as `http://127.0.0.1:8090`. Diarizing an hour
-    /// on a CPU takes minutes, so the timeout is generous.
+    /// on a CPU takes minutes, so the timeout is generous. No connection is kept idle: the
+    /// sidecar closes one after a few seconds, and reusing it fails the next request.
     pub fn new(url: &str) -> Result<Self, DiarizeError> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(3 * 60 * 60))
+            .pool_max_idle_per_host(0)
             .build()
             .map_err(|e| DiarizeError::Sidecar {
                 url: url.to_owned(),

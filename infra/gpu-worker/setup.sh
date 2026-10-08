@@ -16,8 +16,13 @@ REPO=$HOME/wt
 TOOLS=$HOME/wt-tools
 step() { echo "=== $(date +%H:%M:%S) $*"; }
 
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || {
-  echo "no NVIDIA driver: this script needs a GPU machine image with the driver installed"
+step "system packages"
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
+  build-essential cmake git curl ca-certificates ffmpeg pkg-config libssl-dev libsndfile1 pciutils
+
+lspci | grep -qi nvidia || {
+  echo "no NVIDIA GPU on this machine"
   exit 1
 }
 [ -f "$REPO/Cargo.toml" ] || {
@@ -26,21 +31,29 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader ||
 }
 mkdir -p "$TOOLS"
 
-step "system packages"
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -q
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends \
-  build-essential cmake git curl ca-certificates ffmpeg pkg-config libssl-dev libsndfile1
-
+# NVIDIA's repository, for the driver when the image has none and for the CUDA toolkit.
+if ! command -v nvidia-smi > /dev/null || { ! command -v nvcc > /dev/null && [ ! -x /usr/local/cuda/bin/nvcc ]; }; then
+  if ! dpkg -s cuda-keyring > /dev/null 2>&1; then
+    step "NVIDIA repository"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    keyring=$(mktemp -d)
+    curl -fsSL -o "$keyring/cuda-keyring.deb" \
+      "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${VERSION_ID//./}/x86_64/cuda-keyring_1.1-1_all.deb"
+    sudo dpkg -i "$keyring/cuda-keyring.deb"
+    rm -rf "$keyring"
+    sudo apt-get update -q
+  fi
+fi
+if ! command -v nvidia-smi > /dev/null; then
+  step "NVIDIA driver"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq cuda-drivers
+  echo "the driver is installed; reboot and run setup.sh again"
+  exit 3
+fi
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 if ! command -v nvcc > /dev/null && [ ! -x /usr/local/cuda/bin/nvcc ]; then
   step "CUDA toolkit"
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  keyring=$(mktemp -d)
-  curl -fsSL -o "$keyring/cuda-keyring.deb" \
-    "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${VERSION_ID//./}/x86_64/cuda-keyring_1.1-1_all.deb"
-  sudo dpkg -i "$keyring/cuda-keyring.deb"
-  rm -rf "$keyring"
-  sudo apt-get update -q
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends "$CUDA_TOOLKIT"
 fi
 export PATH=/usr/local/cuda/bin:$PATH

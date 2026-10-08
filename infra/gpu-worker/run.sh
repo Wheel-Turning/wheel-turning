@@ -22,7 +22,18 @@ step() { echo "=== $(date +%H:%M:%S) $*"; }
 step "copy the repository"
 git archive HEAD | "${SSH[@]}" "$HOST" 'mkdir -p ~/wt && tar -x -C ~/wt'
 step "set up"
-"${SSH[@]}" "$HOST" 'bash ~/wt/infra/gpu-worker/setup.sh'
+# Exit 3: the driver was installed and the machine must reboot first.
+code=0
+"${SSH[@]}" "$HOST" 'bash ~/wt/infra/gpu-worker/setup.sh' || code=$?
+if [ "$code" = 3 ]; then
+  step "reboot for the driver"
+  "${SSH[@]}" "$HOST" 'sudo reboot' || true
+  sleep 30
+  until "${SSH[@]}" -o ConnectTimeout=10 "$HOST" true 2> /dev/null; do sleep 10; done
+  "${SSH[@]}" "$HOST" 'bash ~/wt/infra/gpu-worker/setup.sh'
+elif [ "$code" != 0 ]; then
+  exit "$code"
+fi
 step "token"
 grep '^HF_TOKEN=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n' |
   "${SSH[@]}" "$HOST" 'umask 077 && cat > ~/.wt-hf-token'
