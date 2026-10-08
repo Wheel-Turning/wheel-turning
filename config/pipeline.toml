@@ -54,8 +54,10 @@ default_basis_for_new_sources = "mandate"
 allowed_license_codes = ["public-domain", "permission-excerpt", "operator-mandate", "cc0", "cc-by-4.0", "cc-by-3.0", "cc-by-sa-4.0", "cc-by-sa-3.0"]
 
 [texts]
-# Texts (Spec 08, PDFs and OCR). The suspect check reads an English word list, one word to a line
-# (apt install wamerican on Linux; on Windows point this at any such list). A proofread passes
+# Texts (Spec 08, PDFs and OCR). The suspect check reads an English word list, one word to a line,
+# and a PDF import is refused without one. On Linux, apt install wamerican provides the default.
+# Windows has no system list: save one (such as wamerican's or SCOWL's words file) and set its
+# path with forward slashes, for example word_list = "C:/tools/dict/words". A proofread passes
 # with at most these errors in its random and lowest-confidence units.
 word_list = "/usr/share/dict/words"
 proof_random_max_errors = 1

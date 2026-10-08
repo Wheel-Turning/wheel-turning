@@ -19,6 +19,23 @@ fn fold(word: &str) -> String {
         .collect()
 }
 
+/// Why the word list is needed and how to get one. The default path exists only where a
+/// package such as `wamerican` installed it, so Windows always needs the setting.
+fn missing_word_list(path: &Path, e: &std::io::Error) -> TextError {
+    let get = if cfg!(windows) {
+        "Windows has no system word list: save one (for example the `words` file from the \
+         wamerican package or SCOWL), then set [texts] word_list in config/pipeline.toml to its \
+         path, such as \"C:/tools/dict/words\""
+    } else {
+        "install one (apt install wamerican) or set [texts] word_list in config/pipeline.toml"
+    };
+    TextError::Source(format!(
+        "a PDF import checks units against an English word list, and {} could not be read \
+         ({e}); {get}",
+        path.display()
+    ))
+}
+
 /// The words a unit is checked against.
 #[derive(Debug, Clone, Default)]
 pub struct Dictionary {
@@ -51,14 +68,16 @@ impl Dictionary {
 
     /// Reads a word list, one word to a line, such as `/usr/share/dict/words`.
     pub fn load(path: &Path, glossary: &[String]) -> Result<Self, TextError> {
-        let text = std::fs::read_to_string(path).map_err(|e| {
-            TextError::Source(format!(
-                "the English word list {} could not be read ({e}); install one (apt install \
-                 wamerican) or set [texts] word_list in pipeline.toml",
-                path.display()
-            ))
-        })?;
+        let text = std::fs::read_to_string(path).map_err(|e| missing_word_list(path, &e))?;
         Ok(Self::new(text.lines(), glossary.iter().map(String::as_str)))
+    }
+
+    /// Refuses a PDF import up front when the word list cannot be read, before any page is
+    /// rendered or read by OCR.
+    pub fn check(path: &Path) -> Result<(), TextError> {
+        std::fs::File::open(path)
+            .map(drop)
+            .map_err(|e| missing_word_list(path, &e))
     }
 
     fn knows(&self, token: &str) -> bool {

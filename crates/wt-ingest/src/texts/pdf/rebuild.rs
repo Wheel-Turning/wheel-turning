@@ -4,19 +4,30 @@
 //! headings, and every word kept with its page, confidence and box so a unit can be traced
 //! back to where it stands.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::Serialize;
 
 use super::super::extract::{Section, normalize};
-use super::layout::{Block, Line, Page, median};
+use super::layout::{Line, Page, type_size};
 
 /// A line in the top or bottom share of a page is in its margin.
 const MARGIN: f32 = 0.10;
+/// A page's first or last line set off from the rest by a gap of at least this many body type
+/// sizes stands where a running head or page number stands, even below [`MARGIN`], as on a
+/// journal scan with wide margins.
+const EDGE_GAP: f32 = 1.0;
+/// Margin lines whose letters differ in at most this share of places are one running head
+/// read with OCR noise, such as "VIMALAKIRTI" and "VIMALAKINTI".
+const HEAD_NOISE: f32 = 0.2;
+/// Letters a margin line needs before it is matched with noise; shorter ones match exactly.
+const HEAD_NOISE_MIN: usize = 8;
 /// A block at or below this share of the page height can be a footnote.
 const FOOT: f32 = 0.55;
 /// Type this much smaller than the body is footnote type.
-const FOOTNOTE_SIZE: f32 = 0.85;
+const FOOTNOTE_SIZE: f32 = 0.9;
+/// A line starting this many body type sizes right of the page's text edge is indented.
+const INDENT: f32 = 0.8;
 /// Type this much larger than the body is a heading.
 const HEADING_SIZE: f32 = 1.3;
 /// A heading has at most this many words.
@@ -61,6 +72,7 @@ pub struct Rebuilt {
     pub excluded: Vec<Excluded>,
 }
 
+/// A margin line's letters in lower case, which leaves out its page number.
 fn margin_key(line: &Line) -> String {
     line.text()
         .chars()
@@ -83,27 +95,87 @@ fn in_margin(page: &Page, line: &Line) -> bool {
         && (line.bottom() <= page.height * MARGIN || line.top() >= page.height * (1.0 - MARGIN))
 }
 
+/// The lines of a page, by block and line index, that stand where running heads and page
+/// numbers stand: those in its margins, and its first and last line when a gap of
+/// [`EDGE_GAP`] sets them off from the text and they are not in heading type.
+fn edge_lines(page: &Page, body: f32) -> HashSet<(usize, usize)> {
+    let mut lines: Vec<(usize, usize, &Line)> = page
+        .blocks
+        .iter()
+        .enumerate()
+        .flat_map(|(b, block)| {
+            block
+                .lines
+                .iter()
+                .enumerate()
+                .map(move |(l, line)| (b, l, line))
+        })
+        .collect();
+    lines.sort_by(|a, b| a.2.top().total_cmp(&b.2.top()));
+    let mut out: HashSet<(usize, usize)> = lines
+        .iter()
+        .filter(|(_, _, line)| in_margin(page, line))
+        .map(|&(b, l, _)| (b, l))
+        .collect();
+    let set_off = |line: &Line, gap: f32| {
+        body > 0.0 && gap >= body * EDGE_GAP && type_size(line.words.iter()) < body * HEADING_SIZE
+    };
+    if let [first, second, ..] = lines.as_slice()
+        && set_off(first.2, second.2.top() - first.2.bottom())
+    {
+        out.insert((first.0, first.1));
+    }
+    if let [.., before, last] = lines.as_slice()
+        && set_off(last.2, last.2.top() - before.2.bottom())
+    {
+        out.insert((last.0, last.1));
+    }
+    out
+}
+
 fn short(text: &str) -> String {
     text.chars().take(80).collect()
 }
 
-/// Margin lines whose letters repeat on several pages: running heads, such as a book's title
-/// on one side and its chapter on the other.
-fn running_heads(pages: &[Page]) -> BTreeSet<String> {
+/// Whether two margin keys are one running head, allowing for OCR noise.
+fn same_head(a: &str, b: &str) -> bool {
+    let n = a.chars().count().max(b.chars().count());
+    #[allow(clippy::cast_precision_loss)]
+    let noise = |d: usize| d as f32 <= n as f32 * HEAD_NOISE;
+    a == b || (n >= HEAD_NOISE_MIN && noise(wt_registry::glossary::damerau_levenshtein(a, b)))
+}
+
+/// Edge lines whose letters repeat on several pages: running heads, such as a journal's name
+/// on the left-hand pages and the article's title on the right-hand ones. Page numbers are left
+/// out of the comparison, so a head matches whichever side its number stands on, and spellings
+/// that differ only by OCR noise count as one head.
+fn running_heads(pages: &[Page], edges: &[HashSet<(usize, usize)>]) -> BTreeSet<String> {
     let mut seen: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
-    for page in pages {
-        for block in &page.blocks {
-            for line in &block.lines {
-                let key = margin_key(line);
-                if in_margin(page, line) && !key.is_empty() {
-                    seen.entry(key).or_default().insert(page.number);
-                }
+    for (page, edge) in pages.iter().zip(edges) {
+        for &(b, l) in edge {
+            let key = margin_key(&page.blocks[b].lines[l]);
+            if !key.is_empty() {
+                seen.entry(key).or_default().insert(page.number);
             }
         }
     }
-    seen.into_iter()
-        .filter(|(_, p)| p.len() >= RUNNING_HEAD_PAGES)
-        .map(|(k, _)| k)
+    let mut keys: Vec<(String, BTreeSet<u32>)> = seen.into_iter().collect();
+    keys.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+    // Each group: its most frequent spelling, every spelling in it, and the pages it is on.
+    let mut groups: Vec<(String, Vec<String>, BTreeSet<u32>)> = Vec::new();
+    for (key, on) in keys {
+        match groups.iter_mut().find(|g| same_head(&g.0, &key)) {
+            Some(group) => {
+                group.1.push(key);
+                group.2.extend(on);
+            }
+            None => groups.push((key.clone(), vec![key], on)),
+        }
+    }
+    groups
+        .into_iter()
+        .filter(|g| g.2.len() >= RUNNING_HEAD_PAGES)
+        .flat_map(|g| g.1)
         .collect()
 }
 
@@ -163,23 +235,20 @@ fn hyphen_joins(last: &str, next: &str) -> bool {
         && next.chars().next().is_some_and(char::is_lowercase)
 }
 
+/// Whether a paragraph ending in `word` is complete. Quotes are straight by now, and a
+/// footnote mark after the stop does not count.
 fn ends_sentence(word: &str) -> bool {
-    word.trim_end_matches(['"', '\'', ')', ']'])
+    word.trim_end_matches(['"', '\'', ')', ']', '*', '\u{2020}', '\u{2021}'])
         .ends_with(['.', '!', '?', ':', ';'])
 }
 
 /// Rebuilds the text of `pages`. With `strip_running_heads`, repeated margin lines go. With
 /// `line_breaks`, a block's lines stay separate lines, as verse needs.
 pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> Rebuilt {
-    let body = median(
-        pages
-            .iter()
-            .flat_map(Page::words)
-            .map(|w| w.height())
-            .collect(),
-    );
+    let body = type_size(pages.iter().flat_map(Page::words));
+    let edges: Vec<HashSet<(usize, usize)>> = pages.iter().map(|p| edge_lines(p, body)).collect();
     let heads = if strip_running_heads {
-        running_heads(pages)
+        running_heads(pages, &edges)
     } else {
         BTreeSet::new()
     };
@@ -216,18 +285,19 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
                 });
             }
         };
-    for page in pages {
-        let mut kept: Vec<(&Block, Vec<&Line>)> = Vec::new();
-        for block in &page.blocks {
+    for (page, edge) in pages.iter().zip(&edges) {
+        let mut kept: Vec<Vec<&Line>> = Vec::new();
+        for (b, block) in page.blocks.iter().enumerate() {
             let mut lines = Vec::new();
-            for line in &block.lines {
-                if in_margin(page, line) && is_page_number(&line.text()) {
+            for (l, line) in block.lines.iter().enumerate() {
+                let at_edge = edge.contains(&(b, l));
+                if at_edge && is_page_number(&line.text()) {
                     out.excluded.push(Excluded {
                         page: page.number,
                         kind: "page_number",
                         text: line.text(),
                     });
-                } else if in_margin(page, line) && heads.contains(&margin_key(line)) {
+                } else if at_edge && heads.contains(&margin_key(line)) {
                     out.excluded.push(Excluded {
                         page: page.number,
                         kind: "running_head",
@@ -238,32 +308,44 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
                 }
             }
             if !lines.is_empty() {
-                kept.push((block, lines));
+                kept.push(lines);
             }
         }
-        // Footnotes: the run of small-type blocks that ends the page, below its upper part.
-        let mut foot_from = kept.len();
-        while foot_from > 0 {
-            let (block, _) = kept[foot_from - 1];
-            let small = body > 0.0 && block.type_size() < body * FOOTNOTE_SIZE;
-            if small && page.height > 0.0 && block.top() >= page.height * FOOT {
-                foot_from -= 1;
-            } else {
-                break;
-            }
-        }
-        for (block, lines) in kept.drain(foot_from..) {
+        let size = |lines: &[&Line]| type_size(lines.iter().flat_map(|l| l.words.iter()));
+        let top = |lines: &[&Line]| lines.iter().map(|l| l.top()).fold(f32::MAX, f32::min);
+        // Footnotes: small-type blocks in the lower part of the page with no body type below
+        // them, wherever the tool put them in reading order.
+        let small = |lines: &[&Line]| body > 0.0 && size(lines) < body * FOOTNOTE_SIZE;
+        let body_bottom = kept
+            .iter()
+            .filter(|lines| !small(lines))
+            .map(|lines| top(lines))
+            .fold(f32::MIN, f32::max);
+        let (feet, kept): (Vec<Vec<&Line>>, Vec<Vec<&Line>>) =
+            kept.into_iter().partition(|lines| {
+                small(lines)
+                    && page.height > 0.0
+                    && top(lines) >= page.height * FOOT
+                    && top(lines) > body_bottom
+            });
+        for lines in feet {
             let text: Vec<String> = lines.iter().map(|l| l.text()).collect();
             out.excluded.push(Excluded {
                 page: page.number,
                 kind: "footnote",
                 text: short(&text.join(" ")),
             });
-            let _ = block;
         }
-        for (i, (block, lines)) in kept.into_iter().enumerate() {
+        // The page's text edge, against which an indented first line starts a paragraph: the
+        // lower quartile of the lines' left edges, since most lines are flush and a stray
+        // speck can stand further left.
+        let mut lefts: Vec<f32> = kept.iter().flatten().map(|l| l.left()).collect();
+        lefts.sort_by(f32::total_cmp);
+        let text_left = lefts.get(lefts.len() / 4).copied().unwrap_or(0.0);
+        let indented = |line: &Line| body > 0.0 && line.left() - text_left > body * INDENT;
+        for (i, lines) in kept.into_iter().enumerate() {
             let words: usize = lines.iter().map(|l| l.words.len()).sum();
-            if body > 0.0 && block.type_size() >= body * HEADING_SIZE && words <= HEADING_WORDS {
+            if body > 0.0 && size(&lines) >= body * HEADING_SIZE && words <= HEADING_WORDS {
                 flush(&mut title, &mut paragraphs, &mut out);
                 let heading: Vec<String> = lines.iter().map(|l| l.text()).collect();
                 title = Some(normalize(&heading.join(" ")));
@@ -273,16 +355,20 @@ pub fn rebuild(pages: &[Page], strip_running_heads: bool, line_breaks: bool) -> 
             if para.is_empty() {
                 continue;
             }
-            // A paragraph that runs over a page break continues the last one.
+            // A paragraph that runs over a page break continues the last one: the last does not
+            // end a sentence and this page's first line is not indented. Verse, whose lines
+            // seldom end in a stop, also needs the line to start in lower case.
             let continues = i == 0
                 && paragraphs
                     .last()
                     .and_then(|p| p.last())
                     .and_then(|l| l.last())
                     .is_some_and(|w| !ends_sentence(&w.text))
-                && para[0]
-                    .first()
-                    .is_some_and(|w| w.text.chars().next().is_some_and(char::is_lowercase));
+                && !lines.first().is_some_and(|l| indented(l))
+                && (!line_breaks
+                    || para[0]
+                        .first()
+                        .is_some_and(|w| w.text.chars().next().is_some_and(char::is_lowercase)));
             if continues && let Some(prev) = paragraphs.last_mut() {
                 let joins = prev
                     .last()
@@ -393,7 +479,7 @@ pub fn place<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::layout::{Origin, Word};
+    use super::super::layout::{Block, Origin, Word};
     use super::*;
 
     fn word(text: &str, x: f32, y: f32, size: f32) -> Word {
@@ -483,6 +569,253 @@ mod tests {
     fn keeps_running_heads_when_asked() {
         let r = rebuild(&book(), false, false);
         assert!(r.excluded.iter().all(|e| e.kind != "running_head"));
+    }
+
+    /// A word as Tesseract boxes it at 300 dpi: as tall as its letters reach, so `size` is the
+    /// ascender height and a word of x-height letters is shorter.
+    fn ocr_word(text: &str, x: f32, y: f32, size: f32) -> Word {
+        let rises = text
+            .chars()
+            .any(|c| c.is_ascii_digit() || c.is_uppercase() || "bdfhklt".contains(c));
+        let falls = text.chars().any(|c| "gjpqy,;()".contains(c));
+        let (top, height) = match (rises, falls) {
+            (true, true) => (0.0, size * 1.27),
+            (true, false) => (0.0, size),
+            (false, true) => (size * 0.3, size * 0.97),
+            (false, false) => (size * 0.3, size * 0.7),
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let width = size * 0.55 * text.chars().count() as f32;
+        Word {
+            text: text.into(),
+            conf: 0.9,
+            x0: x,
+            y0: y + top,
+            x1: x + width,
+            y1: y + top + height,
+        }
+    }
+
+    fn ocr_line(text: &str, x: f32, y: f32, size: f32) -> Line {
+        let mut at = x;
+        let words = text
+            .split(' ')
+            .map(|t| {
+                let w = ocr_word(t, at, y, size);
+                at = w.x1 + size * 0.4;
+                w
+            })
+            .collect();
+        Line { words }
+    }
+
+    /// A block whose lines start at `left`; a line given with a leading `>` is indented.
+    fn ocr_block(lines: &[&str], left: f32, y: f32, size: f32) -> Block {
+        Block {
+            lines: lines
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let (x, t) = match t.strip_prefix('>') {
+                        Some(rest) => (left + 88.0, rest),
+                        None => (left, *t),
+                    };
+                    #[allow(clippy::cast_precision_loss)]
+                    let y = y + i as f32 * size * 1.8;
+                    ocr_line(t, x, y, size)
+                })
+                .collect(),
+        }
+    }
+
+    /// A synthetic journal scan as Tesseract reads it: wide margins, so the running heads stand
+    /// at 14 percent of the page height, below [`MARGIN`]; the journal's name on the even pages
+    /// and the article's title on the odd ones, each with its page number on the outer side and
+    /// some OCR noise; a footnote in smaller type at the foot of the second page that Tesseract
+    /// lists first; and indented paragraphs, one of which runs over a page break.
+    fn journal() -> Vec<Page> {
+        let heads = [
+            "THE LOTUS SUTRA 225",
+            "226 THE SYNTHETIC REVIEW",
+            "THE LOTUS SUTRE 227",
+            "22.8 THE SYNTHETIC REVIEW",
+            "THE L0TUS SUTRA 229",
+            "23O THE SYNTHETIC REVIEW",
+        ];
+        let bodies: [&[&[&str]]; 6] = [
+            &[
+                &[
+                    ">Then the teacher said to the student: Go thou to",
+                    "the hall and ask after the health of the old monk.",
+                ],
+                &[
+                    ">The student replied that the moon is one and",
+                    "not divisible nor is",
+                ],
+            ],
+            &[&[
+                "Suchness divided into parts. The student",
+                "then sat down and the bell rang",
+            ]],
+            &[&[
+                ">Morning came and the student rose early.",
+                "He swept the hall and lit the lamps.",
+            ]],
+            &[&[">The old monk smiled at him.", "Nothing more was said."]],
+            &[&[">Then the rain stopped.", "The student went home."]],
+            &[&[">The book ends here.", "Thus have I heard."]],
+        ];
+        heads
+            .iter()
+            .zip(bodies)
+            .enumerate()
+            .map(|(i, (head, body))| {
+                // Verso pages sit further right on the scan, as a bound volume's do.
+                let left = if i % 2 == 0 { 260.0 } else { 320.0 };
+                let head_x = if i % 2 == 0 { 700.0 } else { left };
+                let mut blocks = Vec::new();
+                if i == 1 {
+                    blocks.push(ocr_block(
+                        &[
+                            ">1 The moon here stands for the mind of",
+                            "the student, as the old commentaries hold.",
+                        ],
+                        left,
+                        2100.0,
+                        25.0,
+                    ));
+                }
+                blocks.push(ocr_block(&[head], head_x, 390.0, 23.0));
+                let mut y = 470.0;
+                for lines in body {
+                    blocks.push(ocr_block(lines, left, y, 30.0));
+                    #[allow(clippy::cast_precision_loss)]
+                    let height = lines.len() as f32 * 54.0;
+                    y += height + 20.0;
+                }
+                Page {
+                    number: u32::try_from(i + 1).unwrap(),
+                    width: 1830.0,
+                    height: 2774.0,
+                    blocks,
+                    origin: Origin::Ocr,
+                }
+            })
+            .collect()
+    }
+
+    fn all_text(r: &Rebuilt) -> Vec<String> {
+        r.sections.iter().flat_map(|s| s.blocks.clone()).collect()
+    }
+
+    #[test]
+    fn strips_alternating_heads_below_the_margin() {
+        let r = rebuild(&journal(), true, false);
+        let heads: Vec<&str> = r
+            .excluded
+            .iter()
+            .filter(|e| e.kind == "running_head")
+            .map(|e| e.text.as_str())
+            .collect();
+        assert_eq!(heads.len(), 6, "{:?}", r.excluded);
+        let all = all_text(&r).join("\n");
+        for gone in ["LOTUS", "L0TUS", "SYNTHETIC", "226", "229"] {
+            assert!(!all.contains(gone), "{gone} in {all}");
+        }
+        let r = rebuild(&journal(), false, false);
+        assert!(all_text(&r).join("\n").contains("THE SYNTHETIC REVIEW"));
+    }
+
+    #[test]
+    fn keeps_a_repeated_first_line_that_is_not_set_off() {
+        // The same sentence opens three pages, but at the body's own spacing, so it is text.
+        let pages: Vec<Page> = (1..=3)
+            .map(|n| Page {
+                number: n,
+                width: 1830.0,
+                height: 2774.0,
+                blocks: vec![ocr_block(
+                    &[
+                        "Therefore I am not worthy to go.",
+                        ">The teacher then asked another student.",
+                    ],
+                    260.0,
+                    470.0,
+                    30.0,
+                )],
+                origin: Origin::Ocr,
+            })
+            .collect();
+        let r = rebuild(&pages, true, false);
+        assert!(r.excluded.is_empty(), "{:?}", r.excluded);
+        assert_eq!(all_text(&r).join(" ").matches("not worthy").count(), 3);
+    }
+
+    #[test]
+    fn excludes_a_small_foot_block_listed_first() {
+        let r = rebuild(&journal(), true, false);
+        let feet: Vec<&Excluded> = r.excluded.iter().filter(|e| e.kind == "footnote").collect();
+        assert_eq!(feet.len(), 1, "{:?}", r.excluded);
+        assert_eq!(feet[0].page, 2);
+        assert!(
+            feet[0].text.starts_with("1 The moon here"),
+            "{}",
+            feet[0].text
+        );
+        assert!(!all_text(&r).join("\n").contains("commentaries"));
+    }
+
+    #[test]
+    fn small_type_above_the_body_text_is_not_a_footnote() {
+        let mut pages = journal();
+        pages[1].blocks.push(ocr_block(
+            &["A last line in body type."],
+            320.0,
+            2400.0,
+            30.0,
+        ));
+        let r = rebuild(&pages, true, false);
+        assert!(r.excluded.iter().all(|e| e.kind != "footnote"));
+        assert!(all_text(&r).join("\n").contains("commentaries"));
+    }
+
+    #[test]
+    fn joins_across_a_page_break_unless_the_next_line_is_indented() {
+        let r = rebuild(&journal(), true, false);
+        let blocks = all_text(&r);
+        assert!(
+            blocks.contains(
+                &"The student replied that the moon is one and not divisible nor is Suchness \
+                  divided into parts. The student then sat down and the bell rang"
+                    .to_owned()
+            ),
+            "{blocks:#?}"
+        );
+        assert!(
+            blocks
+                .iter()
+                .any(|b| b.starts_with("Morning came and the student rose early.")),
+            "{blocks:#?}"
+        );
+        assert_eq!(blocks.len(), 6, "{blocks:#?}");
+    }
+
+    #[test]
+    fn running_heads_match_through_ocr_noise() {
+        assert!(same_head("thevimalakirtisutra", "thevimalakintisutra"));
+        assert!(same_head("thevimalakirtisutra", "thevimalaririttsutra"));
+        assert!(!same_head("theeasternbuddhist", "thevimalakirtisutra"));
+        // Short lines must match exactly.
+        assert!(!same_head("notes", "note"));
+        assert!(same_head("notes", "notes"));
+    }
+
+    #[test]
+    fn type_size_follows_the_tall_words() {
+        let line = ocr_line("one man saw a mountain", 0.0, 0.0, 30.0);
+        assert!((type_size(line.words.iter()) - 30.0).abs() < 1e-3);
+        let low = ocr_line("one man saw", 0.0, 0.0, 30.0);
+        assert!((type_size(low.words.iter()) - 21.0).abs() < 1e-3);
     }
 
     #[test]

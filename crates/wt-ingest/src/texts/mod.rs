@@ -375,6 +375,8 @@ pub async fn import_with(
         let env = opts.pdf_env.ok_or_else(|| {
             TextError::Source("a PDF import needs poppler and Tesseract (PdfEnv)".into())
         })?;
+        // Refused before any page is read, so a long OCR run does not end in this error.
+        pdf::quality::Dictionary::check(&env.word_list)?;
         let plan = large::plan(env.tools, &m, dir)?;
         if plan.large(&m) && !plan.done(objects, &m)? {
             check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
