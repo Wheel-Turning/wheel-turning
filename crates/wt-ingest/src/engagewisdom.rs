@@ -2,9 +2,15 @@
 //! its talks fifty at a time; each talk page holds the title, speaker, date, location, serial,
 //! the transcript and the audio address. Requests obey `robots.txt` and its crawl delay, one at
 //! a time. The page's AI summary and keywords are never read.
+//!
+//! A whole collection takes many hours at the crawl delay, so the adapter can hand its talks
+//! over in batches (`with_batch`): the listing is read once and kept, each call reads the next
+//! batch of talks not yet handed over or already known (`with_known`), and a talk page that
+//! cannot be read is logged and skipped rather than ending the run.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -170,6 +176,11 @@ pub struct EngageWisdomAdapter {
     exclusions: Exclusions,
     max_talks: Option<usize>,
     delay: Duration,
+    batch: Option<usize>,
+    /// The listing, read once.
+    listing: tokio::sync::Mutex<Option<Vec<Url>>>,
+    /// Talk addresses already handed over, known before or unreadable.
+    done: Mutex<HashSet<String>>,
 }
 
 impl EngageWisdomAdapter {
@@ -185,13 +196,68 @@ impl EngageWisdomAdapter {
             exclusions,
             max_talks,
             delay: CRAWL_DELAY,
+            batch: None,
+            listing: tokio::sync::Mutex::new(None),
+            done: Mutex::new(HashSet::new()),
         })
+    }
+
+    /// Each `discover` reads at most `n` talks, the next ones not yet handed over; an empty
+    /// result means the collection is done.
+    pub fn with_batch(mut self, n: usize) -> Self {
+        self.batch = Some(n.max(1));
+        self
+    }
+
+    /// Talk addresses already recorded, which are not read again.
+    pub fn with_known(self, urls: impl IntoIterator<Item = String>) -> Self {
+        if let Ok(mut done) = self.done.lock() {
+            done.extend(urls);
+        }
+        self
     }
 
     /// The same with another delay between requests: tests.
     pub fn with_delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self
+    }
+
+    /// The collection's talk links, page by page until a page adds none, up to `max_talks`.
+    async fn read_listing(&self, first: &mut bool) -> Result<Vec<Url>, IngestError> {
+        let target = self.exclusions.clear(&self.collection)?;
+        http::check_robots(&self.client, &target).await?;
+        let mut links: Vec<Url> = Vec::new();
+        let mut seen = BTreeSet::new();
+        let limit = self.max_talks.unwrap_or(usize::MAX);
+        for n in 0.. {
+            let mut page_url = self.collection.clone();
+            if n > 0 {
+                page_url
+                    .query_pairs_mut()
+                    .append_pair("page", &n.to_string());
+            }
+            let html = self.page(&page_url, first).await?;
+            let found: Vec<String> = talk_links(&html)
+                .into_iter()
+                .filter(|l| seen.insert(l.clone()))
+                .collect();
+            if found.is_empty() {
+                break;
+            }
+            for l in found {
+                if links.len() < limit {
+                    links.push(self.collection.join(&l).map_err(|e| IngestError::Parse {
+                        url: l.clone(),
+                        message: e.to_string(),
+                    })?);
+                }
+            }
+            if links.len() >= limit {
+                break;
+            }
+        }
+        Ok(links)
     }
 
     async fn page(&self, url: &Url, first: &mut bool) -> Result<String, IngestError> {
@@ -215,45 +281,50 @@ impl SourceAdapter for EngageWisdomAdapter {
         &self,
         since: Option<DateTime<Utc>>,
     ) -> Result<Vec<DiscoveredVideo>, IngestError> {
-        let target = self.exclusions.clear(&self.collection)?;
-        http::check_robots(&self.client, &target).await?;
         let mut first = false;
-        let mut links: Vec<Url> = Vec::new();
-        let mut seen = BTreeSet::new();
-        let limit = self.max_talks.unwrap_or(usize::MAX);
-        for n in 0.. {
-            let mut page_url = self.collection.clone();
-            if n > 0 {
-                page_url
-                    .query_pairs_mut()
-                    .append_pair("page", &n.to_string());
-            }
-            let html = self.page(&page_url, &mut first).await?;
-            let found: Vec<String> = talk_links(&html)
-                .into_iter()
-                .filter(|l| seen.insert(l.clone()))
-                .collect();
-            if found.is_empty() {
-                break;
-            }
-            for l in found {
-                if links.len() < limit {
-                    links.push(self.collection.join(&l).map_err(|e| IngestError::Parse {
-                        url: l.clone(),
-                        message: e.to_string(),
-                    })?);
-                }
-            }
-            if links.len() >= limit {
-                break;
-            }
+        let mut listing = self.listing.lock().await;
+        if listing.is_none() {
+            *listing = Some(self.read_listing(&mut first).await?);
         }
+        let pending: Vec<Url> = {
+            let done = self.done.lock().map_err(|_| IngestError::Parse {
+                url: self.collection.to_string(),
+                message: "the adapter's state is poisoned".to_owned(),
+            })?;
+            listing
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|u| !done.contains(u.as_str()))
+                .cloned()
+                .collect()
+        };
+        drop(listing);
         let mut out = Vec::new();
-        for url in links {
+        let batch = self.batch.unwrap_or(usize::MAX);
+        for url in pending {
+            // Skipped pages do not count, so only an exhausted listing gives an empty batch.
+            if out.len() >= batch {
+                break;
+            }
+            if let Ok(mut done) = self.done.lock() {
+                done.insert(url.to_string());
+            }
             let target = self.exclusions.clear(&url)?;
             http::check_robots(&self.client, &target).await?;
-            let html = self.page(&url, &mut first).await?;
-            let talk = parse_talk(&html, url.as_str())?;
+            let talk = match self.page(&url, &mut first).await {
+                Ok(html) => parse_talk(&html, url.as_str()),
+                Err(e) => Err(e),
+            };
+            let talk = match talk {
+                Ok(talk) => talk,
+                // One unreadable page does not end a run of thousands (Spec 03).
+                Err(e) if self.batch.is_some() => {
+                    tracing::warn!(url = %url, error = %e, "talk page skipped");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             let published_at = talk
                 .date
                 .as_deref()

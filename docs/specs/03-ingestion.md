@@ -454,7 +454,9 @@ default_sangha = "San Francisco Zen Center"
 link_style = "engagewisdom"
 ```
 
-Berkeley Zen Center (`https://berkeleyzen.engagewisdom.com/`) and Peaceful Sea Sangha (`https://peacefulsea.engagewisdom.com/eb`) follow the same form. The first run takes ten talks from each of the four collections as a segmentation sample, and the owner decides on the full run after reading it.
+Berkeley Zen Center (`https://berkeleyzen.engagewisdom.com/bz`, the archive; the site's front page lists only recent talks) and Peaceful Sea Sangha (`https://peacefulsea.engagewisdom.com/eb`) follow the same form. The first run takes ten talks from each of the four collections as a segmentation sample, and the owner decides on the full run after reading it.
+
+The full run (owner's decision of October 8, 2026) reads every talk: about 5,950 at SFZC, which include most of the Suzuki archive's 440, about 3,000 at Berkeley and 341 at Peaceful Sea. At the ten-second crawl delay that is many hours per collection, so discovery records talks in batches of 25, keeps the listing it read at the start, skips talks already recorded when rerun, and logs and skips a talk page it cannot read instead of ending the run. Rented GPUs transcribe up to the $50 cap of Spec 01, and the PC works through the rest.
 
 Acceptance criteria for EngageWisdom sources:
 

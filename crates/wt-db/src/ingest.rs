@@ -93,6 +93,19 @@ pub enum Recorded {
     },
 }
 
+/// The addresses of the videos a source has recorded, so a long discovery can resume.
+pub async fn recorded_urls(
+    conn: &mut PgConnection,
+    source: &str,
+) -> Result<Vec<String>, IngestDbError> {
+    Ok(sqlx::query_scalar!(
+        r#"select url as "url!" from source_video where raw->>'source' = $1"#,
+        source
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Stores one discovered video. A new video gets a `source_video` row, a `talk` in state
 /// `discovered` and a `classify` job. A known one has its stored metadata refreshed, and its
 /// talk is re-queued only when the metadata changed and the talk is still before the gate.
