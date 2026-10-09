@@ -406,7 +406,7 @@ pub struct TextHit {
 
 `AnswerView` gains `texts: Vec<TextHit>`. The page shows them in a section titled "From the texts" after the teacher groups, each as a blockquote with work, locator, author, translator, edition and license notice. A text hit has no give button. The result line counts them apart: "Passages from 3 teachers, and 2 text excerpts".
 
-Footnotes. When a citation has `text_unit_id`, its footnote links to `/text/<unit_id>` as "Read in the text". Otherwise it renders as before, with a link-out when the locator has a URL.
+Footnotes. When a citation has `text_unit_id`, its footnote links to `/text/<unit_id>` as "Read in the text", and a verified quotation also shows the unit under the footnote (Quoted passages inline). Otherwise it renders as before, with a link-out when the locator has a URL.
 
 New route: `GET /text/{unit_id}` (session required) shows the unit with at most two neighbors on each side, read through `servable_text_unit`, each with its license notice. There is no whole-work view, in keeping with the PRD's short-passages rule.
 
@@ -451,6 +451,57 @@ Acceptance criteria:
 - [ ] A citation matching two works stays `unresolved`, and a stoplisted phrase never matches.
 - [ ] After a new link-out work, `wt reindex --citations` resolves a previously unresolved fixture citation of that work, and a rerun changes nothing.
 - [ ] The answer page renders a work-level footnote with the work title, the "the work, not a passage" badge and the work's link-out, and renders a work with no `link_out_url` without a link. (With the answer page in M5.)
+
+## Quoted passages inline
+
+When a teacher reads a line of a text aloud and comments on it, the student is helped by seeing that line in a translation's full wording next to the commentary. A passage the code cannot prove is the one quoted misleads instead: the student reads the teacher's words against a passage they were not discussing and cannot tell. So the answer page shows a text excerpt beside a teacher's passage only when the code has checked that the teacher's quoted words are in that unit. In every other case the footnote keeps its link (decision of October 9, 2026).
+
+A model takes no part in the check. It is a comparison of words, computed in code and stored, so the page only reads a number.
+
+Conditions. A citation's unit is shown inline only when all of these hold:
+
+1. Its `kind` is `quotation`. A reference ("as Dogen says in Uji") or a case is never shown inline.
+2. It is `resolved` by method `hand_list`. Series labels, model hints and work-level citations are never shown inline, because none of them proves the place.
+3. It has a `text_unit_id` that `servable_text_unit` serves, so the edition is ready, excerptable, proofread and covered by approved evidence.
+4. Its `quote_match_words` is at least `inline_min_quote_words` (default 6), and was computed against the unit's current text.
+
+The check. `quote_match_words` is the length of the longest run of consecutive words of the citation's `raw_text` that appears as consecutive words in the unit's text. Both are compared after the normalization of Spec 03's rule 1 (lowercase, punctuation as spaces, spaces collapsed), with accents folded, so "Dōgen" and "Dogen" match and recognition's punctuation does not matter. Framing words such as "as he says" do not count against a citation, since only the longest shared run is measured. A teacher quoting a different translation shares few consecutive words with the edition we hold, fails the check, and keeps the link, which is the right outcome. The run is measured within the linked unit only. A quotation that runs across two units is measured against the one the resolver chose.
+
+When it runs. The check runs wherever `citation.text_unit_id` is set or changes: at index time for each talk, and in `wt reindex --citations`. It writes `quote_match_words` and `quote_match_hash`, the unit's `content_hash` it was measured against. `wt text fix` and any import that replaces a unit's text clear both fields on the citations linked to that unit, and the next `wt reindex --citations` measures again. A rerun on unchanged text changes nothing (CLAUDE.md rule 8).
+
+Migration `0027_quoted_passages_inline.sql`:
+
+```sql
+alter table citation add column kind text
+  check (kind in ('reference','quotation','case'));
+alter table citation add column quote_match_words integer check (quote_match_words >= 0);
+alter table citation add column quote_match_hash text;
+```
+
+`kind` is written by the index step from the staged citation, which already carries it (Spec 04, `RawCitation.kind`). Citations indexed before this migration have no `kind` and are never shown inline until it is filled: `wt reindex --citations` fills it from the staging object without rebuilding passages. `servable_citation` gains `kind` and a computed `quote_verified` boolean, true only when conditions 1 to 3 hold and `quote_match_hash` equals the unit's current `content_hash`. The view compares the hash, so the web role never reads `text_unit`. The assembler applies condition 4's threshold, so tuning it needs no new measurement.
+
+Rendering (M5):
+
+- The excerpt sits under the citation's footnote, collapsed by default as a `<details>` element whose summary reads "The passage quoted". The teacher's passage stays the main thing on the page. The excerpt is set smaller and indented, never as a second blockquote of the same weight.
+- It shows the unit's text whole, which the excerpt limits already cap at 250 words, with no neighbors. Beneath it are the credit line (work, locator, author, translator, edition, page when known and license notice), "Read in the text" to `/text/<unit_id>`, and "Report this excerpt", as PRD principle 7 requires of every excerpt.
+- At most `inline_excerpts_per_answer` (default 3) inline excerpts appear per answer, and at most 1 per work, taken in the order their footnotes are numbered. A verified quotation past those caps keeps its link.
+- A unit shown inline is not repeated in "From the texts". Inline excerpts do not count toward that section's `max_units` or `max_works`, never count toward the teacher count, and never enter the dana split or synthesis.
+- `answer.payload` stores nothing new. A permalink re-renders through the serving views, so if a unit is removed or its edition taken down, the excerpt disappears and the footnote renders as it would without it.
+
+Settings under `[texts]` in `config/retrieval.toml`: `inline_min_quote_words = 6` and `inline_excerpts_per_answer = 3`. Calibrate the first on the evaluation set: the claim audit samples inline pairs, and a reviewer marks whether the excerpt is the passage the teacher quoted. A misquote found counts against the PRD's text-quality bar.
+
+Evaluation. Evaluation exports list each inline pair (the teacher's passage with the citation span marked, and the unit shown) in its own labeled block, so the reviewer rates whether the pairing is right separately from passage relevance.
+
+Acceptance criteria:
+
+- [ ] Migration `0027` applies after `0026`, and `servable_citation` exposes `kind` and `quote_verified`.
+- [ ] On fixtures, a quotation sharing six or more consecutive words with its hand-listed unit gets `quote_match_words` of at least 6 and `quote_verified` true. The same lines in another translation, sharing fewer, get a lower count and stay a link.
+- [ ] Accents and punctuation do not change the count, and framing words around the quoted words do not lower it.
+- [ ] A reference, a case, a `probable` citation, a `series_label`, `llm` or `work_name` citation, and a citation whose edition is not served are never `quote_verified`, whatever their count.
+- [ ] `wt text fix` on the unit clears the measurement and `quote_verified` turns false. The next `wt reindex --citations` measures again, and a rerun with unchanged text changes no rows.
+- [ ] A citation indexed before `0027` gets its `kind` from `wt reindex --citations` without its passage being rebuilt.
+- [ ] The answer page renders a verified quotation collapsed under its footnote with its credit line, "Read in the text" and "Report this excerpt", respects both caps, and leaves the unit out of "From the texts". (With the answer page in M5.)
+- [ ] After a takedown of the edition, a permalink to an answer that showed the excerpt renders the footnote without it.
 
 ## Guided loading
 
