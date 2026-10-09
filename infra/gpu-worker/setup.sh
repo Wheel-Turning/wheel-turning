@@ -95,6 +95,13 @@ if [ ! -x "$TOOLS/sidecar/bin/python" ]; then
   # Linux torch wheels from PyPI carry CUDA.
   uv pip install -q -p "$TOOLS/sidecar/bin/python" -r "$REPO/sidecars/diarize/pyproject.toml"
 fi
+# PyPI's torch is built for CUDA 13, which needs driver 580 or later. Older drivers (Lambda
+# Stack images carry 570) get torch 2.11 built for CUDA 12.8.
+if ! "$TOOLS/sidecar/bin/python" -c "import torch, sys; sys.exit(not torch.cuda.is_available())" 2> /dev/null; then
+  step "torch for CUDA 12.8"
+  export PATH=$HOME/.local/bin:$PATH
+  uv pip install -q -p "$TOOLS/sidecar/bin/python" --reinstall-package torch --reinstall-package torchaudio     --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple     --index-strategy unsafe-best-match "torch==2.11.*" "torchaudio==2.11.0"
+fi
 
 step "wt"
 command -v cargo > /dev/null || [ -x "$HOME/.cargo/bin/cargo" ] ||
