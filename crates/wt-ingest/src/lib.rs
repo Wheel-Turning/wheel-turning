@@ -18,6 +18,7 @@ pub mod review;
 pub mod robots;
 pub mod rss;
 pub mod source;
+pub mod text_transcript;
 pub mod textjobs;
 pub mod texts;
 pub mod vimeo;

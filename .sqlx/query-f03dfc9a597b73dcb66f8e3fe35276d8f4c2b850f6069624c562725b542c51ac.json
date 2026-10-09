@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select te.display_name as \"name!\" from talk t join teacher te on te.id = t.teacher_id\n           where t.id = $1\n           union\n           select a.alias from talk t join teacher_alias a on a.teacher_id = t.teacher_id\n           where t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f03dfc9a597b73dcb66f8e3fe35276d8f4c2b850f6069624c562725b542c51ac"
+}

@@ -170,7 +170,7 @@ create table transcript (
   id uuid primary key default gen_random_uuid(),
   talk_id uuid not null references talk(id) on delete cascade,
   version integer not null,
-  origin text not null check (origin in ('captions','asr')),   -- 'reviewed' added by M4T (Spec 03, Display levels)
+  origin text not null check (origin in ('captions','asr')),   -- 'reviewed' added by M4T (Spec 03, Display levels); 'aligned' by migration 0024 and 'text' by 0025 (Spec 04)
   language text not null default 'en',
   s3_key text not null,                  -- transcript JSON, schema in Spec 04
   content_hash text not null,

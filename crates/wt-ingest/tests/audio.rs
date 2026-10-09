@@ -809,3 +809,160 @@ async fn a_monologue_is_not_diarized_at_all() {
         "no diarization for a monologue"
     );
 }
+
+/// A cleared EngageWisdom talk by Ada with the source's transcript and no audio.
+async fn cleared_text_only_talk(fx: &Fx, transcript: &str) -> TalkId {
+    let talk = cleared_engagewisdom_talk(fx, transcript).await;
+    sqlx::query(
+        "update source_video set raw = raw #- '{item,audio_url}'
+         where id = (select source_video_id from talk where id = $1)",
+    )
+    .bind(talk.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    talk
+}
+
+fn words(prefix: &str, from: usize, n: usize) -> String {
+    (from..from + n)
+        .map(|i| format!("{prefix}{i}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        + "."
+}
+
+/// A labeled transcript: Ada teaches, a student asks, Ada answers. Ada's words start with
+/// `teacher`.
+fn labeled_text(teacher: &str) -> String {
+    format!(
+        "{}\n\nStudent: {}\n\n{}\n\nAda: {}",
+        words(teacher, 0, 1500),
+        words("s", 0, 40),
+        words("s", 40, 10),
+        words(teacher, 1500, 300),
+    )
+}
+
+fn stored_words(fx: &Fx, talk: TalkId) -> (serde_json::Value, Vec<String>) {
+    let json: serde_json::Value = serde_json::from_slice(
+        &fx.objects()
+            .get(&audio::transcript_key(talk, 1))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let stored = json["words"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["w"].as_str().unwrap().to_owned())
+        .collect();
+    (json, stored)
+}
+
+#[tokio::test]
+async fn a_talk_with_only_a_labeled_text_keeps_the_teacher_and_fetches_nothing() {
+    let fx = start().await;
+    let talk = cleared_text_only_talk(&fx, &labeled_text("t")).await;
+    let (w, turns) = timeline();
+    let outcome = run(&fx, talk, &FakeTranscriber::new(w, 600_000), turns)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert!(
+        fx.server.received_requests().await.unwrap().is_empty(),
+        "nothing fetched"
+    );
+    assert!(fx.scratch_is_empty());
+    let (json, stored) = stored_words(&fx, talk);
+    assert_eq!(json["origin"], "text");
+    assert_eq!(json["model"], "source-text");
+    assert!(
+        stored.iter().any(|w| w.starts_with("t1799")),
+        "the answer is kept"
+    );
+    assert!(
+        !stored.iter().any(|w| w.starts_with('s')),
+        "no student word, labeled or in the unlabeled paragraph after"
+    );
+    let origin: String = sqlx::query_scalar("select origin from transcript where talk_id = $1")
+        .bind(talk.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(origin, "text");
+}
+
+#[tokio::test]
+async fn a_labeled_text_whose_recording_does_not_align_is_used_alone() {
+    let fx = start().await;
+    // Ada's words here are not the recording's.
+    let talk = cleared_engagewisdom_talk(&fx, &labeled_text("x")).await;
+    let (w, turns) = timeline();
+    let outcome = run(&fx, talk, &FakeTranscriber::new(w, 600_000), turns)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert!(fx.scratch_is_empty());
+    let (json, stored) = stored_words(&fx, talk);
+    assert_eq!(json["origin"], "text");
+    assert!(stored.iter().any(|w| w.starts_with("x1799")));
+    assert!(!stored.iter().any(|w| w.starts_with('s')));
+}
+
+#[tokio::test]
+async fn an_unlabeled_conversation_with_no_audio_is_held() {
+    let fx = start().await;
+    let talk = cleared_text_only_talk(
+        &fx,
+        &"What do you think? Yes. And the pond? No. It is still. ".repeat(80),
+    )
+    .await;
+    let (w, turns) = timeline();
+    let outcome = run(&fx, talk, &FakeTranscriber::new(w, 600_000), turns)
+        .await
+        .unwrap();
+    assert_eq!(outcome, AudioOutcome::Held("unlabeled_dialogue".into()));
+    assert_eq!(
+        state(&fx.pool, talk).await,
+        ("needs_review".into(), Some("unlabeled_dialogue".into()))
+    );
+}
+
+#[tokio::test]
+async fn held_talks_go_back_to_cleared_with_one_job_per_hold() {
+    let fx = start().await;
+    let talk = cleared_talk(&fx, false).await;
+    let (w, turns) = timeline();
+    let outcome = run(&fx, talk, &FakeTranscriber::new(w, 600_000), turns)
+        .await
+        .unwrap();
+    assert_eq!(outcome, AudioOutcome::NoMedia);
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let reasons = vec!["no_media".to_owned()];
+    let queued = audio::retry_held(&mut conn, &reasons, "test")
+        .await
+        .unwrap();
+    assert_eq!(queued, vec![talk]);
+    assert_eq!(state(&fx.pool, talk).await, ("cleared".into(), None));
+    let again = audio::retry_held(&mut conn, &reasons, "test")
+        .await
+        .unwrap();
+    assert!(again.is_empty(), "nothing is held any more");
+    let jobs: i64 = sqlx::query_scalar("select count(*) from job where kind = 'audio'")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(jobs, 1);
+    let other = audio::retry_held(&mut conn, &["multi_speaker".to_owned()], "test")
+        .await
+        .unwrap();
+    assert!(other.is_empty());
+}

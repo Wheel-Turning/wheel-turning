@@ -513,6 +513,13 @@ enum PipelineCommand {
         #[arg(long)]
         talk: TalkId,
     },
+    /// Returns talks the audio job held for these reasons to cleared, each with a new audio
+    /// job, such as `no_media` and `alignment_failed` for the text-only path (Spec 04).
+    RetryHeld {
+        /// A hold reason. Repeat for several.
+        #[arg(long, required = true)]
+        reason: Vec<String>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -1968,6 +1975,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                         )?,
                         None => anyhow::bail!("talk {talk} has no dead job to retry"),
                     }
+                }
+                PipelineCommand::RetryHeld { reason } => {
+                    let queued =
+                        wt_ingest::audio::retry_held(&mut conn, &reason, "wt pipeline retry-held")
+                            .await?;
+                    commands::print_json(
+                        &serde_json::json!({ "audio_jobs_queued": queued.len() }),
+                    )?;
                 }
             }
         }
