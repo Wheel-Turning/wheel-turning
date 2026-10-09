@@ -237,6 +237,63 @@ pub struct ImportOptions<'a> {
     pub pdf_env: Option<&'a PdfEnv<'a>>,
 }
 
+/// What `wt text reembed` did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ReembedReport {
+    /// Units given a new vector.
+    pub reembedded: usize,
+}
+
+/// Units per transaction in [`reembed`].
+const REEMBED_CHUNK: i64 = 100;
+
+/// `wt text reembed`: gives every text unit whose vector came from another model or an older
+/// `wt_ml::VECTOR_VERSION` a new vector from its stored text, without importing the edition
+/// again (Spec 04; decision of October 9, 2026). Text, hashes and proofread state are left as
+/// they are. Each chunk commits on its own, so an interrupted run resumes where it stopped,
+/// and a rerun with nothing stale is a no-op.
+pub async fn reembed(
+    conn: &mut sqlx::PgConnection,
+    embedder: &dyn Embedder,
+) -> Result<ReembedReport, TextError> {
+    let mut report = ReembedReport::default();
+    loop {
+        let stale = texts::stale_units(
+            conn,
+            embedder.model_id(),
+            wt_ml::VECTOR_VERSION,
+            REEMBED_CHUNK,
+        )
+        .await?;
+        if stale.is_empty() {
+            return Ok(report);
+        }
+        let vectors = embedder
+            .embed(&stale.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())
+            .await?;
+        if vectors.len() != stale.len() {
+            return Err(TextError::Ml(wt_ml::MlError::Output(format!(
+                "{} vectors for {} units",
+                vectors.len(),
+                stale.len()
+            ))));
+        }
+        let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+        for ((unit, _), v) in stale.iter().zip(&vectors) {
+            texts::set_unit_vector(
+                &mut tx,
+                *unit,
+                &vector_literal(v),
+                embedder.model_id(),
+                wt_ml::VECTOR_VERSION,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+        report.reembedded += stale.len();
+    }
+}
+
 /// Runs an import. `allowed_codes` is `[licenses] allowed_license_codes`. Without `apply` it
 /// only reports. A PDF needs `pdf_env`.
 #[allow(clippy::too_many_arguments)]
@@ -472,8 +529,7 @@ async fn import_one(
         check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
 
     // 2 and 3. Extract and filter.
-    // The vector version re-embeds every edition when the way vectors are computed changes.
-    let mut key_input = format!("{key_seed}:vectors:{}", wt_ml::VECTOR_VERSION);
+    let mut key_input = key_seed.to_owned();
     let mut sections = Vec::new();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     let is_pdf = m.source.format == Format::Pdf;
@@ -862,7 +918,14 @@ async fn import_one(
             ),
         })
         .collect();
-    texts::replace_units(&mut tx, edition, &new_units, embedder.model_id()).await?;
+    texts::replace_units(
+        &mut tx,
+        edition,
+        &new_units,
+        embedder.model_id(),
+        wt_ml::VECTOR_VERSION,
+    )
+    .await?;
 
     // 7. Locators, with any aliases from the manifest.
     let locators: Vec<(String, String, Vec<String>)> = units

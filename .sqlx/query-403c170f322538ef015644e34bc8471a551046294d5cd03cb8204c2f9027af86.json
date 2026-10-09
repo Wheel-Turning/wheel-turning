@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update text_unit set embedding = $2::text::vector, embedding_model = $3,\n                              vector_version = $4\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "403c170f322538ef015644e34bc8471a551046294d5cd03cb8204c2f9027af86"
+}

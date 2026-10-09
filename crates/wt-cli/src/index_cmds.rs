@@ -70,6 +70,17 @@ pub async fn reindex(
     }))
 }
 
+/// `wt text reembed`: new vectors for text units embedded with another model or an older
+/// `wt_ml::VECTOR_VERSION`.
+pub async fn reembed_texts(
+    pool: &PgPool,
+    config: &Config,
+) -> anyhow::Result<wt_ingest::texts::ReembedReport> {
+    let embedder = stages::embedder(config)?;
+    let mut conn = pool.acquire().await?;
+    Ok(wt_ingest::texts::reembed(&mut conn, &embedder as &dyn Embedder).await?)
+}
+
 /// Writes `passages.jsonl` under `out`: one line per servable passage, with no names.
 pub async fn export_transcripts(pool: &PgPool, out: &Path) -> anyhow::Result<()> {
     let mut conn = pool.acquire().await?;

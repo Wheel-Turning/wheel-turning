@@ -360,6 +360,7 @@ pub async fn fix_unit(
             content_hash: sha256_hex(text.as_bytes()),
             embedding,
             model: embedder.model_id(),
+            vector_version: wt_ml::VECTOR_VERSION,
             actor,
             reason,
         },

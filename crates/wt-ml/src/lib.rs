@@ -12,16 +12,16 @@ use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 use sha2::{Digest, Sha256};
-use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
+use tokenizers::{Tokenizer, TruncationParams};
 
 /// The dimension of bge-m3's dense vectors.
 pub const EMBED_DIM: usize = 1024;
 
 /// The version of how vectors are computed from text, beyond the model itself. It is part of
-/// a talk's index hash and a text edition's import key, so raising it re-embeds everything on
-/// the next `wt reindex --all` and text import. 2: one text per run, so a vector depends on
+/// a talk's index hash and is stored on each text unit, so raising it makes `wt reindex --all`
+/// and `wt text reembed` re-embed everything once. 2: one text per run, so a vector depends on
 /// its text alone (decision of October 9, 2026).
-pub const VECTOR_VERSION: u32 = 2;
+pub const VECTOR_VERSION: i32 = 2;
 
 /// Why a model failed.
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +66,7 @@ pub fn l2_normalize(v: &mut [f32]) {
     }
 }
 
-/// Where the embedder runs and how wide its batches are.
+/// Where the embedder runs.
 #[derive(Debug, Clone)]
 pub struct OnnxSettings {
     /// `WT_MODEL_DIR`.
@@ -75,11 +75,6 @@ pub struct OnnxSettings {
     pub model: String,
     /// The ONNX Runtime library; when `None`, `ORT_DYLIB_PATH` or the system search path.
     pub runtime: Option<PathBuf>,
-    /// Texts per run: 1. The int8 export quantizes activations dynamically, with one scale
-    /// per tensor across the whole batch, padding included, so in a larger batch a vector
-    /// depends on the texts beside it (cosine 0.97 to 0.99 against the same text alone).
-    /// Queries are embedded alone, so passages are too. On a CPU it is also faster.
-    pub batch_size: usize,
     /// Tokens per text; longer texts are truncated.
     pub max_tokens: usize,
     /// Threads inside one run.
@@ -93,7 +88,6 @@ impl OnnxSettings {
             model_dir: model_dir.into(),
             model: model.into(),
             runtime: None,
-            batch_size: 1,
             max_tokens: 512,
             threads: std::thread::available_parallelism().map_or(4, |n| n.get().min(8)),
         }
@@ -130,7 +124,6 @@ pub struct OnnxEmbedder {
     model_id: String,
     session: Arc<Mutex<Session>>,
     tokenizer: Arc<Tokenizer>,
-    batch_size: usize,
 }
 
 impl std::fmt::Debug for OnnxEmbedder {
@@ -172,34 +165,34 @@ impl OnnxEmbedder {
                 ..TruncationParams::default()
             }))
             .map_err(|e| MlError::Tokenizer(e.to_string()))?;
-        tokenizer.with_padding(Some(PaddingParams::default()));
         Ok(Self {
             model_id: settings.model.clone(),
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
-            batch_size: settings.batch_size.max(1),
         })
     }
 }
 
-/// Embeds one batch on the calling thread.
-fn embed_batch(
+/// Embeds one text in its own run on the calling thread. Every text gets a run of its own:
+/// the int8 export quantizes activations dynamically, with one scale per tensor across the whole
+/// run, padding included, so beside other texts a vector moved (cosine 0.97 to 0.99 against the
+/// same text alone). Queries are embedded alone, so passages are too, and there is no batch
+/// setting to change that (decision of October 9, 2026). On a CPU it is also faster.
+fn embed_one(
     session: &Mutex<Session>,
     tokenizer: &Tokenizer,
-    texts: &[String],
-) -> Result<Vec<Vec<f32>>, MlError> {
-    let encodings = tokenizer
-        .encode_batch(texts.to_vec(), true)
+    text: &str,
+) -> Result<Vec<f32>, MlError> {
+    let encoding = tokenizer
+        .encode(text, true)
         .map_err(|e| MlError::Tokenizer(e.to_string()))?;
-    let rows = encodings.len();
-    let cols = encodings.first().map_or(0, |e| e.get_ids().len());
-    let mut ids = Vec::with_capacity(rows * cols);
-    let mut mask = Vec::with_capacity(rows * cols);
-    for e in &encodings {
-        ids.extend(e.get_ids().iter().map(|&i| i64::from(i)));
-        mask.extend(e.get_attention_mask().iter().map(|&m| i64::from(m)));
-    }
-    let shape = [rows, cols];
+    let ids: Vec<i64> = encoding.get_ids().iter().map(|&i| i64::from(i)).collect();
+    let mask: Vec<i64> = encoding
+        .get_attention_mask()
+        .iter()
+        .map(|&m| i64::from(m))
+        .collect();
+    let shape = [1, ids.len()];
     let ids = Tensor::from_array((shape, ids)).map_err(runtime_err)?;
     let mask = Tensor::from_array((shape, mask)).map_err(runtime_err)?;
     let mut session = session
@@ -220,11 +213,9 @@ fn embed_batch(
         .iter()
         .map(|&d| usize::try_from(d).unwrap_or(0))
         .collect();
-    // Hidden states [batch, tokens, dim] give the first token's; a pooled [batch, dim] is used
-    // as is.
-    let (dim, stride) = match dims.as_slice() {
-        [b, t, d] if *b == rows => (*d, t * d),
-        [b, d] if *b == rows => (*d, *d),
+    // Hidden states [1, tokens, dim] give the first token's; a pooled [1, dim] is used as is.
+    let dim = match dims.as_slice() {
+        [1, _, d] | [1, d] => *d,
         other => return Err(MlError::Output(format!("unexpected shape {other:?}"))),
     };
     if dim != EMBED_DIM {
@@ -232,13 +223,9 @@ fn embed_batch(
             "vectors have {dim} dimensions, not {EMBED_DIM}"
         )));
     }
-    Ok((0..rows)
-        .map(|r| {
-            let mut v = data[r * stride..r * stride + dim].to_vec();
-            l2_normalize(&mut v);
-            v
-        })
-        .collect())
+    let mut v = data[..dim].to_vec();
+    l2_normalize(&mut v);
+    Ok(v)
 }
 
 #[async_trait]
@@ -253,17 +240,17 @@ impl Embedder for OnnxEmbedder {
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MlError> {
         let mut out = Vec::with_capacity(texts.len());
-        for batch in texts.chunks(self.batch_size) {
-            let (session, tokenizer, batch) = (
+        for text in texts {
+            let (session, tokenizer, text) = (
                 Arc::clone(&self.session),
                 Arc::clone(&self.tokenizer),
-                batch.to_vec(),
+                text.clone(),
             );
-            let vectors =
-                tokio::task::spawn_blocking(move || embed_batch(&session, &tokenizer, &batch))
+            let vector =
+                tokio::task::spawn_blocking(move || embed_one(&session, &tokenizer, &text))
                     .await
                     .map_err(|e| MlError::Runtime(format!("embedding task: {e}")))??;
-            out.extend(vectors);
+            out.push(vector);
         }
         Ok(out)
     }

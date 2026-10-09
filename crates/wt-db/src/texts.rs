@@ -198,12 +198,14 @@ pub struct NewUnit<'a> {
     pub source_anchor: Option<String>,
 }
 
-/// Replaces the edition's units and refreshes its units hash.
+/// Replaces the edition's units and refreshes its units hash. `vector_version` is
+/// `wt_ml::VECTOR_VERSION`, how the embeddings were computed.
 pub async fn replace_units(
     conn: &mut PgConnection,
     edition: Uuid,
     units: &[NewUnit<'_>],
     model: &str,
+    vector_version: i32,
 ) -> Result<(), DbError> {
     sqlx::query!("delete from text_unit where edition_id = $1", edition)
         .execute(&mut *conn)
@@ -223,9 +225,9 @@ pub async fn replace_units(
     sqlx::query!(
         "insert into text_unit (edition_id, ordinal, locator, label, heading, text, word_count,
                                 content_hash, embedding, embedding_model, source_page, confidence,
-                                source_anchor)
+                                source_anchor, vector_version)
          select $1, u.ord, u.loc, u.lab, u.head, u.txt, u.wc, u.h, u.emb::vector, $10, u.pg, u.cf,
-                u.an
+                u.an, $14
          from unnest($2::int4[], $3::text[], $4::text[], $5::text[], $6::text[], $7::int4[],
                      $8::text[], $9::text[], $11::int4[], $12::float4[], $13::text[])
               as u(ord, loc, lab, head, txt, wc, h, emb, pg, cf, an)",
@@ -241,7 +243,8 @@ pub async fn replace_units(
         model,
         &pages as &[Option<i32>],
         &confidences as &[Option<f32>],
-        &anchors as &[Option<String>]
+        &anchors as &[Option<String>],
+        vector_version
     )
     .execute(&mut *conn)
     .await?;
@@ -414,6 +417,8 @@ pub struct UnitFix<'a> {
     pub embedding: String,
     /// The embedding model.
     pub model: &'a str,
+    /// How the embedding was computed: `wt_ml::VECTOR_VERSION`.
+    pub vector_version: i32,
     /// Who corrected it.
     pub actor: &'a str,
     /// Why.
@@ -438,14 +443,16 @@ pub async fn fix_unit(
     };
     sqlx::query!(
         "update text_unit set text = $2, word_count = $3, content_hash = $4,
-                              embedding = $5::text::vector, embedding_model = $6
+                              embedding = $5::text::vector, embedding_model = $6,
+                              vector_version = $7
          where id = $1",
         f.unit,
         f.text,
         f.word_count,
         f.content_hash,
         f.embedding,
-        f.model
+        f.model,
+        f.vector_version
     )
     .execute(&mut *conn)
     .await?;
@@ -463,6 +470,52 @@ pub async fn fix_unit(
     refresh_units_hash(conn, old.edition_id).await?;
     set_state(conn, old.edition_id, "imported").await?;
     Ok(Some((old.edition_id, old.locator)))
+}
+
+/// Up to `limit` units whose vectors were computed with a model other than `model` or below
+/// `vector_version`, with their text, in a stable order.
+pub async fn stale_units(
+    conn: &mut PgConnection,
+    model: &str,
+    vector_version: i32,
+    limit: i64,
+) -> Result<Vec<(Uuid, String)>, DbError> {
+    Ok(sqlx::query!(
+        "select id, text from text_unit
+         where embedding_model <> $1 or vector_version < $2
+         order by id limit $3",
+        model,
+        vector_version,
+        limit
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.id, r.text))
+    .collect())
+}
+
+/// Replaces a unit's embedding, leaving its text, hash and proofread state as they are: the
+/// text has not changed, only how its vector was computed.
+pub async fn set_unit_vector(
+    conn: &mut PgConnection,
+    unit: Uuid,
+    embedding: &str,
+    model: &str,
+    vector_version: i32,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "update text_unit set embedding = $2::text::vector, embedding_model = $3,
+                              vector_version = $4
+         where id = $1",
+        unit,
+        embedding,
+        model,
+        vector_version
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Upserts a `work_locator` per unit, with any aliases, so the resolver can match citations.
