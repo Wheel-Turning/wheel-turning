@@ -37,6 +37,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0022 | `0022_proof_gate.sql` | M4b | The proofread gate holds only for the units it read: `text_edition.units_hash`, `proof_check.units_hash` and the per-group counts `random_sampled`, `random_errors`, `worst_sampled`, `worst_errors`; `servable_text_unit` requires a passing check whose hash matches | None new: the view keeps its grants, and `wt_pipeline` already writes both tables |
 | 0023 | `0023_text_notices.sql` | M4b | `text_edition.notice`: copyright notices naming a holder the evidence does not cover, kept for a flagged or held edition and listed by `wt source report` | None new: `wt_pipeline` already writes `text_edition` |
 | 0024 | `0024_engagewisdom_platform.sql` | M4E | The `engagewisdom` source platform, and `aligned` as a transcript origin for a source's own text timed by recognition (Spec 03, EngageWisdom sources; Spec 04, Aligned source transcripts) | None new |
+| 0026 | `0026_text_unit_vector_version.sql` | Embeddings (#72) | `text_unit.vector_version`, default 1: how a unit's vector was computed beyond its model, so `wt text reembed` finds units embedded in batches (Spec 04, decision of October 9, 2026) | None new: `wt_pipeline` already updates `text_unit` |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 

@@ -362,6 +362,10 @@ enum TextCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Gives every text unit embedded with another model or an older vector version a new
+    /// vector from its stored text, without importing the edition again (Spec 04). Prints the
+    /// count as JSON; a rerun with nothing stale is a no-op.
+    Reembed,
     /// Reads a page range of a PDF edition again at a higher resolution and imports the
     /// edition again; it then needs a new proofread.
     Reocr {
@@ -1753,6 +1757,12 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 &config_dir,
             )
             .await?;
+            commands::print_json(&report)?;
+        }
+        Command::Text {
+            command: TextCommand::Reembed,
+        } => {
+            let report = index_cmds::reembed_texts(&pool().await?, &config).await?;
             commands::print_json(&report)?;
         }
         Command::Text {

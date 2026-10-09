@@ -575,7 +575,7 @@ pub async fn run_index(
             }
         })
         .collect();
-    let plan = index::plan(&index_segments, &citations, chunk, embedder.model_id())?;
+    let plan = index::plan(&index_segments, &citations, chunk, &embedder.vector_id())?;
     let mut indexed = Indexed {
         passages: plan.passages.len(),
         citations: plan.citations.len(),

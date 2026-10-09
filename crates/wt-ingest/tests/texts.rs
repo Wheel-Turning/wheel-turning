@@ -326,3 +326,91 @@ async fn include_sections_restores_an_excluded_section() {
     assert!(report.sections_excluded.is_empty());
     assert_eq!(report.sections_kept.len(), 3);
 }
+
+#[tokio::test]
+async fn reembed_renews_stale_vectors_from_stored_text_and_then_does_nothing() {
+    let fx = start().await;
+    let ev = evidence(&fx.pool, "public-domain", true).await;
+    let manifest = write_manifest(&fx.dir, ev, "");
+    let embedder = FakeEmbedder::new("fake-bge-m3");
+    let mut conn = fx.pool.acquire().await.unwrap();
+    texts::import(
+        &mut conn,
+        &fx.objects,
+        &embedder,
+        &manifest,
+        &allowed(),
+        "owner",
+        true,
+        None,
+    )
+    .await
+    .unwrap();
+    let versions: Vec<i32> = sqlx::query_scalar("select vector_version from text_unit")
+        .fetch_all(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        versions,
+        vec![wt_ml::VECTOR_VERSION; 3],
+        "an import stamps the version"
+    );
+    assert_eq!(
+        texts::reembed(&mut conn, &embedder)
+            .await
+            .unwrap()
+            .reembedded,
+        0
+    );
+
+    // One unit embedded the old way: a different vector and version 1.
+    let snapshot = "select id::text, embedding::text, content_hash from text_unit order by id";
+    let before: Vec<(String, String, String)> =
+        sqlx::query_as(snapshot).fetch_all(&fx.pool).await.unwrap();
+    let edition_before: (Option<String>, String) =
+        sqlx::query_as("select units_hash, state::text from text_edition")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "update text_unit set vector_version = 1, embedding = array_fill(0.5, array[1024])::vector
+         where id = $1::uuid",
+    )
+    .bind(&before[0].0)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let report = texts::reembed(&mut conn, &embedder).await.unwrap();
+    assert_eq!(report.reembedded, 1);
+    let after: Vec<(String, String, String)> =
+        sqlx::query_as(snapshot).fetch_all(&fx.pool).await.unwrap();
+    assert_eq!(after, before, "the vector comes back from the stored text");
+    let edition_after: (Option<String>, String) =
+        sqlx::query_as("select units_hash, state::text from text_edition")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        edition_after, edition_before,
+        "text, hash and state are untouched"
+    );
+    assert_eq!(
+        texts::reembed(&mut conn, &embedder)
+            .await
+            .unwrap()
+            .reembedded,
+        0
+    );
+
+    // A new model makes every unit stale.
+    let other = FakeEmbedder::new("fake-bge-m3-next");
+    assert_eq!(
+        texts::reembed(&mut conn, &other).await.unwrap().reembedded,
+        3
+    );
+    assert_eq!(
+        texts::reembed(&mut conn, &other).await.unwrap().reembedded,
+        0
+    );
+}
