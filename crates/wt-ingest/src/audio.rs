@@ -184,6 +184,8 @@ pub enum Steps {
         /// For the source's own text, aligned: the share of its words matched (Spec 04,
         /// Aligned source transcripts).
         aligned: Option<f32>,
+        /// `asr`, `aligned`, or `text` for a transcript built from the source's text alone.
+        origin: &'static str,
     },
 }
 
@@ -269,18 +271,39 @@ async fn steps(
         TalkRepo::advance(c, talk, PipelineState::Segmenting).await?;
     }
     let audio_ms = i32::try_from(raw.audio_ms).unwrap_or(i32::MAX);
+    let segmented = segment_words(&raw.words, &turns, audio_ms, deps).await;
+    // The raw recognition and the audio are no longer needed; delete them before storing.
+    scratch.finish()?;
+    Ok(match segmented? {
+        Err(reason) => Steps::Held(reason),
+        Ok((seg, fallback_windows)) => Steps::Segmented {
+            seg,
+            model: raw.model,
+            audio_ms: raw.audio_ms,
+            fallback_windows,
+            origin: if aligned.is_some() { "aligned" } else { "asr" },
+            aligned,
+        },
+    })
+}
+
+/// Segmentation of timed, attributed words: the plan, labels for its ambiguous windows and the
+/// segments, or the reason the talk needs a person.
+async fn segment_words(
+    words: &[wt_core::transcript::Word],
+    turns: &[wt_segment::Turn],
+    audio_ms: i32,
+    deps: &AudioDeps<'_>,
+) -> Result<Result<(Segmentation, usize), String>, AudioError> {
     let plan = match wt_segment::plan(
-        &raw.words,
-        &turns,
+        words,
+        turns,
         audio_ms,
         &deps.segment.chant_phrases,
         deps.segment,
     ) {
         Ok(plan) => plan,
-        Err(review) => {
-            scratch.finish()?;
-            return Ok(Steps::Held(review.reason().to_owned()));
-        }
+        Err(review) => return Ok(Err(review.reason().to_owned())),
     };
     let labels: BTreeMap<_, _> = if plan.ambiguous().is_empty() {
         BTreeMap::new()
@@ -292,15 +315,50 @@ async fn steps(
     } else {
         0
     };
-    let seg = plan.finish(&labels)?;
-    // The raw recognition and the audio are no longer needed; delete them before storing.
-    scratch.finish()?;
-    Ok(Steps::Segmented {
-        seg,
-        model: raw.model,
-        audio_ms: raw.audio_ms,
-        fallback_windows,
-        aligned,
+    Ok(Ok((plan.finish(&labels)?, fallback_windows)))
+}
+
+/// The text-only path (Spec 04, Text-only source transcripts): the source's text, its speakers
+/// from its labels and its times from its markers, segmented as recognized words are. Nothing
+/// is fetched and no scratch is used. With `labeled_only`, after a recording failed to align,
+/// an unlabeled text keeps the talk held, since only the audio could tell its speakers apart.
+async fn text_steps(
+    conn: &mut sqlx::PgConnection,
+    talk: &wt_core::gate::Talk<wt_core::gate::Consented>,
+    text: &str,
+    labeled_only: bool,
+    deps: &AudioDeps<'_>,
+) -> Result<Steps, AudioError> {
+    use crate::text_transcript::{TextPlan, plan, teacher_labels};
+    let names = transcript::teacher_names(conn, talk.id).await?;
+    let (words, turns, audio_ms) = match plan(
+        text,
+        &teacher_labels(&names),
+        deps.segment.monologue_max_replies_per_hour,
+    ) {
+        TextPlan::Held(reason) => return Ok(Steps::Held(reason.into())),
+        TextPlan::Ready { labeled: false, .. } if labeled_only => {
+            return Ok(Steps::Held("alignment_failed".into()));
+        }
+        TextPlan::Ready {
+            words,
+            turns,
+            audio_ms,
+            ..
+        } => (words, turns, audio_ms),
+    };
+    tracing::info!(talk = %talk.id, words = words.len(), turns = turns.len(), "text-only transcript");
+    TalkRepo::advance(conn, talk, PipelineState::Segmenting).await?;
+    Ok(match segment_words(&words, &turns, audio_ms, deps).await? {
+        Err(reason) => Steps::Held(reason),
+        Ok((seg, fallback_windows)) => Steps::Segmented {
+            seg,
+            model: "source-text".to_owned(),
+            audio_ms: i64::from(audio_ms),
+            fallback_windows,
+            aligned: None,
+            origin: "text",
+        },
     })
 }
 
@@ -356,26 +414,37 @@ pub async fn run(
         _ => {}
     }
     let route = feed::media_route(conn, talk_id).await?;
-    let Some(source) = MediaSource::from_route(&route) else {
-        transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
-        return Ok(AudioOutcome::NoMedia);
-    };
-
     let text = feed::source_transcript(conn, talk_id).await?;
-    let (seg, model, audio_ms, fallback_windows, aligned) =
-        match steps(Some(&mut *conn), &talk, &source, text.as_deref(), deps).await? {
-            Steps::Held(reason) => {
-                transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
-                return Ok(AudioOutcome::Held(reason));
-            }
-            Steps::Segmented {
-                seg,
-                model,
-                audio_ms,
-                fallback_windows,
-                aligned,
-            } => (seg, model, audio_ms, fallback_windows, aligned),
-        };
+    // Without audio, the source's own text is the transcript, and a labeled text whose
+    // recording does not align is used alone too (Spec 04, Text-only source transcripts).
+    let done = match (MediaSource::from_route(&route), text.as_deref()) {
+        (None, None) => {
+            transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
+            return Ok(AudioOutcome::NoMedia);
+        }
+        (None, Some(text)) => text_steps(conn, &talk, text, false, deps).await?,
+        (Some(source), text) => match steps(Some(&mut *conn), &talk, &source, text, deps).await? {
+            Steps::Held(reason) if reason == "alignment_failed" => match text {
+                Some(text) => text_steps(conn, &talk, text, true, deps).await?,
+                None => Steps::Held(reason),
+            },
+            other => other,
+        },
+    };
+    let (seg, model, audio_ms, fallback_windows, aligned, origin) = match done {
+        Steps::Held(reason) => {
+            transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
+            return Ok(AudioOutcome::Held(reason));
+        }
+        Steps::Segmented {
+            seg,
+            model,
+            audio_ms,
+            fallback_windows,
+            aligned,
+            origin,
+        } => (seg, model, audio_ms, fallback_windows, aligned, origin),
+    };
 
     let version = transcript::next_version(conn, talk_id).await?;
     let key = transcript_key(talk_id, version);
@@ -388,6 +457,7 @@ pub async fn run(
         &seg,
         fallback_windows,
         aligned,
+        origin,
     );
     let hash = sha256_hex(json.as_bytes());
     deps.objects.put(&key, json.as_bytes())?;
@@ -409,7 +479,7 @@ pub async fn run(
         talk_id,
         &NewTranscript {
             version,
-            origin: if aligned.is_some() { "aligned" } else { "asr" },
+            origin,
             key: &key,
             content_hash: &hash,
             word_count: i32::try_from(seg.words.len()).unwrap_or(i32::MAX),
@@ -444,12 +514,13 @@ fn transcript_json(
     seg: &Segmentation,
     fallback_windows: usize,
     aligned: Option<f32>,
+    origin: &str,
 ) -> String {
     let doc = TranscriptJson {
         schema: 1,
         talk_id: talk.as_uuid().to_string(),
         version,
-        origin: if aligned.is_some() { "aligned" } else { "asr" },
+        origin,
         alignment_share: aligned,
         model,
         language,
@@ -521,6 +592,33 @@ pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId
             queued.push(talk);
         }
     }
+    Ok(queued)
+}
+
+/// `wt pipeline retry-held`: talks the `audio` job held for one of `reasons`, such as
+/// `no_media` or `alignment_failed` once the text-only path can take them (Spec 04, Text-only
+/// source transcripts), go back to `cleared` with an `audio` job each, keyed by the hold so
+/// asking twice queues nothing new. Returns those talks.
+pub async fn retry_held(
+    conn: &mut sqlx::PgConnection,
+    reasons: &[String],
+    actor: &str,
+) -> Result<Vec<TalkId>, AudioError> {
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    let released = transcript::release_held(&mut tx, reasons, actor).await?;
+    let mut queued = Vec::with_capacity(released.len());
+    for (talk, hold) in released {
+        job::enqueue(
+            &mut tx,
+            JobKind::Audio,
+            Some(talk),
+            &sha256_hex(format!("retry-held:{hold}").as_bytes()),
+            &serde_json::json!({}),
+        )
+        .await?;
+        queued.push(talk);
+    }
+    tx.commit().await?;
     Ok(queued)
 }
 

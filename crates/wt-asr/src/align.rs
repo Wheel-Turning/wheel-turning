@@ -43,15 +43,39 @@ fn marker_ms(token: &str) -> Option<i32> {
 /// The source text's words: markers attached to the word after them, stage directions,
 /// paragraph speaker labels and `@` tags removed.
 pub fn source_words(text: &str) -> Vec<SourceWord> {
+    labeled_source_words(text)
+        .into_iter()
+        .map(|(w, _)| w)
+        .collect()
+}
+
+/// The same words, each with the speaker label of its paragraph, if the paragraph opened with
+/// one (`SR:`, `Student A:`, `Q:`), for the text-only path (Spec 04, Text-only source
+/// transcripts).
+pub fn labeled_source_words(text: &str) -> Vec<(SourceWord, Option<String>)> {
     let mut out = Vec::new();
     let mut pending: Option<i32> = None;
-    for paragraph in text.split("\n\n") {
+    for paragraph in text.split(
+        "
+
+",
+    ) {
         let mut p = paragraph.trim().to_owned();
         if let Some(re) = DIRECTION.as_ref() {
             p = re.replace_all(&p, " ").into_owned();
         }
-        if let Some(re) = LABEL.as_ref() {
-            p = re.replace(&p, "").into_owned();
+        let mut label = None;
+        if let Some(re) = LABEL.as_ref()
+            && let Some(m) = re.find(&p)
+        {
+            label = Some(
+                m.as_str()
+                    .trim_end()
+                    .trim_end_matches(':')
+                    .trim()
+                    .to_owned(),
+            );
+            p = p[m.end()..].to_owned();
         }
         for token in p.split_whitespace() {
             if let Some(ms) = marker_ms(token) {
@@ -61,10 +85,13 @@ pub fn source_words(text: &str) -> Vec<SourceWord> {
             if token.starts_with('@') {
                 continue;
             }
-            out.push(SourceWord {
-                text: token.to_owned(),
-                marker_ms: pending.take(),
-            });
+            out.push((
+                SourceWord {
+                    text: token.to_owned(),
+                    marker_ms: pending.take(),
+                },
+                label.clone(),
+            ));
         }
     }
     out
@@ -246,6 +273,29 @@ mod tests {
         assert_eq!(w[0].marker_ms, Some(0));
         assert_eq!(w[4].marker_ms, Some(62_000));
         assert_eq!(w[1].marker_ms, None);
+    }
+
+    #[test]
+    fn each_word_keeps_its_paragraphs_label() {
+        let w = labeled_source_words(
+            "Good morning.
+
+Student A: Is it still?
+
+SR: No.",
+        );
+        let labels: Vec<Option<&str>> = w.iter().map(|(_, l)| l.as_deref()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                None,
+                None,
+                Some("Student A"),
+                Some("Student A"),
+                Some("Student A"),
+                Some("SR")
+            ]
+        );
     }
 
     #[test]

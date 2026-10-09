@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk t set state = 'cleared', state_reason = null\n           from talk before\n           where before.id = t.id and t.state = 'needs_review' and t.state_reason = any($1)\n           returning t.id, before.state_reason as \"reason!\", before.updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "reason!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "7b49daa0fe20b75dc62b1a76c91130946bfb83e797910f5a90b99af773374f98"
+}

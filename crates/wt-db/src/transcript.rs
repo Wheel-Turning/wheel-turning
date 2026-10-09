@@ -101,6 +101,21 @@ pub async fn store(
     Ok(id)
 }
 
+/// The talk's teacher's name and aliases, which name the teacher in a source's speaker labels
+/// (Spec 04, Text-only source transcripts). Empty when the talk has no teacher.
+pub async fn teacher_names(conn: &mut PgConnection, talk: TalkId) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"select te.display_name as "name!" from talk t join teacher te on te.id = t.teacher_id
+           where t.id = $1
+           union
+           select a.alias from talk t join teacher_alias a on a.teacher_id = t.teacher_id
+           where t.id = $1"#,
+        talk.as_uuid()
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Holds a talk in the pipeline for a person: `needs_review` with `reason`, such as
 /// `multi_speaker` or `no_media`, logged in `correction_log`. Returns whether it moved.
 pub async fn hold_for_review(
@@ -135,6 +150,44 @@ pub async fn hold_for_review(
     )
     .await?;
     Ok(true)
+}
+
+/// Returns talks the pipeline held in `needs_review` for one of `reasons` to `cleared`, logged,
+/// with the time each was held, so the caller can queue each hold's retry once. Holds made
+/// before the gate (classification's) are not touched: only these reasons are.
+pub async fn release_held(
+    conn: &mut PgConnection,
+    reasons: &[String],
+    actor: &str,
+) -> Result<Vec<(TalkId, String)>, DbError> {
+    let rows = sqlx::query!(
+        r#"update talk t set state = 'cleared', state_reason = null
+           from talk before
+           where before.id = t.id and t.state = 'needs_review' and t.state_reason = any($1)
+           returning t.id, before.state_reason as "reason!", before.updated_at"#,
+        reasons
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        log_change(
+            conn,
+            "talk",
+            r.id,
+            "state",
+            Some(serde_json::json!("needs_review")),
+            Some(serde_json::json!("cleared")),
+            actor,
+            &format!("retry after {}", r.reason),
+        )
+        .await?;
+        out.push((
+            TalkId::from(r.id),
+            format!("{}:{}", r.reason, r.updated_at.to_rfc3339()),
+        ));
+    }
+    Ok(out)
 }
 
 /// The talk's current transcript: version, object key and content hash.
@@ -294,7 +347,7 @@ pub async fn current_keys(
         .collect())
 }
 
-/// The current transcript's origin: `asr`, `captions` or `reviewed`.
+/// The current transcript's origin: `asr`, `captions`, `aligned`, `text` or `reviewed`.
 pub async fn current_origin(
     conn: &mut PgConnection,
     talk: TalkId,

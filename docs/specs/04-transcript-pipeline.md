@@ -119,6 +119,24 @@ Acceptance criteria for aligned source transcripts:
 - [x] With a `FakeDiarizer` that returns a student turn, the stored transcript holds the source's teacher words, no student words, and the gap before the teacher's answer is marked "A student asked a question". (`wt-ingest/tests/audio.rs`; the label in `owner_export` and `pipeline.rs`.)
 - [x] The timing words never reach any store. (`wt-ingest/tests/audio.rs`: the stored words are the source's, with its own spellings.)
 
+## Text-only source transcripts
+
+Owner's decision of October 8, 2026. Some talks have a source transcript and nothing to align it with: about a third of the Suzuki archive's pages carry no audio, and its recordings from the 1960s align with their edited transcripts at only 55 to 83 percent. Their transcripts mark who speaks (`SR:`, `Student A:`, `Q:`), so the text alone can give a teacher-only transcript, with origin `text` and model `source-text`.
+
+1. When. The `audio` job takes this path when a talk has a source transcript and no media route, instead of holding it as `no_media`, and when a source transcript's recording fails to align, if the text labels its speakers. An unlabeled text whose recording fails to align stays `alignment_failed`, since only the audio could tell its speakers apart. Nothing is fetched on this path and no scratch is used.
+2. Speakers. Words before any label are the teacher's. A paragraph label that names the teacher starts the teacher's speech: the teacher's registry name and aliases, each of their words of three letters or more, the initials of a name of two words or more ("Suzuki Roshi" gives `SR`), `A` and `Teacher`, compared without case. Any other label (`Student A`, `Q`, `PS`) starts another speaker's speech, and an unlabeled paragraph continues whoever spoke last, so a student's unlabeled second paragraph is dropped with the first. Losing a teacher's unlabeled reply is the accepted cost of never keeping a student's words.
+3. Unlabeled texts. With no labels at all, the text is read as the audio path reads its words (Diarizing only the questions): a monologue is the teacher's throughout; a text that invites questions is the teacher's until the invitation, and everything after it, questions and answers alike, is dropped; a conversation with no invitation goes to `needs_review` with reason `unlabeled_dialogue`.
+4. Times. `[mm:ss]` markers anchor the words after them and words between markers are spaced evenly; before the first marker, after the last and in a text without any, words are 400 ms apart, 150 words a minute. Few Suzuki transcripts have markers, so most of these times are estimates, and a passage's start time is approximate.
+5. Segmentation. The words and the turns built from the labels go through segmentation exactly as recognized words do, so chant, announcements and student turns are labeled and removed by the same rules, and a second speaker holding 35 percent or more is still held as `multi_speaker`.
+6. Talks held before this path existed are sent through it with `wt pipeline retry-held --reason no_media --reason alignment_failed`, which returns talks the `audio` job held for those reasons to `cleared` with one `audio` job per hold, logged, and touches no hold made before the gate.
+
+Acceptance criteria:
+
+- [x] A talk with a labeled source transcript and no audio is stored with origin `text`, keeps the teacher's answer and stores no student word, labeled or in the unlabeled paragraph after; nothing is fetched and scratch is empty. (`wt-ingest/tests/audio.rs`.)
+- [x] A labeled text whose recording does not align is used alone; an unlabeled one is still held as `alignment_failed`. (Same.)
+- [x] `wt pipeline retry-held` returns a held talk to `cleared` with one job, and asking again queues nothing. (`wt-ingest/tests/audio.rs`.)
+- [x] An unlabeled conversation with no audio is held as `unlabeled_dialogue`; an unlabeled monologue is the teacher's; an unlabeled text that invites questions drops everything after the invitation; markers set times and the pace fills the rest. (`wt-ingest` `text_transcript` unit tests and `wt-ingest/tests/audio.rs`.)
+
 ## Diarizing only the questions
 
 Owner's decision of October 8, 2026. Diarization is the slow step: pyannote ran at 1.9 times real time on a 69-minute talk on the owner's PC, 36 minutes against about 11 for transcription with `large-v3-turbo`, and sherpa-onnx, though four times faster, split one teacher into two speakers or merged everyone into one depending on its threshold. A dharma talk is one voice until its questions begin, so with `[segment] diarize_scope = "qa"`:
