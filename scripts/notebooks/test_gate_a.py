@@ -146,6 +146,40 @@ def test_teacher_ids_never_reach_page():
     assert "secret-teacher" not in g.review_html(qs, results2, g.neighbors(ps2), "run1")
 
 
+def test_named_review_shows_teacher_title_and_link():
+    qs, ps, results = run_fixture()
+    sources = {
+        "k": g.Source("Teacher <One>", "On Anger", "2020-01-05", "https://vimeo.com/123", "vimeo"),
+        "k2": g.Source("Teacher Two", "Grief", "", "https://example.org/talk/9", "engagewisdom"),
+    }
+    page = g.review_html(qs, results, g.neighbors(ps), "run1", sources)
+    assert "1. Teacher &lt;One&gt;: On Anger, 2020-01-05" in page
+    assert "href='https://vimeo.com/123#t=0s'" in page
+    assert "Listen at 0:00:00 (opens the source video in a new tab)" in page
+    assert "href='https://example.org/talk/9'" in page and "starts at 0:01:01" in page
+    assert "rel='noopener noreferrer'" in page
+    assert "Teacher 1" not in page and "number only" not in page
+
+
+def test_source_link_styles():
+    vimeo = g.Source("T", "x", "", "https://vimeo.com/5", "vimeo")
+    assert g.source_link(vimeo, 75_400) == (
+        "https://vimeo.com/5#t=75s", "Listen at 0:01:15 (opens the source video in a new tab)"
+    )
+    page = g.Source("T", "x", "", "https://example.org/p", "engagewisdom")
+    assert g.source_link(page, 3_600_000)[0] == "https://example.org/p"
+    unsafe = g.Source("T", "x", "", "javascript:alert(1)", "vimeo")
+    assert g.source_link(unsafe, 0) == (None, "Starts at 0:00:00")
+
+
+def test_rebuild_from_saved_results():
+    qs, ps, results = run_fixture()
+    saved = g.results_json(qs, results, {"run_id": "run1"})
+    qs2, hits2 = g.hits_from_results(saved, ps)
+    assert qs2 == qs
+    assert [h.passage for h in hits2["q01"]] == [h.passage for h in results["q01"]]
+
+
 def scoring_results(n_questions=4):
     return {
         "meta": {"run_id": "r"},

@@ -367,6 +367,49 @@ def clock(ms: int) -> str:
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
 
 
+@dataclasses.dataclass(frozen=True)
+class Source:
+    """Who gave a talk and where it lives, for the reviewer (owner's decision of October 9,
+    2026: the reviewer sees names and source links). The passage export stays nameless."""
+
+    teacher: str
+    title: str
+    date: str
+    url: str
+    platform: str
+
+
+SOURCES_SQL = """
+select t.id::text, te.display_name, t.title,
+       coalesce(t.talk_date::text, sv.published_at::date::text, ''), sv.url, sv.platform::text
+from talk t
+join teacher te on te.id = t.teacher_id
+join source_video sv on sv.id = t.source_video_id
+where t.id = any(%s::uuid[])
+"""
+
+
+def fetch_sources(dsn: str, talk_ids: Sequence[str]) -> dict[str, Source]:
+    """Reads the teacher, title, date and source address of the given talks. Read-only, and it
+    reads no passage text."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(SOURCES_SQL, (list(talk_ids),))
+        return {r[0]: Source(*r[1:]) for r in cur.fetchall()}
+
+
+def source_link(src: Source, start_ms: int) -> tuple[str | None, str]:
+    """The address and link text for a passage, following Spec 03's link styles: Vimeo takes a
+    `#t=<seconds>s` offset; other pages have no time parameter, so the text gives the start."""
+    at = clock(start_ms)
+    if not src.url.startswith("https://"):
+        return None, f"Starts at {at}"
+    if src.platform == "vimeo":
+        return f"{src.url}#t={start_ms // 1000}s", f"Listen at {at} (opens the source video in a new tab)"
+    return src.url, f"Open the talk, starts at {at} (opens in a new tab)"
+
+
 def results_json(questions: Sequence[Question], results: dict[str, list[Hit]], meta: dict) -> dict:
     return {
         "meta": meta,
@@ -400,7 +443,7 @@ main{max-width:46rem;margin:0 auto;padding:1.5rem 1rem 6rem}h1{font-size:1.6rem}
 .brief,.q{border-top:2px solid var(--line);padding-top:1rem}.tags{color:var(--muted);font-size:.9rem}
 .p{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1rem;margin:1rem 0}
 .who{color:var(--muted);font:600 .9rem/1.3 system-ui,sans-serif}blockquote{margin:.6rem 0;font-size:1.05rem}
-details{color:var(--muted);font-size:.92rem}fieldset{border:0;padding:0;margin:.5rem 0;display:flex;gap:1.2rem;flex-wrap:wrap}
+details{color:var(--muted);font-size:.92rem}.src{margin:.2rem 0 .6rem;font:.92rem system-ui,sans-serif}a{color:var(--accent)}fieldset{border:0;padding:0;margin:.5rem 0;display:flex;gap:1.2rem;flex-wrap:wrap}
 legend{font:600 .95rem system-ui,sans-serif;padding:0;margin-bottom:.2rem}label{min-height:44px;display:inline-flex;align-items:center;gap:.4rem}
 textarea{width:100%;min-height:3rem;font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px}
 .bar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:.6rem 1rem;display:flex;gap:1rem;align-items:center;justify-content:center;font:15px system-ui,sans-serif}
@@ -435,19 +478,26 @@ def review_html(
     results: dict[str, list[Hit]],
     context: dict[str, tuple[str | None, str | None]],
     run_id: str,
+    sources: dict[str, Source] | None = None,
 ) -> str:
     """One self-contained page: no external resources, ratings kept in the browser and saved
-    as JSON with the download button. Teachers are shown by blind label only."""
+    as JSON with the download button. With `sources`, each passage names its teacher and talk
+    and links to the source; without, teachers are shown by blind label only."""
     e = html.escape
     labels = teacher_labels(results)
+    sources = sources or {}
+    if sources:
+        who_line = "Each passage names its teacher and talk and links to the source at that point. "
+    else:
+        who_line = "Teachers are shown by number only, so the rating rests on the words. "
     parts = [
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
         "<meta name='viewport' content='width=device-width, initial-scale=1'>",
         f"<title>Gate A review {e(run_id)}</title><style>{REVIEW_CSS}</style></head>",
         f"<body data-run='{e(run_id)}'><main><h1>Gate A: passage review</h1>",
         "<section class='brief'><p>Each question below is something a practitioner might ask. ",
-        "Under it are the passages the search returned, transcribed from talks. Teachers are ",
-        "shown by number only, so the rating rests on the words.</p>",
+        "Under it are the passages the search returned, transcribed from talks. ",
+        f"{who_line}</p>",
         "<p>For each passage, answer two questions:</p><ul>",
         "<li><strong>Faithful</strong>: read as it stands, does the passage represent what the ",
         "teacher meant? Answer no if it is cut so that it misleads, garbled, or says something ",
@@ -468,11 +518,26 @@ def review_html(
             p = h.passage
             qid, pid = e(q.id), e(p.passage_id)
             before, after = context.get(p.passage_id, (None, None))
+            src = sources.get(p.talk_id)
+            if src:
+                when = f", {e(src.date)}" if src.date else ""
+                who = f"{n}. {e(src.teacher)}: {e(src.title)}{when}"
+            else:
+                who = f"{n}. {e(labels[p.teacher_id])}, at {clock(p.start_ms)}"
             parts.append(
                 f"<div class='p' data-q='{qid}' data-p='{pid}'>"
-                f"<div class='who'>{n}. {e(labels[p.teacher_id])}, at {clock(p.start_ms)}</div>"
+                f"<div class='who'>{who}</div>"
                 f"<blockquote>{e(p.text)}</blockquote>"
             )
+            if src:
+                href, text = source_link(src, p.start_ms)
+                if href:
+                    parts.append(
+                        f"<p class='src'><a href='{e(href)}' target='_blank' rel='noopener noreferrer'>"
+                        f"{e(text)}</a></p>"
+                    )
+                else:
+                    parts.append(f"<p class='src'>{e(text)}</p>")
             if before or after:
                 parts.append("<details><summary>Surrounding text</summary>")
                 if before:
@@ -571,3 +636,51 @@ def gate_record(s: GateScore) -> str:
     ]
     lines += [f"| {q.id} | {q.rated} | {q.good} | {'yes' if q.passed else 'no'} |" for q in s.questions]
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------- rebuild
+
+
+def hits_from_results(
+    results: dict, passages: Sequence[Passage]
+) -> tuple[list[Question], dict[str, list[Hit]]]:
+    """The questions and hits of a saved run, so its review file can be rebuilt without
+    running retrieval again."""
+    by_id = {p.passage_id: p for p in passages}
+    questions, hits = [], {}
+    for q in results["questions"]:
+        questions.append(Question(q["id"], q["text"], tuple(q.get("tags", []))))
+        hits[q["id"]] = [
+            Hit(by_id[r["passage_id"]], r["rerank_score"], r["fused_rank"]) for r in q["passages"]
+        ]
+    return questions, hits
+
+
+def rebuild_review(run_dir: Path, export: Path, dsn: str | None) -> Path:
+    """Rewrites a saved run's `review.html`, with names and links when `dsn` is given."""
+    results = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
+    passages = load_passages(export)
+    questions, hits = hits_from_results(results, passages)
+    talks = sorted({h.passage.talk_id for hs in hits.values() for h in hs})
+    sources = fetch_sources(dsn, talks) if dsn else None
+    out = run_dir / "review.html"
+    out.write_text(
+        review_html(questions, hits, neighbors(passages), results["meta"]["run_id"], sources),
+        encoding="utf-8",
+    )
+    return out
+
+
+if __name__ == "__main__":
+    import argparse
+    import os
+
+    ap = argparse.ArgumentParser(description="Rebuild a Gate A run's review.html.")
+    ap.add_argument("run_dir", type=Path)
+    ap.add_argument("--export", type=Path, default=Path("data/export/passages.jsonl"))
+    ap.add_argument("--blind", action="store_true", help="teachers by number, with no links")
+    args = ap.parse_args()
+    dsn = None if args.blind else os.environ.get("DATABASE_URL")
+    if not args.blind and not dsn:
+        raise SystemExit("set DATABASE_URL to name teachers, or pass --blind")
+    print(rebuild_review(args.run_dir, args.export, dsn))
