@@ -188,7 +188,7 @@ def embed_all(
     one scale per tensor across the whole batch, padding included, so a vector computed in a
     batch depends on its neighbours: bge-m3-int8 gives cosine 0.97 to 0.99 between the same
     passage embedded alone and in a batch of 16. Queries are embedded alone, so passages are
-    too. On a CPU it is also faster, with no padding to compute."""
+    too. It is slower than batching, about 1.5 against 2.3 passages a second on a CPU."""
     order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
     out: np.ndarray | None = None
     for start in range(0, len(order), batch_size):
