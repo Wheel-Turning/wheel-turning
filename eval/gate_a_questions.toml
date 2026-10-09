@@ -1,0 +1,100 @@
+# Gate A question set (Spec 07, "Gate A notebook retrieval test").
+#
+# DRAFT for the founder to replace or approve before the reviewer sees results. Spec 07 says
+# this is a 20-question subset of the practitioner set (eval/questions_v1.toml, not written
+# yet) covering multi-voice topics, single-teacher topics and grief. These are written in a
+# practitioner's own words, as the PRD asks, around the PRD's multi-voice topics.
+#
+# Named-teacher and named-author questions are left out: the notebook has no name filter,
+# which arrives with Spec 05's named mode in M5.
+#
+# IDs default to q01, q02, ... in file order. Changing a question after a run means a new run.
+
+# Compassion
+[[question]]
+text = "I try to be compassionate toward my mother but I end up exhausted and resentful. Is that a failure of practice?"
+tags = ["multi_voice", "compassion"]
+
+[[question]]
+text = "How do I practice compassion for someone who has really hurt me?"
+tags = ["multi_voice", "compassion"]
+
+# Anger
+[[question]]
+text = "Anger comes up hard during zazen and I can't stop replaying an argument. What do I do with it?"
+tags = ["multi_voice", "anger"]
+
+[[question]]
+text = "Is it ever right to be angry, or is anger always something to let go of?"
+tags = ["multi_voice", "anger"]
+
+# Heart Sutra
+[[question]]
+text = "We chant 'form is emptiness, emptiness is form' every week and I still don't know what it means. How should I understand it?"
+tags = ["multi_voice", "heart_sutra"]
+
+[[question]]
+text = "If there is no eye, ear, nose, tongue, body or mind, who is it that practices?"
+tags = ["multi_voice", "heart_sutra"]
+
+# Precepts
+[[question]]
+text = "I took the precepts but I keep breaking the one about right speech. How should I relate to that?"
+tags = ["multi_voice", "precepts"]
+
+[[question]]
+text = "Are the precepts rules I follow, or something else?"
+tags = ["multi_voice", "precepts"]
+
+# Repentance
+[[question]]
+text = "How is the repentance verse supposed to work when I don't feel sorry, or feel sorry all the time?"
+tags = ["multi_voice", "repentance"]
+
+[[question]]
+text = "I did something years ago that still makes me ashamed. Can practice help with that?"
+tags = ["multi_voice", "repentance"]
+
+# Practicing within sangha
+[[question]]
+text = "There's someone in my sangha I find really difficult. How do I keep practicing with them?"
+tags = ["multi_voice", "sangha"]
+
+[[question]]
+text = "Why should I sit with a group when I can sit at home?"
+tags = ["multi_voice", "sangha"]
+
+# Discrimination and suffering
+[[question]]
+text = "As a person of color, I often feel out of place in Zen centers. How do teachers talk about that?"
+tags = ["multi_voice", "discrimination"]
+
+[[question]]
+text = "How does Zen practice respond to injustice and racism, not just personal suffering?"
+tags = ["multi_voice", "discrimination"]
+
+# Single-teacher topics: narrower subjects a few talks treat in depth.
+[[question]]
+text = "My legs hurt so much in sesshin that it's all I can think about. How should I work with pain?"
+tags = ["single_teacher", "body"]
+
+[[question]]
+text = "What is the point of oryoki and all the forms around eating?"
+tags = ["single_teacher", "forms"]
+
+[[question]]
+text = "How do I keep practicing when work and family leave me no time to sit?"
+tags = ["single_teacher", "daily_life"]
+
+[[question]]
+text = "What does shikantaza actually ask me to do on the cushion?"
+tags = ["single_teacher", "zazen"]
+
+# Grief
+[[question]]
+text = "My father died last month and sitting feels unbearable. How do teachers talk about grief?"
+tags = ["grief"]
+
+[[question]]
+text = "If everything is impermanent, why does losing someone still hurt this much?"
+tags = ["grief", "impermanence"]

@@ -26,6 +26,7 @@ tests/deny-fixture/Cargo.lock
 __pycache__/
 .venv/
 .ruff_cache/
+.pytest_cache/
 
 # Terraform
 .terraform/
