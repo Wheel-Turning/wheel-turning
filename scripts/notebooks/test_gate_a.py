@@ -103,6 +103,15 @@ def test_search_finds_planted_passages_and_caps_teachers():
     assert len(hits) <= g.KEEP_TOP
 
 
+def test_check_vectors_accepts_matching_and_refuses_drifted():
+    ps = [passage(i, "a", f"breath number {i} counted and released") for i in range(40)]
+    good = g.embed_all([p.text for p in ps], bag_embed)
+    assert g.check_vectors(good, ps, bag_embed) > 0.9999
+    drifted = g.normalize(good + 0.05)
+    with pytest.raises(ValueError, match="reindex"):
+        g.check_vectors(drifted, ps, bag_embed)
+
+
 def test_sparse_ignores_stopword_only_query():
     s = g.Sparse([passage(0, "a", "breath")])
     assert s.ranking("what is it") == []
