@@ -32,7 +32,10 @@ lspci | grep -qi nvidia || {
 mkdir -p "$TOOLS"
 
 # NVIDIA's repository, for the driver when the image has none and for the CUDA toolkit.
-if ! command -v nvidia-smi > /dev/null || { ! command -v nvcc > /dev/null && [ ! -x /usr/local/cuda/bin/nvcc ]; }; then
+# Images with Lambda Stack carry an nvcc outside /usr/local/cuda that CMake cannot use, so only
+# NVIDIA's toolkit there counts.
+NVCC=/usr/local/cuda/bin/nvcc
+if ! command -v nvidia-smi > /dev/null || [ ! -x "$NVCC" ]; then
   if ! dpkg -s cuda-keyring > /dev/null 2>&1; then
     step "NVIDIA repository"
     # shellcheck disable=SC1091
@@ -52,7 +55,7 @@ if ! command -v nvidia-smi > /dev/null; then
   exit 3
 fi
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
-if ! command -v nvcc > /dev/null && [ ! -x /usr/local/cuda/bin/nvcc ]; then
+if [ ! -x "$NVCC" ]; then
   step "CUDA toolkit"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends "$CUDA_TOOLKIT"
 fi
@@ -66,7 +69,7 @@ if [ ! -x "$TOOLS/whisper.cpp/build/bin/whisper-cli" ]; then
   # The GPU's own architecture, since older CMake has no "native".
   arch=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
   cmake -S "$TOOLS/whisper.cpp" -B "$TOOLS/whisper.cpp/build" -DCMAKE_BUILD_TYPE=Release \
-    -DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES="$arch" > /dev/null
+    -DGGML_CUDA=1 -DCMAKE_CUDA_COMPILER="$NVCC" -DCMAKE_CUDA_ARCHITECTURES="$arch" > /dev/null
   cmake --build "$TOOLS/whisper.cpp/build" -j "$(nproc)" --target whisper-cli > /dev/null
 fi
 
