@@ -63,6 +63,12 @@ word_list = "/usr/share/dict/words"
 proof_random_max_errors = 1
 proof_worst_max_errors = 3
 
+[citations]
+# Work-level citations (Spec 08). A citation that names a work and no place in it resolves to
+# the work when a title or alias appears as whole words. These phrases come up in talks too
+# often to identify a work, so they never match, even as a title or alias.
+work_alias_stoplist = ["being time", "the way", "the self", "the mind", "the moon", "zazen"]
+
 [deployment]
 # Who can reach the tool. With "public" and a mandated source enabled, the audit warns, because
 # a mandated source's exposure grows once the tool is public (Spec 08, Mandated sources).

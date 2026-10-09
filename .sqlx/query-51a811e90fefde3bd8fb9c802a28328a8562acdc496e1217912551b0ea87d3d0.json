@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update work_locator set aliases = $2 where work_id = $1 and locator = '*'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "51a811e90fefde3bd8fb9c802a28328a8562acdc496e1217912551b0ea87d3d0"
+}

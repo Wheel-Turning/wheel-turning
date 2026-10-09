@@ -17,7 +17,7 @@ use wt_db::job::{self, JobKind};
 use wt_db::talk::TalkRepo;
 use wt_db::transcript::{self, SegmentRow};
 use wt_extract::extract::{self, Staging};
-use wt_extract::resolve::{self, HandList};
+use wt_extract::resolve::{self, HandList, WorkNames};
 use wt_extract::{DataClass, LlmClient, LlmError};
 use wt_index::ChunkSettings;
 use wt_index::index::{self, IndexCitation, IndexSegment};
@@ -462,12 +462,23 @@ pub async fn requeue_after_glossary_change(
 #[derive(Debug, Clone)]
 pub struct PgHandList {
     pool: sqlx::PgPool,
+    stoplist: Vec<String>,
 }
 
 impl PgHandList {
-    /// A hand list read through `pool`.
+    /// A hand list read through `pool`, with no work-name stoplist.
     pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            stoplist: Vec::new(),
+        }
+    }
+
+    /// The same, leaving out work names on `[citations] work_alias_stoplist`.
+    #[must_use]
+    pub fn with_stoplist(mut self, stoplist: Vec<String>) -> Self {
+        self.stoplist = stoplist;
+        self
     }
 }
 
@@ -499,6 +510,23 @@ impl HandList for PgHandList {
             .await
             .map_err(hand_list_error)?
             .map(|id| id.to_string()))
+    }
+
+    async fn works(&self) -> Result<Vec<WorkNames>, LlmError> {
+        let mut conn = self.pool.acquire().await.map_err(hand_list_error)?;
+        Ok(wt_db::locator::work_names(&mut conn)
+            .await
+            .map_err(hand_list_error)?
+            .into_iter()
+            .map(|w| WorkNames {
+                id: w.id.to_string(),
+                names: w
+                    .names
+                    .into_iter()
+                    .filter(|n| resolve::usable_work_name(n, &self.stoplist))
+                    .collect(),
+            })
+            .collect())
     }
 }
 

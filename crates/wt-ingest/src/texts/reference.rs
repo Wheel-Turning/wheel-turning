@@ -412,12 +412,14 @@ pub async fn import(
 }
 
 /// `wt text link-out`: a work read elsewhere, with its locators and no text, so talks can
-/// cite it and the footnote links out.
+/// cite it and the footnote links out. `aliases`, when given, name the whole work for
+/// work-level citations (Spec 08).
 pub async fn link_out(
     conn: &mut sqlx::PgConnection,
     title: &str,
     url: &str,
     locators_csv: Option<&Path>,
+    aliases: &[String],
 ) -> Result<usize, TextError> {
     let rows = match locators_csv {
         Some(path) => {
@@ -436,6 +438,9 @@ pub async fn link_out(
     };
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     let work = reference::upsert_link_out_work(&mut tx, title, url).await?;
+    if !aliases.is_empty() {
+        wt_db::locator::set_work_aliases(&mut tx, work, aliases).await?;
+    }
     let parsed: Vec<LocatorRow> = rows
         .iter()
         .map(|row| {

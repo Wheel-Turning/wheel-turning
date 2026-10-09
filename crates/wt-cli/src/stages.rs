@@ -210,7 +210,10 @@ impl Stages {
             llm,
             real_data_ok: config.llm_real_data_ok,
             embedder,
-            hand_list: PgHandList::new(pool.clone()),
+            hand_list: PgHandList::new(pool.clone()).with_stoplist(
+                wt_ingest::config::CitationSettings::load(&config_dir.join("pipeline.toml"))?
+                    .work_alias_stoplist,
+            ),
             actor: actor.to_owned(),
             indexed: AtomicUsize::new(0),
             texts,

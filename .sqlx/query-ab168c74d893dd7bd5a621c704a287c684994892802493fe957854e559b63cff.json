@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select wl.id,\n                  greatest(similarity(lower(wl.label), lower($1)),\n                           coalesce((select max(similarity(lower(a), lower($1)))\n                                     from unnest(wl.aliases) a), 0)) as \"sim!\"\n           from work_locator wl\n           order by 2 desc, wl.locator\n           limit 1",
+  "query": "select wl.id,\n                  greatest(similarity(lower(wl.label), lower($1)),\n                           coalesce((select max(similarity(lower(a), lower($1)))\n                                     from unnest(wl.aliases) a), 0)) as \"sim!\"\n           from work_locator wl\n           where wl.locator <> '*'\n           order by 2 desc, wl.locator\n           limit 1",
   "describe": {
     "columns": [
       {
@@ -31,5 +31,5 @@
       null
     ]
   },
-  "hash": "267d70cfb5cc08767f5849915d0c7ccb04d9fe32cab06fe41b0651cf396ad022"
+  "hash": "ab168c74d893dd7bd5a621c704a287c684994892802493fe957854e559b63cff"
 }

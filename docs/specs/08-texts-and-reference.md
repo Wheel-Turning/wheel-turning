@@ -429,7 +429,7 @@ select id, '*', title from work
 on conflict (work_id, locator) do nothing;
 ```
 
-Creating them. `wt text import` and `wt text link-out` upsert the work-level locator with every work they create or update. Its aliases come from an optional `aliases` list under `[work]` in the manifest, and from repeated `--alias` options on `wt text link-out`. The title always counts. Nothing derives aliases automatically. The resolver's hand-list hash covers work-level locators, so `wt reindex --citations` re-resolves talks after a new work or alias, as it already does for new locators.
+Creating them. A trigger on `work` creates the work-level locator for every new work, however it is created, and keeps its label equal to the title (decision of October 9, 2026, made while building it, so a locator list's works get one too). `wt text import` and `wt text link-out` set its aliases. Its aliases come from an optional `aliases` list under `[work]` in the manifest, and from repeated `--alias` options on `wt text link-out`. The title always counts. Nothing derives aliases automatically. The resolver's hand-list hash covers work-level locators, so `wt reindex --citations` re-resolves talks after a new work or alias, as it already does for new locators.
 
 Matching (Spec 04 resolution step 4):
 
@@ -443,13 +443,13 @@ Rendering (M5). The answer assembler reads the work through `servable_citation.w
 
 Acceptance criteria:
 
-- [ ] Migration `0026` applies after `0025`, gives every existing work exactly one work-level locator, and a second run of its insert changes nothing.
-- [ ] `wt text import` and `wt text link-out` create the work-level locator with the manifest's or the command's aliases, and warn on a stoplisted or too-short alias.
-- [ ] A fixture citation "as Dogen says in Uji" resolves `resolved` with method `work_name` to Uji's work-level locator, and gets no `text_unit_id`.
-- [ ] A citation naming a hand-listed passage of that work resolves to the passage, not the work, and a generic citation in a mapped series part still resolves by series label.
-- [ ] A work named only in the context, or only in `work_hint`, resolves `probable`. A `work_hint` matching no title or alias stays `unresolved`.
-- [ ] A citation matching two works stays `unresolved`, and a stoplisted phrase never matches.
-- [ ] After a new link-out work, `wt reindex --citations` resolves a previously unresolved fixture citation of that work, and a rerun changes nothing.
+- [x] Migration `0026` applies after `0025`, gives every existing work exactly one work-level locator, and a second run of its insert changes nothing. (Applied with the rest in `wt-db/tests/migrations.rs`; the backfill is `on conflict do nothing` on the `(work_id, locator)` key, and the trigger gives every new work one, checked in `wt-ingest/tests/reference.rs`.)
+- [x] `wt text import` and `wt text link-out` create the work-level locator with the manifest's or the command's aliases, and warn on a stoplisted or too-short alias. (Link-out aliases, kept by a later link-out without any, in `wt-ingest/tests/reference.rs`; the warnings in `wt-extract/tests/resolve.rs`, added to both commands' output.)
+- [x] A fixture citation "as Dogen says in Uji" resolves `resolved` with method `work_name` to Uji's work-level locator, and gets no `text_unit_id`. (`wt-extract/tests/resolve.rs` in memory and `wt-ingest/tests/reference.rs` against Postgres, which also runs `link_citations`.)
+- [x] A citation naming a hand-listed passage of that work resolves to the passage, not the work, and a generic citation in a mapped series part still resolves by series label. (`wt-extract/tests/resolve.rs`; the passage over the work against Postgres in `wt-ingest/tests/reference.rs`.)
+- [x] A work named only in the context, or only in `work_hint`, resolves `probable`. A `work_hint` matching no title or alias stays `unresolved`. (`wt-extract/tests/resolve.rs`.)
+- [x] A citation matching two works stays `unresolved`, and a stoplisted phrase never matches. (`wt-extract/tests/resolve.rs`; the stoplist against Postgres in `wt-ingest/tests/reference.rs`.)
+- [x] After a new link-out work, `wt reindex --citations` resolves a previously unresolved fixture citation of that work, and a rerun changes nothing. (The `resolve` job in `wt-ingest/tests/textjobs.rs`; the command's queueing, again after a stoplist change and not on a rerun, in `wt-cli/tests/commands.rs`.)
 - [ ] The answer page renders a work-level footnote with the work title, the "the work, not a passage" badge and the work's link-out, and renders a work with no `link_out_url` without a link. (With the answer page in M5.)
 
 ## Guided loading

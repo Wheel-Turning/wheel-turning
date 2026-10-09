@@ -424,7 +424,7 @@ pub async fn import_text(
         scratch: config.scratch_dir.join("texts"),
         word_list: texts.word_list,
     };
-    let report = wt_ingest::texts::import(
+    let mut report = wt_ingest::texts::import(
         &mut conn,
         &objects,
         embedder,
@@ -435,6 +435,11 @@ pub async fn import_text(
         Some(&env),
     )
     .await?;
+    let citations = wt_ingest::config::CitationSettings::load(&config_dir.join("pipeline.toml"))?;
+    report.warnings.extend(wt_ingest::texts::work_name_warnings(
+        manifest,
+        &citations.work_alias_stoplist,
+    )?);
     if let Some(reason) = report.pdf.as_ref().and_then(|p| p.stopped.as_ref()) {
         commands::print_json(&report)?;
         anyhow::bail!("the import stopped: {reason}");
@@ -1001,17 +1006,24 @@ pub async fn import_reference(
 }
 
 /// `wt reindex --citations`: links citations to text units, and queues resolution again for
-/// talks with staged citations, keyed by the hand list, so a new locator list or text resolves
-/// citations that matched nothing before.
+/// talks with staged citations, keyed by the hand list and the work-name stoplist, so a new
+/// locator list, work alias or text resolves citations that matched nothing before.
 pub async fn reindex_citations(
     pool: &PgPool,
     config: &Config,
+    config_dir: &Path,
 ) -> anyhow::Result<serde_json::Value> {
     use wt_core::objects::ObjectStore as _;
     let objects = stages::objects(config)?;
+    let stoplist = wt_ingest::config::CitationSettings::load(&config_dir.join("pipeline.toml"))?
+        .work_alias_stoplist;
     let mut conn = pool.acquire().await?;
     let linked = wt_db::reference::link_citations(&mut conn).await?;
-    let version = wt_db::reference::locator_version(&mut conn).await?;
+    let version = format!(
+        "{}-{}",
+        wt_db::reference::locator_version(&mut conn).await?,
+        wt_core::records::sha256_hex(stoplist.join("\n").as_bytes())
+    );
     let mut queued = 0;
     for talk in wt_db::transcript::corrected_talks(&mut conn).await? {
         if objects
