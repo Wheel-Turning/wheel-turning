@@ -472,7 +472,8 @@ async fn import_one(
         check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
 
     // 2 and 3. Extract and filter.
-    let mut key_input = key_seed.to_owned();
+    // The vector version re-embeds every edition when the way vectors are computed changes.
+    let mut key_input = format!("{key_seed}:vectors:{}", wt_ml::VECTOR_VERSION);
     let mut sections = Vec::new();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     let is_pdf = m.source.format == Format::Pdf;

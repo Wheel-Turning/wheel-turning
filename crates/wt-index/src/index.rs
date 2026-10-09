@@ -105,7 +105,8 @@ pub struct Plan {
     pub skipped_short: usize,
     /// Citations whose first word is in no kept passage.
     pub dropped_citations: usize,
-    /// `talk.content_hash`: the passages, the citations and the embedding model.
+    /// `talk.content_hash`: the passages, the citations and the embedder's vector ID (the
+    /// model and how vectors are computed, `Embedder::vector_id`).
     pub content_hash: String,
 }
 
@@ -128,12 +129,13 @@ fn word_spans(words: &[(Word, (usize, usize))], range: (usize, usize)) -> Vec<(u
     out
 }
 
-/// Builds passages and maps citations onto them. Pure and deterministic.
+/// Builds passages and maps citations onto them. Pure and deterministic. `vector_id` names
+/// the model and how vectors are computed; it goes into the content hash.
 pub fn plan(
     segments: &[IndexSegment],
     citations: &[IndexCitation],
     cfg: &ChunkSettings,
-    model_id: &str,
+    vector_id: &str,
 ) -> Result<Plan, IndexError> {
     let mut passages = Vec::new();
     let mut skipped_short = 0;
@@ -207,7 +209,7 @@ pub fn plan(
         });
     }
 
-    let mut h = format!("model\u{1f}{model_id}\u{1e}");
+    let mut h = format!("model\u{1f}{vector_id}\u{1e}");
     for p in &passages {
         h.push_str(&format!(
             "{}\u{1f}{}\u{1f}{}\u{1e}",

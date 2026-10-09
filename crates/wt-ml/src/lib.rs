@@ -17,6 +17,12 @@ use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
 /// The dimension of bge-m3's dense vectors.
 pub const EMBED_DIM: usize = 1024;
 
+/// The version of how vectors are computed from text, beyond the model itself. It is part of
+/// a talk's index hash and a text edition's import key, so raising it re-embeds everything on
+/// the next `wt reindex --all` and text import. 2: one text per run, so a vector depends on
+/// its text alone (decision of October 9, 2026).
+pub const VECTOR_VERSION: u32 = 2;
+
 /// Why a model failed.
 #[derive(Debug, thiserror::Error)]
 pub enum MlError {
@@ -39,6 +45,11 @@ pub enum MlError {
 pub trait Embedder: Send + Sync {
     /// The name stored in `passage.embedding_model`.
     fn model_id(&self) -> &str;
+    /// The model and [`VECTOR_VERSION`]: what an index hash records, so a change to either
+    /// makes stored vectors stale.
+    fn vector_id(&self) -> String {
+        format!("{}#v{VECTOR_VERSION}", self.model_id())
+    }
     /// Vector length: 1024 for bge-m3.
     fn dim(&self) -> usize;
     /// One L2-normalized vector per text, in order.
@@ -64,7 +75,10 @@ pub struct OnnxSettings {
     pub model: String,
     /// The ONNX Runtime library; when `None`, `ORT_DYLIB_PATH` or the system search path.
     pub runtime: Option<PathBuf>,
-    /// Texts per run: 16 on CPU.
+    /// Texts per run: 1. The int8 export quantizes activations dynamically, with one scale
+    /// per tensor across the whole batch, padding included, so in a larger batch a vector
+    /// depends on the texts beside it (cosine 0.97 to 0.99 against the same text alone).
+    /// Queries are embedded alone, so passages are too. On a CPU it is also faster.
     pub batch_size: usize,
     /// Tokens per text; longer texts are truncated.
     pub max_tokens: usize,
@@ -79,7 +93,7 @@ impl OnnxSettings {
             model_dir: model_dir.into(),
             model: model.into(),
             runtime: None,
-            batch_size: 16,
+            batch_size: 1,
             max_tokens: 512,
             threads: std::thread::available_parallelism().map_or(4, |n| n.get().min(8)),
         }
