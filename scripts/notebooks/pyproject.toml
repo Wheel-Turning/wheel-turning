@@ -1,0 +1,25 @@
+# The Gate A notebook's environment (Spec 07). Not part of the Rust build or CI.
+#
+#   uv run --project scripts/notebooks pytest scripts/notebooks
+#   uv run --project scripts/notebooks jupyter lab scripts/notebooks/gate_a_retrieval.ipynb
+[project]
+name = "wt-notebooks"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "numpy>=2",
+  "onnxruntime==1.30.0",  # the version WT_ORT_DYLIB loads for the Rust service
+  "tokenizers>=0.21",
+  "rank-bm25>=0.2.2",
+  "torch>=2.4",
+  "transformers>=4.44",
+  "jupyterlab>=4.2",
+  "nbconvert>=7.16",
+  "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
