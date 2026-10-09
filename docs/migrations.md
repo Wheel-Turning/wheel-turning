@@ -38,8 +38,11 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0023 | `0023_text_notices.sql` | M4b | `text_edition.notice`: copyright notices naming a holder the evidence does not cover, kept for a flagged or held edition and listed by `wt source report` | None new: `wt_pipeline` already writes `text_edition` |
 | 0024 | `0024_engagewisdom_platform.sql` | M4E | The `engagewisdom` source platform, and `aligned` as a transcript origin for a source's own text timed by recognition (Spec 03, EngageWisdom sources; Spec 04, Aligned source transcripts) | None new |
 | 0026 | `0026_text_unit_vector_version.sql` | Embeddings (#72) | `text_unit.vector_version`, default 1: how a unit's vector was computed beyond its model, so `wt text reembed` finds units embedded in batches (Spec 04, decision of October 9, 2026) | None new: `wt_pipeline` already updates `text_unit` |
+| 0027 | `0027_work_level_citations.sql` | Work-level citations (#74) | Each work's work-level locator `'*'`, kept by a trigger on `work`, and `work_name` as a citation method (Spec 08, Work-level citations) | None new |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
+
+0027 is the one exception to rule 4. #72 and #74 both merged a 0026 on October 9, 2026, five minutes apart, and sqlx refused the duplicate version, so main's CI failed. The real-data database had already applied #72's file as 26 and no database had applied #74's, so #74's file was renumbered to 0027 the same day.
 
 ## Planned, not yet numbered
 
@@ -52,3 +55,4 @@ These come from the October 3 to 5 specs. Each gets its number at merge.
 | 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
 | 02 | 0021 | donation links: `sangha.donation_kind`, `donation_note`, `donation_checked_at`, `donation_checked_by` and the `donation_verified_needs_page` check | Alters `sangha` from 0002 |
 | 05 | 0022 | `query_log.sensitive_category` | Alters `query_log` from 0005. Storing an acute question without its text also needs 0019, which makes `query_text` nullable, so it merges after 0019 |
+| 08 | 0027 | quoted passages inline: `citation.kind` in `servable_citation` (#73) | 0027 went to work-level citations, so this takes the next free number |
