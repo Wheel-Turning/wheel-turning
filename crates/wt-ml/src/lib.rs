@@ -177,7 +177,8 @@ impl OnnxEmbedder {
 /// the int8 export quantizes activations dynamically, with one scale per tensor across the whole
 /// run, padding included, so beside other texts a vector moved (cosine 0.97 to 0.99 against the
 /// same text alone). Queries are embedded alone, so passages are too, and there is no batch
-/// setting to change that (decision of October 9, 2026). On a CPU it is also faster.
+/// setting to change that (decision of October 9, 2026). It is slower than batching: on a
+/// random sample of passages on the owner's CPU, about 1.5 against 2.3 passages a second.
 fn embed_one(
     session: &Mutex<Session>,
     tokenizer: &Tokenizer,

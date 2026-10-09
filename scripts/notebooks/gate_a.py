@@ -188,7 +188,7 @@ def embed_all(
     one scale per tensor across the whole batch, padding included, so a vector computed in a
     batch depends on its neighbours: bge-m3-int8 gives cosine 0.97 to 0.99 between the same
     passage embedded alone and in a batch of 16. Queries are embedded alone, so passages are
-    too. On a CPU it is also faster, with no padding to compute."""
+    too. It is slower than batching, about 1.5 against 2.3 passages a second on a CPU."""
     order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
     out: np.ndarray | None = None
     for start in range(0, len(order), batch_size):
@@ -223,6 +223,55 @@ def cached_embeddings(
     np.save(tmp, v)
     tmp.replace(path)
     return v
+
+
+VECTORS_SQL = """
+select passage_id::text, embedding::real[] from servable_passage
+where passage_id = any(%s::uuid[]) and embedding_model = %s
+"""
+
+
+def db_vectors(dsn: str, passages: Sequence[Passage], model_id: str) -> np.ndarray:
+    """The stored vectors of `passages`, in their order, from `servable_passage`. `wt reindex`
+    computes them with the same model one text per run, so they are what `embed_all` would
+    compute (owner's decision of October 9, 2026: read them rather than embed twice). Fails
+    if any passage is missing or was embedded with another model; `check_vectors` then
+    confirms a sample against the embedder."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(VECTORS_SQL, ([p.passage_id for p in passages], model_id))
+        found = {pid: v for pid, v in cur.fetchall()}
+    missing = [p.passage_id for p in passages if p.passage_id not in found]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} exported passages have no {model_id} vector in servable_passage, "
+            f"such as {missing[0]}: export again after the reindex"
+        )
+    return np.asarray([found[p.passage_id] for p in passages], dtype=np.float32)
+
+
+def check_vectors(
+    matrix: np.ndarray,
+    passages: Sequence[Passage],
+    embed: Callable[[Sequence[str]], np.ndarray],
+    sample: int = 30,
+    seed: int = 0,
+    min_cosine: float = 0.9999,
+) -> float:
+    """Embeds a random sample of passages one text per run and compares them with `matrix`.
+    Returns the lowest cosine, and fails below `min_cosine`, which catches vectors that were
+    computed in batches (0.97 to 0.99) or with another model."""
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(passages), size=min(sample, len(passages)), replace=False)
+    fresh = embed_all([passages[i].text for i in idx], embed)
+    lowest = float(np.min(np.sum(fresh * matrix[idx], axis=1)))
+    if lowest < min_cosine:
+        raise ValueError(
+            f"stored vectors differ from the embedder (lowest cosine {lowest:.5f}): "
+            "run `wt reindex --all` on the current build first"
+        )
+    return lowest
 
 
 def dense_ranking(matrix: np.ndarray, query: np.ndarray, depth: int = FUSE_DEPTH) -> list[int]:
