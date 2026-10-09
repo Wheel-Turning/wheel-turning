@@ -412,6 +412,46 @@ New route: `GET /text/{unit_id}` (session required) shows the unit with at most 
 
 Texts are not passed to the synthesizer in v1, because themes describe how teachers approach a question. Evaluation exports list text hits in their own labeled block so the reviewer can rate them separately.
 
+## Work-level citations
+
+Teachers often name a work without a place in it: "as Dogen says in Uji", "the Platform Sutra puts it this way". Before this section such a citation matched no locator and stayed `unresolved`, so the footnote could not even say which work was meant. A work-level citation names the work and links to it as a whole, and never claims a passage (decision of October 9, 2026).
+
+The footnote links only to what the resolver established from the teacher's own words. When the passage is known, the footnote links to the unit page or the locator's URL. When only the work is known, it links to the work. When neither is known, it shows the teacher's words with no link. A model never picks the work on its own, and a work-level citation never gets a `text_unit_id` or an excerpt.
+
+Schema. Each work has one work-level locator: a `work_locator` row with `locator = '*'`, `label` set to the work's title, the work's aliases, and no `link_out_url`. Migration `0026_work_level_citations.sql`:
+
+```sql
+alter table citation drop constraint citation_method_check;
+alter table citation add constraint citation_method_check
+  check (method in ('hand_list','series_label','llm','work_name'));
+insert into work_locator (work_id, locator, label)
+select id, '*', title from work
+on conflict (work_id, locator) do nothing;
+```
+
+Creating them. `wt text import` and `wt text link-out` upsert the work-level locator with every work they create or update. Its aliases come from an optional `aliases` list under `[work]` in the manifest, and from repeated `--alias` options on `wt text link-out`. The title always counts. Nothing derives aliases automatically. The resolver's hand-list hash covers work-level locators, so `wt reindex --citations` re-resolves talks after a new work or alias, as it already does for new locators.
+
+Matching (Spec 04 resolution step 4):
+
+1. The work-level locators are excluded from the hand-list lookups of steps 1 to 3 (`HandList::exact`, `most_similar` and `by_key`). A citation that names a place in a work always gets the passage, and a citation that names only the work never resolves to some passage of it.
+2. Titles and aliases are normalized like everything else in the resolver, and are matched as whole words, not by trigram similarity. That way "uji" does not match inside another word, and a long context does not dilute the match.
+3. A match in the citation's own text is `resolved`. A match only in the 20 words of context on either side, or only in `work_hint`, is `probable`. A `work_hint` that matches no title or alias stays `unresolved`.
+4. When titles or aliases of two different works match, the citation stays `unresolved`. The resolver does not choose between them.
+5. Phrases too common in Zen talks to identify a work, such as "being time" or "the way", are listed in `[citations] work_alias_stoplist` in `config/pipeline.toml`. Such a phrase never matches, even when it is a title or alias. `wt text import` and `wt text link-out` warn when a new title or alias is on the stoplist or shorter than three characters.
+
+Rendering (M5). The answer assembler reads the work through `servable_citation.work_id`, and `wt_web` already has select on `work`. A work-level footnote shows the work's title, its author when known, and the badge "the work, not a passage". It links out to `work.link_out_url` when that is set, and otherwise has no link. Texts referenced lists it as the work alone, with no locator. A work-level citation is never shown as an excerpt.
+
+Acceptance criteria:
+
+- [ ] Migration `0026` applies after `0025`, gives every existing work exactly one work-level locator, and a second run of its insert changes nothing.
+- [ ] `wt text import` and `wt text link-out` create the work-level locator with the manifest's or the command's aliases, and warn on a stoplisted or too-short alias.
+- [ ] A fixture citation "as Dogen says in Uji" resolves `resolved` with method `work_name` to Uji's work-level locator, and gets no `text_unit_id`.
+- [ ] A citation naming a hand-listed passage of that work resolves to the passage, not the work, and a generic citation in a mapped series part still resolves by series label.
+- [ ] A work named only in the context, or only in `work_hint`, resolves `probable`. A `work_hint` matching no title or alias stays `unresolved`.
+- [ ] A citation matching two works stays `unresolved`, and a stoplisted phrase never matches.
+- [ ] After a new link-out work, `wt reindex --citations` resolves a previously unresolved fixture citation of that work, and a rerun changes nothing.
+- [ ] The answer page renders a work-level footnote with the work title, the "the work, not a passage" badge and the work's link-out, and renders a work with no `link_out_url` without a link. (With the answer page in M5.)
+
 ## Guided loading
 
 All files you collect go into one gitignored folder at the repository root, `data-inbox/`, with one subfolder per edition or asset.
