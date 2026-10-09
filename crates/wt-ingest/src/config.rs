@@ -323,6 +323,28 @@ impl LicenseSettings {
     }
 }
 
+/// `[citations]` in `config/pipeline.toml` (Spec 08, Work-level citations): phrases too common
+/// in talks to identify a work, which never match even as a title or alias.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct CitationSettings {
+    /// Compared after normalization.
+    pub work_alias_stoplist: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CitationsFile {
+    #[serde(default)]
+    citations: CitationSettings,
+}
+
+impl CitationSettings {
+    /// Reads `[citations]` from `config/pipeline.toml`; without the section, an empty stoplist.
+    pub fn load(pipeline: &Path) -> Result<Self, ConfigError> {
+        Ok(parse::<CitationsFile>(&read(pipeline)?, &pipeline.display().to_string())?.citations)
+    }
+}
+
 /// `[texts]` in `config/pipeline.toml` (Spec 08, PDFs and OCR): the English word list the
 /// suspect check reads, and the errors a proofread allows.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]

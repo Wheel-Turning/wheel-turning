@@ -66,6 +66,10 @@ pub struct WorkSection {
     /// Such as `theravada`.
     #[serde(default)]
     pub tradition: Option<String>,
+    /// Other names talks use for the whole work, beside its title, for work-level citations
+    /// (Spec 08). Left as they are when empty.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// `[edition]`.

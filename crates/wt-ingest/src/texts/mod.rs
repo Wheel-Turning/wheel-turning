@@ -222,6 +222,21 @@ fn slug(s: &str) -> String {
     out.trim_matches('-').to_owned()
 }
 
+/// Warnings for the manifest's work title and `[work] aliases` as names of the whole work
+/// (Spec 08, Work-level citations): on `work_alias_stoplist`, or shorter than three characters.
+pub fn work_name_warnings(
+    manifest_path: &Path,
+    stoplist: &[String],
+) -> Result<Vec<String>, TextError> {
+    let text = std::fs::read_to_string(manifest_path)
+        .map_err(|e| TextError::Manifest(format!("reading {}: {e}", manifest_path.display())))?;
+    let m = CorpusManifest::parse(&text)?;
+    Ok(std::iter::once(&m.work.title)
+        .chain(&m.work.aliases)
+        .filter_map(|n| wt_extract::resolve::work_name_warning(n, stoplist))
+        .collect())
+}
+
 /// How an import runs.
 pub struct ImportOptions<'a> {
     /// `[licenses] allowed_license_codes`.
@@ -868,6 +883,9 @@ async fn import_one(
     };
     let work =
         texts::upsert_work(&mut tx, &m.work.title, author, m.work.tradition.as_deref()).await?;
+    if !m.work.aliases.is_empty() {
+        wt_db::locator::set_work_aliases(&mut tx, work, &m.work.aliases).await?;
+    }
     let edition = texts::upsert_edition(
         &mut tx,
         &NewEdition {

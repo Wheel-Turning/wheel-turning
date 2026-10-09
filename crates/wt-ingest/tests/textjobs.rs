@@ -339,3 +339,72 @@ async fn with_no_model_a_real_talk_is_staged_as_skipped_and_goes_on() {
     );
     assert_eq!(queued(&fx.pool, talk, "resolve").await, 1);
 }
+
+#[tokio::test]
+async fn a_new_link_out_work_resolves_a_citation_that_matched_nothing_and_a_rerun_changes_nothing()
+{
+    let fx = start().await;
+    let text = "Today we read what Dogen wrote in Uji, that time itself is being.";
+    let talk = segmented_talk(&fx, "uji", text).await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let g = glossary(None);
+    textjobs::run_correct(&mut conn, talk, &fx.objects, &g, &|_| false)
+        .await
+        .unwrap();
+    let llm = FakeLlm::new(vec![Ok(json!({
+        "practice_period": null,
+        "citations": [
+            {"text": "wrote in Uji, that time itself is being", "work_hint": null,
+             "locator_hint": null, "kind": "reference"}
+        ]
+    }))]);
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm)
+        .await
+        .unwrap();
+    let resolution = |objects: &LocalObjects| {
+        let staging: Staging =
+            serde_json::from_slice(&objects.get(&staging_key(talk)).unwrap().unwrap()).unwrap();
+        staging.citations[0].resolution.clone().unwrap()
+    };
+
+    // No such work yet: unresolved.
+    let hand_list = PgHandList::new(fx.pool.clone());
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    assert_eq!(resolution(&fx.objects).confidence, "unresolved");
+
+    // A link-out records the work; resolving again finds it as the work, not a passage.
+    wt_ingest::texts::reference::link_out(
+        &mut conn,
+        "Uji",
+        "https://example.invalid/uji",
+        None,
+        &[],
+    )
+    .await
+    .unwrap();
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    let r = resolution(&fx.objects);
+    assert_eq!(
+        (r.confidence.as_str(), r.method.as_deref()),
+        ("resolved", Some("work_name"))
+    );
+    let work_level: String = sqlx::query_scalar(
+        "select wl.id::text from work_locator wl join work w on w.id = wl.work_id
+         where w.title = 'Uji' and wl.locator = '*'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(r.work_locator_id.as_deref(), Some(work_level.as_str()));
+
+    // A rerun on the same hand list leaves the staging object as it is.
+    let before = fx.objects.get(&staging_key(talk)).unwrap().unwrap();
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    assert_eq!(fx.objects.get(&staging_key(talk)).unwrap().unwrap(), before);
+}

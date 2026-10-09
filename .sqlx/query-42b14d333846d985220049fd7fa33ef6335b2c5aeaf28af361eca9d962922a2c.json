@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id from work_locator\n         where btrim(regexp_replace(lower(label), '[^[:alnum:]]+', ' ', 'g')) = $1\n            or exists (select 1 from unnest(aliases) a\n                       where btrim(regexp_replace(lower(a), '[^[:alnum:]]+', ' ', 'g')) = $1)\n         order by locator limit 1",
+  "query": "select id from work_locator where locator = $1 and locator <> '*' order by id limit 1",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "134284846d230c1b3f25fdbc5c3ca2b18e583db9b325da92b1b00969bac2eca0"
+  "hash": "42b14d333846d985220049fd7fa33ef6335b2c5aeaf28af361eca9d962922a2c"
 }

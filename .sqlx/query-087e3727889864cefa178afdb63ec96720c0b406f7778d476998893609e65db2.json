@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id from work_locator\n         where locator <> '*'\n           and (btrim(regexp_replace(lower(label), '[^[:alnum:]]+', ' ', 'g')) = $1\n                or exists (select 1 from unnest(aliases) a\n                           where btrim(regexp_replace(lower(a), '[^[:alnum:]]+', ' ', 'g')) = $1))\n         order by locator limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "work_locator",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "087e3727889864cefa178afdb63ec96720c0b406f7778d476998893609e65db2"
+}

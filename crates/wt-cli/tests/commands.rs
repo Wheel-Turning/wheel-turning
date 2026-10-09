@@ -1570,3 +1570,105 @@ async fn removal_requests_suspend_decline_and_remove_text() {
             .unwrap();
     assert_eq!(status, "removed");
 }
+
+#[tokio::test]
+async fn reindex_citations_queues_resolution_after_a_new_work_or_stoplist_and_not_on_a_rerun() {
+    let fx = start().await;
+    fx.import_registry();
+    let talk = fx.talk(Some("Ada Fixture")).await;
+    wt_db::consent::set_consent(
+        &fx.pool,
+        "Ada",
+        wt_core::gate::ConsentStatus::Granted,
+        Some("fixture"),
+        None,
+        "test",
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into transcript (talk_id, version, origin, s3_key, content_hash)
+         values ($1, 1, 'asr', 'transcripts/x/v1.json', 'h')",
+    )
+    .bind(talk)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query("update talk set state = 'ready' where id = $1")
+        .bind(talk)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    // The worker's object store is data/objects under the working directory; the talk has
+    // staged citations there.
+    let cwd = std::env::temp_dir().join(format!("wt-reindex-{}", Uuid::new_v4()));
+    let staged = cwd.join("data/objects/citations");
+    std::fs::create_dir_all(&staged).unwrap();
+    std::fs::write(staged.join(format!("{talk}.json")), "{}").unwrap();
+    let cfg = config_dir();
+    let cfg_arg = cfg.to_str().unwrap();
+    let run = |args: &[&str]| -> serde_json::Value {
+        let out = wt_command()
+            .current_dir(&cwd)
+            .args(args)
+            .env("DATABASE_URL", fx.db.url().expose())
+            .env("WT_LOG", "warn")
+            .env_remove("WT_ENV")
+            .env_remove("WT_DB_HOST")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "wt {args:?} failed: {}", stderr(&out));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let reindex =
+        || run(&["reindex", "--citations", "--config-dir", cfg_arg])["resolve_queued"].clone();
+    let resolve_jobs = || async {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from job where talk_id = $1 and kind = 'resolve'",
+        )
+        .bind(talk)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap()
+    };
+
+    assert_eq!(reindex(), 1);
+    assert_eq!(reindex(), 0, "an unchanged hand list queues nothing");
+
+    // A new link-out work, with a stoplisted alias it warns about.
+    let linked = run(&[
+        "text",
+        "link-out",
+        "--work",
+        "Uji",
+        "--url",
+        "https://example.invalid/uji",
+        "--alias",
+        "Being Time",
+        "--config-dir",
+        cfg_arg,
+    ]);
+    let warnings = linked["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0]
+            .as_str()
+            .unwrap()
+            .contains("work_alias_stoplist")
+    );
+    assert_eq!(reindex(), 1, "a new work queues resolution again");
+    assert_eq!(reindex(), 0);
+
+    // A changed stoplist queues it again too.
+    let pipeline = cfg.join("pipeline.toml");
+    let toml = std::fs::read_to_string(&pipeline).unwrap().replace(
+        "work_alias_stoplist = [",
+        "work_alias_stoplist = [\"time being\", ",
+    );
+    std::fs::write(&pipeline, toml).unwrap();
+    assert_eq!(reindex(), 1, "a changed stoplist queues resolution again");
+    assert_eq!(resolve_jobs().await, 3);
+
+    std::fs::remove_dir_all(&cwd).unwrap();
+    std::fs::remove_dir_all(&cfg).unwrap();
+}

@@ -258,13 +258,14 @@ async fn a_locator_list_and_a_link_out_make_works_and_locators_with_no_text() {
         "Restricted Fixture",
         "https://example.invalid/book",
         Some(&csv),
+        &[],
     )
     .await
     .unwrap();
     assert_eq!(n, 1);
     let (url, locator_url): (String, String) = sqlx::query_as(
         "select w.link_out_url, wl.link_out_url from work w join work_locator wl on wl.work_id = w.id
-         where w.title = 'Restricted Fixture'",
+         where w.title = 'Restricted Fixture' and wl.locator <> '*'",
     )
     .fetch_one(&fx.pool)
     .await
@@ -392,4 +393,157 @@ async fn reindexing_citations_links_a_resolved_locator_to_its_text_unit() {
             .await
             .unwrap();
     assert_eq!(linked, None);
+}
+
+fn work_cite(text: &str, hint: Option<&str>) -> wt_extract::extract::StagedCitation {
+    use wt_extract::extract::{CitationKind, RawCitation, StagedCitation};
+    StagedCitation {
+        raw: RawCitation {
+            text: text.into(),
+            work_hint: hint.map(str::to_owned),
+            locator_hint: None,
+            kind: CitationKind::Reference,
+        },
+        w0: 0,
+        w1: 1,
+        resolution: None,
+    }
+}
+
+#[tokio::test]
+async fn a_link_out_work_gets_a_work_level_locator_that_resolves_citations_of_the_whole_work() {
+    use wt_extract::resolve::resolve;
+    use wt_ingest::textjobs::PgHandList;
+    let fx = start().await;
+    let csv = fx.dir.join("uji.csv");
+    std::fs::write(
+        &csv,
+        "locator,label
+uji:1,\"Uji, section 1\"
+",
+    )
+    .unwrap();
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let aliases = vec!["Being Time".to_owned(), "Time Being".to_owned()];
+    reference::link_out(
+        &mut conn,
+        "Uji",
+        "https://example.invalid/uji",
+        Some(&csv),
+        &aliases,
+    )
+    .await
+    .unwrap();
+    // The trigger made exactly one work-level locator, labeled with the title, with no URL of
+    // its own, and the command set its aliases.
+    let (label, got, url): (String, Vec<String>, Option<String>) = sqlx::query_as(
+        "select wl.label, wl.aliases, wl.link_out_url from work_locator wl
+         join work w on w.id = wl.work_id where w.title = 'Uji' and wl.locator = '*'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!((label.as_str(), got, url), ("Uji", aliases.clone(), None));
+    // A second link-out without aliases keeps them.
+    reference::link_out(&mut conn, "Uji", "https://example.invalid/uji", None, &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        scalar(
+            &fx.pool,
+            "select count(*) from work_locator wl join work w on w.id = wl.work_id
+             where w.title = 'Uji' and wl.locator = '*' and cardinality(wl.aliases) = 2"
+        )
+        .await,
+        1
+    );
+
+    let stoplist = vec!["being time".to_owned()];
+    let hand = PgHandList::new(fx.pool.clone()).with_stoplist(stoplist);
+    let work_level: String = sqlx::query_scalar(
+        "select wl.id::text from work_locator wl join work w on w.id = wl.work_id
+         where w.title = 'Uji' and wl.locator = '*'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    // Named in the citation: the work, resolved, with method work_name.
+    let r = resolve(&work_cite("as Dogen says in Uji", None), "", None, &hand)
+        .await
+        .unwrap();
+    assert_eq!(
+        (r.confidence.as_str(), r.method.as_deref()),
+        ("resolved", Some("work_name"))
+    );
+    assert_eq!(r.work_locator_id.as_deref(), Some(work_level.as_str()));
+    // The passage-level lookups never return the work-level locator, even for its exact title.
+    let r = resolve(&work_cite("uji", None), "", None, &hand)
+        .await
+        .unwrap();
+    assert_eq!(r.method.as_deref(), Some("work_name"));
+    // A named section still wins.
+    let r = resolve(&work_cite("Uji, section 1", None), "", None, &hand)
+        .await
+        .unwrap();
+    assert_eq!(r.method.as_deref(), Some("hand_list"));
+    assert_ne!(r.work_locator_id.as_deref(), Some(work_level.as_str()));
+    // A stoplisted alias never matches; an alias that is not stoplisted does.
+    let r = resolve(
+        &work_cite("the being time of the mountains", None),
+        "",
+        None,
+        &hand,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.confidence, "unresolved");
+    let r = resolve(&work_cite("in Time Being he says", None), "", None, &hand)
+        .await
+        .unwrap();
+    assert_eq!(r.work_locator_id.as_deref(), Some(work_level.as_str()));
+    // Only in the hint: probable.
+    let r = resolve(&work_cite("the time itself", Some("Uji")), "", None, &hand)
+        .await
+        .unwrap();
+    assert_eq!(
+        (r.confidence.as_str(), r.method.as_deref()),
+        ("probable", Some("work_name"))
+    );
+
+    // A work-level citation stored on a passage never links to a text unit.
+    let g = fx.dir.join("genjokoan.csv");
+    std::fs::write(
+        &g,
+        "locator,label
+genjokoan:5,\"Genjokoan, paragraph 5\"
+",
+    )
+    .unwrap();
+    reference::link_out(
+        &mut conn,
+        "Genjokoan",
+        "https://example.invalid/g",
+        Some(&g),
+        &[],
+    )
+    .await
+    .unwrap();
+    let citation = cited_talk(&fx.pool).await;
+    sqlx::query(
+        "update citation set work_locator_id = $1::uuid, method = 'work_name' where id = $2",
+    )
+    .bind(&work_level)
+    .bind(citation)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    wt_db::reference::link_citations(&mut conn).await.unwrap();
+    assert_eq!(
+        scalar(
+            &fx.pool,
+            "select count(*) from citation where text_unit_id is not null"
+        )
+        .await,
+        0
+    );
 }

@@ -313,6 +313,12 @@ enum TextCommand {
         /// A CSV of locators: locator, label, and optional aliases (semicolon separated) and url.
         #[arg(long)]
         locators: Option<PathBuf>,
+        /// Another name talks use for the whole work, beside its title; repeat for more.
+        #[arg(long = "alias")]
+        aliases: Vec<String>,
+        /// The directory holding pipeline.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
     },
     /// Imports a corpus text from a manifest and its source files: a dry run that reports
     /// sections, units and locators unless --apply, which writes the edition, its units with
@@ -1912,14 +1918,30 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     work,
                     url,
                     locators,
+                    aliases,
+                    config_dir,
                 },
         } => {
+            let stoplist =
+                wt_ingest::config::CitationSettings::load(&config_dir.join("pipeline.toml"))?
+                    .work_alias_stoplist;
+            let warnings: Vec<String> = std::iter::once(&work)
+                .chain(&aliases)
+                .filter_map(|n| wt_extract::resolve::work_name_warning(n, &stoplist))
+                .collect();
             let pool = pool().await?;
             let mut conn = pool.acquire().await?;
-            let n =
-                wt_ingest::texts::reference::link_out(&mut conn, &work, &url, locators.as_deref())
-                    .await?;
-            commands::print_json(&serde_json::json!({ "work": work, "locators": n }))?;
+            let n = wt_ingest::texts::reference::link_out(
+                &mut conn,
+                &work,
+                &url,
+                locators.as_deref(),
+                &aliases,
+            )
+            .await?;
+            commands::print_json(
+                &serde_json::json!({ "work": work, "locators": n, "warnings": warnings }),
+            )?;
         }
         Command::Reference {
             command:
@@ -1997,7 +2019,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Reindex(args) if args.citations => {
-            let report = index_cmds::reindex_citations(&pool().await?, &config).await?;
+            let report =
+                index_cmds::reindex_citations(&pool().await?, &config, &args.config_dir).await?;
             commands::print_json(&report)?;
         }
         Command::Reindex(args) => {
