@@ -56,7 +56,10 @@ if ! command -v nvcc > /dev/null && [ ! -x /usr/local/cuda/bin/nvcc ]; then
   step "CUDA toolkit"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq --no-install-recommends "$CUDA_TOOLKIT"
 fi
-export PATH=/usr/local/cuda/bin:$PATH
+# Lambda Stack images have nvcc on PATH and a /usr/local/cuda that CMake cannot find headers
+# under, so /usr/local/cuda/bin goes first only when no nvcc is on PATH.
+command -v nvcc > /dev/null || export PATH=/usr/local/cuda/bin:$PATH
+NVCC=$(command -v nvcc)
 
 if [ ! -x "$TOOLS/whisper.cpp/build/bin/whisper-cli" ]; then
   step "whisper.cpp for CUDA"
@@ -64,9 +67,10 @@ if [ ! -x "$TOOLS/whisper.cpp/build/bin/whisper-cli" ]; then
   git -C "$TOOLS/whisper.cpp" fetch -q origin "$WHISPER_REV"
   git -C "$TOOLS/whisper.cpp" checkout -q "$WHISPER_REV"
   # The GPU's own architecture, since older CMake has no "native".
+  rm -rf "$TOOLS/whisper.cpp/build"
   arch=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '.')
   cmake -S "$TOOLS/whisper.cpp" -B "$TOOLS/whisper.cpp/build" -DCMAKE_BUILD_TYPE=Release \
-    -DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES="$arch" > /dev/null
+    -DGGML_CUDA=1 -DCMAKE_CUDA_COMPILER="$NVCC" -DCMAKE_CUDA_ARCHITECTURES="$arch" > /dev/null
   cmake --build "$TOOLS/whisper.cpp/build" -j "$(nproc)" --target whisper-cli > /dev/null
 fi
 
@@ -90,6 +94,13 @@ if [ ! -x "$TOOLS/sidecar/bin/python" ]; then
   uv venv -q -p 3.11 "$TOOLS/sidecar"
   # Linux torch wheels from PyPI carry CUDA.
   uv pip install -q -p "$TOOLS/sidecar/bin/python" -r "$REPO/sidecars/diarize/pyproject.toml"
+fi
+# PyPI's torch is built for CUDA 13, which needs driver 580 or later. Older drivers (Lambda
+# Stack images carry 570) get torch 2.11 built for CUDA 12.8.
+if ! "$TOOLS/sidecar/bin/python" -c "import torch, sys; sys.exit(not torch.cuda.is_available())" 2> /dev/null; then
+  step "torch for CUDA 12.8"
+  export PATH=$HOME/.local/bin:$PATH
+  uv pip install -q -p "$TOOLS/sidecar/bin/python" --reinstall-package torch --reinstall-package torchaudio     --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple     --index-strategy unsafe-best-match "torch==2.11.*" "torchaudio==2.11.0"
 fi
 
 step "wt"
