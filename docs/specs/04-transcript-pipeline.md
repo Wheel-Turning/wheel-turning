@@ -213,7 +213,10 @@ Resolution assigns one of three confidence levels, in this order of precedence:
 1. Hand list, method `hand_list`, `resolved`. The normalized `text`, hints and window context are matched to `work_locator.label` and `aliases` by exact match or `pg_trgm` similarity of at least 0.85.
 2. Series label, method `series_label`, `probable`. If the talk has a `series` and `part`, and the citation is generic (for example "this passage" or "as Dogen says here") with no locator hint, the locator mapped to that part in `config/series.toml` is used.
 3. Model hint, method `llm`, `probable`. A `work_hint` and `locator_hint` that fuzzy-match a hand-listed locator at 0.7 or better are accepted.
-4. Anything else is `unresolved`, stored with its raw text and no locator.
+4. Work only, method `work_name`. The citation names a work but no place in it, for example "as Dogen says in Uji". It resolves to the work's work-level locator (Spec 08, Work-level citations): `resolved` when a work title or alias appears as whole words in the citation's own text, `probable` when it appears only in the context or only in `work_hint`.
+5. Anything else is `unresolved`, stored with its raw text and no locator.
+
+Steps 1 to 3 consider only passage-level locators, so a work-level locator never wins over a place in the text, and step 4 runs only when they find nothing.
 
 The model never creates a locator. A hint that matches nothing in the hand list becomes `unresolved`. For talks in labeled series, the resolver is scored against the series label as ground truth.
 
