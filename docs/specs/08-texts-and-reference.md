@@ -418,7 +418,7 @@ Teachers often name a work without a place in it: "as Dogen says in Uji", "the P
 
 The footnote links only to what the resolver established from the teacher's own words. When the passage is known, the footnote links to the unit page or the locator's URL. When only the work is known, it links to the work. When neither is known, it shows the teacher's words with no link. A model never picks the work on its own, and a work-level citation never gets a `text_unit_id` or an excerpt.
 
-Schema. Each work has one work-level locator: a `work_locator` row with `locator = '*'`, `label` set to the work's title, the work's aliases, and no `link_out_url`. Migration `0026_work_level_citations.sql`:
+Schema. Each work has one work-level locator: a `work_locator` row with `locator = '*'`, `label` set to the work's title, the work's aliases, and no `link_out_url`. Migration `0027_work_level_citations.sql`:
 
 ```sql
 alter table citation drop constraint citation_method_check;
