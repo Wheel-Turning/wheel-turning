@@ -10,10 +10,9 @@ import json
 import re
 from pathlib import Path
 
+import gate_a as g
 import numpy as np
 import pytest
-
-import gate_a as g
 
 
 def passage(i: int, teacher: str, text: str, talk: str | None = None, start: int = 0) -> g.Passage:
@@ -85,8 +84,14 @@ def test_cached_embeddings_reuses_file(tmp_path):
 
 
 def test_search_finds_planted_passages_and_caps_teachers():
-    filler = [passage(i, f"f{i % 7}", f"talk about walking meditation and kinhin number {i}") for i in range(60)]
-    planted = [passage(100 + i, "anger-teacher", f"anger arises and we meet anger with care {i}") for i in range(6)]
+    filler = [
+        passage(i, f"f{i % 7}", f"talk about walking meditation and kinhin number {i}")
+        for i in range(60)
+    ]
+    planted = [
+        passage(100 + i, "anger-teacher", f"anger arises and we meet anger with care {i}")
+        for i in range(6)
+    ]
     other = [passage(200, "second", "when anger comes I breathe with anger")]
     r = retriever(filler + planted + other)
     hits = r.search("What do I do when anger comes up in zazen?")
@@ -105,22 +110,31 @@ def test_sparse_ignores_stopword_only_query():
 
 def test_load_questions(tmp_path):
     f = tmp_path / "q.toml"
-    f.write_text('[[question]]\ntext = "One?"\ntags = ["grief"]\n[[question]]\nid = "x"\ntext = "Two?"\n')
+    f.write_text(
+        '[[question]]\ntext = "One?"\ntags = ["grief"]\n[[question]]\nid = "x"\ntext = "Two?"\n'
+    )
     qs = g.load_questions(f)
     assert [(q.id, q.text, q.tags) for q in qs] == [("q01", "One?", ("grief",)), ("x", "Two?", ())]
 
 
 def test_load_passages(tmp_path):
     f = tmp_path / "passages.jsonl"
-    f.write_text(json.dumps({"passage_id": 1, "talk_id": "t", "teacher_id": "a", "start_ms": 5, "text": "hi"}) + "\n\n")
+    f.write_text(
+        json.dumps(
+            {"passage_id": 1, "talk_id": "t", "teacher_id": "a", "start_ms": 5, "text": "hi"}
+        )
+        + "\n\n"
+    )
     assert g.load_passages(f) == [g.Passage("1", "t", "a", 5, "hi")]
 
 
 def run_fixture():
     qs = [g.Question("q01", "Anger <b>?", ("multi_voice",)), g.Question("q02", "Grief?", ())]
-    ps = [passage(1, "t1", "<script>alert(1)</script> anger", talk="k", start=0),
-          passage(2, "t2", "grief text", talk="k2", start=61_000),
-          passage(3, "t1", "after text", talk="k", start=90_000)]
+    ps = [
+        passage(1, "t1", "<script>alert(1)</script> anger", talk="k", start=0),
+        passage(2, "t2", "grief text", talk="k2", start=61_000),
+        passage(3, "t1", "after text", talk="k", start=90_000),
+    ]
     results = {"q01": [g.Hit(ps[0], 1.0, 1), g.Hit(ps[1], 0.5, 2)], "q02": []}
     return qs, ps, results
 
@@ -141,7 +155,10 @@ def test_review_html_is_escaped_blind_and_self_contained():
 
 def test_teacher_ids_never_reach_page():
     qs, ps, results = run_fixture()
-    ps2 = [g.Passage(p.passage_id, p.talk_id, f"secret-teacher-{p.teacher_id}", p.start_ms, p.text) for p in ps]
+    ps2 = [
+        g.Passage(p.passage_id, p.talk_id, f"secret-teacher-{p.teacher_id}", p.start_ms, p.text)
+        for p in ps
+    ]
     results2 = {"q01": [g.Hit(ps2[0], 1, 1)], "q02": []}
     assert "secret-teacher" not in g.review_html(qs, results2, g.neighbors(ps2), "run1")
 
@@ -164,7 +181,8 @@ def test_named_review_shows_teacher_title_and_link():
 def test_source_link_styles():
     vimeo = g.Source("T", "x", "", "https://vimeo.com/5", "vimeo")
     assert g.source_link(vimeo, 75_400) == (
-        "https://vimeo.com/5#t=75s", "Listen at 0:01:15 (opens the source video in a new tab)"
+        "https://vimeo.com/5#t=75s",
+        "Listen at 0:01:15 (opens the source video in a new tab)",
     )
     page = g.Source("T", "x", "", "https://example.org/p", "engagewisdom")
     assert g.source_link(page, 3_600_000)[0] == "https://example.org/p"
@@ -198,10 +216,15 @@ def test_score_pass_ratio_and_gate():
         "rated_on": "2026-10-10",
         "ratings": [
             # q0: 2 of 3 good = 0.667 >= 0.67? No: 2/3 is below 0.67.
-            rate("q0", "a", True, True), rate("q0", "b", True, True), rate("q0", "c", False, True),
+            rate("q0", "a", True, True),
+            rate("q0", "b", True, True),
+            rate("q0", "c", False, True),
             # q1: 3 of 4 good passes; the half-rated passage is not counted.
-            rate("q1", "a", True, True), rate("q1", "b", True, True), rate("q1", "c", True, True),
-            rate("q1", "d", True, False), rate("q1", "e", True, None),
+            rate("q1", "a", True, True),
+            rate("q1", "b", True, True),
+            rate("q1", "c", True, True),
+            rate("q1", "d", True, False),
+            rate("q1", "e", True, None),
             # q2: all good.
             rate("q2", "a", True, True),
             # q3: none rated.
@@ -210,7 +233,10 @@ def test_score_pass_ratio_and_gate():
     }
     s = g.score(ratings, scoring_results())
     assert [(q.rated, q.good, q.passed) for q in s.questions] == [
-        (3, 2, False), (4, 3, True), (1, 1, True), (0, 0, False)
+        (3, 2, False),
+        (4, 3, True),
+        (1, 1, True),
+        (0, 0, False),
     ]
     # 2 of 4 is not more than half.
     assert s.passed_count == 2 and not s.gate_passed
@@ -218,7 +244,11 @@ def test_score_pass_ratio_and_gate():
 
 
 def test_gate_needs_more_than_half():
-    ratings = {"run": "r", "reviewer": "R", "ratings": [rate(f"q{i}", "a", True, True) for i in range(3)]}
+    ratings = {
+        "run": "r",
+        "reviewer": "R",
+        "ratings": [rate(f"q{i}", "a", True, True) for i in range(3)],
+    }
     s = g.score(ratings, scoring_results())
     assert s.gate_passed and "**pass**" in g.gate_record(s)
 

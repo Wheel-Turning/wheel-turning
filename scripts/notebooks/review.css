@@ -1,0 +1,49 @@
+/* Gate A review page. gate_a.review_html inlines this, so the page needs no other file. */
+:root {
+  --bg: #fbfaf7;
+  --fg: #1d1b18;
+  --muted: #5d574f;
+  --line: #d9d3c8;
+  --card: #fff;
+  --accent: #7a4b12;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171512;
+    --fg: #ece7de;
+    --muted: #b0a898;
+    --line: #3a352e;
+    --card: #211e1a;
+    --accent: #e2b56b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.55 Georgia, serif; }
+main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 10rem; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.25rem; margin-top: 3rem; }
+.brief, .q { border-top: 2px solid var(--line); padding-top: 1rem; }
+.tags { color: var(--muted); font-size: .9rem; }
+.p { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+.who { color: var(--muted); font: 600 .9rem/1.3 system-ui, sans-serif; }
+blockquote { margin: .6rem 0; font-size: 1.05rem; }
+details { color: var(--muted); font-size: .92rem; }
+.src { margin: .2rem 0 .6rem; font: .92rem system-ui, sans-serif; }
+a { color: var(--accent); }
+fieldset { border: 0; padding: 0; margin: .5rem 0; display: flex; gap: 1.2rem; flex-wrap: wrap; }
+legend { font: 600 .95rem system-ui, sans-serif; padding: 0; margin-bottom: .2rem; }
+label { min-height: 44px; display: inline-flex; align-items: center; gap: .4rem; }
+textarea {
+  width: 100%; min-height: 3rem; font: inherit; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px;
+}
+.bar {
+  position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
+  border-top: 1px solid var(--line); padding: .6rem 1rem; display: flex; gap: 1rem;
+  align-items: center; justify-content: center; flex-wrap: wrap; font: 15px system-ui, sans-serif;
+}
+button {
+  font: inherit; min-height: 44px; padding: 0 1rem; background: var(--accent); color: var(--bg);
+  border: 0; border-radius: 4px; cursor: pointer;
+}
+input[type=text] { font: inherit; min-height: 44px; padding: 0 .5rem; }

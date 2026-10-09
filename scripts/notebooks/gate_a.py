@@ -108,7 +108,9 @@ def load_questions(path: Path) -> list[Question]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     qs = []
     for i, q in enumerate(data.get("question", []), start=1):
-        qs.append(Question(id=q.get("id", f"q{i:02d}"), text=q["text"], tags=tuple(q.get("tags", []))))
+        qs.append(
+            Question(id=q.get("id", f"q{i:02d}"), text=q["text"], tags=tuple(q.get("tags", [])))
+        )
     ids = [q.id for q in qs]
     if len(set(ids)) != len(ids):
         raise ValueError("question ids are not unique")
@@ -406,7 +408,10 @@ def source_link(src: Source, start_ms: int) -> tuple[str | None, str]:
     if not src.url.startswith("https://"):
         return None, f"Starts at {at}"
     if src.platform == "vimeo":
-        return f"{src.url}#t={start_ms // 1000}s", f"Listen at {at} (opens the source video in a new tab)"
+        return (
+            f"{src.url}#t={start_ms // 1000}s",
+            f"Listen at {at} (opens the source video in a new tab)",
+        )
     return src.url, f"Open the talk, starts at {at} (opens in a new tab)"
 
 
@@ -435,42 +440,9 @@ def results_json(questions: Sequence[Question], results: dict[str, list[Hit]], m
     }
 
 
-REVIEW_CSS = """
-:root{--bg:#fbfaf7;--fg:#1d1b18;--muted:#5d574f;--line:#d9d3c8;--card:#fff;--accent:#7a4b12}
-@media (prefers-color-scheme:dark){:root{--bg:#171512;--fg:#ece7de;--muted:#b0a898;--line:#3a352e;--card:#211e1a;--accent:#e2b56b}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.55 Georgia,serif}
-main{max-width:46rem;margin:0 auto;padding:1.5rem 1rem 6rem}h1{font-size:1.6rem}h2{font-size:1.25rem;margin-top:3rem}
-.brief,.q{border-top:2px solid var(--line);padding-top:1rem}.tags{color:var(--muted);font-size:.9rem}
-.p{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1rem;margin:1rem 0}
-.who{color:var(--muted);font:600 .9rem/1.3 system-ui,sans-serif}blockquote{margin:.6rem 0;font-size:1.05rem}
-details{color:var(--muted);font-size:.92rem}.src{margin:.2rem 0 .6rem;font:.92rem system-ui,sans-serif}a{color:var(--accent)}fieldset{border:0;padding:0;margin:.5rem 0;display:flex;gap:1.2rem;flex-wrap:wrap}
-legend{font:600 .95rem system-ui,sans-serif;padding:0;margin-bottom:.2rem}label{min-height:44px;display:inline-flex;align-items:center;gap:.4rem}
-textarea{width:100%;min-height:3rem;font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px}
-.bar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:.6rem 1rem;display:flex;gap:1rem;align-items:center;justify-content:center;font:15px system-ui,sans-serif}
-button{font:inherit;min-height:44px;padding:0 1rem;background:var(--accent);color:var(--bg);border:0;border-radius:4px;cursor:pointer}
-input[type=text]{font:inherit;min-height:44px;padding:0 .5rem}
-"""
-
-REVIEW_JS = """
-const KEY='gate-a-ratings-'+document.body.dataset.run;
-const form=document.querySelector('form');
-function collect(){const out=[];document.querySelectorAll('.p').forEach(el=>{const q=el.dataset.q,p=el.dataset.p;
-const v=n=>{const c=el.querySelector('input[name="'+n+'-'+q+'-'+p+'"]:checked');return c?c.value==='yes':null};
-out.push({question_id:q,passage_id:p,faithful:v('f'),relevant:v('r'),note:el.querySelector('textarea').value.trim()})});return out}
-function count(){const r=collect();const done=r.filter(x=>x.faithful!==null&&x.relevant!==null).length;
-document.getElementById('done').textContent=done+' of '+r.length+' passages rated'}
-function save(){try{localStorage.setItem(KEY,JSON.stringify({reviewer:document.getElementById('reviewer').value,ratings:collect()}))}catch(e){}count()}
-function restore(){let s=null;try{s=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}if(!s)return;
-document.getElementById('reviewer').value=s.reviewer||'';for(const r of s.ratings){
-for(const [n,val] of [['f',r.faithful],['r',r.relevant]]){if(val===null)continue;
-const c=document.querySelector('input[name="'+n+'-'+r.question_id+'-'+r.passage_id+'"][value="'+(val?'yes':'no')+'"]');if(c)c.checked=true}
-const t=document.querySelector('.p[data-q="'+r.question_id+'"][data-p="'+r.passage_id+'"] textarea');if(t)t.value=r.note||''}}
-form.addEventListener('change',save);form.addEventListener('input',save);
-document.getElementById('download').addEventListener('click',()=>{const body={run:document.body.dataset.run,
-reviewer:document.getElementById('reviewer').value.trim(),rated_on:new Date().toISOString().slice(0,10),ratings:collect()};
-const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(body,null,2)],{type:'application/json'}));
-a.download='ratings-'+document.body.dataset.run+'.json';a.click()});restore();count();
-"""
+HERE = Path(__file__).parent
+REVIEW_CSS = (HERE / "review.css").read_text(encoding="utf-8")
+REVIEW_JS = (HERE / "review.js").read_text(encoding="utf-8")
 
 
 def review_html(
@@ -533,7 +505,8 @@ def review_html(
                 href, text = source_link(src, p.start_ms)
                 if href:
                     parts.append(
-                        f"<p class='src'><a href='{e(href)}' target='_blank' rel='noopener noreferrer'>"
+                        f"<p class='src'><a href='{e(href)}' target='_blank'"
+                        " rel='noopener noreferrer'>"
                         f"{e(text)}</a></p>"
                     )
                 else:
@@ -627,14 +600,17 @@ def gate_record(s: GateScore) -> str:
         f"- Reviewer: {s.reviewer}",
         f"- Date rated: {s.rated_on}",
         f"- Passages rated: {s.rated_count}",
-        f"- Questions passing (at least {QUESTION_PASS_RATIO:.0%} of rated passages faithful and relevant): "
+        f"- Questions passing (at least {QUESTION_PASS_RATIO:.0%} of rated passages "
+        "faithful and relevant): "
         f"{s.passed_count} of {len(s.questions)}",
         f"- Result: **{verdict}**",
         "",
         "| Question | Rated | Faithful and relevant | Passes |",
         "| --- | --- | --- | --- |",
     ]
-    lines += [f"| {q.id} | {q.rated} | {q.good} | {'yes' if q.passed else 'no'} |" for q in s.questions]
+    lines += [
+        f"| {q.id} | {q.rated} | {q.good} | {'yes' if q.passed else 'no'} |" for q in s.questions
+    ]
     return "\n".join(lines) + "\n"
 
 
