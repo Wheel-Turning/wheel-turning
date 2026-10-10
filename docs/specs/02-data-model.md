@@ -140,6 +140,7 @@ create table talk (
   teacher_id uuid references teacher(id),
   sangha_id uuid references sangha(id),
   speaker_guess text,                    -- raw text the speaker was inferred from, for review
+  speaker_assigned_by text,              -- who assigned the speaker by hand; null when the registry resolved it (0028)
   consent_status consent_status not null default 'unknown',
   rights_holder text,                    -- null or 'unknown' blocks every state past cleared
   rights_basis rights_basis,             -- how the talk is cleared: speaker consent or a verified license
