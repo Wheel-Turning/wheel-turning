@@ -22,6 +22,7 @@ wt-index = { path = "crates/wt-index" }
 wt-extract = { path = "crates/wt-extract" }
 wt-ml = { path = "crates/wt-ml" }
 wt-retrieve = { path = "crates/wt-retrieve" }
+wt-api = { path = "crates/wt-api" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"

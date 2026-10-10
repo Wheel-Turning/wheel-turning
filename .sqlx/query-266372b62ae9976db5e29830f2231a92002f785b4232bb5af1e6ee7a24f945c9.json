@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select teacher_id as \"teacher_id!\", alias as \"alias!\" from teacher_alias\n           union select id, display_name from teacher",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teacher_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "alias!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "266372b62ae9976db5e29830f2231a92002f785b4232bb5af1e6ee7a24f945c9"
+}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<h1>{{ title }}</h1>
+<p>{{ teacher }} <span class="muted">· {{ sangha }}</span></p>
+<p class="meta">{{ meta }}</p>
+<p><a href="{{ source_href }}" target="_blank" rel="noopener noreferrer">Open the source (opens in a new tab)</a></p>
+<p class="credit">{{ credit }}</p>
+{% if let Some(t) = transcript_href %}<p><a href="{{ t }}">Read the transcript</a></p>{% endif %}
+</div>
+{% endblock %}

@@ -12,16 +12,25 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+askama = "0.14"
 axum.workspace = true
-wt-core.workspace = true
-wt-db.workspace = true
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+getrandom = "0.3"
+hmac = "0.13"
 serde.workspace = true
+sha2 = "0.11"
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+wt-core.workspace = true
+wt-db.workspace = true
+wt-ml.workspace = true
+wt-retrieve.workspace = true
 
 [dev-dependencies]
 wt-db = { workspace = true, features = ["test-support"] }
+wt-registry.workspace = true
 http-body-util.workspace = true
 serde_json.workspace = true
 tower.workspace = true

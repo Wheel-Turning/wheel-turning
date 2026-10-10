@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tester set last_seen_at = case\n             when last_seen_at is null or last_seen_at < now() - interval '1 hour' then now()\n             else last_seen_at end\n           where id = $1 and revoked_at is null\n           returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "tester",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "20f65bfa228abceed62f9349ccc54d31b4111cc478a24de391d199dd5bb17615"
+}
