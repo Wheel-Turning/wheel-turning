@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ query }} · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<p class="muted">Your question</p>
+<h1 class="question">{{ query }}</h1>
+<p class="result">{{ view.result_line }}</p>
+{% if let Some(n) = view.notice %}<section class="notice" aria-labelledby="notice-h"><h2 id="notice-h" class="visually-hidden">Notice</h2><p>{{ n }}</p></section>{% endif %}
+{% if view.degraded %}<p class="muted small">Alpha: excerpts are ordered by search match only; the relevance check is not installed yet.</p>{% endif %}
+{% if thanks %}<p class="status" role="status">Thank you. Your feedback was recorded.</p>{% endif %}
+{% for g in view.groups %}
+<section class="group" aria-labelledby="g{{ loop.index }}">
+  <h2 id="g{{ loop.index }}">{{ g.teacher }} <span class="muted">· {{ g.sangha }}</span></h2>
+  {% for p in g.passages %}
+  <article class="passage" id="p{{ p.number }}">
+    <blockquote>{{ p.text }}</blockquote>
+    <p class="meta">{{ p.meta }}</p>
+    <p class="links">
+      <a href="{{ p.source.href }}" target="_blank" rel="noopener noreferrer">{{ p.source.label }}</a>{% if let Some(s) = p.source.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
+      {% if let Some(t) = p.transcript_href %} · <a href="{{ t }}">Read in the transcript</a>{% endif %}
+      {% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}
+    </p>
+    <p class="credit">{{ p.credit }}</p>
+    <form method="post" action="/a/{{ answer_id }}/feedback" class="feedback">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="passage" value="{{ p.id }}">
+      <span class="muted small">Excerpt {{ p.number }}:</span>
+      <button type="submit" name="kind" value="good" class="small">Good</button>
+      <button type="submit" name="kind" value="not_faithful" class="small">Not faithful</button>
+      <button type="submit" name="kind" value="not_relevant" class="small">Not relevant</button>
+    </form>
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+{% if view.withdrawn > 0 %}<p class="muted">{{ view.withdrawn }} excerpt(s) were removed at the rights holder's request.</p>{% endif %}
+{% if !view.talks.is_empty() %}
+<section aria-labelledby="talks-h">
+  <h2 id="talks-h">Talks cited</h2>
+  <ul class="dated">
+    {% for t in view.talks %}<li>{% if let Some(d) = t.date %}<span class="date">{{ d }}</span>{% endif %}<a href="{{ t.href }}">{{ t.title }}</a> <span class="muted">· {{ t.teacher }}</span></li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+<section aria-labelledby="flag-h" class="flag">
+  <h2 id="flag-h">Flag this query</h2>
+  <p>A flagged query can be read by the founder, so they can see what went wrong.</p>
+  <form method="post" action="/a/{{ answer_id }}/feedback">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" name="kind" value="flag_query" class="secondary">Flag this query</button>
+  </form>
+</section>
+<p><a href="/">Ask another question</a></p>
+</div>
+{% endblock %}

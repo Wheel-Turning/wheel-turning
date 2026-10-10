@@ -1,0 +1,282 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\", text as \"text!\", ordinal as \"ordinal!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\", talk_id as \"talk_id!\",\n                  talk_title as \"talk_title!\", talk_date, series, part,\n                  platform::text as \"platform!\", external_id as \"external_id!\",\n                  source_url as \"source_url!\", teacher_id as \"teacher_id!\",\n                  teacher_name as \"teacher_name!\", sangha_id as \"sangha_id!\",\n                  sangha_name as \"sangha_name!\", listed as \"listed!\", donation_url,\n                  donation_verified as \"donation_verified!\", rights_basis::text as rights_basis,\n                  display_notice, display_level as \"display_level!\"\n           from servable_passage where talk_id = $1 order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "text!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ordinal!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "start_ms!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "end_ms!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "end_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "talk_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "talk_title!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_title"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "talk_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_date"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "series",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "series"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "part",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "part"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "platform!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 11,
+        "name": "external_id!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "source_url!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "source_url"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "teacher_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "teacher_id"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "teacher_name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "teacher_name"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "sangha_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "sangha_id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "sangha_name!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "sangha_name"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "listed!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "listed"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "donation_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "donation_url"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "donation_verified!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "donation_verified"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "rights_basis",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 21,
+        "name": "display_notice",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "display_notice"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "display_level!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "display_level"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "9684756e79024edb46e6f6ad87d45bf94c979b11f4e1f199d53c01679cc05880"
+}

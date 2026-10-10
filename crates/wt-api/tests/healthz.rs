@@ -4,8 +4,10 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use std::sync::Arc;
 use tower::ServiceExt;
-use wt_api::{AppState, router};
+
+use wt_api::{AppState, Site, router};
 use wt_core::Secret;
 use wt_db::test_support::TestDb;
 
@@ -26,7 +28,11 @@ async fn healthz_is_ok_when_the_database_answers() {
         .expect("docker must be running for database tests");
     let pool = wt_db::lazy_pool(db.url()).unwrap();
 
-    let (status, body) = get_healthz(AppState { pool }).await;
+    let (status, body) = get_healthz(AppState {
+        pool,
+        site: Arc::new(Site::with_fakes("fake")),
+    })
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
     assert_eq!(body["database"], "ok");
@@ -37,7 +43,11 @@ async fn healthz_is_unavailable_when_the_database_is_down() {
     // Nothing listens on port 1, so every connection attempt is refused.
     let pool = wt_db::lazy_pool(&Secret::new("postgres://wt:wt@127.0.0.1:1/wt")).unwrap();
 
-    let (status, body) = get_healthz(AppState { pool }).await;
+    let (status, body) = get_healthz(AppState {
+        pool,
+        site: Arc::new(Site::with_fakes("fake")),
+    })
+    .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["status"], "unavailable");
     assert_eq!(body["database"], "unavailable");

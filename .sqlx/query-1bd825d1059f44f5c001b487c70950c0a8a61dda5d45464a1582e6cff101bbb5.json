@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_name from teacher where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1bd825d1059f44f5c001b487c70950c0a8a61dda5d45464a1582e6cff101bbb5"
+}

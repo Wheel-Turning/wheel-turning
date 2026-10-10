@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#F7F5F0">
+<title>{% block title %}Wheel Turning{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+<header class="site">
+  <div class="wrap bar">
+    <a class="name" href="/" aria-label="Wheel Turning, home">Wheel Turning</a>
+    <nav aria-label="Main">
+      <ul>
+        <li><a href="/">Ask</a></li>
+        <li><a href="/about">About</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+<main id="main" class="wrap">
+{% block content %}{% endblock %}
+</main>
+<footer class="site">
+  <div class="wrap">
+    <p>Wheel Turning helps you find what Zen teachers and texts have said about your practice. <a href="/about">About</a></p>
+    <p>If you hold rights in anything shown here, we will remove it on request.</p>
+    <p>Excerpts remain the work of their teachers and publishers.</p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into dana_event (answer_id, sangha_id, kind) values ($1, $2, 'link_click')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a53db63b014d50387448b4054753cdd6d71fccefd7207baa5e6d74e69dc3adff"
+}

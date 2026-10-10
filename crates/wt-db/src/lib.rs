@@ -8,6 +8,7 @@ use sqlx::migrate::Migrator;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use wt_core::Secret;
 
+pub mod answer;
 pub mod audit;
 pub mod consent;
 pub mod correction;
@@ -27,6 +28,7 @@ pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]
 pub mod test_support;
+pub mod tester;
 pub mod text_takedown;
 pub mod texts;
 pub mod transcript;

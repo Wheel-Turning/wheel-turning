@@ -30,6 +30,7 @@ wt-segment.workspace = true
 wt-extract.workspace = true
 wt-index.workspace = true
 wt-ml.workspace = true
+wt-api.workspace = true
 csv = "1"
 toml = "1"
 toml_edit = "0.23"

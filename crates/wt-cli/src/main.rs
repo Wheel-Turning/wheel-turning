@@ -50,6 +50,11 @@ enum Command {
         #[command(subcommand)]
         command: TalkCommand,
     },
+    /// Testers and their invite links (Spec 06, Invite token access).
+    Tester {
+        #[command(subcommand)]
+        command: TesterCommand,
+    },
     /// Remove a teacher's or a talk's text from every store (Spec 07). Prints the counts as
     /// JSON. A real run needs --yes.
     Takedown(TakedownArgs),
@@ -1119,6 +1124,27 @@ enum ConsentCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum TesterCommand {
+    /// Create a tester and print their invite link once. Only the token's SHA-256 is stored.
+    Invite {
+        /// How you know them; not a legal name.
+        #[arg(long)]
+        label: String,
+        /// Where the site is served, for the printed link.
+        #[arg(long, default_value = "http://127.0.0.1:8080")]
+        base_url: String,
+    },
+    /// Every tester, with when they were last seen.
+    List,
+    /// Revoke every active tester with this label.
+    Revoke {
+        /// The label.
+        #[arg(long)]
+        label: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum TalkCommand {
     /// Set the rights holder for a talk or every talk of a teacher, and clear any talk that
     /// now passes the gate.
@@ -1405,6 +1431,26 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Consent {
             command: ConsentCommand::List,
         } => commands::consent_list(&pool().await?).await?,
+        Command::Tester { command } => {
+            let pool = pool().await?;
+            match command {
+                TesterCommand::Invite { label, base_url } => {
+                    let token = wt_api::session::new_token().context("generating a token")?;
+                    wt_db::tester::invite(&pool, &label, &wt_api::session::token_hash(&token))
+                        .await
+                        .context("recording the tester")?;
+                    println!("{}/join/{token}", base_url.trim_end_matches('/'));
+                    eprintln!("This link is shown once. Send it to {label} privately.");
+                }
+                TesterCommand::List => {
+                    commands::print_json(&wt_db::tester::list(&pool).await?)?;
+                }
+                TesterCommand::Revoke { label } => {
+                    let n = wt_db::tester::revoke(&pool, &label).await?;
+                    commands::print_json(&serde_json::json!({ "revoked": n }))?;
+                }
+            }
+        }
         Command::Talk {
             command: TalkCommand::SetRights { target, holder, by },
         } => commands::set_rights(&pool().await?, target.into(), &holder, &by).await?,
