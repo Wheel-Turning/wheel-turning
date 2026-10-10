@@ -90,7 +90,7 @@ pub fn meta(card: &TalkCard) -> String {
 pub struct PassageView {
     /// The passage.
     pub id: PassageId,
-    /// Its number on the page, from 1, for feedback and chips.
+    /// Its number on the page, from 1 in reading order, for feedback and chips.
     pub number: usize,
     /// Verbatim text.
     pub text: String,
@@ -159,11 +159,11 @@ pub fn assemble(
     let mut groups: Vec<Group> = Vec::new();
     let mut talks: Vec<TalkLine> = Vec::new();
     let mut seen_talks: Vec<TalkId> = Vec::new();
-    for (i, s) in served.iter().enumerate() {
+    for s in served {
         let card = &s.talk;
         let view = PassageView {
             id: s.id,
-            number: i + 1,
+            number: 0,
             text: s.text.clone(),
             meta: meta(card),
             source: source_link(card, s.start_ms, lead_in_ms),
@@ -189,6 +189,14 @@ pub fn assemble(
                 date: card.date.map(|d| d.format("%B %-d, %Y").to_string()),
             });
         }
+    }
+    // Number excerpts in reading order, group by group, so the page counts 1, 2, 3 downwards.
+    for (n, p) in groups
+        .iter_mut()
+        .flat_map(|g| g.passages.iter_mut())
+        .enumerate()
+    {
+        p.number = n + 1;
     }
     let teachers = groups.len();
     let result_line = match teachers {
