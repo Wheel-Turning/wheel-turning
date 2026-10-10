@@ -4,13 +4,14 @@
 
 mod common;
 
-use common::{ACTOR, ADA, REGISTRY, consent, count, state, state_reason};
+use common::{ACTOR, ADA, BO, REGISTRY, consent, count, state, state_reason};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
 use wt_db::registry::{
-    RegistryDbError, SpeakerOutcome, alias_matcher, assign_speaker, find_sangha, import,
+    RegistryDbError, SpeakerOutcome, alias_matcher, assign_speaker, assign_speaker_by_hand,
+    find_sangha, find_teacher, import,
 };
 use wt_registry::RegistryFile;
 
@@ -285,4 +286,112 @@ async fn a_talk_held_in_review_for_another_reason_stays_there() {
         Some("student_voices")
     );
     assert_eq!(teacher_and_guess(&fx.pool, t).await, (None, None));
+}
+
+/// Spec 03, Assigning a speaker by hand.
+async fn by_hand(
+    pool: &PgPool,
+    talk: TalkId,
+    teacher: &str,
+) -> Result<SpeakerOutcome, RegistryDbError> {
+    let mut conn = pool.acquire().await.unwrap();
+    let (teacher, _) = find_teacher(&mut conn, teacher).await.unwrap();
+    let venue = find_sangha(&mut conn, "Fixture Mountain Zendo")
+        .await
+        .unwrap();
+    assign_speaker_by_hand(&mut conn, talk, teacher, venue, "owner").await
+}
+
+async fn assigned_by(pool: &PgPool, talk: TalkId) -> Option<String> {
+    sqlx::query_scalar("select speaker_assigned_by from talk where id = $1")
+        .bind(talk.as_uuid())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_speaker_assigned_by_hand_releases_an_unresolved_talk_and_survives_reclassification() {
+    let fx = common::start().await;
+    let t = discovered(&fx.pool, "Sunday morning talk", None, Some(ADA)).await;
+    assert_eq!(assign(&fx.pool, t).await, SpeakerOutcome::NeedsReview);
+
+    assert_eq!(
+        by_hand(&fx.pool, t, "Bo").await.unwrap(),
+        SpeakerOutcome::AwaitingConsent
+    );
+    assert_eq!(state(&fx.pool, t).await, "awaiting_consent");
+    assert_eq!(teacher_and_guess(&fx.pool, t).await.0.as_deref(), Some(BO));
+    assert_eq!(assigned_by(&fx.pool, t).await.as_deref(), Some("owner"));
+    assert_eq!(
+        count(
+            &fx.pool,
+            "select count(*) from correction_log where entity_id = $1
+               and reason = 'speaker assigned by hand'",
+            t.as_uuid()
+        )
+        .await,
+        1
+    );
+
+    // Classification runs again, as `wt ingest reclassify` would, and keeps the decision.
+    assert_eq!(assign(&fx.pool, t).await, SpeakerOutcome::AwaitingConsent);
+    assert_eq!(state(&fx.pool, t).await, "awaiting_consent");
+    assert_eq!(teacher_and_guess(&fx.pool, t).await.0.as_deref(), Some(BO));
+}
+
+#[tokio::test]
+async fn a_wrong_alias_match_is_corrected_by_hand_and_stays_corrected() {
+    let fx = common::start().await;
+    let t = discovered(&fx.pool, "Ada on the precepts", None, None).await;
+    assert_eq!(assign(&fx.pool, t).await, SpeakerOutcome::AwaitingConsent);
+
+    by_hand(&fx.pool, t, BO).await.unwrap();
+    assign(&fx.pool, t).await;
+
+    assert_eq!(teacher_and_guess(&fx.pool, t).await.0.as_deref(), Some(BO));
+}
+
+#[tokio::test]
+async fn a_speaker_assigned_by_hand_clears_when_consent_and_rights_are_in_place() {
+    let fx = common::start().await;
+    consent(&fx.pool, BO, ConsentStatus::Granted).await;
+    let t = discovered(&fx.pool, "Sunday morning talk", None, Some(BO)).await;
+    assign(&fx.pool, t).await;
+
+    assert_eq!(
+        by_hand(&fx.pool, t, BO).await.unwrap(),
+        SpeakerOutcome::Cleared
+    );
+    assert_eq!(state(&fx.pool, t).await, "cleared");
+}
+
+#[tokio::test]
+async fn a_talk_held_for_another_reason_or_past_the_gate_refuses_a_speaker_by_hand() {
+    let fx = common::start().await;
+    let held = discovered(&fx.pool, "Sunday morning talk", None, None).await;
+    sqlx::query(
+        "update talk set state = 'needs_review', state_reason = 'student_voices' where id = $1",
+    )
+    .bind(held.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        by_hand(&fx.pool, held, ADA).await,
+        Err(RegistryDbError::SpeakerClosed { .. })
+    ));
+    assert_eq!(teacher_and_guess(&fx.pool, held).await.0, None);
+
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+    let cleared = discovered(&fx.pool, "Ada on the precepts", None, Some(ADA)).await;
+    assert_eq!(assign(&fx.pool, cleared).await, SpeakerOutcome::Cleared);
+    assert!(matches!(
+        by_hand(&fx.pool, cleared, BO).await,
+        Err(RegistryDbError::SpeakerClosed { .. })
+    ));
+    assert_eq!(
+        teacher_and_guess(&fx.pool, cleared).await.0.as_deref(),
+        Some(ADA)
+    );
 }

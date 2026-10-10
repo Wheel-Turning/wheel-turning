@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.state::text as \"state!\", t.state_reason, t.teacher_id\n           from talk t where t.id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "state_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "state_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "teacher_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "teacher_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "dc22f8cc093607439fc88ce32aa6e84254f6a7095505bbe51cdaa38c483aad3b"
+}

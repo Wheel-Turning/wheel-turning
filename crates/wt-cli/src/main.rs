@@ -1148,6 +1148,36 @@ enum TalkCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Set the speaker of a talk the registry could not resolve, or correct a wrong match, or
+    /// apply a review sheet's decisions (Spec 03, Assigning a speaker by hand).
+    AssignSpeaker {
+        /// The talk id.
+        #[arg(long, requires = "teacher", required_unless_present = "sheet")]
+        talk: Option<TalkId>,
+        /// The speaking teacher, by display name or alias.
+        #[arg(long, requires = "talk")]
+        teacher: Option<String>,
+        /// A review sheet with `talk_id`, `decision` and `note` columns: a teacher's name
+        /// assigns, `exclude` excludes (needs --yes), blank or `hold` leaves the talk held.
+        #[arg(long, conflicts_with_all = ["talk", "teacher", "sangha"])]
+        sheet: Option<PathBuf>,
+        /// The sangha where the talk was given, which receives its dana. Defaults to the
+        /// source's default_sangha.
+        #[arg(long)]
+        sangha: Option<String>,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+        /// Print what each sheet row would do and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm the exclusions a sheet asks for.
+        #[arg(long)]
+        yes: bool,
+        /// The directory holding sources.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -1378,6 +1408,39 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Talk {
             command: TalkCommand::SetRights { target, holder, by },
         } => commands::set_rights(&pool().await?, target.into(), &holder, &by).await?,
+        Command::Talk {
+            command:
+                TalkCommand::AssignSpeaker {
+                    talk,
+                    teacher,
+                    sheet,
+                    sangha,
+                    by,
+                    dry_run,
+                    yes,
+                    config_dir,
+                },
+        } => {
+            let pool = pool().await?;
+            match (sheet, talk, teacher) {
+                (Some(sheet), _, _) => {
+                    commands::assign_speaker_sheet(&pool, &config_dir, &sheet, &by, dry_run, yes)
+                        .await?
+                }
+                (None, Some(talk), Some(teacher)) => {
+                    commands::assign_speaker(
+                        &pool,
+                        &config_dir,
+                        talk,
+                        &teacher,
+                        sangha.as_deref(),
+                        &by,
+                    )
+                    .await?
+                }
+                _ => anyhow::bail!("give --talk and --teacher, or --sheet"),
+            }
+        }
         Command::Talk {
             command:
                 TalkCommand::Exclude {

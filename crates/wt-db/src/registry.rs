@@ -40,6 +40,16 @@ pub enum RegistryDbError {
     /// No sangha has that name.
     #[error("no sangha is called {0:?}")]
     UnknownSangha(String),
+    /// The talk is held for another reason or past the gate, so its speaker is not open.
+    #[error(
+        "talk {talk} is {state}; only a talk before the gate, or held as speaker_unresolved, takes a speaker by hand"
+    )]
+    SpeakerClosed {
+        /// The talk.
+        talk: TalkId,
+        /// Its state, with the reason when it has one.
+        state: String,
+    },
     /// Clearing a newly assigned talk through the gate failed.
     #[error(transparent)]
     Talk(#[from] TalkError),
@@ -202,7 +212,7 @@ pub enum SpeakerOutcome {
 /// talk was given (`venue`), which receives its dana. Zero or several matches send the talk to
 /// `needs_review` with reason `speaker_unresolved`. Applies only to talks not yet past the gate,
 /// and leaves alone a talk held in `needs_review` for any other reason, such as student voices
-/// or an unclear talk type: only a person releases those.
+/// or an unclear talk type: only a person releases those. A speaker assigned by hand is kept.
 pub async fn assign_speaker(
     conn: &mut PgConnection,
     matcher: &AliasMatcher<TeacherId>,
@@ -212,22 +222,25 @@ pub async fn assign_speaker(
 ) -> Result<SpeakerOutcome, RegistryDbError> {
     let talk = sqlx::query!(
         r#"select t.title, sv.description, t.state::text as "state!", t.state_reason,
+                  t.speaker_assigned_by is not null as "by_hand!",
                   sv.platform::text = 'engagewisdom' as "byline_only!"
            from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1"#,
         talk_id.as_uuid()
     )
     .fetch_one(&mut *conn)
     .await?;
-    let open = match talk.state.as_str() {
-        "discovered" | "awaiting_consent" => true,
-        "needs_review" => matches!(
-            talk.state_reason.as_deref(),
-            None | Some("speaker_unresolved")
-        ),
-        _ => false,
-    };
-    if !open {
+    if !speaker_open(&talk.state, talk.state_reason.as_deref()) {
         return Ok(SpeakerOutcome::NeedsReview);
+    }
+    if talk.by_hand {
+        // A person's decision outranks the registry (Spec 03, Assigning a speaker by hand).
+        sqlx::query!(
+            "update talk set state = 'awaiting_consent', state_reason = null where id = $1",
+            talk_id.as_uuid()
+        )
+        .execute(&mut *conn)
+        .await?;
+        return clear_if_ready(conn, talk_id).await;
     }
 
     // A source that names its speaker is read from that line alone, so a title naming another
@@ -259,11 +272,7 @@ pub async fn assign_speaker(
                 "speaker resolved from alias",
             )
             .await?;
-            if try_clear(conn, talk_id).await?.is_ok() {
-                Ok(SpeakerOutcome::Cleared)
-            } else {
-                Ok(SpeakerOutcome::AwaitingConsent)
-            }
+            clear_if_ready(conn, talk_id).await
         }
         unresolved => {
             let guess = match &unresolved {
@@ -282,6 +291,99 @@ pub async fn assign_speaker(
             Ok(SpeakerOutcome::NeedsReview)
         }
     }
+}
+
+/// Spec 03, Assigning a speaker by hand: sets `teacher` as the speaker of a talk at
+/// `discovered`, `awaiting_consent`, or `needs_review` with reason `speaker_unresolved`, with
+/// `sangha` as the venue, and records `actor` in `speaker_assigned_by` so classification keeps
+/// it. The talk moves to `awaiting_consent` and is cleared at once when its rights basis is in
+/// place. Any other talk is refused with [`RegistryDbError::SpeakerClosed`].
+pub async fn assign_speaker_by_hand(
+    conn: &mut PgConnection,
+    talk_id: TalkId,
+    teacher: TeacherId,
+    sangha: SanghaId,
+    actor: &str,
+) -> Result<SpeakerOutcome, RegistryDbError> {
+    let talk = sqlx::query!(
+        r#"select t.state::text as "state!", t.state_reason, t.teacher_id
+           from talk t where t.id = $1 for update"#,
+        talk_id.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if !speaker_open(&talk.state, talk.state_reason.as_deref()) {
+        let state = match talk.state_reason {
+            Some(reason) => format!("{} ({reason})", talk.state),
+            None => talk.state,
+        };
+        return Err(RegistryDbError::SpeakerClosed {
+            talk: talk_id,
+            state,
+        });
+    }
+    sqlx::query!(
+        r#"update talk set teacher_id = $2, sangha_id = $3, speaker_assigned_by = $4,
+                  state = 'awaiting_consent', state_reason = null,
+                  consent_status = coalesce(
+                    (select status from current_consent where teacher_id = $2), 'unknown')
+           where id = $1"#,
+        talk_id.as_uuid(),
+        teacher.as_uuid(),
+        sangha.as_uuid(),
+        actor
+    )
+    .execute(&mut *conn)
+    .await?;
+    log_change(
+        conn,
+        "talk",
+        talk_id.as_uuid(),
+        "teacher_id",
+        talk.teacher_id
+            .map(|t| serde_json::json!({ "teacher_id": t })),
+        Some(serde_json::json!({ "teacher_id": teacher, "sangha_id": sangha })),
+        actor,
+        "speaker assigned by hand",
+    )
+    .await?;
+    clear_if_ready(conn, talk_id).await
+}
+
+/// The source a talk was discovered from, whose `default_sangha` is its venue.
+pub async fn talk_source_key(
+    conn: &mut PgConnection,
+    talk_id: TalkId,
+) -> Result<Option<String>, RegistryDbError> {
+    Ok(sqlx::query_scalar!(
+        "select source_key from talk where id = $1",
+        talk_id.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten())
+}
+
+/// Whether a talk's speaker may still be set: before the gate, and not held for a reason other
+/// than an unresolved speaker.
+fn speaker_open(state: &str, reason: Option<&str>) -> bool {
+    match state {
+        "discovered" | "awaiting_consent" => true,
+        "needs_review" => matches!(reason, None | Some("speaker_unresolved")),
+        _ => false,
+    }
+}
+
+/// Clears a talk whose speaker was just set when its rights basis is already in place.
+async fn clear_if_ready(
+    conn: &mut PgConnection,
+    talk_id: TalkId,
+) -> Result<SpeakerOutcome, RegistryDbError> {
+    Ok(if try_clear(conn, talk_id).await?.is_ok() {
+        SpeakerOutcome::Cleared
+    } else {
+        SpeakerOutcome::AwaitingConsent
+    })
 }
 
 /// Makes each speaker a teacher of `sangha`, with their name as an alias, unless a teacher of

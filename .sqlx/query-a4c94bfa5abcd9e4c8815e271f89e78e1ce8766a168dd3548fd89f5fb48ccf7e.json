@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select source_key from talk where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "source_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "source_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a4c94bfa5abcd9e4c8815e271f89e78e1ce8766a168dd3548fd89f5fb48ccf7e"
+}

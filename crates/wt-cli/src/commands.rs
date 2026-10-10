@@ -12,7 +12,9 @@ use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
 use wt_db::audit::AuditSettings;
 use wt_db::consent::{Holder, RightsTarget};
+use wt_db::registry::{self, SpeakerOutcome};
 use wt_db::takedown::{Scope, TakedownReport};
+use wt_ingest::config::SourcesFile;
 use wt_registry::RegistryFile;
 
 use crate::Target;
@@ -120,6 +122,218 @@ pub async fn set_rights(
         .await
         .context("setting the rights holder")?;
     print_json(&Cleared { cleared })
+}
+
+/// One talk's speaker, as set by hand.
+#[derive(Debug, Serialize)]
+struct SpeakerAssigned {
+    talk: TalkId,
+    teacher: String,
+    sangha: String,
+    /// `cleared` when the rights basis was already in place, otherwise `awaiting_consent`.
+    state: &'static str,
+}
+
+/// `wt talk assign-speaker --talk --teacher` (Spec 03, Assigning a speaker by hand).
+pub async fn assign_speaker(
+    pool: &PgPool,
+    config_dir: &Path,
+    talk: TalkId,
+    teacher: &str,
+    sangha: Option<&str>,
+    by: &str,
+) -> anyhow::Result<()> {
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let done = assign_one(pool, &sources, talk, teacher, sangha, by).await?;
+    print_json(&done)
+}
+
+async fn assign_one(
+    pool: &PgPool,
+    sources: &SourcesFile,
+    talk: TalkId,
+    teacher: &str,
+    sangha: Option<&str>,
+    by: &str,
+) -> anyhow::Result<SpeakerAssigned> {
+    let mut tx = pool.begin().await?;
+    let (teacher_id, display_name) = registry::find_teacher(&mut tx, teacher).await?;
+    let sangha_name = match sangha {
+        Some(name) => name.to_owned(),
+        None => {
+            let key = registry::talk_source_key(&mut tx, talk)
+                .await?
+                .with_context(|| format!("talk {talk} has no source; give its sangha"))?;
+            sources.get(&key)?.default_sangha.clone()
+        }
+    };
+    let sangha_id = registry::find_sangha(&mut tx, &sangha_name).await?;
+    let outcome = registry::assign_speaker_by_hand(&mut tx, talk, teacher_id, sangha_id, by)
+        .await
+        .with_context(|| format!("assigning the speaker of talk {talk}"))?;
+    tx.commit().await?;
+    Ok(SpeakerAssigned {
+        talk,
+        teacher: display_name,
+        sangha: sangha_name,
+        state: match outcome {
+            SpeakerOutcome::Cleared => "cleared",
+            SpeakerOutcome::AwaitingConsent => "awaiting_consent",
+            SpeakerOutcome::NeedsReview => "needs_review",
+        },
+    })
+}
+
+/// A row of the speaker review sheet. Other columns are ignored.
+#[derive(Debug, serde::Deserialize)]
+struct SheetRow {
+    talk_id: String,
+    #[serde(default)]
+    decision: String,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    sangha: String,
+    #[serde(default)]
+    title: String,
+}
+
+/// What one sheet row asks for.
+#[derive(Debug, PartialEq, Eq)]
+enum Decision {
+    Hold,
+    Exclude,
+    Assign(String),
+}
+
+impl Decision {
+    fn of(decision: &str) -> Self {
+        let d = decision.trim();
+        if d.is_empty() || d.eq_ignore_ascii_case("hold") {
+            Decision::Hold
+        } else if d.eq_ignore_ascii_case("exclude") {
+            Decision::Exclude
+        } else {
+            Decision::Assign(d.to_owned())
+        }
+    }
+}
+
+/// What happened to one sheet row.
+#[derive(Debug, Serialize)]
+struct SheetOutcome {
+    talk_id: String,
+    title: String,
+    decision: String,
+    /// `assigned`, `excluded`, `held`, `would assign`, `would exclude` or `failed`.
+    result: &'static str,
+    /// The teacher and state for an assignment, or the error for a failure.
+    detail: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct SheetReport {
+    assigned: usize,
+    excluded: usize,
+    held: usize,
+    failed: usize,
+    rows: Vec<SheetOutcome>,
+}
+
+/// `wt talk assign-speaker --sheet` (Spec 03, Assigning a speaker by hand). Each row applies on
+/// its own, so a failed row is reported and the rest still apply.
+pub async fn assign_speaker_sheet(
+    pool: &PgPool,
+    config_dir: &Path,
+    sheet: &Path,
+    by: &str,
+    dry_run: bool,
+    yes: bool,
+) -> anyhow::Result<()> {
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let text =
+        std::fs::read_to_string(sheet).with_context(|| format!("reading {}", sheet.display()))?;
+    let rows = csv::Reader::from_reader(text.trim_start_matches('\u{feff}').as_bytes())
+        .deserialize()
+        .collect::<Result<Vec<SheetRow>, _>>()
+        .with_context(|| format!("parsing {}", sheet.display()))?;
+    let exclusions = rows
+        .iter()
+        .filter(|r| Decision::of(&r.decision) == Decision::Exclude)
+        .count();
+    if exclusions > 0 && !dry_run && !yes {
+        bail!(
+            "{exclusions} rows ask to exclude their talk, which runs a takedown: rerun with --yes"
+        );
+    }
+
+    let mut report = SheetReport::default();
+    for row in rows {
+        let decision = Decision::of(&row.decision);
+        let (result, detail) = match (&decision, dry_run) {
+            (Decision::Hold, _) => {
+                report.held += 1;
+                ("held", None)
+            }
+            (Decision::Exclude, true) => ("would exclude", None),
+            (Decision::Assign(teacher), true) => ("would assign", Some(teacher.clone())),
+            (Decision::Exclude, false) => {
+                let reason = match row.note.trim() {
+                    "" => "excluded at speaker review",
+                    note => note,
+                };
+                match exclude_row(pool, &row.talk_id, reason, by).await {
+                    Ok(()) => {
+                        report.excluded += 1;
+                        ("excluded", None)
+                    }
+                    Err(e) => {
+                        report.failed += 1;
+                        ("failed", Some(format!("{e:#}")))
+                    }
+                }
+            }
+            (Decision::Assign(teacher), false) => {
+                let sangha = Some(row.sangha.trim()).filter(|s| !s.is_empty());
+                let done = match row.talk_id.trim().parse::<TalkId>() {
+                    Ok(talk) => assign_one(pool, &sources, talk, teacher, sangha, by).await,
+                    Err(e) => Err(anyhow::anyhow!("bad talk id {:?}: {e}", row.talk_id)),
+                };
+                match done {
+                    Ok(done) => {
+                        report.assigned += 1;
+                        (
+                            "assigned",
+                            Some(format!("{}, {}", done.teacher, done.state)),
+                        )
+                    }
+                    Err(e) => {
+                        report.failed += 1;
+                        ("failed", Some(format!("{e:#}")))
+                    }
+                }
+            }
+        };
+        report.rows.push(SheetOutcome {
+            talk_id: row.talk_id,
+            title: row.title,
+            decision: row.decision,
+            result,
+            detail,
+        });
+    }
+    print_json(&report)
+}
+
+async fn exclude_row(pool: &PgPool, talk: &str, reason: &str, by: &str) -> anyhow::Result<()> {
+    let talk: TalkId = talk
+        .trim()
+        .parse()
+        .map_err(|e| anyhow::anyhow!("bad talk id {talk:?}: {e}"))?;
+    wt_db::consent::exclude_talk(pool, talk, reason, by)
+        .await
+        .with_context(|| format!("excluding talk {talk}"))?;
+    Ok(())
 }
 
 pub async fn exclude(

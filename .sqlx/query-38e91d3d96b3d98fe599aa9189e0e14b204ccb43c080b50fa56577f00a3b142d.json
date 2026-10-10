@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select t.title, sv.description, t.state::text as \"state!\", t.state_reason,\n                  sv.platform::text = 'engagewisdom' as \"byline_only!\"\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
+  "query": "select t.title, sv.description, t.state::text as \"state!\", t.state_reason,\n                  t.speaker_assigned_by is not null as \"by_hand!\",\n                  sv.platform::text = 'engagewisdom' as \"byline_only!\"\n           from talk t join source_video sv on sv.id = t.source_video_id where t.id = $1",
   "describe": {
     "columns": [
       {
@@ -44,6 +44,12 @@
       },
       {
         "ordinal": 4,
+        "name": "by_hand!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
         "name": "byline_only!",
         "type_info": "Bool",
         "origin": "Expression"
@@ -59,8 +65,9 @@
       true,
       null,
       true,
+      null,
       null
     ]
   },
-  "hash": "dbe9038cfbc4e90edffa61f27cef8597bfd79c7d7866bf3f07be494ddf860099"
+  "hash": "38e91d3d96b3d98fe599aa9189e0e14b204ccb43c080b50fa56577f00a3b142d"
 }
