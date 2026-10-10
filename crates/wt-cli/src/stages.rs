@@ -362,7 +362,7 @@ impl Stages {
             language: self.asr.language.clone(),
         };
         // The model labels ambiguous windows only when it may see the talk: a fixture, or a
-        // real talk once zero data retention is in place. Otherwise the rule fallback does.
+        // real talk once the owner sets `WT_LLM_REAL_DATA_OK`. Otherwise the rule fallback does.
         let labeler: Box<dyn WindowLabeler + '_> = match &self.llm {
             Some(llm) if class == DataClass::Synthetic || self.real_data_ok => {
                 Box::new(LlmLabeler::new(llm, class))

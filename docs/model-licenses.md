@@ -53,4 +53,4 @@ Data handling, read October 5, 2026 (https://privacy.claude.com/en/articles/7996
 - Inputs and outputs are deleted from Anthropic's systems within 30 days by default. A request flagged under the usage policy is kept up to 2 years, and its classification scores up to 7 years. Feedback a user submits is kept 5 years.
 - Zero data retention is a separate agreement, arranged through Anthropic's sales team and enabled per API organization. A Team plan subscription does not change the API's retention.
 
-So `WT_LLM_REAL_DATA_OK=true` waits for zero data retention on the organization whose API key the pipeline uses (PRD, open items).
+Zero data retention is not available to the project (decision of October 9, 2026). Real transcripts go to the model under the default terms above once the owner sets `WT_LLM_REAL_DATA_OK=true`. Student speech is never sent (Spec 04, paraphrases).
