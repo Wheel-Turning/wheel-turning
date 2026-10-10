@@ -1,5 +1,5 @@
 //! The `Embedder` trait and its ONNX Runtime implementation (Spec 04, Chunking, embedding and
-//! indexing). The `Reranker` arrives with retrieval in Spec 05.
+//! indexing), and the `Reranker` trait that retrieval uses (Spec 05).
 //!
 //! Embedding input is passage text and nothing else; queries are embedded the same way, with no
 //! instruction prefix. Vectors are L2-normalized for cosine distance.
@@ -300,6 +300,54 @@ impl Embedder for FakeEmbedder {
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, MlError> {
         Ok(texts.iter().map(|t| Self::vector(t)).collect())
+    }
+}
+
+/// A cross-encoder that scores how well each passage answers a query (Spec 05, Hybrid retrieval,
+/// reranking and selection). Retrieval applies a sigmoid to the returned logits and drops
+/// passages below `rerank_min_score`.
+#[async_trait]
+pub trait Reranker: Send + Sync {
+    /// The model's name, for the log.
+    fn model_id(&self) -> &str;
+    /// One logit per passage, in order.
+    async fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>, MlError>;
+}
+
+/// A deterministic stand-in for tests: the logit grows with the share of the query's words
+/// (longer than two letters) that the passage contains, from -2 for none to 6 for all, so with
+/// Spec 05's threshold of 0.30 a passage sharing any query word passes and one sharing none
+/// does not.
+#[derive(Debug, Clone, Default)]
+pub struct FakeReranker;
+
+impl FakeReranker {
+    /// The logit for one pair.
+    pub fn logit(query: &str, passage: &str) -> f32 {
+        let words = |t: &str| -> std::collections::BTreeSet<String> {
+            t.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| w.len() > 2)
+                .map(str::to_lowercase)
+                .collect()
+        };
+        let q = words(query);
+        if q.is_empty() {
+            return -2.0;
+        }
+        let p = words(passage);
+        let shared = q.intersection(&p).count() as f32;
+        8.0 * shared / q.len() as f32 - 2.0
+    }
+}
+
+#[async_trait]
+impl Reranker for FakeReranker {
+    fn model_id(&self) -> &str {
+        "fake-reranker"
+    }
+
+    async fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>, MlError> {
+        Ok(passages.iter().map(|p| Self::logit(query, p)).collect())
     }
 }
 

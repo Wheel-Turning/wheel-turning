@@ -1,0 +1,25 @@
+# Retrieval, selection and answer settings (Spec 05). Numeric values are starting points to
+# calibrate on the 50-question set before the first tester session.
+
+[retrieval]
+fts_top_k = 60
+vector_top_k = 60
+rrf_k = 60
+fuse_top_k = 40            # candidates sent to the reranker
+hnsw_ef_search = 100
+rerank_min_score = 0.30    # sigmoid of the reranker logit; calibrate on the eval set
+rerank_timeout_s = 10
+
+[selection]
+target_teachers = 3
+per_teacher_cap = 3
+max_passages = 10
+max_sources = 8            # distinct talks in one answer
+mmr_lambda = 0.7
+same_talk_min_gap_s = 60   # passages closer than this in one talk count as near-duplicates
+named_min_passages = 2
+named_max_passages = 8
+named_per_talk_cap = 2
+
+[answer]
+link_lead_in_ms = 2000

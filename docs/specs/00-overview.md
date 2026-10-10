@@ -100,7 +100,7 @@ Milestones are ordered so the riskiest PRD hypotheses are tested before the inte
 | M7, dana, access, logging | Dana calculator and panel, invite access, query and answer logging, tester feedback, role-separated log access | M5 | Property tests pass and a tester can follow a dana link from an answer |
 | M8, evaluation and hardening | Evaluation harness, review export and import, nightly audit, complete takedown, runbook | M6, M7 | The 50-question run and a 20-answer claim audit complete without code changes, and takedown leaves zero rows in every store |
 
-M4T can proceed in parallel with Gate A; the transcript page itself is part of M5 (decision of October 7, 2026). M1 can proceed in parallel with M2 and M3. M3R follows M3's discovery and classification (decision of October 5, 2026): until it lands the system is consent-only, so M4 can start on talks of teachers who have granted consent. M6 and M7 can proceed in parallel once M5 is done.
+M5 starts in parallel with Gate A's ratings (owner's decision of October 9, 2026), so the owner can run a personal alpha on the answer page; Gate A must still pass before any tester other than the owner sees it, and a failed Gate A stops M5 as before. M4T can proceed in parallel with Gate A; the transcript page itself is part of M5 (decision of October 7, 2026). M1 can proceed in parallel with M2 and M3. M3R follows M3's discovery and classification (decision of October 5, 2026): until it lands the system is consent-only, so M4 can start on talks of teachers who have granted consent. M6 and M7 can proceed in parallel once M5 is done.
 
 ## Spec index
 
