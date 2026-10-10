@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\" from servable_passage\n                   where teacher_id = $2\n                   order by embedding <=> $1::text::vector\n                   limit $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f83537457310b277a715b570c397136dbc248c157fb1ce80f2e6522ea4a05d33"
+}

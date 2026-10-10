@@ -4463,6 +4463,20 @@ dependencies = [
 [[package]]
 name = "wt-retrieve"
 version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "serde",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+ "wt-core",
+ "wt-db",
+ "wt-ml",
+ "wt-registry",
+]
 
 [[package]]
 name = "wt-segment"

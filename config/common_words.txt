@@ -1,0 +1,9 @@
+# Ordinary words that are also teacher aliases (Spec 05, Query parsing, rule 3). A query naming
+# one of these selects that teacher only when a title word (roshi, sensei, rev., dr.) comes just
+# before it. One word or phrase per line, case-insensitive; lines starting with # are comments.
+dharma
+joy
+grace
+faith
+hope
+peace
