@@ -70,7 +70,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_LLM_MODEL_VISION` | `WT_LLM_MODEL` | Model for the vision re-read of poorly read OCR pages. See Spec 08. |
 | `WT_LLM_MONTHLY_CAP_USD` | `25` | Monthly spending cap for language model calls. See Spec 04. |
 | `ANTHROPIC_API_KEY` | none | API credential, secret |
-| `WT_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text |
+| `WT_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text. The owner sets it; the provider's standard commercial terms apply (Spec 04) |
 | `YOUTUBE_API_KEY` | none | Key for the YouTube Data API, secret |
 | `YOUTUBE_OAUTH_REFRESH_TOKEN` | none | OAuth refresh token for caption download in owner\_api mode, secret, kept in Secrets Manager. See Spec 03. |
 | `WT_VIMEO_ACCESS_TOKEN` | none | Vimeo API token, secret. Unset means discovery reads the public talks page. See Spec 03. |

@@ -70,7 +70,7 @@ The audio boundary sits at the end of transcription and diarization. Scratch sto
 
 The consent boundary sits at the front of the pipeline, before any media is pulled, and is checked again at indexing by a type that only a cleared talk can satisfy. It is the same code path for a v1 SSZ talk and a v2b partner upload. Student segments are removed at the segmentation stage, before chunking and embedding.
 
-The model-provider boundary governs what leaves the infrastructure. Embedding and reranking run locally so retrieval never sends transcripts out. Extraction, classification assistance, synthesis and verification call a hosted model, and only cleared talks reach those calls. The notice to each teacher names this step, and zero-retention terms are confirmed on the provider account before the first speaker's transcript is sent. Counsel reviews this alongside caption ingestion and dana routing.
+The model-provider boundary governs what leaves the infrastructure. Embedding and reranking run locally so retrieval never sends transcripts out. Extraction, classification assistance, synthesis and verification call a hosted model, and only cleared talks reach those calls. The notice to each teacher names this step, and the provider's commercial terms apply: no training on the data and deletion within 30 days. Zero retention is not available (decision of October 9, 2026). Counsel reviews this alongside caption ingestion and dana routing.
 
 The log boundary is two database roles. Analysts see aggregate views. Raw query text is readable only through a function that returns queries a tester has flagged, which makes the stated policy mechanically true.
 
@@ -134,7 +134,7 @@ None of these decisions touches an invariant. Each one has a trigger that forces
 | Synthesis verifier | Second language-model call, or a local entailment model | First claim-by-claim review of 20 answers |
 | ASR hosting | Decided October 4, 2026: the owner's Windows PC, running large-v3 through Vulkan on its Intel GPU, reaching the database through an SSM port forward | Decided; see docs/asr-benchmark.md |
 | Tester access | Invite-link allowlist, or an identity-aware proxy | Before the first tester sees the page |
-| Model provider terms | Zero-retention agreement and its scope | Before any speaker's transcript is sent for extraction |
+| Model provider terms | Decided October 9, 2026: standard commercial API terms, since zero retention is not available | Decided |
 
 This document is reviewed at each roadmap gate and whenever a change touches a row of the invariants table. Amendments are dated and state which invariant moved and why.
 

@@ -125,7 +125,7 @@ Several PRD open items gate real data, not software. The code is built so each o
 | Speaker consent, Kanshin first | Founder | Gate refuses to fetch, transcribe or index any talk without a recorded rights basis: granted consent, a verified license, or the owner's mandate for a teacher who has not opted out. Development runs on synthetic fixtures. |
 | Rights holder per talk | Founder | `rights_holder` null or `unknown` blocks the cleared state and indexing |
 | Counsel review of YouTube caption ingestion, text-only storage, excerpt display, dana routing | Founder with counsel | Third-party fetching (`yt-dlp`) is disabled by default behind `WT_ALLOW_THIRD_PARTY_FETCH`. Metadata comes from the official YouTube Data API. Media comes from SSZ storage or the channel owner's authorized route. |
-| Language-model provider terms with zero retention confirmed | Founder | `WT_LLM_REAL_DATA_OK` defaults to false, and any call carrying real transcript text is refused until it is set. Extraction and synthesis run on fixtures only. |
+| Language-model provider terms (resolved: zero retention is not available, and the standard commercial terms apply, owner's decision of October 9, 2026) | Founder | `WT_LLM_REAL_DATA_OK` defaults to false, and any call carrying real transcript text is refused until the owner sets it. It is the owner's switch, no longer waiting on a retention agreement. |
 | Teacher reviewer scheduled with an unflattering-ratings brief | Founder | Gate A cannot be marked passed without at least one reviewer's recorded ratings |
 | SSZ permission note and speaker-release line | Founder | No code effect in v1. Recorded as a checklist item in the runbook. |
 

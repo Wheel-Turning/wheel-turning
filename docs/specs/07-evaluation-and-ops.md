@@ -115,7 +115,7 @@ The runbook is `docs/runbook.md`, written as the work is built, and it contains 
 5. Rotate secrets and invite tokens.
 6. Restore the database from a snapshot and then run `wt takedown --replay`.
 7. Change the embedding model or glossary and run `wt reindex`, then an evaluation run, then compare.
-8. Before enabling real transcripts with the language model: confirm the provider's zero-retention terms and set `WT_LLM_REAL_DATA_OK`.
+8. Before enabling real transcripts with the language model: check the API key belongs to the project's organization, set a monthly cap in `WT_LLM_MONTHLY_CAP_USD`, and set `WT_LLM_REAL_DATA_OK`. The standard commercial terms apply; zero retention is not available (decision of October 9, 2026).
 9. Release checklist: audit passes, evaluation run attached, Gate A recorded, consent coverage report reviewed, disclosure copy matches the logging code.
 
 ## Acceptance criteria

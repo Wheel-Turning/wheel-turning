@@ -270,5 +270,5 @@ File: `copy/sensitive.md`. The tone is plain and kind and makes no claims it can
 
 Add to the Your questions section of `copy/about.md`:
 
-- To write the short summary line and to check for sensitive topics, the text of your question may be sent to a language model provider. \[Confirm before launch that the provider's zero-retention terms are in place, and say so here in one sentence.\]
+- To write the short summary line and to check for sensitive topics, the text of your question may be sent to a language model provider. The provider does not train on it and deletes it within 30 days. \[Check before launch that this still matches the provider's terms.\]
 - If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.
