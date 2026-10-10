@@ -227,7 +227,7 @@ def cached_embeddings(
 
 VECTORS_SQL = """
 select passage_id::text, embedding::real[] from servable_passage
-where passage_id = any(%s::uuid[]) and embedding_model = %s
+where passage_id = any(%s::uuid[])
 """
 
 
@@ -235,12 +235,12 @@ def db_vectors(dsn: str, passages: Sequence[Passage], model_id: str) -> np.ndarr
     """The stored vectors of `passages`, in their order, from `servable_passage`. `wt reindex`
     computes them with the same model one text per run, so they are what `embed_all` would
     compute (owner's decision of October 9, 2026: read them rather than embed twice). Fails
-    if any passage is missing or was embedded with another model; `check_vectors` then
-    confirms a sample against the embedder."""
+    if any passage is missing. The view does not expose the model, so `check_vectors` is
+    what catches vectors from another model, by checking a sample against the embedder."""
     import psycopg
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute(VECTORS_SQL, ([p.passage_id for p in passages], model_id))
+        cur.execute(VECTORS_SQL, ([p.passage_id for p in passages],))
         found = {pid: v for pid, v in cur.fetchall()}
     missing = [p.passage_id for p in passages if p.passage_id not in found]
     if missing:
