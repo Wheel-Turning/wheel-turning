@@ -13,3 +13,4 @@ cleary = "cleary" # Thomas Cleary, translator
 gya = "gya" # romanized Japanese, the Heart Sutra mantra "gya tei gya tei"
 maka = "maka" # romanized Japanese, "maka hannya haramita" (Maha Prajna Paramita)
 flate = "flate" # the PDF FlateDecode filter
+ment = "ment" # an English suffix the synthesis grounding stemmer removes

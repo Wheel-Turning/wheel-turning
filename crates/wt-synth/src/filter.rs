@@ -246,7 +246,7 @@ const STOPWORDS: &[&str] = &[
 ];
 
 /// A crude stem: lowercase with a common English suffix removed, applied alike to the theme
-/// and the passages, so "practicing" and "practice" meet at "practic".
+/// and the passages, so "noticing" and "notice" meet at the same stem.
 fn stem(word: &str) -> String {
     for suffix in [
         "ingly", "edly", "ness", "ment", "ing", "ies", "ied", "ed", "es", "ly", "er", "s", "e",
