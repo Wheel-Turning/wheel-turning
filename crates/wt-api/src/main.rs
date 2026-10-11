@@ -14,7 +14,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 use wt_extract::{
     ClaudeClient, ClaudeSettings, LlmClient, LogAlerter, PgLedger, PriceTable, UnavailableLlm,
 };
-use wt_ml::{OnnxEmbedder, OnnxSettings};
+use wt_ml::{MlError, OnnxEmbedder, OnnxReranker, OnnxSettings, Reranker};
 use wt_retrieve::RetrievalConfig;
 
 #[tokio::main]
@@ -58,9 +58,17 @@ fn site(config: &Config, pool: &sqlx::PgPool) -> anyhow::Result<Site> {
             Keys::random().context("generating a session key")?
         }
     };
-    // The reranker model is not exported yet (Spec 05, step 4): answers run on the fused order
-    // and say so.
-    tracing::warn!(model = %config.rerank_model, "no reranker loaded: relevance threshold off");
+    // Without the reranker export, answers run on the fused order and say so (Spec 05, step 4).
+    let mut rerank_settings = OnnxSettings::new(&config.model_dir, &config.rerank_model);
+    rerank_settings.runtime.clone_from(&config.ort_dylib);
+    let reranker: Option<Arc<dyn Reranker>> = match OnnxReranker::load(&rerank_settings) {
+        Ok(r) => Some(Arc::new(r)),
+        Err(MlError::Files(missing)) => {
+            tracing::warn!(model = %config.rerank_model, %missing, "no reranker loaded: relevance threshold off");
+            None
+        }
+        Err(e) => return Err(e).context("loading the reranker"),
+    };
     let llm: Arc<dyn LlmClient> = match claude(config, &dir, pool) {
         Ok(c) => Arc::new(c),
         Err(e) => {
@@ -70,7 +78,7 @@ fn site(config: &Config, pool: &sqlx::PgPool) -> anyhow::Result<Site> {
     };
     Ok(Site {
         embedder: Arc::new(embedder),
-        reranker: None,
+        reranker,
         llm,
         retrieval,
         common_words,

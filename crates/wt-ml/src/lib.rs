@@ -1,5 +1,6 @@
 //! The `Embedder` trait and its ONNX Runtime implementation (Spec 04, Chunking, embedding and
-//! indexing), and the `Reranker` trait that retrieval uses (Spec 05).
+//! indexing), and the `Reranker` trait that retrieval uses with its ONNX Runtime
+//! implementation (Spec 05).
 //!
 //! Embedding input is passage text and nothing else; queries are embedded the same way, with no
 //! instruction prefix. Vectors are L2-normalized for cosine distance.
@@ -137,40 +138,47 @@ impl std::fmt::Debug for OnnxEmbedder {
 impl OnnxEmbedder {
     /// Loads the model and its tokenizer, failing at startup when either is missing.
     pub fn load(settings: &OnnxSettings) -> Result<Self, MlError> {
-        let dir = settings.model_dir.join(&settings.model);
-        let model = dir.join("model.onnx");
-        let tokenizer_file = dir.join("tokenizer.json");
-        for f in [&model, &tokenizer_file] {
-            if !f.is_file() {
-                return Err(MlError::Files(format!(
-                    "{} is missing; run scripts/export_models.py",
-                    f.display()
-                )));
-            }
-        }
-        load_runtime(settings.runtime.as_deref())?;
-        let session = Session::builder()
-            .map_err(runtime_err)?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(runtime_err)?
-            .with_intra_threads(settings.threads.max(1))
-            .map_err(runtime_err)?
-            .commit_from_file(&model)
-            .map_err(runtime_err)?;
-        let mut tokenizer =
-            Tokenizer::from_file(&tokenizer_file).map_err(|e| MlError::Tokenizer(e.to_string()))?;
-        tokenizer
-            .with_truncation(Some(TruncationParams {
-                max_length: settings.max_tokens,
-                ..TruncationParams::default()
-            }))
-            .map_err(|e| MlError::Tokenizer(e.to_string()))?;
+        let (session, tokenizer) = load_model(settings)?;
         Ok(Self {
             model_id: settings.model.clone(),
             session: Arc::new(Mutex::new(session)),
             tokenizer: Arc::new(tokenizer),
         })
     }
+}
+
+/// Opens `model.onnx` and `tokenizer.json` in the model's directory, with truncation at
+/// `max_tokens`.
+fn load_model(settings: &OnnxSettings) -> Result<(Session, Tokenizer), MlError> {
+    let dir = settings.model_dir.join(&settings.model);
+    let model = dir.join("model.onnx");
+    let tokenizer_file = dir.join("tokenizer.json");
+    for f in [&model, &tokenizer_file] {
+        if !f.is_file() {
+            return Err(MlError::Files(format!(
+                "{} is missing; run scripts/export_models.py",
+                f.display()
+            )));
+        }
+    }
+    load_runtime(settings.runtime.as_deref())?;
+    let session = Session::builder()
+        .map_err(runtime_err)?
+        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .map_err(runtime_err)?
+        .with_intra_threads(settings.threads.max(1))
+        .map_err(runtime_err)?
+        .commit_from_file(&model)
+        .map_err(runtime_err)?;
+    let mut tokenizer =
+        Tokenizer::from_file(&tokenizer_file).map_err(|e| MlError::Tokenizer(e.to_string()))?;
+    tokenizer
+        .with_truncation(Some(TruncationParams {
+            max_length: settings.max_tokens,
+            ..TruncationParams::default()
+        }))
+        .map_err(|e| MlError::Tokenizer(e.to_string()))?;
+    Ok((session, tokenizer))
 }
 
 /// Embeds one text in its own run on the calling thread. Every text gets a run of its own:
@@ -351,6 +359,120 @@ impl Reranker for FakeReranker {
     }
 }
 
+/// bge-reranker-v2-m3 exported to ONNX by `scripts/export_models.py`: `model.onnx` and
+/// `tokenizer.json` in one directory. Each query and passage pair is encoded as the model was
+/// trained, `<s> query </s></s> passage </s>`, truncated to `max_tokens` from the longer side,
+/// and the model returns one logit.
+pub struct OnnxReranker {
+    model_id: String,
+    session: Arc<Mutex<Session>>,
+    tokenizer: Arc<Tokenizer>,
+}
+
+impl std::fmt::Debug for OnnxReranker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnnxReranker")
+            .field("model_id", &self.model_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl OnnxReranker {
+    /// Loads the model and its tokenizer, failing at startup when either is missing.
+    /// `settings.model` is `WT_RERANK_MODEL`.
+    pub fn load(settings: &OnnxSettings) -> Result<Self, MlError> {
+        let (session, tokenizer) = load_model(settings)?;
+        Ok(Self {
+            model_id: settings.model.clone(),
+            session: Arc::new(Mutex::new(session)),
+            tokenizer: Arc::new(tokenizer),
+        })
+    }
+}
+
+/// Token IDs and attention mask for one query and passage pair, through the tokenizer's own
+/// pair template and truncation.
+fn encode_pair(
+    tokenizer: &Tokenizer,
+    query: &str,
+    passage: &str,
+) -> Result<(Vec<i64>, Vec<i64>), MlError> {
+    let encoding = tokenizer
+        .encode((query, passage), true)
+        .map_err(|e| MlError::Tokenizer(e.to_string()))?;
+    let ids = encoding.get_ids().iter().map(|&i| i64::from(i)).collect();
+    let mask = encoding
+        .get_attention_mask()
+        .iter()
+        .map(|&m| i64::from(m))
+        .collect();
+    Ok((ids, mask))
+}
+
+/// Scores one pair in its own run, for the same reason [`embed_one`] runs one text: the int8
+/// export quantizes activations per run, so a score would move with its batch neighbors.
+fn score_one(
+    session: &Mutex<Session>,
+    tokenizer: &Tokenizer,
+    query: &str,
+    passage: &str,
+) -> Result<f32, MlError> {
+    let (ids, mask) = encode_pair(tokenizer, query, passage)?;
+    let shape = [1, ids.len()];
+    let ids = Tensor::from_array((shape, ids)).map_err(runtime_err)?;
+    let mask = Tensor::from_array((shape, mask)).map_err(runtime_err)?;
+    let mut session = session
+        .lock()
+        .map_err(|_| MlError::Runtime("a previous run panicked".into()))?;
+    let output_name = session
+        .outputs()
+        .first()
+        .map(|o| o.name().to_owned())
+        .ok_or_else(|| MlError::Output("the model has no outputs".into()))?;
+    let outputs = session
+        .run(ort::inputs!["input_ids" => ids, "attention_mask" => mask])
+        .map_err(runtime_err)?;
+    let (_, data) = outputs[output_name.as_str()]
+        .try_extract_tensor::<f32>()
+        .map_err(runtime_err)?;
+    // Logits are [1, 1]: one pair, one label.
+    match data {
+        [logit] => Ok(*logit),
+        other => Err(MlError::Output(format!(
+            "expected one logit, got {}",
+            other.len()
+        ))),
+    }
+}
+
+#[async_trait]
+impl Reranker for OnnxReranker {
+    fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    async fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>, MlError> {
+        let mut out = Vec::with_capacity(passages.len());
+        // One blocking task per pair, so a caller that gives up (the rerank timeout) stops the
+        // work after the pair in hand.
+        for passage in passages {
+            let (session, tokenizer, query, passage) = (
+                Arc::clone(&self.session),
+                Arc::clone(&self.tokenizer),
+                query.to_owned(),
+                passage.clone(),
+            );
+            let logit = tokio::task::spawn_blocking(move || {
+                score_one(&session, &tokenizer, &query, &passage)
+            })
+            .await
+            .map_err(|e| MlError::Runtime(format!("rerank task: {e}")))??;
+            out.push(logit);
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -381,6 +503,75 @@ mod tests {
         let err = OnnxEmbedder::load(&s).unwrap_err().to_string();
         assert!(
             err.contains("model.onnx") && err.contains("export_models.py"),
+            "{err}"
+        );
+    }
+
+    /// A small tokenizer with the reranker's pair template, built in memory.
+    fn pair_tokenizer(max_length: usize) -> Tokenizer {
+        use tokenizers::models::wordlevel::WordLevel;
+        use tokenizers::pre_tokenizers::whitespace::Whitespace;
+        use tokenizers::processors::template::TemplateProcessing;
+
+        let words = [
+            "<s>", "<pad>", "</s>", "<unk>", "why", "do", "we", "sit", "to", "be", "here", "now",
+            "and", "breathe",
+        ];
+        let vocab = words
+            .iter()
+            .enumerate()
+            .map(|(i, w)| ((*w).to_owned(), u32::try_from(i).unwrap()))
+            .collect();
+        let model = WordLevel::builder()
+            .vocab(vocab)
+            .unk_token("<unk>".into())
+            .build()
+            .unwrap();
+        let template = TemplateProcessing::builder()
+            .try_single("<s> $A </s>")
+            .unwrap()
+            .try_pair("<s> $A </s> </s> $B </s>")
+            .unwrap()
+            .special_tokens(vec![("<s>", 0), ("</s>", 2)])
+            .build()
+            .unwrap();
+        let mut t = Tokenizer::new(model);
+        t.with_pre_tokenizer(Some(Whitespace {}));
+        t.with_post_processor(Some(template));
+        t.with_truncation(Some(TruncationParams {
+            max_length,
+            ..TruncationParams::default()
+        }))
+        .unwrap();
+        t
+    }
+
+    #[test]
+    fn a_pair_is_encoded_query_first_between_separators() {
+        let t = pair_tokenizer(512);
+        let (ids, mask) = encode_pair(&t, "why sit", "we sit here now").unwrap();
+        // <s> why sit </s> </s> we sit here now </s>
+        assert_eq!(ids, vec![0, 4, 7, 2, 2, 6, 7, 10, 11, 2]);
+        assert_eq!(mask, vec![1; ids.len()]);
+    }
+
+    #[test]
+    fn a_long_passage_is_cut_and_a_short_query_kept() {
+        let t = pair_tokenizer(10);
+        let (ids, _) = encode_pair(&t, "why sit", "we sit to be here now and breathe").unwrap();
+        // Ten tokens: four special, the whole query and the passage's first four words.
+        assert_eq!(ids, vec![0, 4, 7, 2, 2, 6, 7, 8, 9, 2]);
+    }
+
+    #[test]
+    fn a_missing_reranker_fails_at_load_naming_the_file() {
+        let s = OnnxSettings::new(
+            std::env::temp_dir().join("wt-no-models"),
+            "bge-reranker-v2-m3-int8",
+        );
+        let err = OnnxReranker::load(&s).unwrap_err().to_string();
+        assert!(
+            err.contains("bge-reranker-v2-m3-int8") && err.contains("export_models.py"),
             "{err}"
         );
     }
