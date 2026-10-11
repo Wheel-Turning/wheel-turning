@@ -33,22 +33,56 @@ trap cleanup EXIT
   echo "no Hugging Face token; run.sh sends it"
   exit 1
 }
+# A whisper-cli that aborts here aborts on every job and burns their attempts (October 9: 833
+# jobs dead in eight minutes on two hosts), so a machine that fails this does no work.
+if ! "$WT_WHISPER_CLI" -m "$WT_WHISPER_MODEL" -f "$TOOLS/whisper.cpp/samples/jfk.wav" -np -nt \
+  > "$LOGS/smoke.log" 2>&1; then
+  echo "whisper-cli smoke test failed:"
+  tail -20 "$LOGS/smoke.log"
+  exit 4
+fi
+echo "whisper-cli smoke test ok"
+
 HF_TOKEN=$(cat "$TOKEN") "$TOOLS/sidecar/bin/python" -m uvicorn app:app \
   --app-dir "$REPO/sidecars/diarize" --host 127.0.0.1 --port 8090 > "$LOGS/sidecar.log" 2>&1 &
 SIDECAR=$!
+healthy=0
 for _ in $(seq 1 180); do
-  curl -sf http://127.0.0.1:8090/healthz && break
+  curl -sf http://127.0.0.1:8090/healthz && healthy=1 && break
   sleep 2
 done
 echo
+if [ "$healthy" = 0 ]; then
+  echo "diarization sidecar never became healthy:"
+  tail -20 "$LOGS/sidecar.log"
+  exit 5
+fi
 
 pids=()
 for i in $(seq 1 "$WORKERS"); do
   ./target/release/wt worker --kinds audio --drain --config-dir config > "$LOGS/worker$i.log" 2>&1 &
   pids+=($!)
 done
+# Circuit breaker: a worker whose last jobs all failed, with no success since, is on a broken host
+# or GPU. Stop it before it spends more attempts; its jobs go back to the queue for other hosts.
+FAILS=${WT_WORKER_MAX_FAILS:-3}
+(
+  while sleep 30; do
+    for i in "${!pids[@]}"; do
+      kill -0 "${pids[$i]}" 2> /dev/null || continue
+      since=$(awk '/job done/ { n = 0; next } /job failed|job dead/ { n++ } END { print n + 0 }' \
+        "$LOGS/worker$((i + 1)).log")
+      if [ "$since" -ge "$FAILS" ]; then
+        echo "worker$((i + 1)): $since failures in a row, stopping it"
+        kill "${pids[$i]}"
+      fi
+    done
+  done
+) &
+BREAKER=$!
 status=0
 for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+kill "$BREAKER" 2> /dev/null
 grep -h "segmented\|failed\|error" "$LOGS"/worker*.log | tail -20
 echo "workers done, status $status"
 exit $status
