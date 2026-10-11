@@ -563,6 +563,9 @@ enum PipelineCommand {
         /// Queue only the text-only talks; talks with recordings wait for a GPU run.
         #[arg(long)]
         text_only: bool,
+        /// Queue talks whose earlier recovery already ran, once more.
+        #[arg(long)]
+        again: bool,
     },
 }
 
@@ -2151,6 +2154,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     source,
                     dry_run,
                     text_only,
+                    again,
                 } => {
                     let report = wt_ingest::audio::queue_student_questions(
                         &mut conn,
@@ -2158,6 +2162,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                         source.as_deref(),
                         dry_run,
                         text_only,
+                        again,
                     )
                     .await?;
                     commands::print_json(&report)?;

@@ -66,6 +66,9 @@ pub enum AudioError {
     /// A database connection error.
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+    /// Recovering a talk's questions failed at the model; the job is retried.
+    #[error("{0} of the talk's question edits failed; nothing was staged")]
+    QuestionEdits(usize),
 }
 
 /// Everything the job uses, so tests can swap in fakes.
@@ -694,6 +697,11 @@ pub async fn backfill_questions(
     if report.capped {
         return Ok(QuestionsOutcome::Capped);
     }
+    // A recovery exists only to make these calls, so a failed one fails the job, which is
+    // retried, rather than recording the talk as done without its questions.
+    if report.failed > 0 {
+        return Err(AudioError::QuestionEdits(report.failed));
+    }
     let staged = questions.len();
     let questions_hash = stage_questions(deps.objects, talk_id, version, questions)?;
     if let Some(qh) = questions_hash {
@@ -732,13 +740,15 @@ pub struct StudentQuestionsReport {
 /// transcripts mark a student gap, text-only and with recordings, and queues them: a
 /// `questions` job for each text-only talk, and, unless `text_only`, an `audio` job asking for
 /// questions for each talk with a recording. Jobs are keyed by the current transcript, so asking
-/// again queues nothing new. With `dry_run`, only counts.
+/// again queues nothing new. With `again`, a talk whose earlier recovery finished is queued once
+/// more, keyed by how many it has had. With `dry_run`, only counts.
 pub async fn queue_student_questions(
     conn: &mut sqlx::PgConnection,
     talk: Option<TalkId>,
     source: Option<&str>,
     dry_run: bool,
     text_only: bool,
+    again: bool,
 ) -> Result<StudentQuestionsReport, AudioError> {
     let talks = student_gap_talks(conn, talk, source).await?;
     let mut report = StudentQuestionsReport {
@@ -757,7 +767,12 @@ pub async fn queue_student_questions(
         let Some((_, _, hash)) = transcript::current(conn, id).await? else {
             continue;
         };
-        let key = sha256_hex(format!("student-questions:{hash}").as_bytes());
+        let key = if again {
+            let rounds = job::count_for_talk(conn, id, &["questions", "audio"]).await?;
+            sha256_hex(format!("student-questions:{hash}:again:{rounds}").as_bytes())
+        } else {
+            sha256_hex(format!("student-questions:{hash}").as_bytes())
+        };
         let (kind, payload) = if recording {
             (
                 JobKind::Audio,
