@@ -30,7 +30,7 @@ create type job_state as enum ('queued','running','succeeded','failed','dead');
 create type rights_basis as enum ('speaker_consent','license');
 ```
 
-The value `qa_student` exists so the segmenter can label student speech in memory. A check constraint on `segment` forbids storing it, so student speech cannot reach the database.
+The value `qa_student` exists so the segmenter can label student speech in memory. A check constraint on `segment` forbids storing it, so a student's own words cannot reach the database. A student question is stored only in its lightly edited form, in `student_question`, defined with its view in Spec 04, Student questions (owner's decision of October 10, 2026).
 
 ## Registry tables
 

@@ -113,6 +113,7 @@ fn client(
         ClaudeSettings {
             base_url: server.uri(),
             api_key: Secret::new("fixture-key"),
+            workspace_id: Some("wrkspc_fixture".into()),
             models,
             real_data_ok: real_ok,
             retry_base: Duration::from_millis(1),
@@ -153,6 +154,7 @@ async fn requests_use_structured_outputs_and_temperature_only_where_accepted() {
         .and(path("/v1/messages"))
         .and(header("anthropic-version", "2023-06-01"))
         .and(header("x-api-key", "fixture-key"))
+        .and(header("anthropic-workspace-id", "wrkspc_fixture"))
         .respond_with(reply(r#"{"label":"talk","reason":"fixture"}"#, 1000, 100))
         .mount(&server)
         .await;
@@ -299,10 +301,10 @@ async fn overload_retries_and_a_bad_reply_gets_one_repair() {
 
     let rejecting = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(
-            ResponseTemplate::new(400)
-                .set_body_json(json!({"type":"error","error":{"type":"invalid_request_error"}})),
-        )
+        .respond_with(ResponseTemplate::new(400).set_body_json(
+            json!({"type":"error","error":{"type":"invalid_request_error",
+                                         "message":"add the anthropic-workspace-id header"}}),
+        ))
         .mount(&rejecting)
         .await;
     let c = client(
@@ -318,6 +320,11 @@ async fn overload_retries_and_a_bad_reply_gets_one_repair() {
         .await
         .unwrap_err();
     assert!(matches!(err, LlmError::Status { status: 400, .. }), "{err}");
+    assert!(
+        err.to_string()
+            .contains("add the anthropic-workspace-id header"),
+        "{err}"
+    );
     assert_eq!(
         rejecting.received_requests().await.unwrap().len(),
         1,

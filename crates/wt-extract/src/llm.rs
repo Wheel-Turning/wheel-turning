@@ -70,12 +70,14 @@ pub enum LlmError {
     #[error("calling the Claude API: {0}")]
     Http(String),
     /// The API answered with an error.
-    #[error("the Claude API answered {status}: {kind}")]
+    #[error("the Claude API answered {status}: {kind}: {message}")]
     Status {
         /// HTTP status.
         status: u16,
         /// The error type the API names.
         kind: String,
+        /// The API's explanation.
+        message: String,
     },
     /// The model declined.
     #[error("the model declined the request")]
@@ -353,6 +355,8 @@ pub struct ClaudeSettings {
     pub base_url: String,
     /// `ANTHROPIC_API_KEY`.
     pub api_key: Secret,
+    /// `ANTHROPIC_WORKSPACE_ID`, for a key not scoped to a workspace.
+    pub workspace_id: Option<String>,
     /// The model per stage.
     pub models: BTreeMap<&'static str, String>,
     /// `WT_LLM_REAL_DATA_OK`.
@@ -402,17 +406,18 @@ impl ClaudeClient {
     async fn send(&self, body: &Value) -> Result<Value, LlmError> {
         let mut attempt = 0u32;
         loop {
-            let response = self
+            let mut request = self
                 .http
                 .post(format!(
                     "{}/v1/messages",
                     self.settings.base_url.trim_end_matches('/')
                 ))
                 .header("x-api-key", self.settings.api_key.expose())
-                .header("anthropic-version", "2023-06-01")
-                .json(body)
-                .send()
-                .await;
+                .header("anthropic-version", "2023-06-01");
+            if let Some(workspace) = &self.settings.workspace_id {
+                request = request.header("anthropic-workspace-id", workspace);
+            }
+            let response = request.json(body).send().await;
             let retryable = match &response {
                 Ok(r) => r.status().as_u16() == 429 || r.status().is_server_error(),
                 Err(e) => e.is_timeout() || e.is_connect(),
@@ -433,7 +438,13 @@ impl ClaudeClient {
                     .as_str()
                     .unwrap_or("unknown")
                     .to_owned();
-                return Err(LlmError::Status { status, kind });
+                // The API's own message says what to fix; it never repeats the request text.
+                let message = value["error"]["message"].as_str().unwrap_or("").to_owned();
+                return Err(LlmError::Status {
+                    status,
+                    kind,
+                    message,
+                });
             }
             return Ok(value);
         }

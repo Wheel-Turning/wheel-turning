@@ -38,6 +38,9 @@ button.link { background: none; border: none; color: var(--ink); text-decoration
 .error { color: var(--error); font-weight: 600; }
 .examples { padding-left: 1.25rem; }
 .result { font-weight: 600; }
+.themes ul { padding-left: 1.25rem; }
+.themes li { margin: 0.4rem 0; }
+.chip { display: inline-block; min-width: 1.4em; padding: 0 0.35em; border: 1px solid var(--ink); border-radius: 0.7em; font-size: 0.8em; line-height: 1.4; text-align: center; text-decoration: none; vertical-align: 0.1em; }
 .notice { background: var(--band); border-left: 3px solid var(--ink); padding: 0.5rem 1rem; margin: 1rem 0; }
 .status { background: var(--band); padding: 0.5rem 1rem; }
 .group { margin-top: 3rem; border-top: 1px solid var(--rule); }

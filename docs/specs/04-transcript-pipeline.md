@@ -1,6 +1,6 @@
 # Spec 04: Transcript pipeline
 
-Implements M4. It takes a `cleared` talk to `ready`: media in, passages and embeddings out, audio deleted, student speech never stored. The gate rules are in Spec 03 and every handler here starts by re-authorizing the talk. Table definitions are in Spec 02.
+Implements M4. It takes a `cleared` talk to `ready`: media in, passages and embeddings out, audio deleted, student speech never stored except as the lightly edited questions of Student questions below. The gate rules are in Spec 03 and every handler here starts by re-authorizing the talk. Table definitions are in Spec 02.
 
 | Step | Crate and trait | Reads | Writes | Talk state |
 | --- | --- | --- | --- | --- |
@@ -110,14 +110,61 @@ Decision of October 7, 2026. When a source supplies its own transcript (Spec 03,
 1. Timing. The audio is transcribed in scratch by the configured Whisper model for word timestamps only; its words are never stored. A smaller model would be faster and is a later setting. The source text's `[mm:ss]` markers, where present, are removed from the text and kept as anchors.
 2. Alignment. The source text's words are aligned to the timing words by a monotonic sequence alignment on normalized tokens, constrained by the markers where they exist. Each source word takes the time of the timing word it matches, and unmatched words take times interpolated between their matched neighbors. A talk whose aligned share is under 0.6 goes to `needs_review` with reason `alignment_failed`, since the text and the recording may differ.
 3. Speakers. Diarization runs on the audio as usual, and each source word takes the speaker of the turn its time falls in. The words with times and speakers then go through segmentation exactly as ASR words do, so student turns, chant, announcements and sitting are labeled and removed by the same rules, and only the teacher's words are persisted.
-4. Student questions. A removed student turn leaves the gap every transcript already has before a teacher's answer, which exports, review files and the transcript page now mark "A student asked a question" (it was "Question omitted"). The paraphrase in rule 5 fills it later; the student's words exist only in scratch and are deleted with the audio.
-5. Paraphrases (deferred, decisions of October 7 and 9, 2026). Zero data retention is not available, so paraphrases stay off until the owner decides that student words may go to the model under the standard terms. A `paraphrase` job sends a student turn's words, with the teacher's answer as context, to the model, which returns JSON holding a short paraphrase in the third person. A second call checks that the paraphrase is faithful to the question and holds no name, place or other identifying detail, returning JSON with a verdict and reasons. Only a paraphrase that passes is stored, in `student_question` (talk, start, end, paraphrase, model, checker verdict), attributed to "a student". It is shown before the teacher's answer as "A student asked, in paraphrase:" and is never embedded, searched or shown as a quotation. Until then the job is not queued, because the student's words would go to the model; the scratch copy needed for it is not kept, so paraphrasing later means fetching and aligning the audio again.
+4. Student questions. A removed student turn leaves a gap before the teacher's answer. The Student questions section below fills it with the lightly edited question; where no edit is stored, exports, review files and the transcript page mark it "A student asked a question".
+5. Paraphrases. Superseded by Student questions below (owner's decision of October 10, 2026): a light edit instead of a third-person paraphrase, searchable, and not deferred.
 
 Acceptance criteria for aligned source transcripts:
 
 - [x] A synthetic source text aligned to fake timing words gets each word's time, with markers honored and unmatched words interpolated; a mismatched recording goes to `needs_review` with `alignment_failed`. (`wt-asr` `align` unit tests and `wt-ingest/tests/audio.rs`.)
 - [x] With a `FakeDiarizer` that returns a student turn, the stored transcript holds the source's teacher words, no student words, and the gap before the teacher's answer is marked "A student asked a question". (`wt-ingest/tests/audio.rs`; the label in `owner_export` and `pipeline.rs`.)
 - [x] The timing words never reach any store. (`wt-ingest/tests/audio.rs`: the stored words are the source's, with its own spellings.)
+
+## Student questions
+
+Owner's decision of October 10, 2026, which replaces the paraphrase rule of October 7 and changes the PRD's rule that a student's words are never stored or shown. A teacher's answer often makes sense only beside its question, so each question is kept in a lightly edited form and shown as context.
+
+1. Which turns. Every student turn that segmentation labels `qa_student` and that a `qa_teacher` answer follows, on every path: recognized speech, aligned source transcripts and text-only source transcripts. Student speech before the first talk or during chant or announcements is still dropped (Segmentation, rule 5).
+2. The edit. Within the `audio` job, before scratch is deleted (on the text-only path, from memory), the student's words and the first 60 words of the teacher's answer, for context only, go to the model through `LlmClient` with `DataClass::Real`, so `WT_LLM_REAL_DATA_OK` must be true. The prompt, in `crates/wt-segment/prompts/student_question.md`, asks for the student's own wording with only these changes: names of people, places, organizations and dates, contact details, and other details that could identify someone are replaced by generic words ("my teacher", "a city", "my partner"); filler words and false starts are removed; nothing is summarized, answered, added or reordered. The model returns JSON `{"question": "...", "removed_identifying_details": true|false}`. The model is `WT_LLM_MODEL_EXTRACT`, falling back to `WT_LLM_MODEL`, and the call counts against the monthly cap.
+3. Checks, in code, before anything is stored. The edit has between 3 and `student_question_max_words` (default 120) words. It contains no teacher, alias or sangha name from the registry, no email address, phone number or web address, and no run of six or more digits. At least `student_question_min_overlap` (default 0.5) of its content words appear in the student's original words, so a rewrite or an answer is caught. An edit that fails is not stored, the gap keeps "A student asked a question", and the reason goes to the job log. Without a model, or with the spend cap reached, the gap stays as well.
+4. Storage. Only the edited text is stored, never the original words, in `student_question` (Spec 02): talk, transcript version, the student turn's start and end, the start of the teacher's answer, the text, its word count and hash, its embedding from the passage embedder, and the edit model. It is deleted with its talk by every takedown and is read through `servable_student_question`, which applies `servable_passage`'s conditions.
+5. Attribution and display. A question is attributed only to "Student", never a name, and always carries the line "Question lightly edited by machine; names and identifying details removed." It is not an excerpt: it never appears inside a passage's blockquote, never counts toward the 250-word excerpt limit or the teacher count, and is never presented as a quotation of anyone. The transcript page shows it in place of "A student asked a question". The answer page shows it above a passage that starts within the teacher's answer to it (Spec 06).
+6. Search. Retrieval adds a third ranked list to fusion: a vector search over `servable_student_question` (and, in named mode, that teacher's talks only), where each hit stands for the first servable passage of the same talk starting at or after the question's answer start. A question is never returned on its own (Spec 05).
+7. Talks already processed. Their student words were never kept, so a question can be recovered only by running the talk again. `wt pipeline student-questions [--talk <id>] [--source <key>] [--dry-run]` queues talks whose transcripts mark a student gap: text-only talks rerun from their stored source text with no fetch; talks with recordings get a fresh `audio` job, which fetches and transcribes again and replaces the transcript only if its teacher words are unchanged, adding the questions. The command prints the count of each kind first, since the second kind needs the GPU run.
+
+Migration (next free number, see `docs/migrations.md`):
+
+```sql
+create table student_question (
+  id uuid primary key default gen_random_uuid(),
+  talk_id uuid not null references talk(id) on delete cascade,
+  transcript_id uuid not null references transcript(id) on delete cascade,
+  start_ms integer not null,
+  end_ms integer not null,
+  answer_start_ms integer not null,
+  text text not null check (char_length(text) between 3 and 1200),
+  word_count integer not null,
+  content_hash text not null,
+  embedding vector(1024) not null,
+  embedding_model text not null,
+  edit_model text not null,
+  created_at timestamptz not null default now(),
+  unique (talk_id, start_ms)
+);
+create index student_question_embedding_hnsw on student_question
+  using hnsw (embedding vector_cosine_ops) with (m = 16, ef_construction = 64);
+```
+
+`servable_student_question` selects the question's columns joined to the same talk, teacher, sangha and rights conditions as `servable_passage`. `wt_pipeline` may insert and delete; `wt_web` may select from the view only. The takedown registry and `wt audit` include the table, and the audit applies rule 3's checks to every stored question.
+
+Acceptance criteria for student questions:
+
+- [ ] With a `FakeDiarizer` that returns a student turn and a `FakeLlm` that returns an edit, the stored `student_question` holds the edit, no `segment`, transcript JSON or passage holds the student's original words, and scratch is empty afterwards.
+- [ ] An edit holding a registry name, an email address, a phone number, a web address or a six-digit run, or sharing under half its content words with the original, is not stored, and the transcript keeps "A student asked a question".
+- [ ] With `WT_LLM_REAL_DATA_OK` unset, a real talk stores no question and makes no model call.
+- [ ] A text-only talk with a labeled student paragraph stores its edited question.
+- [ ] A query that matches only a student question returns the teacher passage that answers it, and never the question by itself.
+- [ ] The transcript and answer pages show the question with "Student" and the edit label, outside any blockquote, and a talk takedown leaves no `student_question` row.
+- [ ] `wt pipeline student-questions --dry-run` counts text-only and recording talks separately and queues nothing.
 
 ## Text-only source transcripts
 
@@ -226,6 +273,7 @@ Real talks while the switch is off (owner's decision of October 7, 2026). Zero d
 
 - Windows the rules leave ambiguous are labeled by `RuleFallbackLabeler`: a window holding the teacher's words is `talk`, any other `other`. The transcript JSON records how many as `label_fallback_windows`, and `wt segment sample` shows the count per talk. Fixtures still go to the model.
 - Extraction is staged as skipped: empty citations, a `skipped` reason and no input hash, so it runs once a model may. The talk goes on through `resolve` and `index` with no citations.
+- Once a model may, `wt pipeline retry-extract [--talk <id>] [--dry-run]` queues `extract` for each talk whose staging object is skipped, keyed by that object and the extraction model, so asking twice queues nothing new. It refuses without `ANTHROPIC_API_KEY` and `WT_LLM_REAL_DATA_OK=true`, since the extraction would be skipped again. `extract` keys `resolve` by the text it read and the staged citations as extracted, so the new extraction is resolved and indexed again (decision of October 10, 2026).
 - A worker starts without `ANTHROPIC_API_KEY` and uses both fallbacks; with a key, the model is used wherever the data class allows.
 - `wt segment sample` picks only cleared talks that have audio to fetch (a matched podcast enclosure), since SSZ's Vimeo files need SSZ's token.
 
@@ -271,7 +319,7 @@ Decisions of October 6, 2026, made while building the index step and the embedde
 - A citation's `raw_text` is its corrected words; its span is cut at the end of the passage holding its first word. A citation the resolver left `unresolved` is stored with method `llm`, since the model found it, and a citation whose first word is in no kept passage is dropped and counted in the job log.
 - `talk.content_hash` covers the passages, the citations and the embedding model. An `index` job on a `ready` talk with the same hash changes nothing; a `ready` talk being reindexed stays `ready`, serving its old passages until the new ones commit.
 - The worker runs `ANALYZE passage` when its queue empties after indexing at least one talk, and `wt reindex` runs it at the end.
-- Rerunning a stage on unchanged input changes no rows (CLAUDE.md rule 8). `audio` does nothing for a talk with a current transcript unless its job's payload has `"retranscribe": true`, which is how a new recognition model is applied. Every stage moves a talk only forward. `extract` records the hash of the text it read in the staging object and does not call the model again for the same text. `correct` and `resolve` queue `index` with the same input hash (the segment text and the staged citations), and `extract` queues `resolve` by the text it read.
+- Rerunning a stage on unchanged input changes no rows (CLAUDE.md rule 8). `audio` does nothing for a talk with a current transcript unless its job's payload has `"retranscribe": true`, which is how a new recognition model is applied. Every stage moves a talk only forward. `extract` records the hash of the text it read in the staging object and does not call the model again for the same text. `correct` and `resolve` queue `index` with the same input hash (the segment text and the staged citations), and `extract` queues `resolve` by the text it read and the citations it staged, without their resolutions.
 - `wt pipeline advance` (Spec 03) queues `audio` for each `cleared` talk keyed by its media route, so a talk whose route changes gets a new job; `wt pipeline retry --talk <id>` requeues the talk's latest dead job with fresh attempts and clears its `state_reason`.
 - `wt segment sample` picks `cleared` talks at random, or takes `--talk`, and writes to `data/segment-sample.html` by default, since the report holds teachers' words. The language model labels ambiguous windows as in the job, so the sample is charged to the cap. Student turns appear as time ranges only.
 
@@ -362,7 +410,7 @@ Acceptance criteria for the spend cap:
 - [x] Each call records tokens and an estimated cost, and the month-to-date sum matches the sum of the rows. (`wt-extract/tests/client.rs`.)
 - [x] A fake client at 80 percent publishes one alert, and at 100 percent refuses further calls. (`wt-extract/tests/client.rs`; the alert is logged until there is an SNS client.)
 - [x] A refused ingestion job returns to the queue with a run time on the first of the next month, and `wt llm cap set` releases it. (`wt-db/tests/job.rs`; the worker defers `audio` and `extract` jobs the cap refuses, without using an attempt.)
-- [ ] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry. (With synthesis in M6: the client already returns `CapReached` for any stage.)
+- [x] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry. (`wt-synth/tests/synth.rs` for the `cap_reached` outcome; `wt-api/tests/pages.rs` for the answer rendered without the line when a call fails.)
 - [x] A stage whose model setting is empty uses `WT_LLM_MODEL`, and the loader fails at startup if neither is set when a language-model stage is enabled. (`wt-core` config tests; `wt worker --kinds extract` refuses to start in `wt-cli/tests/commands.rs`.)
 
 ## Transcription model and where it runs

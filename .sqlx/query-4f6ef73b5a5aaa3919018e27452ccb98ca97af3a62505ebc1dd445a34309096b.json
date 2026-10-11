@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,\n                                sangha_count, passage_count, thin_coverage, latency_ms)\n         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id",
+  "query": "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,\n                                sangha_count, passage_count, thin_coverage, latency_ms,\n                                theme_count, themes_dropped)\n         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id",
   "describe": {
     "columns": [
       {
@@ -25,6 +25,8 @@
         "Int4",
         "Int4",
         "Bool",
+        "Int4",
+        "Int4",
         "Int4"
       ]
     },
@@ -32,5 +34,5 @@
       false
     ]
   },
-  "hash": "d0a6c0ccfb8fb74e434955db14482eb2ae8fe8c517e702c1eeb5a5170edfd33b"
+  "hash": "4f6ef73b5a5aaa3919018e27452ccb98ca97af3a62505ebc1dd445a34309096b"
 }

@@ -277,13 +277,9 @@ impl Transcriber for WhisperCli {
                 message: e.to_string(),
             })?;
         if !out.status.success() {
-            // The last line of stderr; it names the problem and holds no transcript text.
-            let line = String::from_utf8_lossy(&out.stderr)
-                .lines()
-                .last()
-                .unwrap_or("no message")
-                .to_owned();
-            return Err(AsrError::Failed(line));
+            return Err(AsrError::Failed(failure_message(&String::from_utf8_lossy(
+                &out.stderr,
+            ))));
         }
         let json_path = scratch.file("asr.json")?;
         let json =
@@ -293,6 +289,35 @@ impl Transcriber for WhisperCli {
             audio_ms: wav_duration_ms(audio)?,
             words: parse_cli_json(&json)?,
         })
+    }
+}
+
+/// The lines of whisper-cli's stderr that name a failure, at most three, else the last line.
+///
+/// On an abort, ggml runs gdb for a backtrace, so the last line is gdb noise
+/// (`../sysdeps/unix/sysv/linux/wait4.c: No such file or directory.`) and the assertion or CUDA
+/// error sits earlier. stderr carries progress and diagnostics only, never transcript text.
+fn failure_message(stderr: &str) -> String {
+    // Not "cuda": every GPU run logs lines such as `ggml_cuda_init: found 1 CUDA devices`.
+    const MARKERS: [&str; 5] = ["error", "assert", "abort", "out of memory", "failed"];
+    let named: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            MARKERS.iter().any(|m| lower.contains(m))
+        })
+        .take(3)
+        .collect();
+    if named.is_empty() {
+        stderr
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or("no message")
+            .to_owned()
+    } else {
+        named.join(" | ")
     }
 }
 
@@ -341,6 +366,33 @@ impl Transcriber for FakeTranscriber {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failure_message_prefers_the_named_error_over_gdb_noise() {
+        let stderr = "whisper_init_from_file: loading model
+            ggml/src/ggml-cuda/ggml-cuda.cu:96: CUDA error: out of memory
+            [New LWP 4711]
+            30	../sysdeps/unix/sysv/linux/wait4.c: No such file or directory.
+";
+        assert_eq!(
+            super::failure_message(stderr),
+            "ggml/src/ggml-cuda/ggml-cuda.cu:96: CUDA error: out of memory"
+        );
+    }
+
+    #[test]
+    fn failure_message_falls_back_to_the_last_line() {
+        assert_eq!(
+            super::failure_message(
+                "one
+two
+
+"
+            ),
+            "two"
+        );
+        assert_eq!(super::failure_message(""), "no message");
+    }
+
     use super::*;
 
     /// whisper-cli's full JSON, with invented words.

@@ -4327,6 +4327,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "askama",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -4342,9 +4343,11 @@ dependencies = [
  "tracing",
  "wt-core",
  "wt-db",
+ "wt-extract",
  "wt-ml",
  "wt-registry",
  "wt-retrieve",
+ "wt-synth",
 ]
 
 [[package]]
@@ -4566,6 +4569,19 @@ dependencies = [
 [[package]]
 name = "wt-synth"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "wt-core",
+ "wt-extract",
+]
 
 [[package]]
 name = "xattr"

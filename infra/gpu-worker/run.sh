@@ -49,6 +49,13 @@ sync_objects() {
 SYNC=$!
 trap 'kill $SYNC 2> /dev/null || true' EXIT
 
+step "clear what an earlier round left"
+# A killed round can leave workers, the sidecar on 8090 and its tunnel's listener on 55433 behind:
+# they hold GPU memory, and the tunnel below would fail to bind. The brackets keep pkill from
+# matching this command line itself.
+"${SSH[@]}" "$HOST" "pkill -f 'wt [w]orker'; pkill -f 'uvicorn [a]pp:app'; \
+  sudo fuser -k 55433/tcp 8090/tcp; true" > /dev/null 2>&1 || true
+
 step "work: $WORKERS workers"
 LIMIT=()
 [ "$HOURS" != 0 ] && LIMIT=(timeout "${HOURS}h")

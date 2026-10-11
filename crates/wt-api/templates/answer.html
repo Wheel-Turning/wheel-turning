@@ -8,6 +8,14 @@
 {% if let Some(n) = view.notice %}<section class="notice" aria-labelledby="notice-h"><h2 id="notice-h" class="visually-hidden">Notice</h2><p>{{ n }}</p></section>{% endif %}
 {% if view.degraded %}<p class="muted small">Alpha: excerpts are ordered by search match only; the relevance check is not installed yet.</p>{% endif %}
 {% if thanks %}<p class="status" role="status">Thank you. Your feedback was recorded.</p>{% endif %}
+{% if !view.themes.is_empty() %}
+<section class="themes" aria-labelledby="themes-h">
+  <h2 id="themes-h">How approaches differ</h2>
+  <ul>
+    {% for t in view.themes %}<li>{{ t.description }}{% for n in t.chips %} <a class="chip" href="#p{{ n }}" aria-label="Excerpt {{ n }}">{{ n }}</a>{% endfor %}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% for g in view.groups %}
 <section class="group" aria-labelledby="g{{ loop.index }}">
   <h2 id="g{{ loop.index }}">{{ g.teacher }} <span class="muted">· {{ g.sangha }}</span></h2>

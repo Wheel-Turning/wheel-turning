@@ -45,7 +45,7 @@ Called through the Claude API (`ANTHROPIC_API_KEY`) under Anthropic's Commercial
 
 | Model id | Stages | Added |
 | --- | --- | --- |
-| `claude-haiku-4-5` | Extract and window labeling (`WT_LLM_MODEL` or `WT_LLM_MODEL_EXTRACT`), priced in `config/llm_prices.toml` | October 6, 2026 |
+| `claude-haiku-4-5` | Extract and window labeling (`WT_LLM_MODEL` or `WT_LLM_MODEL_EXTRACT`), and synthesis and verification on the owner's alpha (`WT_LLM_MODEL`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY`), priced in `config/llm_prices.toml` | October 6, 2026 |
 | `claude-sonnet-5-5` | Priced in `config/llm_prices.toml`; not configured for a stage yet | October 6, 2026 |
 | `claude-opus-5-5` | Priced in `config/llm_prices.toml`; not configured for a stage yet | October 6, 2026 |
 

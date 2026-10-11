@@ -22,7 +22,7 @@ Wheel Turning lets a practitioner describe what is happening in their practice a
 2. Teachers are never spoken for. Different approaches stay visibly different. Blending voices into one answer would erase what makes the corpus worth searching.
 3. Dana follows citation. Each passage carries its sangha's own donation link, and the sanghas cited in an answer share equally in any gift made from it.
 4. Relevance alone ranks. No payment, partnership, claimed profile, upload volume or rights basis (consent, license, permission or mandate) changes where a passage appears.
-5. Text only. The product stores transcripts, texts and metadata, never audio or video, and plays from the source. Student voices are never stored: a student's question is kept only as a checked paraphrase attributed to "a student", shown as context for the teacher's answer and never searched.
+5. Text only. The product stores transcripts, texts and metadata, never audio or video, and plays from the source. Student audio is never stored. A student's question is kept only as a lightly edited text, with names and identifying details removed, attributed to "Student", shown as context for the teacher's answer and searchable (owner's decision of October 10, 2026).
 6. Use, ask, record, leave. Sources are used by default on the project owner's decision. The project then asks each rights holder for explicit permission, records every answer, and removes anything on request, permanently. A teacher can also choose a narrower level than full removal: excerpts only, nothing public, or a copy of their transcripts for their own use (see Display levels).
 7. Honest labeling. The page never says or implies a permission or license that was not given. Credit, a source link and a way to report an excerpt appear with every passage.
 8. Free and noncommercial. No ads, no paid tiers, no sale of the corpus or its data. The site's own optional dana is separate and never a condition of use.
@@ -70,7 +70,7 @@ Three kinds of material feed it:
 
 **In scope**
 
-- Transcripts of talks, segmented into talk, chant, announcement, sitting and Q&A, with only talk and teacher answers indexed. Student speech is dropped before anything is stored.
+- Transcripts of talks, segmented into talk, chant, announcement, sitting and Q&A, with only talk and teacher answers indexed as excerpts. A student's question is kept only as a lightly edited text with identifying details removed.
 - Retrieval over passage-level segments of talks and, separately, units of texts.
 - The answer page described below, with teacher, sangha, source link, donation link and a report link on every talk passage, and a separate Texts section.
 - A full-transcript page for each talk at display level c, reached from each of its passages, showing the teacher's words with marked gaps, the attribution, source and giving links at the top, and a "Listen at" link for each passage.
@@ -86,7 +86,7 @@ Three kinds of material feed it:
 - Accounts, payments, claim-your-profile and a polished interface. Takedown is a command run on request, plus the public removal form.
 - Automatic sending of permission requests and notices from a domain email address, which is in the backlog.
 - Audio or video storage.
-- Student voices in any form.
+- Student audio, student names, and a student's unedited words.
 - Talks from other lineages. Texts from any tradition may be loaded.
 
 ## Answer experience
@@ -114,7 +114,7 @@ The credit line follows the rights basis and never claims more than it has. Wher
 
 ## Data pipeline and model
 
-The pipeline turns a source into rights-cleared, segmented, glossary-corrected text with metadata. Audio and video are discarded after transcription, and student speech is dropped before anything is stored.
+The pipeline turns a source into rights-cleared, segmented, glossary-corrected text with metadata. Audio and video are discarded after transcription, and a student's words are stored only after a model has lightly edited them and removed identifying details.
 
 **Talks, in order**
 
@@ -122,7 +122,7 @@ The pipeline turns a source into rights-cleared, segmented, glossary-corrected t
 2. Clear. A talk proceeds only with a recorded rights basis (speaker consent, a verified license or the owner's mandate), a known rights holder, and no opt-out or exclusion. The check repeats at every stage.
 3. Transcribe. Fetch media into scratch space, transcribe once with timestamps and delete the audio. Manual captions serve only as a reference for measuring accuracy.
 4. Correct. Run a glossary pass for Dogen, shikantaza, Genjokoan, Japanese and Sanskrit terms and teacher names. The glossary is a standing asset and also feeds citation resolution.
-5. Segment. Label each stretch as talk, chant, announcement, sitting or Q&A. Index talk and teacher answers only. Drop student questions and student audio before embedding.
+5. Segment. Label each stretch as talk, chant, announcement, sitting or Q&A. Index talk and teacher answers as excerpts. Store each student question only as a lightly edited text with identifying details removed, embedded so a search can reach the teacher's answer through it. Drop student audio.
 6. Extract. Capture teacher, sangha, date, talk type, series and part, practice-period context, and every cited text or case.
 7. Resolve. Match citations to canonical locators, such as fascicle and section, at three confidence levels: resolved, probable, unresolved.
 8. Index. Embed passages for retrieval, with the source link and start time stored beside each.
@@ -163,7 +163,7 @@ Sources are used by default on the project owner's decision, each rights holder 
 
 **Other rules**
 
-- Student questions and student audio are never indexed, and a student's own words are never stored or shown, including in Tuesday classes and Q&A. Teacher responses are indexed with the question omitted. A teacher's answer is often meaningless without its question, so a question is shown as context in paraphrase: a language model paraphrases it, a second check confirms the paraphrase is faithful and holds no names or identifying details, and it is stored attributed to a generic "student", labeled as a paraphrase and never as a quotation. It is not embedded or searched. Until zero data retention is in place, the question appears only as a marked gap. Owner's decision of October 7, 2026.
+- Student questions (owner's decision of October 10, 2026, replacing the paraphrase rule of October 7, 2026). A teacher's answer is often meaningless without its question, so a student's question is kept as context: a language model lightly edits the student's words, keeping their wording but removing names, places, contact details and other identifying details, and filler. Code checks the edit before it is stored. It is attributed only to "Student", never a name, and labeled "Question lightly edited by machine; names and identifying details removed." It is shown before the teacher's answer on the transcript and answer pages, does not count toward an excerpt's length limit, and is embedded so a search can match it, which returns the teacher's answer, never the question alone. Student audio and a student's unedited words are never stored. Talks processed before this decision need their recordings fetched again to recover their questions.
 - A talk needs a resolved speaker, a registered sangha and a known rights holder. "Unknown" is a valid rights-holder value and blocks indexing until someone fills it in.
 - Answers show short passages. A talk's full transcript is shown on its own page by default, with the same attribution, source link, giving link and report link as a passage, unless its teacher has chosen a narrower display level. Full texts are not displayed: texts stay excerpt-only under Spec 08's limits. Owner's decision of October 7, 2026, after Genzen asked to be able to open the full transcript from a passage so that priests can review transcription errors and his talks might later become books.
 - A document that carries another party's copyright notice is flagged on arrival, and a source can be set to hold or block such documents. Under the owner's mandate the default is to flag.
@@ -183,7 +183,7 @@ Each teacher has a display level, and a talk can be set narrower than its teache
 | e, Export and delete | Nothing | Nothing: the takedown runs after the export | Yes, before deletion |
 | f, Full removal | Nothing | Nothing, with permanent exclusions, as in rule 4 above | No |
 
-Levels a to c are what the public sees. Levels d to f are what happens behind it. The full transcript holds only the teacher's words. Student speech, chant, announcements and sitting appear as marked gaps. Transcripts are reviewed offline in v1: a reviewer such as one of the teacher's priests gets a file per talk with the text and links to each moment of the recording, marks corrections, and the owner imports them as a reviewed version that no later automated pass overwrites.
+Levels a to c are what the public sees. Levels d to f are what happens behind it. The full transcript holds the teacher's words and each student question in its lightly edited form, labeled as such. Chant, announcements and sitting appear as marked gaps. Transcripts are reviewed offline in v1: a reviewer such as one of the teacher's priests gets a file per talk with the text and links to each moment of the recording, marks corrections, and the owner imports them as a reviewed version that no later automated pass overwrites.
 
 **Outreach sequence for v1**
 

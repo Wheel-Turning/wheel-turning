@@ -110,6 +110,9 @@ pub struct Config {
     pub llm_model: Option<String>,
     /// `ANTHROPIC_API_KEY`.
     pub anthropic_api_key: Option<Secret>,
+    /// `ANTHROPIC_WORKSPACE_ID`, sent as `anthropic-workspace-id` for a key that is not
+    /// scoped to a workspace.
+    pub anthropic_workspace_id: Option<String>,
     /// `WT_LLM_REAL_DATA_OK`. Must be true before any call carries real transcript text.
     pub llm_real_data_ok: bool,
     /// `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and
@@ -214,6 +217,7 @@ impl Config {
                 .map_or_else(|| PathBuf::from("docs/model-licenses.md"), PathBuf::from),
             llm_model: get("WT_LLM_MODEL"),
             anthropic_api_key: get("ANTHROPIC_API_KEY").map(Secret::new),
+            anthropic_workspace_id: get("ANTHROPIC_WORKSPACE_ID").map(|v| v.trim().to_owned()),
             llm_real_data_ok: parse_bool("WT_LLM_REAL_DATA_OK", get("WT_LLM_REAL_DATA_OK"))?,
             llm_stage_models: LlmStageModels {
                 extract: get("WT_LLM_MODEL_EXTRACT"),

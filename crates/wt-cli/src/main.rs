@@ -535,6 +535,17 @@ enum PipelineCommand {
         #[arg(long, required = true)]
         reason: Vec<String>,
     },
+    /// Queues extraction again for talks whose citations were staged as skipped because no
+    /// model could see them, once one may (Spec 04). Needs `ANTHROPIC_API_KEY`, the extraction
+    /// model and `WT_LLM_REAL_DATA_OK=true`.
+    RetryExtract {
+        /// One talk instead of every skipped one.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Count the skipped talks without queueing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -2124,6 +2135,25 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     commands::print_json(
                         &serde_json::json!({ "audio_jobs_queued": queued.len() }),
                     )?;
+                }
+                PipelineCommand::RetryExtract { talk, dry_run } => {
+                    let model = config.llm_model_for(wt_core::config::LlmStage::Extract)?;
+                    if !dry_run && (config.anthropic_api_key.is_none() || !config.llm_real_data_ok)
+                    {
+                        anyhow::bail!(
+                            "retry-extract needs ANTHROPIC_API_KEY and WT_LLM_REAL_DATA_OK=true,                              or the extraction would be skipped again"
+                        );
+                    }
+                    let objects = stages::objects(&config)?;
+                    let talks = wt_ingest::textjobs::retry_skipped_extracts(
+                        &mut conn, &objects, talk, model, dry_run,
+                    )
+                    .await?;
+                    commands::print_json(&serde_json::json!({
+                        "skipped_talks": talks.len(),
+                        "extract_jobs_queued": if dry_run { 0 } else { talks.len() },
+                        "dry_run": dry_run,
+                    }))?;
                 }
             }
         }
