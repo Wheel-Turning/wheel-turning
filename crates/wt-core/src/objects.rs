@@ -73,7 +73,16 @@ impl ObjectStore for LocalObjects {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io(parent))?;
         }
-        std::fs::write(&path, bytes).map_err(io(&path))
+        // Written beside the target and renamed over it, so a reader sees the old object or the
+        // new one, never half of it (October 11, 2026: jobs read transcripts mid-write).
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(format!(".tmp-{}", std::process::id()));
+        let tmp = PathBuf::from(tmp);
+        std::fs::write(&tmp, bytes).map_err(io(&tmp))?;
+        std::fs::rename(&tmp, &path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            io(&path)(e)
+        })
     }
 
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>, ObjectError> {
@@ -121,6 +130,26 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn put_replaces_an_object_whole_and_leaves_no_temporary_file() {
+        let dir = std::env::temp_dir().join(format!("wt-objects-{}", uuid::Uuid::new_v4()));
+        let store = LocalObjects::new(&dir);
+        store
+            .put("transcripts/t1/v1.json", b"{\"long\": \"first version\"}")
+            .unwrap_or_else(|e| panic!("{e}"));
+        store
+            .put("transcripts/t1/v1.json", b"{}")
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            store.get("transcripts/t1/v1.json").unwrap_or_default(),
+            Some(b"{}".to_vec())
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.join("transcripts/t1"))
+            .map(|d| d.flatten().map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        assert_eq!(names, vec![std::ffi::OsString::from("v1.json")]);
+    }
 
     #[test]
     fn put_get_and_delete_by_prefix() {
