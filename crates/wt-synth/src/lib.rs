@@ -97,6 +97,8 @@ pub enum DropReason {
     QuotationMark,
     /// A teacher alias from the registry.
     TeacherAlias,
+    /// A passage label such as P3, which would not match the page's numbering.
+    PassageLabel,
     /// Too few content words found in the cited passages.
     Ungrounded,
     /// The verifier did not mark it supported.
@@ -114,6 +116,7 @@ impl DropReason {
             DropReason::TooLong => "too_long",
             DropReason::QuotationMark => "quotation_mark",
             DropReason::TeacherAlias => "teacher_alias",
+            DropReason::PassageLabel => "passage_label",
             DropReason::Ungrounded => "ungrounded",
             DropReason::Unsupported => "unsupported",
         }
@@ -340,6 +343,10 @@ fn filter_drafts(
         }
         if filter::has_quotation_mark(&draft.description) {
             reject(DropReason::QuotationMark, None, draft);
+            continue;
+        }
+        if filter::has_passage_label(&draft.description) {
+            reject(DropReason::PassageLabel, None, draft);
             continue;
         }
         if let Some(alias) = filter::alias_in(&draft.description, aliases) {

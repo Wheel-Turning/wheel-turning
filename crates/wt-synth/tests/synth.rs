@@ -38,7 +38,7 @@ fn input() -> SynthesisInput {
 }
 
 const GOOD: &str =
-    "P1 and P2 both treat judging thoughts as thinking to notice before returning to breath.";
+    "Both passages treat judging thoughts as thinking to notice before returning to breath.";
 
 fn aliases() -> Vec<String> {
     vec!["Ada Fixture".into(), "Kosho".into()]
@@ -106,12 +106,12 @@ async fn each_filter_drops_its_fixture() {
     let long = "judging thoughts breath ".repeat(11);
     let cases: Vec<(&str, Vec<&str>, DropReason)> = vec![
         (
-            "P1 and P4 both treat judging thoughts as thinking to notice.",
+            "Both passages treat judging thoughts as thinking to notice.",
             vec!["P1", "P4"],
             DropReason::UnknownRef,
         ),
         (
-            "P1 treats judging thoughts as thinking to notice before breath.",
+            "One passage treats judging thoughts as thinking to notice before breath.",
             vec!["P1", "P1"],
             DropReason::TooFewPassages,
         ),
@@ -127,9 +127,14 @@ async fn each_filter_drops_its_fixture() {
             DropReason::QuotationMark,
         ),
         (
-            "Kosho and P2 treat judging thoughts as thinking to notice.",
+            "Kosho and others treat judging thoughts as thinking to notice.",
             vec!["P1", "P2"],
             DropReason::TeacherAlias,
+        ),
+        (
+            "P1 and P2 both treat judging thoughts as thinking to notice.",
+            vec!["P1", "P2"],
+            DropReason::PassageLabel,
         ),
         (
             "Both recommend therapy, journaling and medication for anxiety disorders.",
@@ -183,7 +188,7 @@ async fn a_reply_off_the_schema_fails_without_a_line() {
 
 #[tokio::test]
 async fn a_verifier_that_rejects_a_theme_drops_it_with_the_reason() {
-    let other = "P2 and P3 both treat judging as the object of practice met with kindness.";
+    let other = "Both passages treat judging as the object of practice met with kindness.";
     let llm = FakeLlm::new(vec![
         Ok(draft(vec![
             (GOOD, vec!["P1", "P2"]),

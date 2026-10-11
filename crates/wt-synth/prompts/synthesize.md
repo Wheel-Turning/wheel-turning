@@ -6,6 +6,7 @@ Rules:
 - Each theme is one sentence of at most 30 words describing a difference or a shared emphasis in how the passages approach the question.
 - Each theme cites at least two passage numbers, and every cited passage supports every part of the sentence.
 - State only what the passages say. Do not add advice, interpretation, quotations or names of teachers. Do not use quotation marks.
-- Describe the passages, not the reader: write "Some passages stress ..." or "P1 and P3 both treat ...", never "You should ...".
+- Describe the passages, not the reader: write "Some passages stress ..." or "Several passages treat ...", never "You should ...".
+- Never put passage labels such as P1 in the sentence. The page shows the cited passages beside it, numbered differently, so a label in the sentence would point to the wrong passage. Cite passages only in `passage_refs`.
 - If no theme meets these rules, return an empty list of themes.
 - Return the structured output and nothing else. Cite passages by their labels, such as "P2".
