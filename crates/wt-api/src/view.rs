@@ -130,6 +130,15 @@ pub struct TalkLine {
     pub date: Option<String>,
 }
 
+/// One verified synthesis theme: model text, shown only in "How approaches differ".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThemeLine {
+    /// The sentence.
+    pub description: String,
+    /// The page numbers of the passages that support it, for its footnote chips.
+    pub chips: Vec<usize>,
+}
+
 /// The assembled answer.
 #[derive(Debug, Clone)]
 pub struct AnswerView {
@@ -137,6 +146,8 @@ pub struct AnswerView {
     pub result_line: String,
     /// The notice banner, from Spec 09's messages.
     pub notice: Option<String>,
+    /// Verified themes; the section is left out when empty.
+    pub themes: Vec<ThemeLine>,
     /// Teacher groups, ordered by their best passage.
     pub groups: Vec<Group>,
     /// Passages that no longer serve.
@@ -198,6 +209,26 @@ pub fn assemble(
     {
         p.number = n + 1;
     }
+    // A theme renders only while every passage it cites still serves on this page.
+    let numbers: Vec<(PassageId, usize)> = groups
+        .iter()
+        .flat_map(|g| g.passages.iter().map(|p| (p.id, p.number)))
+        .collect();
+    let themes = payload
+        .themes
+        .iter()
+        .filter_map(|t| {
+            let chips: Option<Vec<usize>> = t
+                .passage_ids
+                .iter()
+                .map(|id| numbers.iter().find(|(p, _)| p == id).map(|(_, n)| *n))
+                .collect();
+            Some(ThemeLine {
+                description: t.description.clone(),
+                chips: chips?,
+            })
+        })
+        .collect();
     let teachers = groups.len();
     let result_line = match teachers {
         0 => "No excerpts found".to_owned(),
@@ -228,6 +259,7 @@ pub fn assemble(
     AnswerView {
         result_line,
         notice,
+        themes,
         groups,
         withdrawn: payload.passage_ids.len().saturating_sub(served.len()),
         talks,

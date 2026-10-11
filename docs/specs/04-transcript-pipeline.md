@@ -410,7 +410,7 @@ Acceptance criteria for the spend cap:
 - [x] Each call records tokens and an estimated cost, and the month-to-date sum matches the sum of the rows. (`wt-extract/tests/client.rs`.)
 - [x] A fake client at 80 percent publishes one alert, and at 100 percent refuses further calls. (`wt-extract/tests/client.rs`; the alert is logged until there is an SNS client.)
 - [x] A refused ingestion job returns to the queue with a run time on the first of the next month, and `wt llm cap set` releases it. (`wt-db/tests/job.rs`; the worker defers `audio` and `extract` jobs the cap refuses, without using an attempt.)
-- [ ] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry. (With synthesis in M6: the client already returns `CapReached` for any stage.)
+- [x] A refused synthesis call produces a rendered answer with no synthesis line and a `cap_reached` log entry. (`wt-synth/tests/synth.rs` for the `cap_reached` outcome; `wt-api/tests/pages.rs` for the answer rendered without the line when a call fails.)
 - [x] A stage whose model setting is empty uses `WT_LLM_MODEL`, and the loader fails at startup if neither is set when a language-model stage is enabled. (`wt-core` config tests; `wt worker --kinds extract` refuses to start in `wt-cli/tests/commands.rs`.)
 
 ## Transcription model and where it runs

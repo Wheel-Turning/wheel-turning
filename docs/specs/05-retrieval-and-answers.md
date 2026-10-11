@@ -183,11 +183,11 @@ M5, retrieval and assembly
 
 M6, synthesis
 
-- [ ] Each deterministic filter has a fixture that it drops and a fixture that it passes.
-- [ ] A `FakeLlm` verifier that rejects a theme drops it, and the drop reason lands in the log.
-- [ ] A theme containing a teacher alias or a quotation mark is dropped before the verifier is called.
-- [ ] A generation timeout and a verifier failure each leave a fully rendered answer without a synthesis line.
-- [ ] Named mode makes no synthesis call.
+- [x] Each deterministic filter has a fixture that it drops and a fixture that it passes. (`wt-synth` `filter` unit tests and `tests/synth.rs`.)
+- [x] A `FakeLlm` verifier that rejects a theme drops it, and the drop reason lands in the log. (`wt-synth/tests/synth.rs`.)
+- [x] A theme containing a teacher alias or a quotation mark is dropped before the verifier is called. (`wt-synth/tests/synth.rs`.)
+- [x] A generation timeout and a verifier failure each leave a fully rendered answer without a synthesis line. (`wt-api/tests/pages.rs`.)
+- [x] Named mode makes no synthesis call. (`wt-api/tests/pages.rs`.)
 - [ ] On the claim-audit sample, no theme that a reviewer marks invented survives the filters and verifier.
 
 M7, dana calculator

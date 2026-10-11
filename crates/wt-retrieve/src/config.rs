@@ -15,6 +15,8 @@ pub struct RetrievalConfig {
     pub selection: SelectionConfig,
     /// `[answer]`.
     pub answer: AnswerConfig,
+    /// `[synthesis]`.
+    pub synthesis: SynthesisConfig,
 }
 
 /// `[retrieval]`: search, fusion and reranking.
@@ -107,6 +109,28 @@ impl Default for AnswerConfig {
     }
 }
 
+/// `[synthesis]`: the theme filters and the model-call limit (Spec 05, Synthesis and verifier).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SynthesisConfig {
+    /// Themes kept from one reply.
+    pub max_themes: usize,
+    /// The least share of a theme's content words found in its cited passages.
+    pub min_grounding_ratio: f32,
+    /// Seconds before a generation or verifier call is abandoned.
+    pub synthesis_timeout_s: u64,
+}
+
+impl Default for SynthesisConfig {
+    fn default() -> Self {
+        Self {
+            max_themes: 4,
+            min_grounding_ratio: 0.4,
+            synthesis_timeout_s: 20,
+        }
+    }
+}
+
 /// Why the file could not be used.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -158,6 +182,8 @@ mod tests {
         assert_eq!(c.selection.target_teachers, 3);
         assert_eq!(c.selection.max_sources, 8);
         assert_eq!(c.answer.link_lead_in_ms, 2000);
+        assert_eq!(c.synthesis.max_themes, 4);
+        assert_eq!(c.synthesis.synthesis_timeout_s, 20);
     }
 
     #[test]

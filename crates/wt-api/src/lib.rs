@@ -2,13 +2,14 @@
 //!
 //! Every route but `/healthz`, `/robots.txt`, `/static/*` and `/join/{token}` needs a session,
 //! and answers the same generic 404 without one. Passage text reaches the templates only from
-//! `servable_passage`, and the templates escape it.
+//! `servable_passage`, and the templates escape it. Model text reaches only the "How approaches
+//! differ" section, as verified themes whose passages the code, not the model, names.
 
 pub mod session;
 pub mod view;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use askama::Template;
 use axum::extract::{FromRequestParts, Path, Query, Request, State};
@@ -22,8 +23,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use wt_core::ids::{AnswerId, SanghaId, TalkId, TesterId};
 use wt_db::answer::{Payload, Served};
+use wt_extract::{DataClass, LlmClient, UnavailableLlm};
 use wt_ml::{Embedder, FakeEmbedder, Reranker};
 use wt_retrieve::{Mode, NamedDetector, Notice, RetrievalConfig, query, retrieve};
+use wt_synth::{Synthesis, SynthesisInput};
 
 use session::Keys;
 
@@ -33,6 +36,9 @@ pub struct Site {
     pub embedder: Arc<dyn Embedder>,
     /// Scores candidates; `None` until the reranker model is installed.
     pub reranker: Option<Arc<dyn Reranker>>,
+    /// Drafts and verifies synthesis themes; [`UnavailableLlm`] when no model may be called,
+    /// which leaves every answer without a synthesis line.
+    pub llm: Arc<dyn LlmClient>,
     /// `config/retrieval.toml`.
     pub retrieval: RetrievalConfig,
     /// `config/common_words.txt`.
@@ -44,15 +50,26 @@ pub struct Site {
 }
 
 impl Site {
-    /// A site with a fake embedder, no reranker and a fixed key, for tests.
+    /// A site with a fake embedder, no reranker, no language model and a fixed key, for tests.
     pub fn with_fakes(embedder_model: &str) -> Self {
         Self {
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
+            llm: Arc::new(UnavailableLlm),
             retrieval: RetrievalConfig::default(),
             common_words: String::new(),
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
+        }
+    }
+
+    /// `[synthesis]` as the synthesizer takes it.
+    fn synthesis(&self) -> wt_synth::Settings {
+        let c = &self.retrieval.synthesis;
+        wt_synth::Settings {
+            max_themes: c.max_themes,
+            min_grounding_ratio: c.min_grounding_ratio,
+            timeout: Duration::from_secs(c.synthesis_timeout_s),
         }
     }
 }
@@ -345,11 +362,12 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
             },
         );
     };
-    let detector = match wt_db::answer::aliases(&state.pool)
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|a| NamedDetector::new(a, &site.common_words).map_err(|e| e.to_string()))
-    {
+    let aliases = match wt_db::answer::aliases(&state.pool).await {
+        Ok(a) => a,
+        Err(e) => return server_error("loading teacher aliases", &e),
+    };
+    let alias_names: Vec<String> = aliases.iter().map(|(_, a)| a.clone()).collect();
+    let detector = match NamedDetector::new(aliases, &site.common_words) {
         Ok(d) => d,
         Err(e) => return server_error("building the alias matcher", &e),
     };
@@ -370,6 +388,25 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
     let served = match wt_db::answer::passages(&state.pool, &ids).await {
         Ok(s) => s,
         Err(e) => return server_error("loading passages", &e),
+    };
+    // Spec 05: synthesis runs in standard mode only, over the passages as served. Any failure
+    // leaves the answer without the line and nothing else.
+    let synthesis = match found.mode {
+        Mode::Standard => {
+            let input = SynthesisInput {
+                query: text.clone(),
+                passages: served.iter().map(|p| (p.id, p.text.clone())).collect(),
+            };
+            wt_synth::synthesize(
+                site.llm.as_ref(),
+                &input,
+                &alias_names,
+                &site.synthesis(),
+                DataClass::Real,
+            )
+            .await
+        }
+        Mode::NamedTeacher(_) => Synthesis::default(),
     };
     let sanghas = served
         .iter()
@@ -393,7 +430,7 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
         named_teacher_id: named,
         notice: notice.map(str::to_owned),
         notice_count,
-        themes: Vec::new(),
+        themes: synthesis.themes,
         passage_ids: ids,
         rerank_degraded: found.rerank_degraded,
     };
@@ -407,6 +444,7 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
         sangha_count: small(sanghas),
         thin_coverage: matches!(found.notice, Some(Notice::ThinCoverage { .. })),
         latency_ms: latency,
+        themes_dropped: small(synthesis.dropped.len()),
     };
     match wt_db::answer::persist(&state.pool, &new).await {
         Ok(id) => {

@@ -25,10 +25,13 @@ tokio.workspace = true
 tracing.workspace = true
 wt-core.workspace = true
 wt-db.workspace = true
+wt-extract.workspace = true
 wt-ml.workspace = true
 wt-retrieve.workspace = true
+wt-synth.workspace = true
 
 [dev-dependencies]
+async-trait = "0.1"
 wt-db = { workspace = true, features = ["test-support"] }
 wt-registry.workspace = true
 http-body-util.workspace = true
