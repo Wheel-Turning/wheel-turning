@@ -340,6 +340,108 @@ async fn with_no_model_a_real_talk_is_staged_as_skipped_and_goes_on() {
     assert_eq!(queued(&fx.pool, talk, "resolve").await, 1);
 }
 
+/// `wt pipeline retry-extract`: a talk staged as skipped gets one new `extract` job, and the
+/// extraction that then runs is resolved and indexed again; a rerun of either queues nothing.
+#[tokio::test]
+async fn retry_extract_reruns_a_skipped_extraction_through_resolve_and_index() {
+    let fx = start().await;
+    let talk = segmented_talk(&fx, "retry", "To study the way is to study the self.").await;
+    let done = segmented_talk(&fx, "done", "Nothing here cites a text.").await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let g = glossary(None);
+    let hand_list = PgHandList::new(fx.pool.clone());
+    for t in [talk, done] {
+        textjobs::run_correct(&mut conn, t, &fx.objects, &g, &|_| false)
+            .await
+            .unwrap();
+    }
+    textjobs::run_extract(
+        &mut conn,
+        talk,
+        &fx.objects,
+        &g,
+        &wt_extract::UnavailableLlm,
+    )
+    .await
+    .unwrap();
+    let none = FakeLlm::new(vec![Ok(
+        json!({ "practice_period": null, "citations": [] }),
+    )]);
+    textjobs::run_extract(&mut conn, done, &fx.objects, &g, &none)
+        .await
+        .unwrap();
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            queued(&fx.pool, talk, "resolve").await,
+            queued(&fx.pool, talk, "index").await
+        ),
+        (1, 1)
+    );
+
+    // A dry run finds the skipped talk only and queues nothing.
+    let found = textjobs::retry_skipped_extracts(&mut conn, &fx.objects, None, "m", true)
+        .await
+        .unwrap();
+    assert_eq!(found, vec![talk]);
+    assert_eq!(queued(&fx.pool, talk, "extract").await, 1);
+    // Asking twice queues one job.
+    for _ in 0..2 {
+        textjobs::retry_skipped_extracts(&mut conn, &fx.objects, None, "m", false)
+            .await
+            .unwrap();
+    }
+    assert_eq!(queued(&fx.pool, talk, "extract").await, 2);
+    assert_eq!(queued(&fx.pool, done, "extract").await, 1);
+    // --talk on a talk that was extracted finds nothing.
+    let other = textjobs::retry_skipped_extracts(&mut conn, &fx.objects, Some(done), "m", false)
+        .await
+        .unwrap();
+    assert!(other.is_empty());
+
+    // The model now runs, and the same text queues a new resolve, and that a new index.
+    let llm = FakeLlm::new(vec![Ok(json!({
+        "practice_period": null,
+        "citations": [{"text": "to study the way is to study the self", "work_hint": "Genjokoan",
+                       "locator_hint": null, "kind": "quotation"}]
+    }))]);
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm)
+        .await
+        .unwrap();
+    let staging: Staging =
+        serde_json::from_slice(&fx.objects.get(&staging_key(talk)).unwrap().unwrap()).unwrap();
+    assert_eq!(staging.citations.len(), 1);
+    assert!(staging.skipped.is_none() && staging.input_hash.is_some());
+    assert_eq!(queued(&fx.pool, talk, "resolve").await, 2);
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    assert_eq!(queued(&fx.pool, talk, "index").await, 2);
+
+    // Reruns: no model call, no new jobs, and the talk is no longer skipped.
+    let unused = FakeLlm::new(vec![]);
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &unused)
+        .await
+        .unwrap();
+    textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
+        .await
+        .unwrap();
+    assert!(unused.seen.lock().unwrap().is_empty());
+    assert_eq!(
+        (
+            queued(&fx.pool, talk, "resolve").await,
+            queued(&fx.pool, talk, "index").await
+        ),
+        (2, 2)
+    );
+    let found = textjobs::retry_skipped_extracts(&mut conn, &fx.objects, None, "m", false)
+        .await
+        .unwrap();
+    assert!(found.is_empty());
+}
+
 #[tokio::test]
 async fn a_new_link_out_work_resolves_a_citation_that_matched_nothing_and_a_rerun_changes_nothing()
 {
