@@ -1010,6 +1010,23 @@ async fn held_talks_go_back_to_cleared_with_one_job_per_hold() {
 
 // ---- Spec 04, Student questions -------------------------------------------------------------
 
+/// An editor whose every call fails, as with a misconfigured API key.
+struct FailingEditor;
+
+#[async_trait::async_trait]
+impl QuestionEditor for FailingEditor {
+    fn model(&self) -> &str {
+        "failing"
+    }
+
+    async fn edit(
+        &self,
+        _turn: &wt_segment::AnsweredTurn,
+    ) -> Result<wt_segment::QuestionEdit, wt_segment::EditError> {
+        Err(wt_segment::EditError::Failed("400".into()))
+    }
+}
+
 /// Edits that keep the student's first eight words, behind a word of the editor's own.
 fn keeping_editor() -> FakeEditor<impl Fn(&str) -> String + Send + Sync> {
     FakeEditor::new(|s: &str| {
@@ -1216,7 +1233,7 @@ async fn the_backfill_counts_both_kinds_and_recovers_a_text_only_talks_question(
     };
     let before = (jobs("audio").await, jobs("questions").await);
 
-    let dry = audio::queue_student_questions(&mut conn, None, None, true, false)
+    let dry = audio::queue_student_questions(&mut conn, None, None, true, false, false)
         .await
         .unwrap();
     assert_eq!((dry.text_only, dry.recording), (1, 1), "{dry:?}");
@@ -1224,14 +1241,21 @@ async fn the_backfill_counts_both_kinds_and_recovers_a_text_only_talks_question(
     assert_eq!((jobs("audio").await, jobs("questions").await), before);
 
     // Text-only first; the recording waits for a GPU run.
-    let queued = audio::queue_student_questions(&mut conn, None, None, false, true)
+    let queued = audio::queue_student_questions(&mut conn, None, None, false, true, false)
         .await
         .unwrap();
     assert_eq!((queued.text_only_queued, queued.recording_queued), (1, 0));
-    let again = audio::queue_student_questions(&mut conn, None, None, false, true)
+    let again = audio::queue_student_questions(&mut conn, None, None, false, true, false)
         .await
         .unwrap();
     assert_eq!(again.text_only_queued, 0, "keyed by the transcript");
+    let once_more = audio::queue_student_questions(&mut conn, None, None, false, true, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        once_more.text_only_queued, 1,
+        "--again queues one more round"
+    );
     assert_eq!(jobs("audio").await, before.0);
 
     // The questions job's work: rerun the source text, no fetch, keep the transcript, stage.
@@ -1261,6 +1285,25 @@ async fn the_backfill_counts_both_kinds_and_recovers_a_text_only_talks_question(
         editor: Some(&editor),
     };
     let requests = fx.server.received_requests().await.unwrap().len();
+    // A failed model call fails the job, so it is retried, and stages nothing.
+    let failing = AudioDeps {
+        editor: Some(&FailingEditor),
+        ..deps
+    };
+    let err = audio::backfill_questions(&mut conn, text_only, &failing, false)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, audio::AudioError::QuestionEdits(1)), "{err}");
+    assert!(
+        objects
+            .get(&audio::questions_key(text_only))
+            .unwrap()
+            .is_none()
+    );
+    let deps = AudioDeps {
+        editor: Some(&editor),
+        ..failing
+    };
     let out = audio::backfill_questions(&mut conn, text_only, &deps, false)
         .await
         .unwrap();

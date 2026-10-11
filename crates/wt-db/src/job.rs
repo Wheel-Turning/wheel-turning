@@ -366,6 +366,22 @@ pub async fn fail(conn: &mut PgConnection, job: &Job, error: &str) -> Result<Fai
     Ok(outcome)
 }
 
+/// How many jobs of these kinds a talk has had, in any state.
+pub async fn count_for_talk(
+    conn: &mut PgConnection,
+    talk: TalkId,
+    kinds: &[&str],
+) -> Result<i64, JobError> {
+    let kinds: Vec<String> = kinds.iter().map(|k| (*k).to_owned()).collect();
+    Ok(sqlx::query_scalar!(
+        r#"select count(*) as "n!" from job where talk_id = $1 and kind = any($2)"#,
+        talk.as_uuid(),
+        &kinds
+    )
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// Talks waiting at `cleared`, for `wt pipeline advance`.
 pub async fn cleared_talks(conn: &mut PgConnection) -> Result<Vec<TalkId>, JobError> {
     let rows =
