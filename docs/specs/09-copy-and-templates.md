@@ -28,7 +28,7 @@ File: `copy/about.md`. The page opens with a two-sentence summary, then short se
 
 **Giving.** Dana is the Sanskrit and Pali word for generosity. Every excerpt from a talk links to the giving page of the sangha that offered it. After an answer, you can choose to share a gift equally among the sanghas it drew on. This site handles no money and takes no share. The links open each sangha's own page. A separate, optional line is for the site's own running costs, and giving is never needed to use the site.
 
-**Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time. Student questions and student voices from recorded classes are never stored.
+**Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time. Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student".
 
 **Who runs this.** Wheel Turning is run by \[name\], an individual, as a free project with no advertising and no fees. The plan is to form a nonprofit. The site uses a single cookie to keep you signed in for 30 days.
 
@@ -58,7 +58,7 @@ Our judgement that terms allow something is our own decision, not the rights hol
 
 **Form.** Fields: Name (optional). Email (optional, but we can only reply if you give a way to reach you). What should be removed? (a web address, a title, or the code shown next to an excerpt). Message (optional). Button: Send request. Note under the button: The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.
 
-**Student voices.** Questions and voices from students in recorded classes are never stored or shown.
+**Student voices.** Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. If you recognize your own question and want it removed, use the form below.
 
 **Sources and their status.** One line per source, in plain words, generated from the ledger. The four statuses are:
 
@@ -132,7 +132,7 @@ I am building Wheel Turning, a free search tool for Zen teachings. A person desc
 
 I want you to know that [N] of your talks from [Sangha or source] are already in it, in a private test with a small group of invited people. I made that choice myself, before hearing from you. I thought a test without real teachers would teach me nothing, and I would rather tell you plainly than have you find out some other way.
 
-Here is what it holds. A written transcript of each talk, made from the recording. The recording itself is not kept. Questions and voices from students are never stored. Here is what people see. Short excerpts in answers, each with your name, your sangha, a link to the talk at that moment, and a link to your sangha's giving page, and a page with the full written transcript of each talk, carrying the same name, sangha, source and giving links. You can choose less at any time with one message: excerpts only, nothing shown publicly, a copy of your transcripts for your own use, or removal of everything.
+Here is what it holds. A written transcript of each talk, made from the recording. The recording itself is not kept. When you answer a student's question, the question is kept in a lightly edited form, with names and identifying details removed, and shown as "Student" before your answer. Here is what people see. Short excerpts in answers, each with your name, your sangha, a link to the talk at that moment, and a link to your sangha's giving page, and a page with the full written transcript of each talk, carrying the same name, sangha, source and giving links. You can choose less at any time with one message: excerpts only, nothing shown publicly, a copy of your transcripts for your own use, or removal of everything.
 
 Here is what you can do.
 

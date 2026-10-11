@@ -204,6 +204,18 @@ fn index_input(texts_hash: &str, staging: &[u8]) -> String {
     sha256_hex(format!("{texts_hash}{}", sha256_hex(staging)).as_bytes())
 }
 
+/// The `resolve` job's input hash: the text extracted from and the staged citations as extracted,
+/// without the resolutions `resolve` writes into them, so a new extraction of the same text, such
+/// as one that was skipped and then ran, is resolved and indexed again, and a rerun is not.
+fn resolve_input(texts_hash: &str, staging: &Staging) -> String {
+    let mut extracted = staging.clone();
+    for c in &mut extracted.citations {
+        c.resolution = None;
+    }
+    let json = serde_json::to_vec(&extracted).unwrap_or_default();
+    sha256_hex(format!("{texts_hash}{}", sha256_hex(&json)).as_bytes())
+}
+
 /// The data class of a talk: `Synthetic` for fixtures, `Real` otherwise.
 pub async fn data_class(
     conn: &mut sqlx::PgConnection,
@@ -318,46 +330,48 @@ pub async fn run_extract(
     let segments = transcript::segments(conn, talk_id).await?;
     let fixed = corrected(stored.glossary(glossary), words, &segments);
     let input = corrected_hash(&fixed);
-    let unchanged = objects
+    let staged = objects
         .get(&staging_key(talk_id))?
-        .and_then(|b| serde_json::from_slice::<Staging>(&b).ok())
-        .is_some_and(|s| s.input_hash.as_deref() == Some(input.as_str()));
-    // When the same text was extracted before, the staged citations stand and the model is not
-    // called again.
-    if !unchanged {
-        let all: Vec<(Word, (usize, usize))> = fixed.into_iter().flatten().collect();
-        let mut staging =
-            match extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await {
-                Ok(staging) => staging,
-                // No model may see this talk yet (owner's decision of October 7, 2026): stage an
-                // empty, skipped extraction so the talk is still indexed; no input hash, so it
-                // runs once a model may.
-                Err(e @ (LlmError::RealDataRefused | LlmError::NoModel(_))) => {
-                    tracing::warn!(talk = %talk_id, reason = %e, "extraction skipped");
-                    Staging {
-                        schema: 1,
-                        talk_id: talk_id.as_uuid().to_string(),
-                        practice_period: None,
-                        citations: Vec::new(),
-                        discarded: 0,
-                        input_hash: None,
-                        skipped: Some(e.to_string()),
+        .and_then(|b| serde_json::from_slice::<Staging>(&b).ok());
+    let staging = match staged {
+        // When the same text was extracted before, the staged citations stand and the model is
+        // not called again.
+        Some(s) if s.input_hash.as_deref() == Some(input.as_str()) => s,
+        _ => {
+            let all: Vec<(Word, (usize, usize))> = fixed.into_iter().flatten().collect();
+            let mut staging =
+                match extract::extract(llm, &talk_id.as_uuid().to_string(), &all, class).await {
+                    Ok(staging) => staging,
+                    // No model may see this talk yet (owner's decision of October 7, 2026): stage
+                    // an empty, skipped extraction so the talk is still indexed; no input hash, so
+                    // `wt pipeline retry-extract` runs it once a model may.
+                    Err(e @ (LlmError::RealDataRefused | LlmError::NoModel(_))) => {
+                        tracing::warn!(talk = %talk_id, reason = %e, "extraction skipped");
+                        Staging {
+                            schema: 1,
+                            talk_id: talk_id.as_uuid().to_string(),
+                            practice_period: None,
+                            citations: Vec::new(),
+                            discarded: 0,
+                            input_hash: None,
+                            skipped: Some(e.to_string()),
+                        }
                     }
-                }
-                Err(e) => return Err(e.into()),
-            };
-        if staging.skipped.is_none() {
-            staging.input_hash = Some(input.clone());
+                    Err(e) => return Err(e.into()),
+                };
+            if staging.skipped.is_none() {
+                staging.input_hash = Some(input.clone());
+            }
+            let json = serde_json::to_vec(&staging).unwrap_or_default();
+            objects.put(&staging_key(talk_id), &json)?;
+            staging
         }
-        let json = serde_json::to_vec(&staging).unwrap_or_default();
-        objects.put(&staging_key(talk_id), &json)?;
-    }
+    };
     job::enqueue(
         conn,
         JobKind::Resolve,
         Some(talk_id),
-        // The extracted text, not the staging object, which `resolve` writes into.
-        &input,
+        &resolve_input(&input, &staging),
         &serde_json::json!({}),
     )
     .await?;
@@ -425,6 +439,48 @@ pub async fn run_resolve(
     .await?;
     tracing::info!(talk = %talk_id, ?counts, "citations resolved");
     Ok(TextOutcome::Done(Some(JobKind::Index)))
+}
+
+/// `wt pipeline retry-extract`: queues `extract` again for every talk whose staged extraction
+/// was skipped because no model could see it, or for `talk` alone. Each job is keyed by the
+/// skipped staging object and the extraction model, so asking twice queues nothing new and a
+/// talk skipped again for another reason, or with another model, can be retried. The new
+/// extraction then flows through `resolve` and `index`, whose keys cover the staged citations.
+/// Returns the skipped talks; with `dry_run`, queues nothing.
+pub async fn retry_skipped_extracts(
+    conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
+    talk: Option<TalkId>,
+    model: &str,
+    dry_run: bool,
+) -> Result<Vec<TalkId>, TextJobError> {
+    let talks = match talk {
+        Some(t) => vec![t],
+        None => transcript::corrected_talks(conn).await?,
+    };
+    let mut skipped = Vec::new();
+    for talk in talks {
+        let Some(bytes) = objects.get(&staging_key(talk))? else {
+            continue;
+        };
+        let is_skipped = serde_json::from_slice::<Staging>(&bytes)
+            .is_ok_and(|s| s.skipped.is_some() && s.input_hash.is_none());
+        if !is_skipped {
+            continue;
+        }
+        if !dry_run {
+            job::enqueue(
+                conn,
+                JobKind::Extract,
+                Some(talk),
+                &sha256_hex(format!("retry-extract:{model}:{}", sha256_hex(&bytes)).as_bytes()),
+                &serde_json::json!({ "reason": "retry-extract" }),
+            )
+            .await?;
+        }
+        skipped.push(talk);
+    }
+    Ok(skipped)
 }
 
 /// After a glossary change: queues `correct` for exactly the talks whose corrected text it
