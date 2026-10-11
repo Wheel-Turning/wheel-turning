@@ -16,7 +16,7 @@ Five properties follow, and every quality check traces back to one of them.
 
 1. Faithful. The text matches the spoken words closely enough that the teacher would recognize them, with terms of art, names and Sanskrit and Japanese words spelled correctly.
 2. Correctly attributed. Teacher, sangha, date, series and part are right, and the timestamped link lands on the moment quoted.
-3. Rightfully held. A rights basis is recorded (consent, a verified license or the owner's mandate), the rights holder is known, no opt-out is outstanding, and no student speech is present anywhere in the index.
+3. Rightfully held. A rights basis is recorded (consent, a verified license or the owner's mandate), the rights holder is known, no opt-out is outstanding, and no unedited student speech is present anywhere in the index.
 4. Current. Donation destinations, consent status and registry entries carry a last-verified date and are re-checked on a schedule, so stale facts are visible as stale.
 5. Honest about what is unknown. An unresolved citation, a thin-coverage answer and an unverified link are shown as exactly that. Unknown is a valid value in this corpus. Wrong is not.
 
@@ -47,7 +47,7 @@ Checks sit at the stage where an error is cheapest to catch, and the earliest on
 | Rights gate | A recorded rights basis (consent, verified license or mandate) and a known rights holder | Talk stops, no media pulled |
 | Transcribe | Timestamps present; link offset within tolerance on the sample | Talk held out of the index until repaired |
 | Correct | Glossary terms and teacher names match the registry | Fix glossary or alias, rerun affected talks |
-| Segment | No student speech; chant and sitting text excluded | Quarantine the whole talk and recheck |
+| Segment | No unedited student speech in segments or passages; chant and sitting text excluded | Quarantine the whole talk and recheck |
 | Extract and resolve | Teacher, series and part present; citations graded at three levels | Doubtful citations shown as unresolved |
 | Index | Required fields complete; typed proof of rights at indexing | Write rejected, talk not indexed |
 | Serve | Read only through the serving view; donation link verified | Shown with no give button, out of the dana split |
@@ -108,7 +108,7 @@ A failing record leaves serving first and is repaired second. The unit of quaran
 
 | Severity | Examples | Action |
 | --- | --- | --- |
-| Blocking | Wrong speaker, student speech in the index, consent or rights holder missing or withdrawn, a donation link pointing at the wrong sangha | Remove from the serving view at once, quarantine the talk, and release only after a re-check passes |
+| Blocking | Wrong speaker, unedited student speech in the index, a name or contact detail in a stored student question, consent or rights holder missing or withdrawn, a donation link pointing at the wrong sangha | Remove from the serving view at once, quarantine the talk, and release only after a re-check passes |
 | Degrading | Transcript accuracy below the line, timestamps off by more than tolerance, a duplicate found after indexing | Quarantine the talk, repair, reindex from the stored transcript version, and re-score on the sample |
 | Informational | Unresolved citation, thin coverage on a topic, an unverified donation link | Show as unknown, with no give button where the link is unverified, and log it for the coverage report |
 
@@ -126,7 +126,7 @@ The metrics below are the ones that change a decision. A metric with no decision
 | --- | --- | --- | --- |
 | Share of the 50 questions rated faithful and relevant | Teacher reviewer | Any change to chunking, embeddings, reranking or glossary | v1 pass or fail: fewer than half is a fail |
 | Invented claims surviving the synthesis filter | 50-answer sample and the 20-answer claim audit | Any change to synthesis | Any survivor is a v1 fail |
-| Student speech found in the index | Scan of indexed segments | Every ingest | Must be zero, otherwise quarantine |
+| Student speech found in the index | Scan of indexed segments and passages, and of `student_question` for names, contact details and long digit runs | Every ingest | Must be zero, otherwise quarantine |
 | Indexed talks without a rights basis or a known rights holder | Rights records against the index | Nightly | Must be zero, otherwise quarantine |
 | Speakers awaiting a reply, by speaker | Consent records | Weekly | Order of outreach and corpus size |
 | Share of citations unresolved | Resolver output on series-labeled talks | Every ingest | Whether the hand-listed set needs to grow |
