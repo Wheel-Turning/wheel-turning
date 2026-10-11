@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_name as \"name!\" from teacher\n           union select alias from teacher_alias\n           union select name from sangha",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b62697aa1a3e735f0d73135a1a9eeb7fe100c167deae04f34e2fac577ad54675"
+}

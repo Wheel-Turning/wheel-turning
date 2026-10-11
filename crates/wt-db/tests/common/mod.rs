@@ -160,6 +160,19 @@ pub async fn make_ready_with_model(pool: &PgPool, talk: TalkId, model: &str) -> 
     .await
     .unwrap();
     sqlx::query(
+        "insert into student_question (talk_id, transcript_id, start_ms, end_ms, answer_start_ms,
+                                       text, word_count, content_hash, embedding,
+                                       embedding_model, edit_model)
+         values ($1, $2, 1000, 2000, 3000, 'What is the fixture asking?', 5, 'h',
+                 array_fill(0.01::real, array[1024])::vector, $3, 'fake-editor')",
+    )
+    .bind(t)
+    .bind(transcript)
+    .bind(model)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
         "insert into job (kind, talk_id, idempotency_key, state, finished_at)
          values ('index', $1, 'index:' || $1::text, 'succeeded', now())",
     )

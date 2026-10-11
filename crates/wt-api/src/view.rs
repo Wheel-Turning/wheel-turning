@@ -104,6 +104,22 @@ pub struct PassageView {
     pub give_href: Option<String>,
     /// The credit line.
     pub credit: String,
+    /// The student's question this passage answers, lightly edited, shown above it as context
+    /// and never as a quotation (Spec 04, Student questions).
+    pub question: Option<String>,
+}
+
+/// The line under every student question.
+pub const QUESTION_LABEL: &str = wt_core::transcript::STUDENT_QUESTION_LABEL;
+
+/// Puts each question above the passage it stands for.
+pub fn attach_questions(view: &mut AnswerView, questions: &[wt_db::questions::ShownQuestion]) {
+    for p in view.groups.iter_mut().flat_map(|g| g.passages.iter_mut()) {
+        p.question = questions
+            .iter()
+            .find(|q| q.passage_id == p.id)
+            .map(|q| q.text.clone());
+    }
 }
 
 /// One teacher's passages.
@@ -182,6 +198,7 @@ pub fn assemble(
                 .then(|| format!("/talk/{}/transcript#p{}", card.id, s.ordinal)),
             give_href: gives(card).then(|| format!("/give/{answer}/{}", card.sangha_id)),
             credit: credit_line(card),
+            question: None,
         };
         match groups.iter_mut().find(|g| g.teacher == card.teacher_name) {
             Some(g) => g.passages.push(view),

@@ -198,10 +198,29 @@ fn script_json(value: &impl Serialize) -> String {
         .replace('&', "\\u0026")
 }
 
-/// The review page: self-contained, loading nothing remote and storing nothing.
-fn render(file: &ReviewFile, title: &str, teacher: &str, source_url: &str) -> String {
+/// The review page: self-contained, loading nothing remote and storing nothing. Each stored
+/// student question stands, not editable, before the first paragraph of its answer.
+fn render(
+    file: &ReviewFile,
+    title: &str,
+    teacher: &str,
+    source_url: &str,
+    questions: &[wt_db::questions::StoredQuestion],
+) -> String {
+    use wt_segment::questions::{ATTRIBUTION, EDIT_LABEL};
     let mut body = String::new();
+    let mut shown = 0;
     for (n, p) in file.paragraphs.iter().enumerate() {
+        while let Some(q) = questions.get(shown)
+            && q.answer_start_ms <= p.start_ms
+        {
+            body.push_str(&format!(
+                "<section class=\"question\"><p><strong>{ATTRIBUTION}:</strong> {text}</p>\
+                 <p class=\"note\">{EDIT_LABEL}</p></section>\n",
+                text = esc(&q.text)
+            ));
+            shown += 1;
+        }
         let secs = (p.start_ms.max(0) - 2000).max(0) / 1000;
         body.push_str(&format!(
             "<section><p class=\"at\"><a href=\"{url}#t={secs}s\" target=\"_blank\" rel=\"noopener noreferrer\">Listen at {clock}</a></p>\
@@ -228,7 +247,7 @@ button {{ font:inherit; padding:8px 18px; border-radius:6px; border:1px solid va
 </style></head><body>
 <h1>{title}</h1>
 <p class="meta">{teacher}</p>
-<p class="note">Correct any word that was misheard, then press <strong>Save corrections</strong> and send the downloaded file back. Only the teacher's words are here: students' questions were never stored. Each "Listen at" link opens the recording at that moment. Nothing on this page is sent anywhere.</p>
+<p class="note">Correct any word that was misheard, then press <strong>Save corrections</strong> and send the downloaded file back. Only the teacher's words are editable here. Students' questions appear, lightly edited by machine, only as context; their own words were never stored. Each "Listen at" link opens the recording at that moment. Nothing on this page is sent anywhere.</p>
 {body}
 <div class="bar"><button id="save" type="button">Save corrections</button> <span id="count" class="note"></span></div>
 <script type="application/json" id="review">{data}</script>
@@ -277,9 +296,16 @@ pub async fn export_review(
     std::fs::create_dir_all(out)
         .map_err(|e| ReviewError::Io(format!("creating {}: {e}", out.display())))?;
     let path = out.join(format!("review-{}.html", talk.as_uuid()));
+    let questions = wt_db::questions::stored(conn, talk).await?;
     std::fs::write(
         &path,
-        render(&file, &facts.title, &facts.teacher, &facts.source_url),
+        render(
+            &file,
+            &facts.title,
+            &facts.teacher,
+            &facts.source_url,
+            &questions,
+        ),
     )
     .map_err(|e| ReviewError::Io(format!("writing {}: {e}", path.display())))?;
     Ok((path, file))
@@ -651,7 +677,20 @@ mod tests {
                 text: "a </script> <b>bold</b>".into(),
             }],
         };
-        let html = render(&file, "T & T", "Ada", "https://vimeo.com/1");
+        let questions = [wt_db::questions::StoredQuestion {
+            start_ms: 50_000,
+            answer_start_ms: 60_000,
+            text: "Why <sit>?".into(),
+        }];
+        let html = render(&file, "T & T", "Ada", "https://vimeo.com/1", &questions);
+        let question = html
+            .find("<strong>Student:</strong> Why &lt;sit&gt;?")
+            .unwrap();
+        assert!(
+            question < html.find("<textarea").unwrap(),
+            "before its answer"
+        );
+        assert!(html.contains("Question lightly edited by machine"));
         assert!(html.contains("T &amp; T"));
         assert!(html.contains("&lt;/script&gt; &lt;b&gt;"));
         assert!(

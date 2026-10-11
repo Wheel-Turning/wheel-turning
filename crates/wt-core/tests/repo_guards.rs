@@ -148,6 +148,11 @@ const PASSAGE_READERS: &[&str] = &[
 /// The SQL in `text` that names the `passage` table itself, not a view or table whose name only
 /// ends in it, such as `servable_passage` or `answer_passage`.
 fn direct_passage_sql(text: &str) -> Vec<String> {
+    direct_sql(text, "passage")
+}
+
+/// The SQL in `text` that names `table` itself.
+fn direct_sql(text: &str, table: &str) -> Vec<String> {
     let flat: String = text
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -155,7 +160,7 @@ fn direct_passage_sql(text: &str) -> Vec<String> {
         .to_lowercase();
     let mut found = Vec::new();
     for keyword in ["from", "join", "update", "into", "table"] {
-        let needle = format!("{keyword} passage");
+        let needle = format!("{keyword} {table}");
         let mut at = 0;
         while let Some(i) = flat[at..].find(&needle) {
             let start = at + i;
@@ -215,6 +220,50 @@ fn only_the_named_modules_read_the_passage_table() {
     assert!(
         offenders.is_empty(),
         "direct reads of the passage table outside {PASSAGE_READERS:?}; use servable_passage:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// Where Rust source may read the `student_question` table directly (Spec 04, Student
+/// questions, and rule 3): `wt-index` writes it, the takedown routine deletes from it, `wt audit`
+/// checks it, and the owner's exports read a talk's questions as they read its stored
+/// transcript. Serving reads `servable_student_question`.
+const QUESTION_READERS: &[&str] = &[
+    "crates/wt-index/",
+    "crates/wt-db/src/takedown.rs",
+    "crates/wt-db/src/audit.rs",
+    "crates/wt-db/src/questions.rs",
+];
+
+#[test]
+fn only_the_named_modules_read_the_student_question_table() {
+    assert_eq!(
+        direct_sql(
+            "select text from student_question where",
+            "student_question"
+        )
+        .len(),
+        1
+    );
+    assert!(direct_sql("from servable_student_question q", "student_question").is_empty());
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut offenders = Vec::new();
+    for path in tracked_files() {
+        let is_source =
+            path.starts_with("crates/") && path.contains("/src/") && path.ends_with(".rs");
+        if !is_source || QUESTION_READERS.iter().any(|p| path.starts_with(p)) {
+            continue;
+        }
+        let text = std::fs::read_to_string(root.join(&path)).unwrap();
+        let code = text.split("#[cfg(test)]").next().unwrap_or_default();
+        for hit in direct_sql(code, "student_question") {
+            offenders.push(format!("{path}: …{hit}…"));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "direct reads of student_question outside {QUESTION_READERS:?}; use \
+         servable_student_question:\n{}",
         offenders.join("\n")
     );
 }

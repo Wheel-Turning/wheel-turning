@@ -64,6 +64,15 @@ pub const STORES: &[Store] = &[
         note: "citing words from passages",
     },
     Store {
+        name: "student_question",
+        kind: StoreKind::Table {
+            table: "student_question",
+            talk_column: "talk_id",
+        },
+        on_takedown: OnTakedown::Delete,
+        note: "students' questions, lightly edited, with their embeddings (Spec 04)",
+    },
+    Store {
         name: "segment",
         kind: StoreKind::Table {
             table: "segment",

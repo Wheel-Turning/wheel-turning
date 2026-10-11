@@ -21,7 +21,9 @@ use wt_ingest::audio::{self, AudioDeps, AudioOutcome};
 use wt_ingest::http::Exclusions;
 use wt_ingest::media::{MediaFetcher, MediaSource};
 use wt_registry::RegistryFile;
-use wt_segment::{FakeDiarizer, FixedLabeler, Label, SegmentSettings, Turn};
+use wt_segment::{
+    FakeDiarizer, FakeEditor, FixedLabeler, Label, QuestionEditor, SegmentSettings, Turn,
+};
 
 const REGISTRY: &str = r#"
 [[sangha]]
@@ -196,6 +198,43 @@ async fn run(
     .await
 }
 
+/// The job with a student-question editor.
+async fn run_editing(
+    fx: &Fx,
+    talk: TalkId,
+    transcriber: &FakeTranscriber,
+    turns: Vec<Turn>,
+    editor: Option<&dyn QuestionEditor>,
+) -> Result<AudioOutcome, audio::AudioError> {
+    let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
+    let objects = fx.objects();
+    let segment = SegmentSettings {
+        diarize_scope: "full".into(),
+        ..SegmentSettings::default()
+    };
+    let hints = AsrHints {
+        glossary_prompt: String::new(),
+        language: "en".into(),
+    };
+    let scratch = fx.scratch();
+    let diarizer = FakeDiarizer::new(turns);
+    let deps = AudioDeps {
+        transcriber,
+        diarizer: &diarizer,
+        labeler: &FixedLabeler(Label::Talk),
+        converter: &FakeConverter,
+        fetcher: &fetcher,
+        objects: &objects,
+        scratch_root: &scratch,
+        segment: &segment,
+        hints: &hints,
+        actor: "test",
+        editor,
+    };
+    let mut conn = fx.pool.acquire().await.unwrap();
+    audio::run(&mut conn, talk, &deps, false).await
+}
+
 /// The job with a chosen diarizer, converter and diarization scope.
 async fn run_scoped(
     fx: &Fx,
@@ -227,6 +266,7 @@ async fn run_scoped(
         segment: &segment,
         hints: &hints,
         actor: "test",
+        editor: None,
     };
     let mut conn = fx.pool.acquire().await.unwrap();
     audio::run(&mut conn, talk, &deps, false).await
@@ -523,6 +563,7 @@ async fn a_new_model_requeues_only_talks_transcribed_with_another() {
         segment: &segment,
         hints: &hints,
         actor: "test",
+        editor: None,
     };
     let out = audio::run(&mut conn, talk, &deps, true).await.unwrap();
     assert!(
@@ -965,4 +1006,294 @@ async fn held_talks_go_back_to_cleared_with_one_job_per_hold() {
         .await
         .unwrap();
     assert!(other.is_empty());
+}
+
+// ---- Spec 04, Student questions -------------------------------------------------------------
+
+/// Edits that keep the student's first eight words, behind a word of the editor's own.
+fn keeping_editor() -> FakeEditor<impl Fn(&str) -> String + Send + Sync> {
+    FakeEditor::new(|s: &str| {
+        let w: Vec<&str> = s.split_whitespace().take(8).collect();
+        format!("Teacher, about {}?", w.join(" "))
+    })
+}
+
+/// Indexes the talk with the fake embedder, which stores its staged questions.
+async fn index(fx: &Fx, talk: TalkId) -> wt_ingest::textjobs::Indexed {
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let glossary = wt_registry::glossary::Glossary::new(&[]).unwrap();
+    wt_ingest::textjobs::run_index(
+        &mut conn,
+        talk,
+        &fx.objects(),
+        &glossary,
+        &wt_index::ChunkSettings::default(),
+        &wt_ml::FakeEmbedder::new("fake-bge-m3"),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+}
+
+async fn questions(pool: &PgPool, talk: TalkId) -> Vec<String> {
+    sqlx::query_scalar("select text from student_question where talk_id = $1")
+        .bind(talk.as_uuid())
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_text_only_talk_stores_its_students_question_as_edited() {
+    let fx = start().await;
+    let talk = cleared_text_only_talk(&fx, &labeled_text("t")).await;
+    let (w, turns) = timeline();
+    let editor = keeping_editor();
+    let outcome = run_editing(
+        &fx,
+        talk,
+        &FakeTranscriber::new(w, 600_000),
+        turns,
+        Some(&editor),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { questions: 1, .. }),
+        "{outcome:?}"
+    );
+    assert!(fx.server.received_requests().await.unwrap().is_empty());
+    let (_, stored) = stored_words(&fx, talk);
+    assert!(!stored.iter().any(|w| w.starts_with('s')));
+    let indexed = index(&fx, talk).await;
+    assert_eq!(indexed.questions, 1);
+    let edit = format!(
+        "Teacher, about {}?",
+        (0..8)
+            .map(|i| format!("s{i}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    assert_eq!(questions(&fx.pool, talk).await, [edit]);
+}
+
+#[tokio::test]
+async fn an_edit_with_identifying_details_or_a_rewrite_is_not_stored() {
+    let leaks: [fn(&str) -> String; 5] = [
+        |s| format!("Ada Fixture, {s}"),
+        |s| format!("{s} write me at sam@example.org"),
+        |s| format!("{s} call 415 555 0100"),
+        |s| format!("{s} see www.example.org"),
+        |_| "Simply return attention gently, noticing thoughts without judgment.".into(),
+    ];
+    for leak in leaks {
+        let fx = start().await;
+        let talk = cleared_text_only_talk(&fx, &labeled_text("t")).await;
+        let (w, turns) = timeline();
+        let editor = FakeEditor::new(leak);
+        let outcome = run_editing(
+            &fx,
+            talk,
+            &FakeTranscriber::new(w, 600_000),
+            turns,
+            Some(&editor),
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(outcome, AudioOutcome::Segmented { questions: 0, .. }),
+            "{outcome:?}"
+        );
+        assert!(
+            fx.objects()
+                .get(&audio::questions_key(talk))
+                .unwrap()
+                .is_none()
+        );
+        index(&fx, talk).await;
+        assert!(questions(&fx.pool, talk).await.is_empty());
+        // The transcript keeps the bare mark.
+        let mut conn = fx.pool.acquire().await.unwrap();
+        let (blocks, _) = wt_ingest::owner_export::talk_blocks(
+            &mut conn,
+            &fx.objects(),
+            &wt_registry::glossary::Glossary::new(&[]).unwrap(),
+            &wt_index::ChunkSettings::default(),
+            talk,
+        )
+        .await
+        .unwrap();
+        assert!(blocks.iter().any(|b| matches!(
+            b,
+            wt_ingest::owner_export::Block::Gap {
+                label: "A student asked a question",
+                ..
+            }
+        )));
+        assert!(
+            !blocks
+                .iter()
+                .any(|b| matches!(b, wt_ingest::owner_export::Block::Question { .. }))
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_real_talk_makes_no_model_call_until_real_data_is_allowed() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use wt_extract::{ClaudeClient, ClaudeSettings, DataClass, LlmQuestionEditor, PgLedger};
+    let fx = start().await;
+    let talk = cleared_text_only_talk(&fx, &labeled_text("t")).await;
+    let api = MockServer::start().await;
+    let models: BTreeMap<&'static str, String> = [("question", "claude-haiku-4-5".to_owned())]
+        .into_iter()
+        .collect();
+    let client = ClaudeClient::new(
+        ClaudeSettings {
+            base_url: api.uri(),
+            api_key: wt_core::Secret::new("fixture-key"),
+            models,
+            real_data_ok: false,
+            workspace_id: None,
+            retry_base: std::time::Duration::from_millis(1),
+        },
+        wt_extract::PriceTable {
+            checked_on: "2026-10-10".into(),
+            models: vec![wt_extract::llm::ModelPrice {
+                id: "claude-haiku-4-5".into(),
+                input_per_mtok: 1.0,
+                output_per_mtok: 5.0,
+                sampling: true,
+            }],
+        },
+        Arc::new(PgLedger::new(fx.pool.clone(), 25.0)),
+        Arc::new(wt_extract::LogAlerter),
+    )
+    .unwrap();
+    let editor = LlmQuestionEditor::new(&client, DataClass::Real, "claude-haiku-4-5");
+    let (w, turns) = timeline();
+    let outcome = run_editing(
+        &fx,
+        talk,
+        &FakeTranscriber::new(w, 600_000),
+        turns,
+        Some(&editor),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { questions: 0, .. }),
+        "{outcome:?}"
+    );
+    assert!(api.received_requests().await.unwrap().is_empty(), "no call");
+    index(&fx, talk).await;
+    assert!(questions(&fx.pool, talk).await.is_empty());
+}
+
+#[tokio::test]
+async fn the_backfill_counts_both_kinds_and_recovers_a_text_only_talks_question() {
+    let fx = start().await;
+    // Both talks were processed before questions were kept.
+    let text_only = cleared_text_only_talk(&fx, &labeled_text("t")).await;
+    let recorded = cleared_talk(&fx, true).await;
+    for talk in [text_only, recorded] {
+        let (w, turns) = timeline();
+        run(&fx, talk, &FakeTranscriber::new(w, 600_000), turns)
+            .await
+            .unwrap();
+    }
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let jobs = |kind: &'static str| {
+        let pool = fx.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("select count(*) from job where kind = $1")
+                .bind(kind)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let before = (jobs("audio").await, jobs("questions").await);
+
+    let dry = audio::queue_student_questions(&mut conn, None, None, true, false)
+        .await
+        .unwrap();
+    assert_eq!((dry.text_only, dry.recording), (1, 1), "{dry:?}");
+    assert_eq!((dry.text_only_queued, dry.recording_queued), (0, 0));
+    assert_eq!((jobs("audio").await, jobs("questions").await), before);
+
+    // Text-only first; the recording waits for a GPU run.
+    let queued = audio::queue_student_questions(&mut conn, None, None, false, true)
+        .await
+        .unwrap();
+    assert_eq!((queued.text_only_queued, queued.recording_queued), (1, 0));
+    let again = audio::queue_student_questions(&mut conn, None, None, false, true)
+        .await
+        .unwrap();
+    assert_eq!(again.text_only_queued, 0, "keyed by the transcript");
+    assert_eq!(jobs("audio").await, before.0);
+
+    // The questions job's work: rerun the source text, no fetch, keep the transcript, stage.
+    let editor = keeping_editor();
+    let fetcher = MediaFetcher::new(Exclusions::default(), false).unwrap();
+    let objects = fx.objects();
+    let segment = SegmentSettings::default();
+    let hints = AsrHints {
+        glossary_prompt: String::new(),
+        language: "en".into(),
+    };
+    let scratch = fx.scratch();
+    let (w, turns) = timeline();
+    let transcriber = FakeTranscriber::new(w, 600_000);
+    let diarizer = FakeDiarizer::new(turns);
+    let deps = AudioDeps {
+        transcriber: &transcriber,
+        diarizer: &diarizer,
+        labeler: &FixedLabeler(Label::Talk),
+        converter: &FakeConverter,
+        fetcher: &fetcher,
+        objects: &objects,
+        scratch_root: &scratch,
+        segment: &segment,
+        hints: &hints,
+        actor: "test",
+        editor: Some(&editor),
+    };
+    let requests = fx.server.received_requests().await.unwrap().len();
+    let out = audio::backfill_questions(&mut conn, text_only, &deps, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        audio::QuestionsOutcome::Staged {
+            turns: 1,
+            questions: 1,
+            rejected: 0
+        }
+    );
+    assert_eq!(
+        audio::backfill_questions(&mut conn, recorded, &deps, false)
+            .await
+            .unwrap(),
+        audio::QuestionsOutcome::NeedsAudio
+    );
+    assert_eq!(fx.server.received_requests().await.unwrap().len(), requests);
+    let versions: i64 = sqlx::query_scalar("select count(*) from transcript where talk_id = $1")
+        .bind(text_only.as_uuid())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(versions, 1, "the transcript is kept");
+    let index_jobs: i64 = sqlx::query_scalar(
+        "select count(*) from job where kind = 'index' and talk_id = $1
+           and payload->>'student_questions' = 'true'",
+    )
+    .bind(text_only.as_uuid())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(index_jobs, 1);
+    index(&fx, text_only).await;
+    assert_eq!(questions(&fx.pool, text_only).await.len(), 1);
 }

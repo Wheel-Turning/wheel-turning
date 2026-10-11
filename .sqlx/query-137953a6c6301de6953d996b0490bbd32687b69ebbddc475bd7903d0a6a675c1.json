@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select start_ms, answer_start_ms, text from student_question\n         where talk_id = $1 order by answer_start_ms",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "start_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "student_question",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "answer_start_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "student_question",
+            "name": "answer_start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "student_question",
+            "name": "text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "137953a6c6301de6953d996b0490bbd32687b69ebbddc475bd7903d0a6a675c1"
+}

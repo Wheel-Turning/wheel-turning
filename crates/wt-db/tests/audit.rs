@@ -66,6 +66,8 @@ async fn a_clean_database_passes_every_check_in_prod() {
         [
             "consent_drift",
             "serving_parity",
+            "question_consent_drift",
+            "question_serving_parity",
             "student_speech",
             "takedown_completeness",
             "fixture_leak",
@@ -99,7 +101,7 @@ async fn consent_drift_fails_when_passages_outlive_consent() {
     // Consent falling back to requested returns the talk to the gate and keeps its passages.
     consent(&fx.pool, ADA, ConsentStatus::Requested).await;
     let report = audit(&fx.pool, Env::Prod).await;
-    only(&report, &["consent_drift"]);
+    only(&report, &["consent_drift", "question_consent_drift"]);
     assert!(report.failed());
     let drift = report
         .checks
@@ -392,7 +394,7 @@ async fn consent_drift_fails_for_an_excluded_talk_that_kept_its_passages() {
         .unwrap();
 
     let report = audit(&fx.pool, Env::Prod).await;
-    only(&report, &["consent_drift"]);
+    only(&report, &["consent_drift", "question_consent_drift"]);
     assert!(report.failed());
 }
 
@@ -642,4 +644,71 @@ async fn a_mandated_source_warns_once_the_tool_is_public() {
     .await
     .unwrap();
     assert_eq!(findings(&off, "mandate_exposed"), 0);
+}
+
+/// Spec 04, Student questions: rule 3's checks cover every stored question, and a takedown
+/// removes them.
+#[tokio::test]
+async fn stored_student_questions_get_rule_threes_checks() {
+    let fx = common::start().await;
+    // `make_ready` stores one question with the passage.
+    let t = clean(&fx.pool).await;
+    only(&audit(&fx.pool, Env::Prod).await, &[]);
+
+    // A question holding a name or contact detail is student speech.
+    for leak in [
+        "Ada Fixture asked about this",
+        "Write to sam@example.org about it",
+        "Call 415 555 0100 about it",
+        "See www.example.org about it",
+        "Member 1234567 asks about it",
+        "Is it like Fixture Mountain Zendo here?",
+    ] {
+        sqlx::query("update student_question set text = $1")
+            .bind(leak)
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+        only(&audit(&fx.pool, Env::Prod).await, &["student_speech"]);
+    }
+    sqlx::query("update student_question set text = 'What is the fixture asking?'")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    // The view narrowed by mistake: the question parity check fails.
+    let def: String = sqlx::query_scalar("select pg_get_viewdef('servable_student_question')")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "create or replace view servable_student_question as {} and false",
+        def.trim().trim_end_matches(';')
+    )))
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["question_serving_parity"]);
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "create or replace view servable_student_question as {def}"
+    )))
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    // Consent falling back keeps the question: drift, as for its passage.
+    consent(&fx.pool, ADA, ConsentStatus::Requested).await;
+    let report = audit(&fx.pool, Env::Prod).await;
+    only(&report, &["consent_drift", "question_consent_drift"]);
+    assert_eq!(findings(&report, "question_consent_drift"), 1);
+    wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(t), ACTOR)
+        .await
+        .unwrap();
+    assert!(!audit(&fx.pool, Env::Prod).await.failed());
+    let left: i64 = sqlx::query_scalar("select count(*) from student_question")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }

@@ -546,6 +546,24 @@ enum PipelineCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Recovers the student questions of processed talks whose transcripts mark a student gap
+    /// (Spec 04, Student questions): text-only talks get a `questions` job, which reruns their
+    /// stored source text with no fetch; talks with recordings get an `audio` job, which fetches
+    /// and transcribes again. Prints the count of each kind first.
+    StudentQuestions {
+        /// One talk.
+        #[arg(long)]
+        talk: Option<TalkId>,
+        /// Only talks discovered from this source key.
+        #[arg(long)]
+        source: Option<String>,
+        /// Count only; queue nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Queue only the text-only talks; talks with recordings wait for a GPU run.
+        #[arg(long)]
+        text_only: bool,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -2127,6 +2145,22 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                         )?,
                         None => anyhow::bail!("talk {talk} has no dead job to retry"),
                     }
+                }
+                PipelineCommand::StudentQuestions {
+                    talk,
+                    source,
+                    dry_run,
+                    text_only,
+                } => {
+                    let report = wt_ingest::audio::queue_student_questions(
+                        &mut conn,
+                        talk,
+                        source.as_deref(),
+                        dry_run,
+                        text_only,
+                    )
+                    .await?;
+                    commands::print_json(&report)?;
                 }
                 PipelineCommand::RetryHeld { reason } => {
                     let queued =

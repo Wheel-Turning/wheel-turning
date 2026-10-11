@@ -60,6 +60,10 @@ pub struct SegmentSettings {
     pub qa_preroll_s: i32,
     /// With no invitation, at most this many short replies an hour make a monologue.
     pub monologue_max_replies_per_hour: f64,
+    /// An edited student question has at most this many words (Spec 04, Student questions).
+    pub student_question_max_words: usize,
+    /// At least this share of an edit's content words must be the student's own.
+    pub student_question_min_overlap: f64,
 }
 
 impl Default for SegmentSettings {
@@ -68,6 +72,8 @@ impl Default for SegmentSettings {
             diarize_scope: "qa".into(),
             qa_preroll_s: 60,
             monologue_max_replies_per_hour: 4.0,
+            student_question_max_words: 120,
+            student_question_min_overlap: 0.5,
             multi_speaker_share: 0.35,
             sitting_silence_s: 120,
             window_s: 60,
@@ -225,6 +231,37 @@ pub struct SegmentDraft {
     pub text: String,
 }
 
+/// A student turn that a `qa_teacher` answer follows. The student's words live only in memory:
+/// they go to the question edit and are dropped with this value.
+#[derive(Clone, PartialEq)]
+pub struct AnsweredTurn {
+    /// Start of the student's first word.
+    pub start_ms: i32,
+    /// End of the student's last word.
+    pub end_ms: i32,
+    /// Start of the teacher's answer.
+    pub answer_start_ms: i32,
+    /// The student's words, joined by spaces.
+    pub student: String,
+    /// The first [`ANSWER_CONTEXT_WORDS`] words of the answer, for context only.
+    pub answer: String,
+}
+
+/// Debug output shows the times and word counts, never the student's words.
+impl std::fmt::Debug for AnsweredTurn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnsweredTurn")
+            .field("start_ms", &self.start_ms)
+            .field("end_ms", &self.end_ms)
+            .field("answer_start_ms", &self.answer_start_ms)
+            .field("student_words", &self.student.split_whitespace().count())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Words of the teacher's answer sent with a question, for context.
+pub const ANSWER_CONTEXT_WORDS: usize = 60;
+
 /// The segmenter's result.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Segmentation {
@@ -238,6 +275,9 @@ pub struct Segmentation {
     pub segments: Vec<SegmentDraft>,
     /// Student turns as time ranges, held in memory for the segmentation sample report.
     pub student_turns: Vec<(i32, i32)>,
+    /// Each student turn a teacher's answer follows, with the student's words, held in memory
+    /// only for the question edit (Spec 04, Student questions) and never persisted.
+    pub questions: Vec<AnsweredTurn>,
     /// Words dropped because no turn was near them.
     pub unaligned_words: usize,
 }
@@ -585,6 +625,9 @@ impl Plan {
         let mut words: Vec<Word> = Vec::new();
         let mut kinds: Vec<(SpanKind, Option<usize>)> = Vec::new();
         let mut student_turns: Vec<(i32, i32)> = Vec::new();
+        // Every student turn with its words; the one whose answer is being collected.
+        let mut turns: Vec<(AnsweredTurn, bool)> = Vec::new();
+        let mut collecting: Option<usize> = None;
         // The run in which the teacher is answering a student, if any.
         let mut answering: Option<Option<usize>> = None;
         let mut last_was_student = false;
@@ -594,10 +637,28 @@ impl Plan {
             let in_qa_scope = matches!(label, Label::Talk | Label::Other);
             if *speaker != self.teacher {
                 if in_qa_scope && first_talk.is_some_and(|t| word.mid_ms() >= t) {
-                    match student_turns.last_mut() {
-                        Some(last) if last_was_student => last.1 = last.1.max(word.end_ms),
-                        _ => student_turns.push((word.start_ms, word.end_ms)),
+                    match (student_turns.last_mut(), turns.last_mut()) {
+                        (Some(last), Some((turn, _))) if last_was_student => {
+                            last.1 = last.1.max(word.end_ms);
+                            turn.end_ms = last.1;
+                            turn.student.push(' ');
+                            turn.student.push_str(word.text.trim());
+                        }
+                        _ => {
+                            student_turns.push((word.start_ms, word.end_ms));
+                            turns.push((
+                                AnsweredTurn {
+                                    start_ms: word.start_ms,
+                                    end_ms: word.end_ms,
+                                    answer_start_ms: 0,
+                                    student: word.text.trim().to_owned(),
+                                    answer: String::new(),
+                                },
+                                false,
+                            ));
+                        }
                     }
+                    collecting = Some(turns.len() - 1);
                     last_was_student = true;
                     answering = Some(run);
                 } else {
@@ -617,6 +678,22 @@ impl Plan {
                 Label::Announcement => SpanKind::Announcement,
                 Label::Other => SpanKind::Other,
             };
+            match collecting {
+                Some(t) if kind == SpanKind::QaTeacher => {
+                    let (turn, answered) = &mut turns[t];
+                    if !*answered {
+                        *answered = true;
+                        turn.answer_start_ms = word.start_ms;
+                    }
+                    if turn.answer.split_whitespace().count() < ANSWER_CONTEXT_WORDS {
+                        if !turn.answer.is_empty() {
+                            turn.answer.push(' ');
+                        }
+                        turn.answer.push_str(word.text.trim());
+                    }
+                }
+                _ => collecting = None,
+            }
             words.push(word.clone());
             kinds.push((kind, run));
         }
@@ -689,6 +766,11 @@ impl Plan {
             spans,
             segments,
             student_turns,
+            questions: turns
+                .into_iter()
+                .filter(|(_, answered)| *answered)
+                .map(|(turn, _)| turn)
+                .collect(),
             unaligned_words: self.unaligned,
         }
     }

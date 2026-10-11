@@ -18,8 +18,8 @@ use wt_core::objects::LocalObjects;
 use wt_core::scratch::Ffmpeg;
 use wt_db::job::{Job, JobKind};
 use wt_extract::{
-    ClaudeClient, ClaudeSettings, DataClass, LlmClient, LlmError, LlmLabeler, LogAlerter, PgLedger,
-    PriceTable, UnavailableLlm,
+    ClaudeClient, ClaudeSettings, DataClass, LlmClient, LlmError, LlmLabeler, LlmQuestionEditor,
+    LogAlerter, PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_index::ChunkSettings;
 use wt_ingest::audio::{self, AudioDeps, AudioError};
@@ -29,7 +29,8 @@ use wt_ingest::textjobs::{self, PgHandList, TextJobError};
 use wt_ml::{Embedder, OnnxEmbedder, OnnxSettings};
 use wt_registry::glossary::Glossary;
 use wt_segment::{
-    LabelError, RuleFallbackLabeler, SegmentSettings, SidecarDiarizer, WindowLabeler,
+    LabelError, QuestionEditor, RuleFallbackLabeler, SegmentSettings, SidecarDiarizer,
+    WindowLabeler,
 };
 
 /// `[segment]`, `[asr]` and `[chunk]` from `config/pipeline.toml`.
@@ -105,6 +106,8 @@ pub struct Stages {
     diarizer: Option<SidecarDiarizer>,
     fetcher: Option<MediaFetcher>,
     llm: Option<ClaudeClient>,
+    /// The model that edits student questions, with `llm`.
+    question_model: Option<String>,
     /// `WT_LLM_REAL_DATA_OK`: whether real talks may go to the model.
     real_data_ok: bool,
     embedder: Option<OnnxEmbedder>,
@@ -160,6 +163,11 @@ impl Stages {
                     config.allow_third_party_fetch,
                 )?),
             )
+        } else if kinds.contains(&JobKind::Questions) {
+            // Text-only talks never fetch; the fetcher only completes the audio steps' parts.
+            let mut conn = pool.acquire().await?;
+            let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
+            (None, None, Some(MediaFetcher::new(exclusions, false)?))
         } else {
             (None, None, None)
         };
@@ -183,7 +191,7 @@ impl Stages {
         };
         let needs_llm = kinds
             .iter()
-            .any(|k| matches!(k, JobKind::Audio | JobKind::Extract));
+            .any(|k| matches!(k, JobKind::Audio | JobKind::Extract | JobKind::Questions));
         // Without an API key the worker still runs (owner's decision of October 7, 2026):
         // ambiguous windows get the rule fallback and extraction is staged as skipped.
         let llm = if needs_llm && config.anthropic_api_key.is_some() {
@@ -196,8 +204,13 @@ impl Stages {
             }
             None
         };
+        let question_model = match &llm {
+            Some(_) => Some(config.llm_model_for(LlmStage::Question)?.to_owned()),
+            None => None,
+        };
         Ok(Self {
             pool: pool.clone(),
+            question_model,
             objects: objects(config)?,
             scratch_root: config.scratch_dir.clone(),
             segment: sections.segment,
@@ -229,16 +242,40 @@ impl Stages {
         let mut db = self.pool.acquire().await?;
         let glossary = Glossary::new(&wt_db::glossary::load(&mut db).await?)?;
         let outcome = match job.kind {
-            JobKind::Audio => {
-                let (labeler, hints) = self.audio_parts(conn, talk).await?;
+            JobKind::Audio | JobKind::Questions => {
+                let (labeler, editor, hints) = self.audio_parts(conn, talk).await?;
                 let ffmpeg = Ffmpeg::default();
-                let deps = self.audio_deps(labeler.as_ref(), &hints, &ffmpeg)?;
-                let retranscribe = job
-                    .payload
-                    .get("retranscribe")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                match audio::run(conn, talk, &deps, retranscribe).await {
+                let deps = self.audio_deps(
+                    labeler.as_ref(),
+                    editor.as_deref(),
+                    &hints,
+                    &ffmpeg,
+                    job.kind == JobKind::Questions,
+                )?;
+                let flag = |key: &str| {
+                    job.payload
+                        .get(key)
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                };
+                // Spec 04, Student questions, step 7: a processed talk run again for its
+                // questions; a `questions` job never fetches.
+                if job.kind == JobKind::Questions || flag("student_questions") {
+                    let fetch = job.kind == JobKind::Audio;
+                    match audio::backfill_questions(conn, talk, &deps, fetch).await {
+                        Ok(audio::QuestionsOutcome::Capped) => {
+                            return Ok(Ran::Capped(
+                                "question edits stopped at the spend cap".into(),
+                            ));
+                        }
+                        Ok(o) => return Ok(Ran::Done(format!("{o:?}"))),
+                        Err(AudioError::Label(LabelError::CapReached(m))) => {
+                            return Ok(Ran::Capped(m));
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                match audio::run(conn, talk, &deps, flag("retranscribe")).await {
                     Ok(o) => format!("{o:?}"),
                     Err(AudioError::Label(LabelError::CapReached(m))) => return Ok(Ran::Capped(m)),
                     Err(e) => return Err(e.into()),
@@ -345,12 +382,17 @@ impl Stages {
         Ok(Ran::Done(outcome))
     }
 
-    /// The labeler and recognition hints an audio run needs for `talk`.
+    /// The labeler, question editor and recognition hints an audio run needs for `talk`.
+    #[allow(clippy::type_complexity)]
     async fn audio_parts(
         &self,
         conn: &mut sqlx::PgConnection,
         talk: wt_core::ids::TalkId,
-    ) -> anyhow::Result<(Box<dyn WindowLabeler + '_>, AsrHints)> {
+    ) -> anyhow::Result<(
+        Box<dyn WindowLabeler + '_>,
+        Option<Box<dyn QuestionEditor + '_>>,
+        AsrHints,
+    )> {
         let class = textjobs::data_class(conn, talk).await?;
         let terms = wt_db::glossary::load(conn).await?;
         let hints = AsrHints {
@@ -369,24 +411,39 @@ impl Stages {
             }
             _ => Box::new(RuleFallbackLabeler),
         };
-        Ok((labeler, hints))
+        // Student questions go to the model under the same rule; otherwise no call is made and
+        // every gap keeps "A student asked a question" (Spec 04, Student questions).
+        let editor: Option<Box<dyn QuestionEditor + '_>> = match (&self.llm, &self.question_model) {
+            (Some(llm), Some(model)) if class == DataClass::Synthetic || self.real_data_ok => {
+                Some(Box::new(LlmQuestionEditor::new(llm, class, model.clone())))
+            }
+            _ => None,
+        };
+        Ok((labeler, editor, hints))
     }
 
     fn audio_deps<'a>(
         &'a self,
         labeler: &'a dyn WindowLabeler,
+        editor: Option<&'a dyn QuestionEditor>,
         hints: &'a AsrHints,
         ffmpeg: &'a Ffmpeg,
+        text_only: bool,
     ) -> anyhow::Result<AudioDeps<'a>> {
-        let (Some(whisper), Some(diarizer), Some(fetcher)) =
-            (&self.whisper, &self.diarizer, &self.fetcher)
-        else {
-            bail!("this worker was not started for audio jobs");
+        let (transcriber, diarizer, fetcher): (
+            &dyn wt_asr::Transcriber,
+            &dyn wt_segment::Diarizer,
+            &MediaFetcher,
+        ) = match (&self.whisper, &self.diarizer, &self.fetcher) {
+            (Some(w), Some(d), Some(f)) => (w, d, f),
+            (_, _, Some(f)) if text_only => (&NoAudio, &NoAudio, f),
+            _ => bail!("this worker was not started for audio jobs"),
         };
         Ok(AudioDeps {
-            transcriber: whisper,
+            transcriber,
             diarizer,
             labeler,
+            editor,
             converter: ffmpeg,
             fetcher,
             objects: &self.objects,
@@ -404,9 +461,10 @@ impl Stages {
         conn: &mut sqlx::PgConnection,
         talk: wt_core::ids::TalkId,
     ) -> anyhow::Result<audio::SampleOutcome> {
-        let (labeler, hints) = self.audio_parts(conn, talk).await?;
+        // The sample stores nothing, so no question is edited and nothing is charged for one.
+        let (labeler, _, hints) = self.audio_parts(conn, talk).await?;
         let ffmpeg = Ffmpeg::default();
-        let deps = self.audio_deps(labeler.as_ref(), &hints, &ffmpeg)?;
+        let deps = self.audio_deps(labeler.as_ref(), None, &hints, &ffmpeg, false)?;
         Ok(audio::sample(conn, talk, &deps).await?)
     }
 
@@ -421,6 +479,37 @@ impl Stages {
     }
 }
 
+/// Recognition and diarization for a worker that runs only `questions` jobs, which never fetch:
+/// a text-only talk needs neither, so any call is refused.
+struct NoAudio;
+
+#[async_trait::async_trait]
+impl wt_asr::Transcriber for NoAudio {
+    async fn transcribe(
+        &self,
+        _scratch: &wt_core::scratch::ScratchDir,
+        _audio: &Path,
+        _hints: &AsrHints,
+    ) -> Result<wt_asr::RawTranscript, wt_asr::AsrError> {
+        Err(wt_asr::AsrError::Failed(
+            "this worker has no WT_WHISPER_CLI and runs only text-only talks".into(),
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl wt_segment::Diarizer for NoAudio {
+    async fn diarize(
+        &self,
+        audio: &Path,
+    ) -> Result<Vec<wt_segment::Turn>, wt_segment::DiarizeError> {
+        Err(wt_segment::DiarizeError::Read {
+            path: audio.display().to_string(),
+            message: "this worker has no diarizer and runs only text-only talks".into(),
+        })
+    }
+}
+
 /// The Claude client for the ingestion stages, refusing to start without a model or key.
 fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<ClaudeClient> {
     let api_key = config
@@ -428,7 +517,7 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
         .clone()
         .context("ANTHROPIC_API_KEY must be set for the language-model stages")?;
     let mut models = BTreeMap::new();
-    for stage in [LlmStage::Extract, LlmStage::Classify] {
+    for stage in [LlmStage::Extract, LlmStage::Classify, LlmStage::Question] {
         let model = config.llm_model_for(stage)?;
         require_licensed(config, model)?;
         models.insert(stage.as_str(), model.to_owned());

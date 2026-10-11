@@ -4,9 +4,11 @@
 pub mod extract;
 pub mod labeler;
 pub mod llm;
+pub mod question;
 pub mod resolve;
 
 pub use labeler::LlmLabeler;
+pub use question::LlmQuestionEditor;
 
 pub use llm::{
     Alerter, ClaudeClient, ClaudeSettings, DataClass, FakeLlm, Ledger, LlmClient, LlmError,

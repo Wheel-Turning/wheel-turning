@@ -43,11 +43,14 @@ pub enum JobKind {
     OcrChunk,
     /// The import of a large PDF once every chunk is read.
     TextAssemble,
+    /// A text-only talk's student questions recovered from its stored source text, with no
+    /// fetch (Spec 04, Student questions, step 7).
+    Questions,
 }
 
 impl JobKind {
     /// Every kind, in pipeline order.
-    pub const ALL: [JobKind; 8] = [
+    pub const ALL: [JobKind; 9] = [
         JobKind::Classify,
         JobKind::Audio,
         JobKind::Correct,
@@ -56,6 +59,7 @@ impl JobKind {
         JobKind::Index,
         JobKind::OcrChunk,
         JobKind::TextAssemble,
+        JobKind::Questions,
     ];
 
     /// The value stored in `job.kind`.
@@ -69,6 +73,7 @@ impl JobKind {
             JobKind::Index => "index",
             JobKind::OcrChunk => "ocr_chunk",
             JobKind::TextAssemble => "text_assemble",
+            JobKind::Questions => "questions",
         }
     }
 

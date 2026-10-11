@@ -18,8 +18,10 @@ use wt_db::ingest::IngestDbError;
 use wt_db::job::{self, JobError, JobKind};
 use wt_db::talk::{TalkError, TalkRepo};
 use wt_db::transcript::{self, NewSegment, NewTranscript};
+use wt_segment::questions::{EditReport, EditedQuestion, edit_all};
 use wt_segment::{
-    DiarizeError, Diarizer, LabelError, SegmentSettings, Segmentation, SpanKind, WindowLabeler,
+    DiarizeError, Diarizer, LabelError, QuestionEditor, SegmentSettings, Segmentation, SpanKind,
+    WindowLabeler,
 };
 
 use crate::media::{MediaFetcher, MediaSource};
@@ -88,6 +90,9 @@ pub struct AudioDeps<'a> {
     pub hints: &'a AsrHints,
     /// Who the correction log names.
     pub actor: &'a str,
+    /// Edits student questions; `None` when the talk's text may not go to the model, so every
+    /// gap keeps "A student asked a question" (Spec 04, Student questions).
+    pub editor: Option<&'a dyn QuestionEditor>,
 }
 
 /// How the job ended.
@@ -113,7 +118,67 @@ pub enum AudioOutcome {
         words: usize,
         /// Ambiguous windows labeled by the rule fallback instead of the model.
         fallback_windows: usize,
+        /// Student questions edited and staged for the index step.
+        questions: usize,
     },
+}
+
+/// The staged, edited student questions of a talk's current transcript, waiting for the index
+/// step to embed and store them in `student_question`. Under the transcript prefix, so a
+/// takedown deletes it with the transcript. It holds only edits, never a student's own words.
+pub fn questions_key(talk: TalkId) -> String {
+    format!("transcripts/{}/questions.json", talk.as_uuid())
+}
+
+/// The staged questions object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct StagedQuestions {
+    /// The transcript version they belong to.
+    pub transcript_version: i32,
+    /// The edits that passed the checks.
+    pub questions: Vec<EditedQuestion>,
+}
+
+/// Edits the answered student turns of `seg`, which are dropped here, and logs the outcome.
+async fn edit_questions(
+    conn: &mut sqlx::PgConnection,
+    talk: TalkId,
+    seg: &mut Segmentation,
+    deps: &AudioDeps<'_>,
+) -> Result<(Vec<EditedQuestion>, EditReport), AudioError> {
+    let turns = std::mem::take(&mut seg.questions);
+    let names = if turns.is_empty() || deps.editor.is_none() {
+        Vec::new()
+    } else {
+        transcript::registry_names(conn).await?
+    };
+    let (edited, report) = edit_all(&turns, deps.editor, &names, deps.segment).await;
+    drop(turns);
+    tracing::info!(%talk, turns = report.turns, stored = report.stored,
+                   rejected = ?report.rejected, failed = report.failed, capped = report.capped,
+                   no_editor = report.no_editor, "student questions");
+    Ok((edited, report))
+}
+
+/// Writes the staged questions for `version`, or removes a stale object when there are none.
+fn stage_questions(
+    objects: &dyn ObjectStore,
+    talk: TalkId,
+    version: i32,
+    questions: Vec<EditedQuestion>,
+) -> Result<Option<String>, ObjectError> {
+    let key = questions_key(talk);
+    if questions.is_empty() {
+        objects.delete_prefix(&key)?;
+        return Ok(None);
+    }
+    let staged = StagedQuestions {
+        transcript_version: version,
+        questions,
+    };
+    let json = serde_json::to_string(&staged).unwrap_or_default();
+    objects.put(&key, json.as_bytes())?;
+    Ok(Some(sha256_hex(json.as_bytes())))
 }
 
 /// The persisted transcript, Spec 04's schema 1.
@@ -328,6 +393,7 @@ async fn text_steps(
     text: &str,
     labeled_only: bool,
     deps: &AudioDeps<'_>,
+    advance: bool,
 ) -> Result<Steps, AudioError> {
     use crate::text_transcript::{TextPlan, plan, teacher_labels};
     let names = transcript::teacher_names(conn, talk.id).await?;
@@ -348,7 +414,9 @@ async fn text_steps(
         } => (words, turns, audio_ms),
     };
     tracing::info!(talk = %talk.id, words = words.len(), turns = turns.len(), "text-only transcript");
-    TalkRepo::advance(conn, talk, PipelineState::Segmenting).await?;
+    if advance {
+        TalkRepo::advance(conn, talk, PipelineState::Segmenting).await?;
+    }
     Ok(match segment_words(&words, &turns, audio_ms, deps).await? {
         Err(reason) => Steps::Held(reason),
         Ok((seg, fallback_windows)) => Steps::Segmented {
@@ -363,6 +431,8 @@ async fn text_steps(
 }
 
 /// How a segmentation sample went for one talk.
+// One value per sampled talk, built once and matched once: boxing would buy nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum SampleOutcome {
     /// The talk did not pass the gate.
@@ -422,16 +492,16 @@ pub async fn run(
             transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
             return Ok(AudioOutcome::NoMedia);
         }
-        (None, Some(text)) => text_steps(conn, &talk, text, false, deps).await?,
+        (None, Some(text)) => text_steps(conn, &talk, text, false, deps, true).await?,
         (Some(source), text) => match steps(Some(&mut *conn), &talk, &source, text, deps).await? {
             Steps::Held(reason) if reason == "alignment_failed" => match text {
-                Some(text) => text_steps(conn, &talk, text, true, deps).await?,
+                Some(text) => text_steps(conn, &talk, text, true, deps, true).await?,
                 None => Steps::Held(reason),
             },
             other => other,
         },
     };
-    let (seg, model, audio_ms, fallback_windows, aligned, origin) = match done {
+    let (mut seg, model, audio_ms, fallback_windows, aligned, origin) = match done {
         Steps::Held(reason) => {
             transcript::hold_for_review(conn, talk_id, &reason, deps.actor).await?;
             return Ok(AudioOutcome::Held(reason));
@@ -446,7 +516,11 @@ pub async fn run(
         } => (seg, model, audio_ms, fallback_windows, aligned, origin),
     };
 
+    // The student's words are in memory only, and scratch is already gone.
+    let (questions, _) = edit_questions(conn, talk_id, &mut seg, deps).await?;
     let version = transcript::next_version(conn, talk_id).await?;
+    let staged = questions.len();
+    stage_questions(deps.objects, talk_id, version, questions)?;
     let key = transcript_key(talk_id, version);
     let json = transcript_json(
         talk_id,
@@ -501,7 +575,226 @@ pub async fn run(
         segments: segments.len(),
         words: seg.words.len(),
         fallback_windows,
+        questions: staged,
     })
+}
+
+/// How a student-question backfill ended for one talk (Spec 04, Student questions, step 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuestionsOutcome {
+    /// The talk did not pass the gate.
+    NotCleared(GateError),
+    /// No current transcript to add questions to.
+    NoTranscript,
+    /// A person reviewed the transcript; no automated pass touches it.
+    Reviewed,
+    /// The talk has a recording, and this run may not fetch: it needs an `audio` job.
+    NeedsAudio,
+    /// The talk has neither a recording nor a source text.
+    NoMedia,
+    /// Segmenting again needed a person, for this reason. The talk keeps its state.
+    Held(String),
+    /// The run's teacher words differ from the stored ones, so the transcript is kept and no
+    /// question is added.
+    WordsChanged,
+    /// The spend cap stopped the edits; nothing was staged and the job waits.
+    Capped,
+    /// Questions edited and staged, with an `index` job queued when any changed.
+    Staged {
+        /// Answered student turns found.
+        turns: usize,
+        /// Edits staged.
+        questions: usize,
+        /// Edits the checks refused.
+        rejected: usize,
+    },
+}
+
+/// The current transcript's version and stored teacher words, as text.
+async fn current_words(
+    conn: &mut sqlx::PgConnection,
+    objects: &dyn ObjectStore,
+    talk: TalkId,
+) -> Result<Option<(i32, String, Vec<String>)>, AudioError> {
+    #[derive(serde::Deserialize)]
+    struct Stored {
+        words: Vec<StoredWord>,
+    }
+    #[derive(serde::Deserialize)]
+    struct StoredWord {
+        w: String,
+    }
+    let Some((version, key, hash)) = transcript::current(conn, talk).await? else {
+        return Ok(None);
+    };
+    let Some(bytes) = objects.get(&key)? else {
+        return Ok(None);
+    };
+    let words = serde_json::from_slice::<Stored>(&bytes)
+        .map(|s| s.words.into_iter().map(|w| w.w).collect())
+        .unwrap_or_default();
+    Ok(Some((version, hash, words)))
+}
+
+/// `wt pipeline student-questions`: runs a processed talk's segmentation again to recover its
+/// student questions, and stages them for its current transcript if its teacher words come out
+/// unchanged, queueing `index` to store them. The talk's state does not change, so a ready talk
+/// keeps serving. A text-only talk runs from its stored source text with no fetch; with
+/// `allow_fetch`, a talk with a recording is fetched and transcribed again, and without it, it
+/// is reported as needing an `audio` job.
+pub async fn backfill_questions(
+    conn: &mut sqlx::PgConnection,
+    talk_id: TalkId,
+    deps: &AudioDeps<'_>,
+    allow_fetch: bool,
+) -> Result<QuestionsOutcome, AudioError> {
+    let talk = match TalkRepo::authorize(conn, talk_id).await? {
+        Ok(talk) => talk,
+        Err(gate) => return Ok(QuestionsOutcome::NotCleared(gate)),
+    };
+    let from_text = match transcript::current_origin(conn, talk_id).await?.as_deref() {
+        None => return Ok(QuestionsOutcome::NoTranscript),
+        Some("reviewed") => return Ok(QuestionsOutcome::Reviewed),
+        Some(origin) => origin == "text",
+    };
+    let route = feed::media_route(conn, talk_id).await?;
+    let text = feed::source_transcript(conn, talk_id).await?;
+    let done = match (MediaSource::from_route(&route), text.as_deref()) {
+        (None, None) => return Ok(QuestionsOutcome::NoMedia),
+        (None, Some(text)) => text_steps(conn, &talk, text, false, deps, false).await?,
+        // A transcript made from the source's text alone, after its recording failed to align,
+        // is made again from the text: nothing is fetched.
+        (Some(_), Some(text)) if from_text => {
+            text_steps(conn, &talk, text, true, deps, false).await?
+        }
+        (Some(_), _) if !allow_fetch => return Ok(QuestionsOutcome::NeedsAudio),
+        (Some(source), text) => match steps(None, &talk, &source, text, deps).await? {
+            Steps::Held(reason) if reason == "alignment_failed" => match text {
+                Some(text) => text_steps(conn, &talk, text, true, deps, false).await?,
+                None => Steps::Held(reason),
+            },
+            other => other,
+        },
+    };
+    let mut seg = match done {
+        Steps::Held(reason) => return Ok(QuestionsOutcome::Held(reason)),
+        Steps::Segmented { seg, .. } => seg,
+    };
+    let Some((version, hash, stored)) = current_words(conn, deps.objects, talk_id).await? else {
+        return Ok(QuestionsOutcome::NoTranscript);
+    };
+    let unchanged =
+        seg.words.len() == stored.len() && seg.words.iter().zip(&stored).all(|(a, b)| a.text == *b);
+    if !unchanged {
+        seg.questions.clear();
+        tracing::info!(talk = %talk_id, "teacher words changed; transcript kept, no questions");
+        return Ok(QuestionsOutcome::WordsChanged);
+    }
+    let (questions, report) = edit_questions(conn, talk_id, &mut seg, deps).await?;
+    if report.capped {
+        return Ok(QuestionsOutcome::Capped);
+    }
+    let staged = questions.len();
+    let questions_hash = stage_questions(deps.objects, talk_id, version, questions)?;
+    if let Some(qh) = questions_hash {
+        job::enqueue(
+            conn,
+            JobKind::Index,
+            Some(talk_id),
+            &sha256_hex(format!("{hash}:questions:{qh}").as_bytes()),
+            &serde_json::json!({ "transcript_version": version, "student_questions": true }),
+        )
+        .await?;
+    }
+    Ok(QuestionsOutcome::Staged {
+        turns: report.turns,
+        questions: staged,
+        rejected: report.rejected.len(),
+    })
+}
+
+/// What `wt pipeline student-questions` found and queued.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StudentQuestionsReport {
+    /// Talks with a student gap and only a source text, rerun with no fetch.
+    pub text_only: usize,
+    /// Talks with a student gap and a recording, which need fetching and transcribing again.
+    pub recording: usize,
+    /// `questions` jobs queued for text-only talks.
+    pub text_only_queued: usize,
+    /// `audio` jobs queued for talks with recordings.
+    pub recording_queued: usize,
+    /// True when nothing was queued.
+    pub dry_run: bool,
+}
+
+/// `wt pipeline student-questions` (Spec 04, Student questions, step 7): counts the talks whose
+/// transcripts mark a student gap, text-only and with recordings, and queues them: a
+/// `questions` job for each text-only talk, and, unless `text_only`, an `audio` job asking for
+/// questions for each talk with a recording. Jobs are keyed by the current transcript, so asking
+/// again queues nothing new. With `dry_run`, only counts.
+pub async fn queue_student_questions(
+    conn: &mut sqlx::PgConnection,
+    talk: Option<TalkId>,
+    source: Option<&str>,
+    dry_run: bool,
+    text_only: bool,
+) -> Result<StudentQuestionsReport, AudioError> {
+    let talks = student_gap_talks(conn, talk, source).await?;
+    let mut report = StudentQuestionsReport {
+        text_only: talks.iter().filter(|(_, rec)| !rec).count(),
+        recording: talks.iter().filter(|(_, rec)| *rec).count(),
+        dry_run,
+        ..StudentQuestionsReport::default()
+    };
+    if dry_run {
+        return Ok(report);
+    }
+    for (id, recording) in talks {
+        if recording && text_only {
+            continue;
+        }
+        let Some((_, _, hash)) = transcript::current(conn, id).await? else {
+            continue;
+        };
+        let key = sha256_hex(format!("student-questions:{hash}").as_bytes());
+        let (kind, payload) = if recording {
+            (
+                JobKind::Audio,
+                serde_json::json!({ "student_questions": true }),
+            )
+        } else {
+            (JobKind::Questions, serde_json::json!({}))
+        };
+        if job::enqueue(conn, kind, Some(id), &key, &payload)
+            .await?
+            .is_some()
+        {
+            if recording {
+                report.recording_queued += 1;
+            } else {
+                report.text_only_queued += 1;
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Talks whose current transcript marks a student gap, for `wt pipeline student-questions`:
+/// each with whether recovering it needs the recording fetched again. A transcript made from
+/// the source's text alone, origin `text`, does not. Reviewed transcripts are left out.
+pub async fn student_gap_talks(
+    conn: &mut sqlx::PgConnection,
+    talk: Option<TalkId>,
+    source: Option<&str>,
+) -> Result<Vec<(TalkId, bool)>, AudioError> {
+    let mut out = Vec::new();
+    for (id, origin) in transcript::student_gap_talks(conn, talk, source).await? {
+        let recording = origin != "text"
+            && MediaSource::from_route(&feed::media_route(conn, id).await?).is_some();
+        out.push((id, recording));
+    }
+    Ok(out)
 }
 
 #[allow(clippy::too_many_arguments)]

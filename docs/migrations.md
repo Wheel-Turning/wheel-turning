@@ -40,6 +40,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0026 | `0026_text_unit_vector_version.sql` | Embeddings (#72) | `text_unit.vector_version`, default 1: how a unit's vector was computed beyond its model, so `wt text reembed` finds units embedded in batches (Spec 04, decision of October 9, 2026) | None new: `wt_pipeline` already updates `text_unit` |
 | 0027 | `0027_work_level_citations.sql` | Work-level citations (#74) | Each work's work-level locator `'*'`, kept by a trigger on `work`, and `work_name` as a citation method (Spec 08, Work-level citations) | None new |
 | 0028 | `0028_talk_speaker_assigned_by.sql` | Speaker by hand | `talk.speaker_assigned_by`: who assigned the speaker by hand, so classification leaves it alone (Spec 03, Assigning a speaker by hand) | None new: `wt_pipeline` already updates `talk` |
+| 0029 | `0029_student_questions.sql` | Student questions | `student_question` with its HNSW index; view `servable_student_question` with `servable_passage`'s talk, teacher, sangha and rights conditions (Spec 04, Student questions) | select, insert, delete on `student_question` to `wt_pipeline`; select on `servable_student_question` to `wt_pipeline` and `wt_web` |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 
