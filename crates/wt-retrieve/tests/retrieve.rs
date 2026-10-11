@@ -403,3 +403,78 @@ async fn a_talk_that_stops_serving_is_never_retrieved() {
     assert!(r.chosen.iter().all(|c| c.teacher_id != ada));
     assert_eq!(ids(&r).intersection(&planted).count(), 2);
 }
+
+/// Spec 04, Student questions, step 6: a query that matches only a student question finds the
+/// teacher passage that answers it, the first one starting at or after the answer, and never
+/// the question itself. Named mode searches only that teacher's questions.
+#[tokio::test]
+async fn a_query_matching_only_a_student_question_returns_the_teachers_answer() {
+    let fx = start().await;
+    corpus(&fx.pool).await;
+    let di = talk(
+        &fx.pool,
+        "Di Placeholder",
+        &texts(&["The garden needs weeding", "Sweeping the zendo floor"]),
+    )
+    .await;
+    let question = "What about loneliness on long retreats?";
+    let question_id: Uuid = sqlx::query_scalar(
+        "insert into student_question (talk_id, transcript_id, start_ms, end_ms, answer_start_ms,
+                                       text, word_count, content_hash, embedding,
+                                       embedding_model, edit_model)
+         select p.talk_id, tr.id, 100000, 110000, 115000, $2, 6, 'h', $3::text::vector, $4,
+                'fake-editor'
+         from passage p join transcript tr on tr.talk_id = p.talk_id
+         where p.id = $1 returning id",
+    )
+    .bind(di[0].as_uuid())
+    .bind(question)
+    .bind(search::vector_literal(&FakeEmbedder::vector(question)))
+    .bind(MODEL)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+
+    let v = FakeEmbedder::new(MODEL)
+        .embed(&["loneliness on long retreats".to_owned()])
+        .await
+        .unwrap()
+        .remove(0);
+    let mut conn = fx.pool.acquire().await.unwrap();
+    assert!(
+        search::full_text(&mut conn, "loneliness | long | retreats", None, 60)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no passage holds the words"
+    );
+    let hits = search::question_vector(&mut conn, &v, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        hits,
+        vec![di[1]],
+        "the first passage at or after the answer"
+    );
+    let bo = teacher_id(&fx.pool, "Bo Sample").await;
+    assert!(
+        search::question_vector(&mut conn, &v, Some(bo), 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    drop(conn);
+
+    let r = ask(
+        &fx.pool,
+        &detector(&fx.pool).await,
+        "loneliness on long retreats",
+        None,
+    )
+    .await;
+    assert_eq!(r.chosen.first().map(|c| c.id), Some(di[1]));
+    assert!(
+        r.chosen.iter().all(|c| c.id.as_uuid() != question_id),
+        "a question is never returned"
+    );
+}

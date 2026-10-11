@@ -21,6 +21,7 @@
   <h2 id="g{{ loop.index }}">{{ g.teacher }} <span class="muted">· {{ g.sangha }}</span></h2>
   {% for p in g.passages %}
   <article class="passage" id="p{{ p.number }}">
+    {% if let Some(q) = p.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>{% endif %}
     <blockquote>{{ p.text }}</blockquote>
     <p class="meta">{{ p.meta }}</p>
     <p class="links">

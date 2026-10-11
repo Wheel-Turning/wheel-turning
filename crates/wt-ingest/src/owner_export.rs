@@ -15,6 +15,8 @@ use wt_db::transcript::{self, ExportTalk};
 use wt_index::{ChunkSettings, chunk};
 use wt_registry::glossary::Glossary;
 
+use wt_segment::questions::{ATTRIBUTION, EDIT_LABEL, GAP_LABEL};
+
 use crate::textjobs::{TextJobError, corrected};
 
 /// One block of a talk's text, in order.
@@ -34,6 +36,34 @@ pub enum Block {
         /// Where it started.
         start_ms: i32,
     },
+    /// A student's question, lightly edited by machine, attributed only to "Student" (Spec 04,
+    /// Student questions).
+    Question {
+        /// The edited text.
+        text: String,
+        /// Where the student turn started.
+        start_ms: i32,
+    },
+}
+
+/// Puts each stored question before the first paragraph at or after its answer, replacing the
+/// "A student asked a question" mark there.
+fn place_questions(blocks: &mut Vec<Block>, questions: &[wt_db::questions::StoredQuestion]) {
+    for q in questions {
+        let Some(at) = blocks.iter().position(
+            |b| matches!(b, Block::Paragraph { start_ms, .. } if *start_ms >= q.answer_start_ms),
+        ) else {
+            continue;
+        };
+        let question = Block::Question {
+            text: q.text.clone(),
+            start_ms: q.start_ms,
+        };
+        match at.checked_sub(1).map(|i| &blocks[i]) {
+            Some(Block::Gap { label, .. }) if *label == GAP_LABEL => blocks[at - 1] = question,
+            _ => blocks.insert(at, question),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,8 +102,9 @@ fn gap_label(kind: &str) -> Option<&'static str> {
 }
 
 /// A talk's text as blocks: each segment's corrected words packed into paragraphs by the
-/// chunker, the transcript's non-talk spans between segments as gaps, and "A student asked a question"
-/// before each teacher answer. Also returns the recognition model's name.
+/// chunker, the transcript's non-talk spans between segments as gaps, and before each teacher
+/// answer its student's question, lightly edited, or where none is stored "A student asked a
+/// question". Also returns the recognition model's name.
 pub async fn talk_blocks(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
@@ -115,7 +146,7 @@ pub async fn talk_blocks(
         }
         if seg.kind == "qa_teacher" {
             blocks.push(Block::Gap {
-                label: "A student asked a question",
+                label: GAP_LABEL,
                 start_ms: seg.start_ms,
             });
         }
@@ -136,6 +167,7 @@ pub async fn talk_blocks(
             });
         }
     }
+    place_questions(&mut blocks, &wt_db::questions::stored(conn, talk).await?);
     Ok((blocks, doc.model))
 }
 
@@ -189,7 +221,7 @@ pub fn render(talk: &ExportTalk, teacher: &str, blocks: &[Block], model: Option<
         )
     };
     out.push_str(&format!(
-        "_{provenance} Only the teacher's words are kept: students' questions and voices are never stored._\n\n---\n\n"
+        "_{provenance} Only the teacher's words are kept, with each student's question lightly edited by machine and attributed to \"{ATTRIBUTION}\"; students' own words and voices are never stored._\n\n---\n\n"
     ));
     for b in blocks {
         match b {
@@ -198,6 +230,12 @@ pub fn render(talk: &ExportTalk, teacher: &str, blocks: &[Block], model: Option<
             }
             Block::Gap { label, start_ms } => {
                 out.push_str(&format!("_[{label}, {}]_\n\n", clock(*start_ms)));
+            }
+            Block::Question { text, start_ms } => {
+                out.push_str(&format!(
+                    "**{ATTRIBUTION}:** {text} [{}]\n\n_{EDIT_LABEL}_\n\n",
+                    clock(*start_ms)
+                ));
             }
         }
     }
@@ -301,6 +339,10 @@ mod tests {
                 label: "A student asked a question",
                 start_ms: 600_000,
             },
+            Block::Question {
+                text: "How do I begin again?".into(),
+                start_ms: 660_000,
+            },
         ];
         let md = render(&talk, "Ada Fixture", &blocks, Some("whisper-large-v3"));
         assert!(md.starts_with("# Beginning Again: A Fixture\n"));
@@ -309,6 +351,14 @@ mod tests {
         assert!(md.contains("_[Chanting, 0:00:00]_"));
         assert!(md.contains("We sit together. [0:01:05]"));
         assert!(md.contains("_[A student asked a question, 0:10:00]_"));
+        assert!(md.contains(
+            "**Student:** How do I begin again? [0:11:00]\n\n_Question lightly edited by machine; \
+             names and identifying details removed._"
+        ));
+        assert!(
+            !md.contains("> How do I"),
+            "a question is never a quotation"
+        );
         assert_eq!(
             file_name(&talk),
             "2026-10-07-beginning-again-a-fixture-00000000.md"

@@ -1,5 +1,6 @@
 //! Full-text and vector search (Spec 05, steps 1 and 2). Every query here reads
-//! `servable_passage` and nothing else (CLAUDE.md rule 3).
+//! `servable_passage`, and the student-question search `servable_student_question`, and nothing
+//! else (CLAUDE.md rule 3).
 
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -113,6 +114,44 @@ pub async fn vector(
         }
     };
     Ok(rows.into_iter().map(PassageId::from).collect())
+}
+
+/// The third list (Spec 04, Student questions, step 6): the student questions nearest the
+/// query, each standing for the first servable passage of its talk that starts at or after the
+/// question's answer start. A question is never returned on its own, and one whose answer has
+/// no servable passage gives nothing. Nearest first, each passage once. Named mode searches
+/// that teacher's questions only.
+pub async fn question_vector(
+    conn: &mut PgConnection,
+    embedding: &[f32],
+    teacher: Option<TeacherId>,
+    k: i64,
+) -> Result<Vec<PassageId>, sqlx::Error> {
+    let literal = vector_literal(embedding);
+    let rows: Vec<Uuid> = sqlx::query_scalar!(
+        r#"select p.passage_id as "passage_id!"
+           from (select q.talk_id, q.answer_start_ms, q.embedding <=> $1::text::vector as d
+                 from servable_student_question q
+                 where $2::uuid is null or q.teacher_id = $2
+                 order by q.embedding <=> $1::text::vector
+                 limit $3) q
+           join lateral (select sp.passage_id from servable_passage sp
+                         where sp.talk_id = q.talk_id and sp.start_ms >= q.answer_start_ms
+                         order by sp.start_ms, sp.ordinal limit 1) p on true
+           order by q.d"#,
+        literal,
+        teacher.map(|t| t.as_uuid()),
+        k
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut out: Vec<PassageId> = Vec::with_capacity(rows.len());
+    for id in rows.into_iter().map(PassageId::from) {
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    Ok(out)
 }
 
 /// A candidate's text and the fields selection needs.

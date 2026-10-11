@@ -118,6 +118,25 @@ fn consented_ready() -> String {
 /// is a metadata gap. M3 replaces this with `config/series.toml`.
 const SERIES_PATTERN: &str = "(genjokoan|genjo koan|uji|bendowa|blue cliff|grass hut)";
 
+/// Spec 07's student speech check: a `qa_student` segment, or a stored student question holding
+/// a registry name, an email address, a phone number, a web address or six digits in a row
+/// (Spec 04, Student questions). A one-word name under three letters is not matched, as in the
+/// edit's own check.
+const STUDENT_SPEECH: &str = r#"select id::text from segment where kind = 'qa_student'
+union all
+select 'question ' || q.id::text from student_question q
+where q.text ~ '[0-9]{6,}'
+   or q.text ~ '[[:alnum:]._+-]+@[[:alnum:]-]+\.[[:alnum:].-]+'
+   or q.text ~* '(https?://|www\.)'
+   or q.text ~* '\m[a-z0-9-]+\.(com|org|net|edu|gov|io|info|co|us|uk|ca|de)\M'
+   or length(regexp_replace(coalesce(substring(q.text from '\+?\(?[0-9][0-9 ().-]{5,}[0-9]'), ''),
+                            '[^0-9]', '', 'g')) >= 7
+   or exists (select 1 from (select display_name as n from teacher
+                             union select alias from teacher_alias
+                             union select name from sangha) r
+              where (length(r.n) >= 3 or r.n like '% %')
+                and q.text ~* ('\m' || regexp_replace(r.n, '([^[:alnum:] ])', '\\\1', 'g') || '\M'))"#;
+
 /// Runs every database check.
 pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, DbError> {
     let mut checks = Vec::new();
@@ -157,15 +176,44 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         },
     });
 
+    // Rule 3's checks over every stored student question (Spec 04, Student questions): none
+    // outlives its talk's rights, and the serving view shows exactly the ones the rule allows.
     checks.push(
         check(
             pool,
-            "student_speech",
+            "question_consent_drift",
             Severity::Fail,
-            "select id::text from segment where kind = 'qa_student'",
+            &format!(
+                "select q.id::text from student_question q join talk t on t.id = q.talk_id
+                 where not ({RIGHTS_VALID})"
+            ),
         )
         .await?,
     );
+    let in_view: i64 =
+        sqlx::query_scalar!(r#"select count(*) as "n!" from servable_student_question"#)
+            .fetch_one(pool)
+            .await?;
+    let expected: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select count(*) from student_question q join talk t on t.id = q.talk_id where {}",
+        consented_ready()
+    )))
+    .fetch_one(pool)
+    .await?;
+    checks.push(CheckResult {
+        name: "question_serving_parity",
+        severity: Severity::Fail,
+        findings: (in_view - expected).abs(),
+        examples: if in_view == expected {
+            vec![]
+        } else {
+            vec![format!(
+                "servable_student_question has {in_view} rows, expected {expected}"
+            )]
+        },
+    });
+
+    checks.push(check(pool, "student_speech", Severity::Fail, STUDENT_SPEECH).await?);
 
     // Takedown completeness: any row left in a deleting store for a talk in a logged scope.
     let mut leftovers = Vec::new();

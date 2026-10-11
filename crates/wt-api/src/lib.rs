@@ -461,6 +461,7 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
 #[template(path = "answer.html")]
 struct AnswerPage {
     query: String,
+    question_label: &'static str,
     view: view::AnswerView,
     answer_id: AnswerId,
     csrf: String,
@@ -503,17 +504,22 @@ async fn answer_page(
             .flatten(),
         None => None,
     };
-    let view = view::assemble(
+    let mut view = view::assemble(
         answer,
         &stored.payload,
         &served,
         named.as_deref(),
         state.site.retrieval.answer.link_lead_in_ms,
     );
+    match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
+        Ok(q) => view::attach_questions(&mut view, &q),
+        Err(e) => return server_error("loading student questions", &e),
+    }
     page(
         StatusCode::OK,
         &AnswerPage {
             query: stored.query_text,
+            question_label: view::QUESTION_LABEL,
             view,
             answer_id: answer,
             csrf: s.csrf(&state.site.keys),
@@ -617,6 +623,10 @@ struct Row {
     at: String,
     text: String,
     gap_before: bool,
+    /// The student's question this passage answers, lightly edited.
+    question: Option<String>,
+    /// An answer whose question has no stored edit: "A student asked a question".
+    asked: bool,
 }
 
 #[derive(Template)]
@@ -629,6 +639,7 @@ struct TranscriptPage {
     credit: String,
     source_href: String,
     rows: Vec<Row>,
+    question_label: &'static str,
 }
 
 /// Passages further apart than this get a marked gap on the transcript page.
@@ -652,14 +663,25 @@ async fn transcript_page(
     if card.display_level != "full" {
         return not_found_page();
     }
+    let questions = match wt_db::questions::for_talk(&state.pool, talk, GAP_MS).await {
+        Ok(q) => q,
+        Err(e) => return server_error("loading student questions", &e),
+    };
     let mut rows = Vec::with_capacity(passages.len());
     let mut last_end: Option<i32> = None;
     for p in &passages {
+        let question = questions
+            .shown
+            .iter()
+            .find(|q| q.passage_id == p.id)
+            .map(|q| q.text.clone());
         rows.push(Row {
             ordinal: p.ordinal,
             at: view::clock(i64::from(p.start_ms)),
             text: p.text.clone(),
             gap_before: last_end.is_some_and(|e| p.start_ms - e > GAP_MS),
+            asked: question.is_none() && questions.asked.contains(&p.id),
+            question,
         });
         last_end = Some(p.end_ms);
     }
@@ -673,6 +695,7 @@ async fn transcript_page(
             credit: view::credit_line(&card),
             source_href: card.source_url.clone(),
             rows,
+            question_label: view::QUESTION_LABEL,
         },
     )
 }

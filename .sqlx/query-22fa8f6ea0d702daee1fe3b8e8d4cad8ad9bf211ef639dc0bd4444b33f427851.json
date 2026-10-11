@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from student_question where talk_id = any($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "22fa8f6ea0d702daee1fe3b8e8d4cad8ad9bf211ef639dc0bd4444b33f427851"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into student_question (talk_id, transcript_id, start_ms, end_ms,\n                                           answer_start_ms, text, word_count, content_hash,\n                                           embedding, embedding_model, edit_model)\n             select $1, tr.id, $2, $3, $4, $5, $6, $7, $8::text::vector, $9, $10\n             from transcript tr where tr.talk_id = $1 and tr.is_current",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9de882c1d254c096a9e5a1bc8599c53aea452dfda6b919f858e63a0cee922a51"
+}

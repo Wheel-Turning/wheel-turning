@@ -94,6 +94,26 @@ pub struct PlannedCitation {
     pub work_locator_id: Option<Uuid>,
 }
 
+/// A staged student question, lightly edited (Spec 04, Student questions), to store with its
+/// vector beside the talk's passages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexQuestion {
+    /// Start of the student turn.
+    pub start_ms: i32,
+    /// End of the student turn.
+    pub end_ms: i32,
+    /// Start of the teacher's answer.
+    pub answer_start_ms: i32,
+    /// The edited text, which is what is embedded.
+    pub text: String,
+    /// Its words.
+    pub word_count: i32,
+    /// SHA-256 of the text.
+    pub content_hash: String,
+    /// The model that edited it.
+    pub edit_model: String,
+}
+
 /// What the index step will write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
@@ -105,6 +125,8 @@ pub struct Plan {
     pub skipped_short: usize,
     /// Citations whose first word is in no kept passage.
     pub dropped_citations: usize,
+    /// The talk's student questions, embedded after the passages.
+    pub questions: Vec<IndexQuestion>,
     /// `talk.content_hash`: the passages, the citations and the embedder's vector ID (the
     /// model and how vectors are computed, `Embedder::vector_id`).
     pub content_hash: String,
@@ -227,8 +249,38 @@ pub fn plan(
         citations: planned,
         skipped_short,
         dropped_citations,
+        questions: Vec::new(),
         content_hash: sha256_hex(h.as_bytes()),
     })
+}
+
+impl Plan {
+    /// Adds the talk's student questions. With any, they join the content hash, so a talk
+    /// whose questions change is indexed again; with none, the hash is as before.
+    pub fn with_questions(mut self, questions: Vec<IndexQuestion>) -> Self {
+        if !questions.is_empty() {
+            let mut h = format!("{}\u{1e}", self.content_hash);
+            for q in &questions {
+                h.push_str(&format!(
+                    "q\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1e}",
+                    q.start_ms, q.end_ms, q.answer_start_ms, q.content_hash
+                ));
+            }
+            self.content_hash = sha256_hex(h.as_bytes());
+        }
+        self.questions = questions;
+        self
+    }
+
+    /// The texts to embed, in the order [`write`] takes their vectors: the passages, then the
+    /// questions.
+    pub fn texts(&self) -> Vec<String> {
+        self.passages
+            .iter()
+            .map(|p| p.passage.text.clone())
+            .chain(self.questions.iter().map(|q| q.text.clone()))
+            .collect()
+    }
 }
 
 /// Whether the talk is `ready` with exactly this content hash, so indexing again would change
@@ -261,8 +313,9 @@ fn vector_literal(v: &[f32]) -> String {
     s
 }
 
-/// Replaces the talk's passages and citations and records the content hash. Run it inside the
-/// transaction that moves the talk to `ready`; the caller commits.
+/// Replaces the talk's passages, citations and student questions and records the content hash.
+/// `vectors` are the passages' and then the questions', as [`Plan::texts`] lists them. Run it
+/// inside the transaction that moves the talk to `ready`; the caller commits.
 pub async fn write(
     conn: &mut PgConnection,
     talk: Uuid,
@@ -271,13 +324,16 @@ pub async fn write(
     model_id: &str,
     dim: usize,
 ) -> Result<(), IndexError> {
-    if vectors.len() != plan.passages.len() || vectors.iter().any(|v| v.len() != dim) {
+    let wanted = plan.passages.len() + plan.questions.len();
+    if vectors.len() != wanted || vectors.iter().any(|v| v.len() != dim) {
         return Err(IndexError::Embedding(format!(
-            "{} vectors for {} passages",
+            "{} vectors for {} passages and {} questions",
             vectors.len(),
-            plan.passages.len()
+            plan.passages.len(),
+            plan.questions.len()
         )));
     }
+    let (vectors, question_vectors) = vectors.split_at(plan.passages.len());
     // Deleting the passages cascades to their citations.
     sqlx::query!("delete from passage where talk_id = $1", talk)
         .execute(&mut *conn)
@@ -370,6 +426,32 @@ pub async fn write(
     )
     .execute(&mut *conn)
     .await?;
+
+    // Student questions belong to the current transcript; a talk without any keeps none.
+    sqlx::query!("delete from student_question where talk_id = $1", talk)
+        .execute(&mut *conn)
+        .await?;
+    for (q, v) in plan.questions.iter().zip(question_vectors) {
+        sqlx::query!(
+            "insert into student_question (talk_id, transcript_id, start_ms, end_ms,
+                                           answer_start_ms, text, word_count, content_hash,
+                                           embedding, embedding_model, edit_model)
+             select $1, tr.id, $2, $3, $4, $5, $6, $7, $8::text::vector, $9, $10
+             from transcript tr where tr.talk_id = $1 and tr.is_current",
+            talk,
+            q.start_ms,
+            q.end_ms,
+            q.answer_start_ms,
+            q.text,
+            q.word_count,
+            q.content_hash,
+            vector_literal(v),
+            model_id,
+            q.edit_model
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
 
     sqlx::query!(
         "update talk set content_hash = $2, last_verified_at = now() where id = $1",

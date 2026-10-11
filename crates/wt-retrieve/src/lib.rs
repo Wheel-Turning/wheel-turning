@@ -1,7 +1,8 @@
 //! Hybrid search, reranking and passage selection (Spec 05, steps 1 to 5).
 //!
 //! [`retrieve`] takes a parsed query to a ranked, diverse selection of passage ids. It reads
-//! only `servable_passage`, and nothing it sees carries sangha, profile, volume or donation
+//! only `servable_passage` and `servable_student_question`, whose hits stand for the teacher
+//! passages that answer them, and nothing it sees carries sangha, profile, volume or donation
 //! fields, so those can never move a passage (CLAUDE.md rules 3 and 4). Answer assembly joins
 //! sangha details afterwards.
 
@@ -126,8 +127,10 @@ pub async fn retrieve(
         cfg.retrieval.hnsw_ef_search,
     )
     .await?;
+    let question_hits =
+        search::question_vector(&mut tx, &vector, named, cfg.retrieval.vector_top_k).await?;
     let fused = fuse::rrf(
-        &[&fts, &vec_hits],
+        &[&fts, &vec_hits, &question_hits],
         cfg.retrieval.rrf_k,
         cfg.retrieval.fuse_top_k,
     );
@@ -172,6 +175,7 @@ pub async fn retrieve(
         select_ms = timings.select_ms,
         fts = fts.len(),
         vector = vec_hits.len(),
+        questions = question_hits.len(),
         passages = chosen.len(),
         teachers = teacher_count,
         rerank_degraded,

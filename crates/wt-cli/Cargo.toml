@@ -26,6 +26,7 @@ wt-db.workspace = true
 wt-registry.workspace = true
 wt-ingest.workspace = true
 wt-asr.workspace = true
+async-trait = "0.1"
 wt-segment.workspace = true
 wt-extract.workspace = true
 wt-index.workspace = true

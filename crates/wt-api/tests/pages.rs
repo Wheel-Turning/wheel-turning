@@ -503,3 +503,74 @@ async fn named_mode_makes_no_synthesis_call() {
         "no model call in named mode"
     );
 }
+
+/// Spec 04, Student questions, step 5: the transcript and answer pages show the student's
+/// question, lightly edited, with "Student" and the edit label, above the answer and outside
+/// any blockquote.
+#[tokio::test]
+async fn the_pages_show_a_students_question_as_context_not_quotation() {
+    let fx = start().await;
+    let question = "How do I stay with <b>anger</b> when it is strong?";
+    let talk: Uuid = sqlx::query_scalar(
+        "insert into student_question (talk_id, transcript_id, start_ms, end_ms, answer_start_ms,
+                                       text, word_count, content_hash, embedding,
+                                       embedding_model, edit_model)
+         select t.id, tr.id, 50000, 60000, 64000, $1, 10, 'h', p.embedding, $2, 'fake-editor'
+         from talk t join transcript tr on tr.talk_id = t.id join passage p on p.talk_id = t.id
+         returning talk_id",
+    )
+    .bind(question)
+    .bind(MODEL)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    let shown = "How do I stay with &#60;b&#62;anger&#60;/b&#62; when it is strong?";
+    let label = "Question lightly edited by machine; names and identifying details removed.";
+    let cookie = join(&fx, "owner").await;
+
+    let transcript = send(
+        &fx.app,
+        get(&format!("/talk/{talk}/transcript"), Some(&cookie)),
+    )
+    .await;
+    assert_eq!(transcript.status, StatusCode::OK);
+    let at = transcript
+        .body
+        .find(&format!("<strong>Student:</strong> {shown}"))
+        .unwrap_or_else(|| panic!("{}", transcript.body));
+    assert!(
+        at < transcript.body.find("When anger arises").unwrap(),
+        "above its answer"
+    );
+    assert!(transcript.body.contains(label));
+    assert!(!transcript.body.contains("A student asked a question"));
+
+    let home = send(&fx.app, get("/", Some(&cookie))).await;
+    let asked = send(
+        &fx.app,
+        post(
+            "/ask",
+            &cookie,
+            &format!(
+                "q={}&csrf={}",
+                encode("How do I work with anger?"),
+                encode(&csrf(&home.body))
+            ),
+        ),
+    )
+    .await;
+    let permalink = asked.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let page = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    let at = page
+        .body
+        .find(&format!("<strong>Student:</strong> {shown}"))
+        .unwrap_or_else(|| panic!("{}", page.body));
+    let quote = page.body.find("<blockquote>").unwrap();
+    assert!(at < quote, "above the passage");
+    let blockquote = &page.body[quote..page.body.find("</blockquote>").unwrap()];
+    assert!(
+        !blockquote.contains("stay with"),
+        "never inside the quotation"
+    );
+    assert!(page.body.contains(label));
+}

@@ -1095,6 +1095,7 @@ mod tests {
                 text: "We sit together today".into(),
             }],
             student_turns: vec![(135_000, 139_000)],
+            questions: vec![],
             unaligned_words: 0,
         };
         let talk = TalkId::from(sqlx::types::Uuid::nil());

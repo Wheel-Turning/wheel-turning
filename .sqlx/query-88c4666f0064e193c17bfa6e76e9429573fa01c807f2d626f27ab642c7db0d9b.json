@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\", segment_kind::text as \"kind!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\"\n           from servable_passage where talk_id = $1 order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "start_ms!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "start_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "end_ms!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "end_ms"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "88c4666f0064e193c17bfa6e76e9429573fa01c807f2d626f27ab642c7db0d9b"
+}

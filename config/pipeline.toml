@@ -94,6 +94,10 @@ aggregator_hosts = ["terebess.hu"]
 diarize_scope = "qa"
 qa_preroll_s = 60
 monologue_max_replies_per_hour = 4.0
+# Student questions (Spec 04): an edit of more words, or sharing under this share of its content
+# words with what the student said, is not stored.
+student_question_max_words = 120
+student_question_min_overlap = 0.5
 multi_speaker_share = 0.35
 sitting_silence_s = 120
 window_s = 60

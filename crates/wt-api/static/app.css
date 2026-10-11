@@ -55,6 +55,8 @@ blockquote { margin: 0; padding: 0 0 0 1rem; border-left: 3px solid var(--ink); 
 .flag { margin-top: 3rem; border-top: 1px solid var(--rule); }
 .tx { margin: 0.75rem 0; }
 .gap { text-align: center; }
+.student-question { margin: 0 0 0.75rem; padding: 0.5rem 0.75rem; background: var(--band); border-radius: 4px; font-family: var(--sans); }
+.student-question p { margin: 0.25rem 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 footer.site { background: var(--dark); color: var(--on-dark); padding: 2rem 0; margin-top: 3rem; }
 footer.site a { color: var(--on-dark); }

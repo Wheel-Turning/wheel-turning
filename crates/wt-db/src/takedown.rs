@@ -177,6 +177,12 @@ pub(crate) async fn run_in(
     sqlx::query!("delete from citation where talk_id = any($1)", &talk_ids)
         .execute(&mut *tx)
         .await?;
+    sqlx::query!(
+        "delete from student_question where talk_id = any($1)",
+        &talk_ids
+    )
+    .execute(&mut *tx)
+    .await?;
     sqlx::query!("delete from segment where talk_id = any($1)", &talk_ids)
         .execute(&mut *tx)
         .await?;

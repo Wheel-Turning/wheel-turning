@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select p.passage_id as \"passage_id!\"\n           from (select q.talk_id, q.answer_start_ms, q.embedding <=> $1::text::vector as d\n                 from servable_student_question q\n                 where $2::uuid is null or q.teacher_id = $2\n                 order by q.embedding <=> $1::text::vector\n                 limit $3) q\n           join lateral (select sp.passage_id from servable_passage sp\n                         where sp.talk_id = q.talk_id and sp.start_ms >= q.answer_start_ms\n                         order by sp.start_ms, sp.ordinal limit 1) p on true\n           order by q.d",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a85cd01a975938753ef61f18a65856e5fad9303f7f4425862af2794177f94657"
+}

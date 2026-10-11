@@ -28,7 +28,9 @@ use wt_ingest::textjobs::{self, PgHandList, TextOutcome, staging_key};
 use wt_ml::FakeEmbedder;
 use wt_registry::RegistryFile;
 use wt_registry::glossary::{Glossary, GlossaryTerm, TermKind};
-use wt_segment::{FakeDiarizer, FixedLabeler, Label, SegmentSettings, Turn};
+use wt_segment::{
+    FakeDiarizer, FakeEditor, FixedLabeler, Label, QuestionEditor, SegmentSettings, Turn,
+};
 
 const REGISTRY: &str = r#"
 [[sangha]]
@@ -211,6 +213,16 @@ fn extraction_reply() -> serde_json::Value {
 
 /// Runs one claimed or direct stage for the fixture talk.
 async fn run_stage(fx: &Fx, kind: JobKind, llm: &FakeLlm) -> String {
+    run_stage_with(fx, kind, llm, None).await
+}
+
+/// Runs a stage with a student-question editor for the `audio` job.
+async fn run_stage_with(
+    fx: &Fx,
+    kind: JobKind,
+    llm: &FakeLlm,
+    editor: Option<&dyn QuestionEditor>,
+) -> String {
     let (words, turns, audio_ms) = timeline();
     let transcriber = FakeTranscriber::new(words, audio_ms);
     let diarizer = FakeDiarizer::new(turns);
@@ -240,6 +252,7 @@ async fn run_stage(fx: &Fx, kind: JobKind, llm: &FakeLlm) -> String {
                 segment: &segment,
                 hints: &hints,
                 actor: "test",
+                editor,
             };
             format!(
                 "{:?}",
@@ -307,6 +320,7 @@ async fn snapshot(pool: &PgPool) -> Vec<(String, i64, String)> {
         "citation",
         "job",
         "llm_usage",
+        "student_question",
     ] {
         let row: (i64, Option<String>) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             // The table names are the constants above.
@@ -413,6 +427,135 @@ async fn a_synthetic_talk_goes_from_cleared_to_ready_and_rerunning_every_stage_c
     assert!(leftover.is_none(), "{leftover:?}");
     assert_eq!(snapshot(&fx.pool).await, before);
     assert_eq!(objects.get(&staging_key(fx.talk)).unwrap(), staged);
+}
+
+/// The fixture student says `s750` to `s799`; the editor keeps eight of the words.
+fn editor() -> FakeEditor<impl Fn(&str) -> String + Send + Sync> {
+    FakeEditor::new(|s: &str| {
+        let w: Vec<&str> = s.split_whitespace().take(8).collect();
+        format!("Teacher, about {}?", w.join(" "))
+    })
+}
+
+fn the_edit() -> String {
+    let w: Vec<String> = (750..758).map(|i| format!("s{i}")).collect();
+    format!("Teacher, about {}?", w.join(" "))
+}
+
+/// Spec 04, Student questions: the student's question is stored only as its edit, with its
+/// embedding, beside the teacher's answer; rerunning every stage changes nothing; the owner's
+/// export shows it with the label; and a talk takedown leaves no question behind.
+#[tokio::test]
+async fn a_students_question_is_stored_only_as_its_edit_and_goes_with_its_talk() {
+    let fx = start().await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    audio::advance_cleared(&mut conn).await.unwrap();
+    let llm = FakeLlm::new(vec![Ok(extraction_reply())]);
+    let editor = editor();
+    while let Some(claimed) = job::claim(&mut conn, &STAGES, "test").await.unwrap() {
+        run_stage_with(&fx, claimed.kind, &llm, Some(&editor)).await;
+        job::succeed(&mut conn, &claimed).await.unwrap();
+    }
+    let rows: Vec<(String, i32, i32, i32, String, String)> = sqlx::query_as(
+        "select text, start_ms, end_ms, answer_start_ms, edit_model, embedding_model
+         from student_question where talk_id = $1",
+    )
+    .bind(fx.talk.as_uuid())
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (text, start, _, answer, model, embed) = &rows[0];
+    assert_eq!(text, &the_edit());
+    assert_eq!((*start, *answer), (300_000, 320_000));
+    assert_eq!(
+        (model.as_str(), embed.as_str()),
+        ("fake-editor", "fake-bge-m3")
+    );
+    let served: i64 =
+        sqlx::query_scalar("select count(*) from servable_student_question where talk_id = $1")
+            .bind(fx.talk.as_uuid())
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(served, 1);
+
+    // The student's other words are nowhere: not in the transcript, segments, passages or the
+    // staged edit.
+    let objects = LocalObjects::new(fx.dir.join("objects"));
+    let transcript = objects
+        .get(&audio::transcript_key(fx.talk, 1))
+        .unwrap()
+        .unwrap();
+    let staged = objects
+        .get(&audio::questions_key(fx.talk))
+        .unwrap()
+        .unwrap();
+    for bytes in [&transcript, &staged] {
+        let text = String::from_utf8_lossy(bytes);
+        assert!(!text.contains("s760") && !text.contains("s799"), "{text}");
+    }
+    let stored: i64 = sqlx::query_scalar(
+        "select (select count(*) from segment where text ~ 's7[5-9][0-9]')
+              + (select count(*) from passage where text ~ 's7[5-9][0-9]')",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, 0);
+    assert!(
+        wt_core::scratch::leftovers(&fx.dir.join("scratch"))
+            .unwrap()
+            .is_empty()
+    );
+
+    // Every stage again: nothing changes and the editor is not asked again.
+    let before = snapshot(&fx.pool).await;
+    let silent = FakeLlm::new(vec![]);
+    for kind in STAGES {
+        run_stage_with(&fx, kind, &silent, Some(&editor)).await;
+    }
+    assert_eq!(snapshot(&fx.pool).await, before);
+    assert_eq!(editor.calls.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+    // The owner's export shows the question with the label, in place of the bare gap.
+    let out = fx.dir.join("owner-export");
+    let report = wt_ingest::owner_export::export_teacher(
+        &mut conn,
+        &objects,
+        &glossary(),
+        &ChunkSettings::default(),
+        "Ada",
+        &out,
+    )
+    .await
+    .unwrap();
+    let md = std::fs::read_to_string(report.dir.join(&report.files[0])).unwrap();
+    assert!(
+        md.contains(&format!("**Student:** {} [0:05:00]", the_edit())),
+        "{md}"
+    );
+    assert!(
+        md.contains("_Question lightly edited by machine; names and identifying details removed._")
+    );
+    assert!(!md.contains("A student asked a question"), "{md}");
+
+    // A talk takedown leaves no question, and its staged edit goes with the transcript.
+    wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(fx.talk), "test")
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("select count(*) from student_question")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+    audio::delete_talk_objects(&objects, &[fx.talk]).unwrap();
+    assert!(
+        objects
+            .get(&audio::questions_key(fx.talk))
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Spec 04, Owner exports, and Spec 03, display level e: the teacher's talk is written for their

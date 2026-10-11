@@ -116,6 +116,40 @@ pub async fn teacher_names(conn: &mut PgConnection, talk: TalkId) -> Result<Vec<
     .await?)
 }
 
+/// Talks whose current, unreviewed transcript marks a student gap (a teacher's answer), with
+/// an optional talk or source filter (Spec 04, Student questions, step 7).
+pub async fn student_gap_talks(
+    conn: &mut PgConnection,
+    talk: Option<TalkId>,
+    source: Option<&str>,
+) -> Result<Vec<TalkId>, DbError> {
+    let rows = sqlx::query_scalar!(
+        r#"select t.id from talk t
+           join transcript tr on tr.talk_id = t.id and tr.is_current and tr.origin <> 'reviewed'
+           where exists (select 1 from segment s where s.talk_id = t.id and s.kind = 'qa_teacher')
+             and ($1::uuid is null or t.id = $1)
+             and ($2::text is null or t.source_key = $2)
+           order by t.id"#,
+        talk.map(|t| t.as_uuid()),
+        source
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.into_iter().map(TalkId::from).collect())
+}
+
+/// Every teacher name, alias and sangha name in the registry: an edited student question may
+/// hold none of them (Spec 04, Student questions).
+pub async fn registry_names(conn: &mut PgConnection) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        r#"select display_name as "name!" from teacher
+           union select alias from teacher_alias
+           union select name from sangha"#
+    )
+    .fetch_all(&mut *conn)
+    .await?)
+}
+
 /// Holds a talk in the pipeline for a person: `needs_review` with `reason`, such as
 /// `multi_speaker` or `no_media`, logged in `correction_log`. Returns whether it moved.
 pub async fn hold_for_review(

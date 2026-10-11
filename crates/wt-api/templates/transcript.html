@@ -7,9 +7,11 @@
 <p class="meta">{{ meta }}</p>
 <p class="credit">{{ credit }}</p>
 <p><a href="{{ source_href }}" target="_blank" rel="noopener noreferrer">Open the source (opens in a new tab)</a></p>
-<p class="muted">This text was transcribed by machine and may contain errors. Only the teacher's words are shown.</p>
+<p class="muted">This text was transcribed by machine and may contain errors. Only the teacher's words are shown as spoken; students' questions appear lightly edited by machine, as context.</p>
 {% for r in rows %}
-{% if r.gap_before %}<p class="gap muted" aria-hidden="true">· · ·</p>{% endif %}
+{% if let Some(q) = r.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>
+{% else if r.asked %}<p class="gap muted">A student asked a question</p>
+{% else if r.gap_before %}<p class="gap muted" aria-hidden="true">· · ·</p>{% endif %}
 <p id="p{{ r.ordinal }}" class="tx"><span class="muted small">{{ r.at }}</span> {{ r.text }}</p>
 {% endfor %}
 </div>

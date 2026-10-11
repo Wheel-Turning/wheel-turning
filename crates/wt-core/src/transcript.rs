@@ -3,6 +3,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The line every displayed student question carries (Spec 04, Student questions, step 5).
+pub const STUDENT_QUESTION_LABEL: &str =
+    "Question lightly edited by machine; names and identifying details removed.";
+
+/// Who a student question is attributed to: never a name.
+pub const STUDENT_ATTRIBUTION: &str = "Student";
+
+/// What a student gap shows when no edited question is stored.
+pub const STUDENT_GAP_LABEL: &str = "A student asked a question";
+
 /// One recognized word.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Word {

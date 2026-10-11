@@ -20,7 +20,7 @@ use wt_extract::extract::{self, Staging};
 use wt_extract::resolve::{self, HandList, WorkNames};
 use wt_extract::{DataClass, LlmClient, LlmError};
 use wt_index::ChunkSettings;
-use wt_index::index::{self, IndexCitation, IndexSegment};
+use wt_index::index::{self, IndexCitation, IndexQuestion, IndexSegment};
 use wt_ml::Embedder;
 use wt_registry::glossary::Glossary;
 
@@ -597,6 +597,8 @@ pub struct Indexed {
     pub skipped_short: usize,
     /// Citations in no kept passage.
     pub dropped_citations: usize,
+    /// Student questions written.
+    pub questions: usize,
     /// Whether anything was written.
     pub written: bool,
 }
@@ -659,12 +661,33 @@ pub async fn run_index(
             }
         })
         .collect();
-    let plan = index::plan(&index_segments, &citations, chunk, &embedder.vector_id())?;
+    // The talk's edited student questions, staged by the `audio` job (Spec 04, Student
+    // questions), are embedded and stored beside its passages.
+    let questions: Vec<IndexQuestion> = match objects.get(&crate::audio::questions_key(talk_id))? {
+        Some(bytes) => serde_json::from_slice::<crate::audio::StagedQuestions>(&bytes)
+            .map_err(|e| TextJobError::Missing(format!("staged questions for {talk_id}: {e}")))?
+            .questions
+            .into_iter()
+            .map(|q| IndexQuestion {
+                start_ms: q.start_ms,
+                end_ms: q.end_ms,
+                answer_start_ms: q.answer_start_ms,
+                text: q.text,
+                word_count: q.word_count,
+                content_hash: q.content_hash,
+                edit_model: q.edit_model,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let plan = index::plan(&index_segments, &citations, chunk, &embedder.vector_id())?
+        .with_questions(questions);
     let mut indexed = Indexed {
         passages: plan.passages.len(),
         citations: plan.citations.len(),
         skipped_short: plan.skipped_short,
         dropped_citations: plan.dropped_citations,
+        questions: plan.questions.len(),
         written: false,
     };
     if index::is_current(conn, talk_id.as_uuid(), &plan.content_hash).await? {
@@ -672,12 +695,7 @@ pub async fn run_index(
     }
     // A ready talk keeps serving its old passages until the new ones commit.
     advance_forward(conn, &talk, PipelineState::Indexing).await?;
-    let texts: Vec<String> = plan
-        .passages
-        .iter()
-        .map(|p| p.passage.text.clone())
-        .collect();
-    let vectors = embedder.embed(&texts).await?;
+    let vectors = embedder.embed(&plan.texts()).await?;
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     index::write(
         &mut tx,
