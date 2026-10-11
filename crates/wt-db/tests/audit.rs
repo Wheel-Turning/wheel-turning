@@ -101,7 +101,7 @@ async fn consent_drift_fails_when_passages_outlive_consent() {
     // Consent falling back to requested returns the talk to the gate and keeps its passages.
     consent(&fx.pool, ADA, ConsentStatus::Requested).await;
     let report = audit(&fx.pool, Env::Prod).await;
-    only(&report, &["consent_drift"]);
+    only(&report, &["consent_drift", "question_consent_drift"]);
     assert!(report.failed());
     let drift = report
         .checks
@@ -394,7 +394,7 @@ async fn consent_drift_fails_for_an_excluded_talk_that_kept_its_passages() {
         .unwrap();
 
     let report = audit(&fx.pool, Env::Prod).await;
-    only(&report, &["consent_drift"]);
+    only(&report, &["consent_drift", "question_consent_drift"]);
     assert!(report.failed());
 }
 
@@ -651,19 +651,8 @@ async fn a_mandated_source_warns_once_the_tool_is_public() {
 #[tokio::test]
 async fn stored_student_questions_get_rule_threes_checks() {
     let fx = common::start().await;
+    // `make_ready` stores one question with the passage.
     let t = clean(&fx.pool).await;
-    sqlx::query(
-        "insert into student_question (talk_id, transcript_id, start_ms, end_ms, answer_start_ms,
-                                       text, word_count, content_hash, embedding,
-                                       embedding_model, edit_model)
-         select p.talk_id, tr.id, 1000, 2000, 3000, 'What is the fixture asking?', 5, 'h',
-                p.embedding, p.embedding_model, 'fake-editor'
-         from passage p join transcript tr on tr.talk_id = p.talk_id where p.talk_id = $1",
-    )
-    .bind(t.as_uuid())
-    .execute(&fx.pool)
-    .await
-    .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
 
     // A question holding a name or contact detail is student speech.
