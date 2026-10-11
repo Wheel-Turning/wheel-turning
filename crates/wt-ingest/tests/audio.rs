@@ -1155,6 +1155,7 @@ async fn a_real_talk_makes_no_model_call_until_real_data_is_allowed() {
             api_key: wt_core::Secret::new("fixture-key"),
             models,
             real_data_ok: false,
+            workspace_id: None,
             retry_base: std::time::Duration::from_millis(1),
         },
         wt_extract::PriceTable {
