@@ -260,6 +260,12 @@ fn stem(word: &str) -> String {
     word.to_owned()
 }
 
+/// Filter 5, a third check: a passage label such as "P3" in the sentence. The page numbers
+/// passages differently from the model's refs, so a label would point to the wrong passage.
+pub fn has_passage_label(description: &str) -> bool {
+    words(description).iter().any(|w| is_label(w))
+}
+
 /// A passage label such as `p3`, which is not a content word.
 fn is_label(word: &str) -> bool {
     word.strip_prefix('p')
@@ -294,7 +300,7 @@ mod tests {
     #[test]
     fn one_sentence_passes_a_single_short_sentence() {
         assert_eq!(
-            one_sentence("P1 and P2 both treat judging thoughts as weather to be watched."),
+            one_sentence("Both passages treat judging thoughts as weather to be watched."),
             None
         );
         assert_eq!(
@@ -330,6 +336,20 @@ mod tests {
             "The teacher's view and the student\u{2019}s doubt."
         ));
         assert!(!has_quotation_mark("Both treat doubt as a doorway."));
+    }
+
+    #[test]
+    fn passage_labels_are_found_in_the_sentence() {
+        assert!(has_passage_label(
+            "P1 and P3 both treat doubt as a doorway."
+        ));
+        assert!(has_passage_label("Unlike p12, others stress breath."));
+        assert!(!has_passage_label(
+            "Several passages treat doubt as a doorway."
+        ));
+        assert!(!has_passage_label(
+            "Practice begins at step 1 with posture."
+        ));
     }
 
     #[test]
