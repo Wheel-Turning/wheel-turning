@@ -9,7 +9,8 @@
 # script copies the repository's committed files to it, runs setup.sh, sends the Hugging Face
 # token over SSH into a file only the owner can read, and runs work.sh with a reverse tunnel so
 # the machine reaches the PC's database on its own localhost:55433; the database is never
-# exposed. Every two minutes, and at the end, it copies the transcripts back into data/objects.
+# exposed. Every two minutes, and at the end, it copies new and changed transcripts back into
+# data/objects, each replaced whole (see sync_objects).
 # Delete the machine afterwards: it is billed by the hour.
 set -euo pipefail
 HOST=${1:?usage: run.sh user@host [workers] [hours]}
@@ -41,9 +42,27 @@ step "token"
 grep '^HF_TOKEN=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n' |
   "${SSH[@]}" "$HOST" 'umask 077 && cat > ~/.wt-hf-token'
 
+# Each sync unpacks into a staging folder of its own, and only then moves new or changed files
+# into data/objects, each with a rename. Unpacking straight into data/objects rewrote every
+# transcript in place every two minutes, so a local job could read one half written and die on
+# it (October 11, 2026). A rename replaces a file whole, and an unchanged file is not touched.
+# An interrupted transfer moves nothing; the next sync sends everything again.
+STAGE="$MAIN/data/objects.incoming/$(printf '%s' "$HOST" | tr -c 'A-Za-z0-9.' '_')"
 sync_objects() {
-  "${SSH[@]}" "$HOST" 'cd ~/wt && if [ -d data/objects ]; then tar -cf - data/objects; fi' |
-    tar -x -C "$MAIN" 2> /dev/null || true
+  rm -rf "$STAGE" && mkdir -p "$STAGE"
+  if ! "${SSH[@]}" "$HOST" 'cd ~/wt && if [ -d data/objects ]; then tar -cf - data/objects; fi' |
+    tar -x -C "$STAGE" 2> /dev/null; then
+    return 0
+  fi
+  [ -d "$STAGE/data/objects" ] || return 0
+  (cd "$STAGE/data/objects" && find . -type f) | while IFS= read -r f; do
+    src="$STAGE/data/objects/$f"
+    dst="$MAIN/data/objects/$f"
+    cmp -s "$src" "$dst" && continue
+    mkdir -p "$(dirname "$dst")"
+    # A file a reader holds open on Windows cannot be replaced; it is sent again next sync.
+    mv -f "$src" "$dst" 2> /dev/null || true
+  done
 }
 (while sleep 120; do sync_objects; done) &
 SYNC=$!
