@@ -307,13 +307,20 @@ impl std::io::Write for Captured {
 
 #[tokio::test]
 async fn every_drop_and_its_reason_land_in_the_log() {
-    let captured = Captured::default();
-    let writer = captured.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    // A process-wide subscriber: tracing caches each callsite's interest globally, so a
+    // thread-local one can miss events while other tests run without a subscriber.
+    static CAPTURED: std::sync::OnceLock<Captured> = std::sync::OnceLock::new();
+    let captured = CAPTURED.get_or_init(|| {
+        let captured = Captured::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+        tracing::callsite::rebuild_interest_cache();
+        captured
+    });
     let llm = FakeLlm::new(vec![
         Ok(draft(vec![
             (GOOD, vec!["P1", "P2"]),
