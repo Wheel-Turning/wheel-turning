@@ -117,14 +117,15 @@ pub async fn teacher_names(conn: &mut PgConnection, talk: TalkId) -> Result<Vec<
 }
 
 /// Talks whose current, unreviewed transcript marks a student gap (a teacher's answer), with
-/// an optional talk or source filter (Spec 04, Student questions, step 7).
+/// the transcript's origin and an optional talk or source filter (Spec 04, Student questions,
+/// step 7).
 pub async fn student_gap_talks(
     conn: &mut PgConnection,
     talk: Option<TalkId>,
     source: Option<&str>,
-) -> Result<Vec<TalkId>, DbError> {
-    let rows = sqlx::query_scalar!(
-        r#"select t.id from talk t
+) -> Result<Vec<(TalkId, String)>, DbError> {
+    let rows = sqlx::query!(
+        r#"select t.id, tr.origin from talk t
            join transcript tr on tr.talk_id = t.id and tr.is_current and tr.origin <> 'reviewed'
            where exists (select 1 from segment s where s.talk_id = t.id and s.kind = 'qa_teacher')
              and ($1::uuid is null or t.id = $1)
@@ -135,7 +136,10 @@ pub async fn student_gap_talks(
     )
     .fetch_all(&mut *conn)
     .await?;
-    Ok(rows.into_iter().map(TalkId::from).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| (TalkId::from(r.id), r.origin))
+        .collect())
 }
 
 /// Every teacher name, alias and sangha name in the registry: an edited student question may

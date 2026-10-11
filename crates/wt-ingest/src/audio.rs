@@ -652,16 +652,21 @@ pub async fn backfill_questions(
         Ok(talk) => talk,
         Err(gate) => return Ok(QuestionsOutcome::NotCleared(gate)),
     };
-    match transcript::current_origin(conn, talk_id).await?.as_deref() {
+    let from_text = match transcript::current_origin(conn, talk_id).await?.as_deref() {
         None => return Ok(QuestionsOutcome::NoTranscript),
         Some("reviewed") => return Ok(QuestionsOutcome::Reviewed),
-        Some(_) => {}
-    }
+        Some(origin) => origin == "text",
+    };
     let route = feed::media_route(conn, talk_id).await?;
     let text = feed::source_transcript(conn, talk_id).await?;
     let done = match (MediaSource::from_route(&route), text.as_deref()) {
         (None, None) => return Ok(QuestionsOutcome::NoMedia),
         (None, Some(text)) => text_steps(conn, &talk, text, false, deps, false).await?,
+        // A transcript made from the source's text alone, after its recording failed to align,
+        // is made again from the text: nothing is fetched.
+        (Some(_), Some(text)) if from_text => {
+            text_steps(conn, &talk, text, true, deps, false).await?
+        }
         (Some(_), _) if !allow_fetch => return Ok(QuestionsOutcome::NeedsAudio),
         (Some(source), text) => match steps(None, &talk, &source, text, deps).await? {
             Steps::Held(reason) if reason == "alignment_failed" => match text {
@@ -776,16 +781,18 @@ pub async fn queue_student_questions(
 }
 
 /// Talks whose current transcript marks a student gap, for `wt pipeline student-questions`:
-/// each with whether it has a recording to fetch. Reviewed transcripts are left out.
+/// each with whether recovering it needs the recording fetched again. A transcript made from
+/// the source's text alone, origin `text`, does not. Reviewed transcripts are left out.
 pub async fn student_gap_talks(
     conn: &mut sqlx::PgConnection,
     talk: Option<TalkId>,
     source: Option<&str>,
 ) -> Result<Vec<(TalkId, bool)>, AudioError> {
     let mut out = Vec::new();
-    for id in transcript::student_gap_talks(conn, talk, source).await? {
-        let route = feed::media_route(conn, id).await?;
-        out.push((id, MediaSource::from_route(&route).is_some()));
+    for (id, origin) in transcript::student_gap_talks(conn, talk, source).await? {
+        let recording = origin != "text"
+            && MediaSource::from_route(&feed::media_route(conn, id).await?).is_some();
+        out.push((id, recording));
     }
     Ok(out)
 }
