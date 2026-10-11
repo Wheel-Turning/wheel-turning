@@ -6,6 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
+use wt_core::answer::StoredTheme;
 use wt_core::ids::{AnswerId, PassageId, SanghaId, TalkId, TeacherId, TesterId};
 
 use crate::DbError;
@@ -25,9 +26,9 @@ pub struct Payload {
     /// For `thin_coverage` and `named_few`: the count the notice states.
     #[serde(default)]
     pub notice_count: Option<u8>,
-    /// Synthesis themes; empty until M6.
+    /// Verified synthesis themes with the passage ids that support them.
     #[serde(default)]
-    pub themes: Vec<serde_json::Value>,
+    pub themes: Vec<StoredTheme>,
     /// Chosen passages, best first.
     pub passage_ids: Vec<PassageId>,
     /// The reranker was unavailable, so no relevance threshold applied.
@@ -52,6 +53,8 @@ pub struct NewAnswer<'a> {
     pub thin_coverage: bool,
     /// End-to-end time.
     pub latency_ms: i32,
+    /// Themes dropped by the filters or the verifier.
+    pub themes_dropped: i32,
 }
 
 /// Spec 06, Logging, rule 1: the query log, the answer and its passages in one transaction, so
@@ -59,10 +62,12 @@ pub struct NewAnswer<'a> {
 pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbError> {
     let mut tx = pool.begin().await?;
     let passages = i32::try_from(a.payload.passage_ids.len()).unwrap_or(i32::MAX);
+    let themes = i32::try_from(a.payload.themes.len()).unwrap_or(i32::MAX);
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
-                                sangha_count, passage_count, thin_coverage, latency_ms)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id",
+                                sangha_count, passage_count, thin_coverage, latency_ms,
+                                theme_count, themes_dropped)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id",
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -71,7 +76,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.sangha_count,
         passages,
         a.thin_coverage,
-        a.latency_ms
+        a.latency_ms,
+        themes,
+        a.themes_dropped
     )
     .fetch_one(&mut *tx)
     .await?;

@@ -23,3 +23,8 @@ named_per_talk_cap = 2
 
 [answer]
 link_lead_in_ms = 2000
+
+[synthesis]
+max_themes = 4
+min_grounding_ratio = 0.4  # tuned on the claim audit; a coarse guard against drift
+synthesis_timeout_s = 20   # per generation or verifier call

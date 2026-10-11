@@ -443,6 +443,7 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
         ClaudeSettings {
             base_url: "https://api.anthropic.com".into(),
             api_key,
+            workspace_id: config.anthropic_workspace_id.clone(),
             models,
             real_data_ok: config.llm_real_data_ok,
             retry_base: Duration::from_secs(2),

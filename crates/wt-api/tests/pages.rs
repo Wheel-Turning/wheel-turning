@@ -1,6 +1,6 @@
 //! Spec 06 acceptance for the pages the alpha uses: invite access, the session gate, CSRF,
-//! asking, the owner-only permalink, escaping, feedback and the security headers. Synthetic
-//! teachers and passages only.
+//! asking, the owner-only permalink, escaping, feedback and the security headers; and Spec 05's
+//! M6 items for the synthesis line. Synthetic teachers and passages only.
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use wt_api::{AppState, Site, router, session};
 use wt_core::gate::ConsentStatus;
 use wt_db::test_support::TestDb;
+use wt_extract::{DataClass, FakeLlm, LlmClient, LlmError, LlmRequest};
 use wt_ml::FakeEmbedder;
 use wt_registry::RegistryFile;
 
@@ -26,12 +27,19 @@ donation_url = "https://example.invalid/north"
 [[teacher]]
 display_name = "Ada Fixture"
 sangha = "North Fixture Zendo"
+
+[[teacher]]
+display_name = "Bo Fixture"
+sangha = "North Fixture Zendo"
 "#;
 
 const MODEL: &str = "fake-embed";
 const ACTOR: &str = "test";
 const ANGER: &str = "When anger arises, turn toward the anger and breathe with it. \
                      <script>alert(1)</script> The bell rang twice before the service.";
+const BO_ANGER: &str = "Anger is only energy. Sit with the anger, turn toward it, and breathe \
+                        until it softens on its own.";
+const THEME: &str = "Both passages turn toward anger and breathe with it.";
 
 struct Fx {
     _db: TestDb,
@@ -40,6 +48,11 @@ struct Fx {
 }
 
 async fn start() -> Fx {
+    start_with(Site::with_fakes(MODEL), false).await
+}
+
+/// A fixture with `site`; `two` adds Bo's passage on anger beside Ada's.
+async fn start_with(site: Site, two: bool) -> Fx {
     let db = TestDb::start()
         .await
         .expect("docker must be running for database tests");
@@ -47,35 +60,40 @@ async fn start() -> Fx {
     wt_db::migrate(&pool).await.unwrap();
     let file = RegistryFile::parse(REGISTRY, "fixture").unwrap();
     wt_db::registry::import(&pool, &file, ACTOR).await.unwrap();
-    passage(&pool, ANGER).await;
+    passage(&pool, "Ada Fixture", "vid1", ANGER).await;
+    if two {
+        passage(&pool, "Bo Fixture", "vid2", BO_ANGER).await;
+    }
     let app = router(AppState {
         pool: pool.clone(),
-        site: Arc::new(Site::with_fakes(MODEL)),
+        site: Arc::new(site),
     });
     Fx { _db: db, pool, app }
 }
 
-/// A ready, consented talk by Ada with one passage.
-async fn passage(pool: &PgPool, text: &str) {
+/// A ready, consented talk by `teacher` with one passage.
+async fn passage(pool: &PgPool, teacher: &str, video_id: &str, text: &str) {
     let video: Uuid = sqlx::query_scalar(
         "insert into source_video (platform, external_id, url, title)
-         values ('youtube', 'vid1', 'https://example.invalid/v', 'Fixture talk') returning id",
+         values ('youtube', $1, 'https://example.invalid/' || $1, 'Fixture talk') returning id",
     )
+    .bind(video_id)
     .fetch_one(pool)
     .await
     .unwrap();
     let talk: Uuid = sqlx::query_scalar(
         "insert into talk (source_video_id, title, teacher_id, sangha_id, rights_holder, state)
-         select $1, 'On anger', te.id, te.sangha_id, 'Ada Fixture', 'awaiting_consent'
-         from teacher te returning id",
+         select $1, 'On anger', te.id, te.sangha_id, te.display_name, 'awaiting_consent'
+         from teacher te where te.display_name = $2 returning id",
     )
     .bind(video)
+    .bind(teacher)
     .fetch_one(pool)
     .await
     .unwrap();
     wt_db::consent::set_consent(
         pool,
-        "Ada Fixture",
+        teacher,
         ConsentStatus::Granted,
         Some("f"),
         None,
@@ -335,5 +353,153 @@ async fn a_short_question_is_refused_with_the_message() {
     assert!(
         r.body
             .contains("Please write between 3 and 500 characters.")
+    );
+}
+
+// ---- synthesis (Spec 05, M6) ----------------------------------------------------------------
+
+fn theme_reply() -> serde_json::Value {
+    serde_json::json!({ "themes": [{ "description": THEME, "passage_refs": ["P1", "P2"] }] })
+}
+
+fn verdict(supported: bool) -> serde_json::Value {
+    let part = (!supported).then_some("breathe");
+    serde_json::json!({ "supported": supported, "unsupported_part": part })
+}
+
+fn site_with(llm: Arc<dyn LlmClient>) -> Site {
+    Site {
+        llm,
+        ..Site::with_fakes(MODEL)
+    }
+}
+
+/// Asks `question` and returns the answer page.
+async fn ask(fx: &Fx, question: &str) -> Reply {
+    let cookie = join(fx, "owner").await;
+    let token = csrf(&send(&fx.app, get("/", Some(&cookie))).await.body);
+    let asked = send(
+        &fx.app,
+        post(
+            "/ask",
+            &cookie,
+            &format!("q={}&csrf={}", encode(question), encode(&token)),
+        ),
+    )
+    .await;
+    assert_eq!(asked.status, StatusCode::SEE_OTHER, "{}", asked.body);
+    let permalink = asked.headers[header::LOCATION].to_str().unwrap().to_owned();
+    send(&fx.app, get(&permalink, Some(&cookie))).await
+}
+
+async fn theme_counts(pool: &PgPool) -> (i32, i32) {
+    sqlx::query_as("select theme_count, themes_dropped from query_log")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_verified_theme_renders_with_chips_and_is_stored_with_passage_ids() {
+    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(true))]));
+    let fx = start_with(site_with(llm.clone()), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("How approaches differ"), "{}", page.body);
+    assert_eq!(
+        page.body.matches(THEME).count(),
+        1,
+        "model text appears once"
+    );
+    let start = page.body.find("How approaches differ").unwrap();
+    let section = &page.body[start..];
+    let section = &section[..section.find("</section>").unwrap()];
+    assert!(section.contains(THEME), "and only in the section");
+    assert!(
+        section.contains("href=\"#p1\"") && section.contains("href=\"#p2\""),
+        "{section}"
+    );
+    assert!(page.body.contains("id=\"p1\"") && page.body.contains("id=\"p2\""));
+    assert!(
+        start < page.body.find("<blockquote>").unwrap(),
+        "above the passages"
+    );
+
+    assert_eq!(theme_counts(&fx.pool).await, (1, 0));
+    let stored: serde_json::Value = sqlx::query_scalar("select payload from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored["themes"][0]["description"], THEME);
+    assert_eq!(
+        stored["themes"][0]["passage_ids"], stored["passage_ids"],
+        "the code maps P1 and P2 to the offered ids"
+    );
+
+    let seen = llm.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert!(seen.iter().all(|(_, class)| *class == DataClass::Real));
+}
+
+#[tokio::test]
+async fn a_rejected_theme_leaves_no_section_and_counts_the_drop() {
+    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(false))]));
+    let fx = start_with(site_with(llm), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains(THEME));
+    assert_eq!(theme_counts(&fx.pool).await, (0, 1));
+}
+
+#[tokio::test]
+async fn a_failed_verifier_leaves_a_fully_rendered_answer_without_the_line() {
+    // The generation call succeeds and the verifier has no reply left, so it fails.
+    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply())]));
+    let fx = start_with(site_with(llm), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("How approaches differ"));
+    assert!(page.body.contains("Ada Fixture") && page.body.contains("Bo Fixture"));
+    assert_eq!(page.body.matches("<blockquote>").count(), 2);
+}
+
+/// A model that never answers in time.
+struct Stalled;
+
+#[async_trait::async_trait]
+impl LlmClient for Stalled {
+    async fn complete_value(
+        &self,
+        _: &LlmRequest,
+        _: &serde_json::Value,
+        _: DataClass,
+    ) -> Result<serde_json::Value, LlmError> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(theme_reply())
+    }
+}
+
+#[tokio::test]
+async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_line() {
+    let mut site = site_with(Arc::new(Stalled));
+    site.retrieval.synthesis.synthesis_timeout_s = 1;
+    let fx = start_with(site, true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("How approaches differ"));
+    assert_eq!(page.body.matches("<blockquote>").count(), 2);
+}
+
+#[tokio::test]
+async fn named_mode_makes_no_synthesis_call() {
+    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(true))]));
+    let fx = start_with(site_with(llm.clone()), true).await;
+    let page = ask(&fx, "What does Ada Fixture say about anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("How approaches differ"));
+    assert!(
+        llm.seen.lock().unwrap().is_empty(),
+        "no model call in named mode"
     );
 }
