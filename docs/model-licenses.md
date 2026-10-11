@@ -35,7 +35,9 @@ Loaded as ONNX with int8 quantization, exported by `scripts/export_models.py` (S
 | `BAAI/bge-m3` | `bge-m3-int8` (`WT_EMBED_MODEL`) | MIT | `5617a9f61b028005a4858fdac845db406aefb181` |
 | `BAAI/bge-reranker-v2-m3` | `bge-reranker-v2-m3-int8` (`WT_RERANK_MODEL`) | Apache-2.0 | `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` |
 
-The export of October 6, 2026 took `onnx/model.onnx` and `onnx/tokenizer.json` from bge-m3 at that revision and quantized the weights to int8 per channel with ONNX Runtime 1.30.0. Its `model.onnx` has SHA-256 `63e806d9763c82e8ffb55e32d577a64cacf2a57be1ac0d803f118cf770cb399d`, as its `export.json` records. The reranker is not exported yet.
+The export of October 6, 2026 took `onnx/model.onnx` and `onnx/tokenizer.json` from bge-m3 at that revision and quantized the weights to int8 per channel with ONNX Runtime 1.30.0. Its `model.onnx` has SHA-256 `63e806d9763c82e8ffb55e32d577a64cacf2a57be1ac0d803f118cf770cb399d`, as its `export.json` records.
+
+The reranker's repository holds safetensors and no ONNX graph, so the export of October 10, 2026 loaded bge-reranker-v2-m3 at the revision above with transformers, traced it to ONNX opset 17 with PyTorch 2.14.1 and quantized the weights to int8 per channel with ONNX Runtime 1.31.0. On the script's invented pairs the int8 logits move the sigmoid score by at most 0.007 from PyTorch fp32. Its `model.onnx` has SHA-256 `7506967c79d89f7d3bbee2f814e0a7cfc7515148073a56237eb4c89e9e9b6c06`, as its `export.json` records.
 
 ## Language models
 

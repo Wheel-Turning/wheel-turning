@@ -82,3 +82,31 @@ async fn a_vector_depends_on_its_text_alone() {
         "a text's vector moved by {drift} beside another text"
     );
 }
+
+/// Spec 05: the real bge-reranker-v2-m3 export. Also ignored by default, for the same reason.
+#[tokio::test]
+#[ignore = "needs the exported model and ONNX Runtime"]
+async fn bge_reranker_scores_a_relevant_passage_above_an_unrelated_one() {
+    use wt_ml::{OnnxReranker, Reranker};
+
+    let dir = std::env::var("WT_MODEL_DIR").expect("set WT_MODEL_DIR");
+    let mut settings = OnnxSettings::new(
+        dir,
+        std::env::var("WT_RERANK_MODEL").unwrap_or_else(|_| "bge-reranker-v2-m3-int8".into()),
+    );
+    settings.runtime = std::env::var("WT_ORT_DYLIB").ok().map(Into::into);
+    let r = OnnxReranker::load(&settings).unwrap();
+    // Invented sentences.
+    let query = "How do I sit with grief when it keeps returning?";
+    let passages: Vec<String> = vec![
+        "Sorrow comes back again and again; we let it sit with us on the cushion.".into(),
+        "The parking lot is closed on Sunday mornings for repaving.".into(),
+    ];
+    let started = std::time::Instant::now();
+    let a = r.score(query, &passages).await.unwrap();
+    let elapsed = started.elapsed();
+    let b = r.score(query, &passages).await.unwrap();
+    println!("{} pairs in {elapsed:?}; logits {a:?}", passages.len());
+    assert_eq!(a, b, "repeated runs differ");
+    assert!(a[0] > a[1] + 2.0, "{a:?}");
+}

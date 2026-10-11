@@ -1,14 +1,16 @@
 # Retrieval, selection and answer settings (Spec 05). Numeric values are starting points to
-# calibrate on the 50-question set before the first tester session.
+# calibrate on the 50-question set before the first tester session. fuse_top_k and
+# rerank_min_score were calibrated on the 20 Gate A questions on October 10, 2026 with the int8
+# reranker on the owner's CPU (PR description has the numbers).
 
 [retrieval]
 fts_top_k = 60
 vector_top_k = 60
 rrf_k = 60
-fuse_top_k = 40            # candidates sent to the reranker
+fuse_top_k = 20            # candidates sent to the reranker; 40 took 15 s or more on CPU
 hnsw_ef_search = 100
-rerank_min_score = 0.30    # sigmoid of the reranker logit; calibrate on the eval set
-rerank_timeout_s = 10
+rerank_min_score = 0.15    # sigmoid of the reranker logit; 0.30 cut on-topic passages
+rerank_timeout_s = 20      # 20 pairs took 5 to 8 s, and past 10 s when the CPU was shared
 
 [selection]
 target_teachers = 3
