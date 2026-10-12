@@ -267,7 +267,7 @@ pub async fn opt_out(
         .as_ref()
         .map(|t| t.talks.clone())
         .unwrap_or_default();
-    let deleted = crate::stages::delete_talk_objects(config, &talks)?;
+    let deleted = crate::stages::delete_talk_objects(pool, config, &talks).await?;
     print_json(&crate::stages::with_objects(&out, deleted))
 }
 

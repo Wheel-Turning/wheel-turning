@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use sqlx::PgPool;
+use sqlx::types::Uuid;
 use sqlx::types::chrono::{DateTime, Utc};
 use wt_db::job::{self, JobKind};
 use wt_db::test_support::TestDb;
@@ -426,6 +427,38 @@ async fn a_withdrawn_talk_is_never_requeued() {
     let report = discover(&fx, &adapter).await;
     assert_eq!(report.withdrawn, 1);
     assert!(classify_all(&fx).await.is_empty());
+    assert_eq!(rows(&fx.pool).await["1001"].state, "withdrawn");
+}
+
+/// Spec 07: the stub a takedown leaves blocks re-ingest of the same source video.
+#[tokio::test]
+async fn a_takedown_stub_blocks_reingest_of_its_source_video() {
+    let fx = start().await;
+    let adapter = FakeAdapter(Mutex::new(corpus()));
+    discover(&fx, &adapter).await;
+    classify_all(&fx).await;
+    let talk: Uuid = sqlx::query_scalar(
+        "select t.id from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.external_id = '1001'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(talk.into()), "test")
+        .await
+        .unwrap();
+
+    let report = discover(&fx, &adapter).await;
+    assert_eq!(report.withdrawn, 1);
+    assert!(classify_all(&fx).await.is_empty());
+    let talks: i64 = sqlx::query_scalar(
+        "select count(*) from talk t join source_video sv on sv.id = t.source_video_id
+         where sv.external_id = '1001'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(talks, 1, "discovery made no second talk for the video");
     assert_eq!(rows(&fx.pool).await["1001"].state, "withdrawn");
 }
 

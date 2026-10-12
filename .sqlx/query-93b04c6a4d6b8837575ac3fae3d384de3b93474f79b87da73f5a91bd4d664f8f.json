@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into speaker_consent (teacher_id, status, decided_at, created_by)\n                       values ($1, 'withdrawn', now(), $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93b04c6a4d6b8837575ac3fae3d384de3b93474f79b87da73f5a91bd4d664f8f"
+}

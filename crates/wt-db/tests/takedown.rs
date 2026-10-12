@@ -8,9 +8,12 @@ use sqlx::PgPool;
 use sqlx::types::Uuid;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::{PassageId, TalkId};
+use wt_core::objects::{LocalObjects, ObjectStore};
 use wt_core::stores;
 use wt_db::registry::RegistryDbError;
-use wt_db::takedown::{Scope, TakedownError, dry_run, run};
+use wt_db::takedown::{
+    Scope, TakedownError, TakedownRecord, complete, dry_run, finish, replay, run,
+};
 
 /// Ada has two ready talks, Bo has one. Returns (Ada's talks, Ada's passages, Bo's talk, Bo's
 /// passage).
@@ -259,17 +262,274 @@ async fn a_withdrawn_talk_stays_withdrawn_when_consent_is_granted_again() {
     }
 }
 
+/// A fresh local object store under the system temp directory.
+fn objects() -> (LocalObjects, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!("wt-takedown-{}", Uuid::new_v4()));
+    (LocalObjects::new(&root), root)
+}
+
+/// Writes what the pipeline stores for a talk: transcript versions, staged questions, glossary
+/// suggestions and the citation export.
+fn store_talk(store: &LocalObjects, talk: TalkId) {
+    let t = talk.as_uuid();
+    for key in [
+        format!("transcripts/{t}/v1.json"),
+        format!("transcripts/{t}/v2.json"),
+        format!("transcripts/{t}/questions.json"),
+        format!("transcripts/{t}/glossary_suggestions.csv"),
+        format!("citations/{t}.json"),
+    ] {
+        store.put(&key, b"{}").unwrap();
+    }
+}
+
+fn talk_keys(store: &LocalObjects, talk: TalkId) -> Vec<String> {
+    let t = talk.as_uuid();
+    let mut keys = store.list(&format!("transcripts/{t}/")).unwrap();
+    keys.extend(store.list(&format!("citations/{t}.json")).unwrap());
+    keys
+}
+
 #[tokio::test]
-async fn object_stores_are_reported_as_not_yet_checked() {
+async fn a_complete_takedown_leaves_no_rows_and_no_objects_in_any_registered_store() {
     let fx = common::start().await;
-    let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
-    let report = run(&fx.pool, &Scope::Talk(t), ACTOR).await.unwrap();
-    let names: Vec<&str> = report
-        .objects_not_checked
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(names, vec!["citation_objects", "transcript_objects"]);
+    let (ada_talks, _, bo_talk, _) = two_teachers(&fx.pool).await;
+    let (store, root) = objects();
+    for t in ada_talks.iter().chain([&bo_talk]) {
+        store_talk(&store, *t);
+    }
+
+    let dry = wt_db::takedown::dry_run_with_objects(&fx.pool, &Scope::Teacher(ADA.into()), &store)
+        .await
+        .unwrap();
+    assert_eq!(dry.objects["transcript_objects"], 8);
+    assert_eq!(dry.objects["citation_objects"], 2);
+    assert_eq!(
+        talk_keys(&store, ada_talks[0]).len(),
+        5,
+        "a dry run deletes nothing"
+    );
+
+    let report = complete(&fx.pool, &Scope::Teacher(ADA.into()), ACTOR, &store)
+        .await
+        .unwrap();
+    assert_eq!(report.objects["transcript_objects"], 8);
+    assert_eq!(report.objects["citation_objects"], 2);
+    for t in &ada_talks {
+        assert!(talk_keys(&store, *t).is_empty(), "objects left for {t}");
+        for (table, n) in rows_left(&fx.pool, *t).await {
+            assert_eq!(n, 0, "{table} still has rows for a withdrawn talk");
+        }
+    }
+    assert_eq!(talk_keys(&store, bo_talk).len(), 5, "Bo's objects stay");
+
+    // The takedown_log row is copied outside the database, holding ids and no words.
+    let log_id = report.log_id.unwrap();
+    let record: TakedownRecord = serde_json::from_slice(
+        &store
+            .get(&wt_db::takedown::record_key(log_id))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(record.scope, "teacher");
+    let mut talks = record.talks.clone();
+    talks.sort();
+    let mut expected = ada_talks.clone();
+    expected.sort();
+    assert_eq!(talks, expected);
+    assert_eq!(
+        record.sources.len(),
+        2,
+        "each talk's source video is recorded"
+    );
+    assert!(record.sources.values().all(|s| s.starts_with("youtube:")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn replay_lists_a_recorded_talk_the_restore_does_not_hold_with_its_source() {
+    let fx = common::start().await;
+    let (ada_talks, _, _, _) = two_teachers(&fx.pool).await;
+    let (store, root) = objects();
+    complete(&fx.pool, &Scope::Talk(ada_talks[0]), ACTOR, &store)
+        .await
+        .unwrap();
+    let source: String = sqlx::query_scalar(
+        "select 'youtube:' || sv.external_id from talk t
+         join source_video sv on sv.id = t.source_video_id where t.id = $1",
+    )
+    .bind(ada_talks[0].as_uuid())
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    // A snapshot from before the talk was discovered holds neither it nor the log row.
+    // Triggers are off for the session, as in a restore.
+    let mut conn = fx.pool.acquire().await.unwrap();
+    for sql in [
+        "set session_replication_role = replica",
+        "delete from takedown_log",
+        "set session_replication_role = origin",
+    ] {
+        sqlx::query(sql).execute(&mut *conn).await.unwrap();
+    }
+    sqlx::query("delete from talk where id = $1")
+        .bind(ada_talks[0].as_uuid())
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+
+    let report = replay(&fx.pool, &store, "restore").await.unwrap();
+    assert_eq!(report.missing_talks, [(ada_talks[0], Some(source))]);
+    assert!(report.talks_reapplied.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn finish_deletes_objects_a_takedown_left_behind() {
+    let fx = common::start().await;
+    let (ada_talks, _, bo_talk, _) = two_teachers(&fx.pool).await;
+    let (store, root) = objects();
+    for t in ada_talks.iter().chain([&bo_talk]) {
+        store_talk(&store, *t);
+    }
+    // The database step committed, then object deletion never ran.
+    run(&fx.pool, &Scope::Talk(ada_talks[0]), ACTOR)
+        .await
+        .unwrap();
+    assert_eq!(talk_keys(&store, ada_talks[0]).len(), 5);
+
+    let done = finish(&fx.pool, &store).await.unwrap();
+    assert_eq!(done.scopes, 1);
+    assert_eq!(done.records_written, 1);
+    assert_eq!(done.objects["transcript_objects"], 4);
+    assert!(talk_keys(&store, ada_talks[0]).is_empty());
+    assert_eq!(talk_keys(&store, ada_talks[1]).len(), 5, "not in scope");
+    assert_eq!(talk_keys(&store, bo_talk).len(), 5, "not in scope");
+
+    // Nothing left: a second finish deletes nothing and writes no record.
+    let again = finish(&fx.pool, &store).await.unwrap();
+    assert_eq!(again.objects.values().sum::<i64>(), 0);
+    assert_eq!(again.records_written, 0);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Puts the database back as a snapshot taken before Ada's takedown would hold it: her talks
+/// ready with their rows, her consent granted, and no takedown_log rows. Triggers are off for
+/// the session, as in a restore.
+async fn restore_snapshot(pool: &PgPool, talks: &[TalkId]) {
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::query("set session_replication_role = replica")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("delete from takedown_log")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("delete from speaker_consent where status = 'withdrawn'")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    let ids: Vec<Uuid> = talks.iter().map(TalkId::as_uuid).collect();
+    sqlx::query(
+        "update talk set state = 'cleared', state_reason = null, consent_status = 'granted'
+         where id = any($1)",
+    )
+    .bind(&ids)
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    sqlx::query("set session_replication_role = origin")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+    for t in talks {
+        make_ready(pool, *t).await;
+    }
+}
+
+#[tokio::test]
+async fn replay_reapplies_every_recorded_takedown_after_a_restore() {
+    let fx = common::start().await;
+    let (ada_talks, _, bo_talk, _) = two_teachers(&fx.pool).await;
+    let (store, root) = objects();
+    complete(&fx.pool, &Scope::Teacher(ADA.into()), ACTOR, &store)
+        .await
+        .unwrap();
+    assert_eq!(servable(&fx.pool).await, 1);
+
+    restore_snapshot(&fx.pool, &ada_talks).await;
+    assert_eq!(
+        servable(&fx.pool).await,
+        3,
+        "the restore brought Ada's talks back"
+    );
+    assert_eq!(
+        current_consent(&fx.pool, ADA).await.as_deref(),
+        Some("granted")
+    );
+    // Their objects came back too, as from an older copy of the bucket.
+    for t in &ada_talks {
+        store_talk(&store, *t);
+    }
+
+    let report = replay(&fx.pool, &store, "restore").await.unwrap();
+    assert_eq!(report.records, 1);
+    let mut reapplied = report.talks_reapplied.clone();
+    reapplied.sort();
+    let mut expected = ada_talks.clone();
+    expected.sort();
+    assert_eq!(reapplied, expected);
+    assert_eq!(report.consent_withdrawn_again.len(), 1);
+    assert!(report.missing_talks.is_empty());
+    assert_eq!(report.objects["transcript_objects"], 8);
+
+    assert_eq!(servable(&fx.pool).await, 1);
+    for t in &ada_talks {
+        assert_eq!(state(&fx.pool, *t).await, "withdrawn");
+        for (table, n) in rows_left(&fx.pool, *t).await {
+            assert_eq!(n, 0, "{table} has rows after the replay");
+        }
+        assert!(talk_keys(&store, *t).is_empty());
+    }
+    assert_eq!(
+        current_consent(&fx.pool, ADA).await.as_deref(),
+        Some("withdrawn")
+    );
+    assert_eq!(state(&fx.pool, bo_talk).await, "ready");
+
+    // Replaying again changes nothing.
+    let again = replay(&fx.pool, &store, "restore").await.unwrap();
+    assert!(again.talks_reapplied.is_empty(), "{again:?}");
+    assert!(again.consent_withdrawn_again.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn replay_leaves_a_later_grant_of_consent_alone() {
+    let fx = common::start().await;
+    let (ada_talks, _, _, _) = two_teachers(&fx.pool).await;
+    let (store, root) = objects();
+    complete(&fx.pool, &Scope::Teacher(ADA.into()), ACTOR, &store)
+        .await
+        .unwrap();
+    // Ada grants consent again after the takedown. Her taken-down talks stay withdrawn.
+    consent(&fx.pool, ADA, ConsentStatus::Granted).await;
+
+    let report = replay(&fx.pool, &store, "restore").await.unwrap();
+    assert!(report.consent_withdrawn_again.is_empty());
+    assert!(report.talks_reapplied.is_empty());
+    assert_eq!(
+        current_consent(&fx.pool, ADA).await.as_deref(),
+        Some("granted")
+    );
+    for t in &ada_talks {
+        assert_eq!(state(&fx.pool, *t).await, "withdrawn");
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[tokio::test]

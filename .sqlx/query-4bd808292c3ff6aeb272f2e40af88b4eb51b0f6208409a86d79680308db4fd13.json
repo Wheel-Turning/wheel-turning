@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = 'ready', quarantine_reason = null where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4bd808292c3ff6aeb272f2e40af88b4eb51b0f6208409a86d79680308db4fd13"
+}

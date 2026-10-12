@@ -126,6 +126,16 @@ pub const STORES: &[Store] = &[
         on_takedown: OnTakedown::Delete,
         note: "citation export (Spec 04); deleted after the database transaction commits",
     },
+    Store {
+        name: "takedown_records",
+        kind: StoreKind::ObjectPrefix {
+            bucket: "transcripts",
+            prefix: "takedowns/",
+        },
+        on_takedown: OnTakedown::Retain,
+        note: "a copy of each takedown_log row outside the database, so `wt takedown --replay` can reapply \
+               takedowns a restored snapshot predates; holds ids and counts, never words",
+    },
 ];
 
 /// The registered database tables keyed by a talk column.
@@ -134,4 +144,41 @@ pub fn tables() -> impl Iterator<Item = (&'static Store, &'static str, &'static 
         StoreKind::Table { table, talk_column } => Some((store, table, talk_column)),
         StoreKind::ObjectPrefix { .. } => None,
     })
+}
+
+/// The object keys or prefixes that takedown deletes for one talk, by store name.
+pub fn talk_objects(talk: &str) -> impl Iterator<Item = (&'static str, String)> + '_ {
+    STORES.iter().filter_map(move |store| match store.kind {
+        StoreKind::ObjectPrefix { prefix, .. } if store.on_takedown == OnTakedown::Delete => {
+            Some((store.name, prefix.replace("{talk_id}", talk)))
+        }
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_deleting_object_store_is_keyed_by_talk() {
+        let objects: Vec<_> = talk_objects("t1").collect();
+        assert_eq!(
+            objects,
+            [
+                ("transcript_objects", "transcripts/t1/".to_owned()),
+                ("citation_objects", "citations/t1.json".to_owned()),
+            ]
+        );
+        for store in STORES {
+            if let StoreKind::ObjectPrefix { prefix, .. } = store.kind {
+                assert_eq!(
+                    prefix.contains("{talk_id}"),
+                    store.on_takedown == OnTakedown::Delete,
+                    "{}",
+                    store.name
+                );
+            }
+        }
+    }
 }

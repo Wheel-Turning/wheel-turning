@@ -1331,6 +1331,32 @@ enum TalkCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Take a ready talk out of serving after a blocking quality failure, deleting nothing
+    /// (Spec 07, runbook procedure 4).
+    Quarantine {
+        /// The talk id.
+        #[arg(long)]
+        talk: TalkId,
+        /// What failed, recorded as the quarantine reason and in correction_log.
+        #[arg(long)]
+        reason: String,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
+    /// Return a talk quarantined with `wt talk quarantine` to serving, after re-checking that
+    /// it has passages and a valid rights basis.
+    Release {
+        /// The talk id.
+        #[arg(long)]
+        talk: TalkId,
+        /// The repair and the decision, recorded in correction_log.
+        #[arg(long)]
+        note: String,
+        /// Who is making the change.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
     /// Set the speaker of a talk the registry could not resolve, or correct a wrong match, or
     /// apply a review sheet's decisions (Spec 03, Assigning a speaker by hand).
     AssignSpeaker {
@@ -1392,6 +1418,14 @@ struct TakedownTarget {
     /// Every text edition whose source URL starts with this prefix, which is excluded.
     #[arg(long)]
     url: Option<String>,
+    /// Retry object deletion for every scope in takedown_log, and copy missing takedown
+    /// records to the object store.
+    #[arg(long)]
+    finish: bool,
+    /// After a database restore, reapply every recorded takedown, from takedown_log and the
+    /// copies in the object store. Needs --yes.
+    #[arg(long)]
+    replay: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1615,6 +1649,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         } => {
             commands::consent_set(
                 &pool().await?,
+                &config,
                 &teacher,
                 status,
                 evidence.as_deref(),
@@ -1725,7 +1760,23 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     by,
                     yes,
                 },
-        } => commands::exclude(&pool().await?, talk, &reason, &by, yes).await?,
+        } => commands::exclude(&pool().await?, &config, talk, &reason, &by, yes).await?,
+        Command::Talk {
+            command: TalkCommand::Quarantine { talk, reason, by },
+        } => {
+            wt_db::quarantine::quarantine(&pool().await?, talk, &reason, &by)
+                .await
+                .with_context(|| format!("quarantining talk {talk}"))?;
+            eprintln!("Talk {talk} is quarantined and no longer serves.");
+        }
+        Command::Talk {
+            command: TalkCommand::Release { talk, note, by },
+        } => {
+            wt_db::quarantine::release(&pool().await?, talk, &note, &by)
+                .await
+                .with_context(|| format!("releasing talk {talk}"))?;
+            eprintln!("Talk {talk} passed the re-check and serves again.");
+        }
         Command::Takedown(TakedownArgs {
             requests: Some(TakedownSubcommand::Requests { command }),
             ..
@@ -1741,7 +1792,11 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 (_, _, Some(u)) => Some(wt_db::text_takedown::TextScope::UrlPrefix(u)),
                 _ => None,
             };
-            if let Some(scope) = text_scope {
+            if t.finish {
+                commands::takedown_finish(&pool().await?, &config).await?;
+            } else if t.replay {
+                commands::takedown_replay(&pool().await?, &config, &actor, args.yes).await?;
+            } else if let Some(scope) = text_scope {
                 index_cmds::takedown_texts(
                     &pool().await?,
                     &config,
@@ -1769,7 +1824,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Audit { config_dir } => {
-            return commands::audit(&pool().await?, config.env, &config_dir).await;
+            return commands::audit(&pool().await?, &config, &config_dir).await;
         }
         Command::Ingest {
             command: IngestCommand::Discover { source, config_dir },
@@ -2563,7 +2618,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .as_ref()
                 .map(|t| t.talks.clone())
                 .unwrap_or_default();
-            let deleted = stages::delete_talk_objects(&config, &talks)?;
+            let deleted = stages::delete_talk_objects(&pool, &config, &talks).await?;
             commands::print_json(&serde_json::json!({
                 "level": change,
                 "export": export,

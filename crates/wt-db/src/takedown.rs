@@ -1,19 +1,22 @@
-//! Takedown (Spec 07), skeleton for M2: the database transaction and its record.
+//! Takedown (Spec 07): the database transaction and its record, then the objects.
 //!
 //! A teacher can pull any talk or all talks at any time. Takedown deletes text and is the only
 //! route to `withdrawn`. The stub `talk` and `source_video` rows remain so discovery never
-//! recreates a removed talk. Object-store deletion (step 3) arrives with the transcript
-//! pipeline in M4, when transcripts first reach S3; until then the object stores are listed in
-//! the report as not checked.
+//! recreates a removed talk. After the transaction commits, [`complete`] deletes the talks'
+//! objects under every registered prefix and confirms nothing is left, and copies the
+//! `takedown_log` row to the object store, where [`replay`] finds it after a database restore
+//! that predates it. [`finish`] retries object deletion for every logged scope.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use serde::{Deserialize, Serialize};
 use sqlx::types::Uuid;
 use sqlx::{PgConnection, PgPool};
 use wt_core::answer::AnswerPayload;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::{PassageId, TalkId, TeacherId};
-use wt_core::stores::{OnTakedown, STORES, StoreKind};
+use wt_core::objects::{ObjectError, ObjectStore};
+use wt_core::stores::{self, OnTakedown, STORES, StoreKind};
 
 use crate::DbError;
 use crate::registry::{RegistryDbError, find_teacher};
@@ -42,8 +45,10 @@ pub struct TakedownReport {
     pub themes_stripped: i64,
     /// Evaluation ratings whose notes were cleared.
     pub rating_notes_cleared: i64,
-    /// Object stores not yet handled by this build, with the reason.
-    pub objects_not_checked: BTreeMap<String, String>,
+    /// Objects per registered object store: found, in a dry run with a store, or deleted.
+    pub objects: BTreeMap<String, i64>,
+    /// The `takedown_log` row, after a real run.
+    pub log_id: Option<Uuid>,
     /// True when nothing was changed.
     pub dry_run: bool,
 }
@@ -63,6 +68,13 @@ pub enum TakedownError {
     /// The database refused.
     #[error(transparent)]
     Db(#[from] DbError),
+    /// Object storage refused, or objects remain after deletion. The `takedown_log` row stays
+    /// as the record of what is left, and `wt takedown --finish` retries.
+    #[error("object storage: {0}")]
+    Objects(#[from] ObjectError),
+    /// A stored takedown record could not be read.
+    #[error("takedown record {0}: {1}")]
+    Record(String, String),
 }
 
 impl From<sqlx::Error> for TakedownError {
@@ -209,17 +221,19 @@ pub(crate) async fn run_in(
         Scope::Teacher(_) => ("teacher", None),
         Scope::Talk(id) => ("talk", Some(id.as_uuid())),
     };
-    sqlx::query!(
-        r#"insert into takedown_log (scope, teacher_id, talk_id, actor, counts)
-           values ($1, $2, $3, $4, $5)"#,
-        scope_text,
-        teacher.map(|t| t.as_uuid()),
-        talk_col,
-        actor,
-        counts
-    )
-    .execute(&mut *tx)
-    .await?;
+    report.log_id = Some(
+        sqlx::query_scalar!(
+            r#"insert into takedown_log (scope, teacher_id, talk_id, actor, counts)
+               values ($1, $2, $3, $4, $5) returning id"#,
+            scope_text,
+            teacher.map(|t| t.as_uuid()),
+            talk_col,
+            actor,
+            counts
+        )
+        .fetch_one(&mut *tx)
+        .await?,
+    );
 
     Ok(report)
 }
@@ -276,12 +290,8 @@ async fn count(conn: &mut PgConnection, talks: &[TalkId]) -> Result<TakedownRepo
                 .await?;
                 report.rows.insert(store.name.to_owned(), n);
             }
-            StoreKind::ObjectPrefix { .. } => {
-                report.objects_not_checked.insert(
-                    store.name.to_owned(),
-                    "object-store deletion arrives with the transcript pipeline (M4)".to_owned(),
-                );
-            }
+            // Objects are counted by `count_objects`, which needs the store.
+            StoreKind::ObjectPrefix { .. } => {}
         }
     }
     report.answer_passage_rows = sqlx::query_scalar!(
@@ -291,5 +301,319 @@ async fn count(conn: &mut PgConnection, talks: &[TalkId]) -> Result<TakedownRepo
     )
     .fetch_one(&mut *conn)
     .await?;
+    Ok(report)
+}
+
+// ---- objects, records, finish and replay ------------------------------------------------------
+
+/// Objects under each registered object store for these talks.
+pub fn count_objects(
+    store: &dyn ObjectStore,
+    talks: &[TalkId],
+) -> Result<BTreeMap<String, i64>, ObjectError> {
+    let mut out = BTreeMap::new();
+    for talk in talks {
+        for (name, prefix) in stores::talk_objects(&talk.as_uuid().to_string()) {
+            let n = i64::try_from(store.list(&prefix)?.len()).unwrap_or(i64::MAX);
+            *out.entry(name.to_owned()).or_insert(0) += n;
+        }
+    }
+    Ok(out)
+}
+
+/// Deletes the talks' objects under every registered prefix, then lists each prefix to confirm
+/// it is empty. Returns the objects deleted per store.
+pub fn delete_objects(
+    store: &dyn ObjectStore,
+    talks: &[TalkId],
+) -> Result<BTreeMap<String, i64>, ObjectError> {
+    let mut out = BTreeMap::new();
+    for talk in talks {
+        for (name, prefix) in stores::talk_objects(&talk.as_uuid().to_string()) {
+            let n = i64::try_from(store.delete_prefix(&prefix)?).unwrap_or(i64::MAX);
+            *out.entry(name.to_owned()).or_insert(0) += n;
+            if !store.list(&prefix)?.is_empty() {
+                return Err(ObjectError::Remains(prefix));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A dry run that also counts the objects takedown would delete.
+pub async fn dry_run_with_objects(
+    pool: &PgPool,
+    scope: &Scope,
+    store: &dyn ObjectStore,
+) -> Result<TakedownReport, TakedownError> {
+    let mut report = dry_run(pool, scope).await?;
+    report.objects = count_objects(store, &report.talks)?;
+    Ok(report)
+}
+
+/// The whole takedown: the database step, then the record copied to the object store, then the
+/// talks' objects. If object deletion fails, the database step has already committed and
+/// `takedown_log` records the scope, so [`finish`] can retry and the audit fails until it does.
+pub async fn complete(
+    pool: &PgPool,
+    scope: &Scope,
+    actor: &str,
+    store: &dyn ObjectStore,
+) -> Result<TakedownReport, TakedownError> {
+    let mut report = run(pool, scope, actor).await?;
+    write_records(pool, store).await?;
+    report.objects = delete_objects(store, &report.talks)?;
+    Ok(report)
+}
+
+/// A `takedown_log` row as kept outside the database. It holds ids and counts, never words.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TakedownRecord {
+    /// The `takedown_log` row.
+    pub log_id: Uuid,
+    /// `teacher` or `talk`.
+    pub scope: String,
+    /// For a teacher scope.
+    pub teacher_id: Option<Uuid>,
+    /// For a talk scope.
+    pub talk_id: Option<Uuid>,
+    /// Every talk the takedown covered.
+    pub talks: Vec<TalkId>,
+    /// Each talk's source video as `platform:external_id`, so a talk a restore lost can be
+    /// found again after discovery recreates it.
+    #[serde(default)]
+    pub sources: BTreeMap<TalkId, String>,
+    /// Who ran it.
+    pub actor: String,
+    /// When it committed.
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Where a record is kept in the object store.
+pub fn record_key(log_id: Uuid) -> String {
+    format!("takedowns/{log_id}.json")
+}
+
+/// Every `takedown_log` row as a record.
+async fn logged(conn: &mut PgConnection) -> Result<Vec<TakedownRecord>, TakedownError> {
+    let rows = sqlx::query!(
+        "select id, scope, teacher_id, talk_id, actor, counts, created_at
+         from takedown_log order by created_at, id"
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let talks = r
+                .counts
+                .get("talks")
+                .cloned()
+                .and_then(|t| serde_json::from_value(t).ok())
+                .unwrap_or_else(|| r.talk_id.map(TalkId::from).into_iter().collect());
+            TakedownRecord {
+                log_id: r.id,
+                scope: r.scope,
+                teacher_id: r.teacher_id,
+                talk_id: r.talk_id,
+                talks,
+                sources: BTreeMap::new(),
+                actor: r.actor,
+                at: r.created_at,
+            }
+        })
+        .collect())
+}
+
+/// Copies every `takedown_log` row that has no record yet to the object store. Returns how many
+/// it wrote.
+pub async fn write_records(pool: &PgPool, store: &dyn ObjectStore) -> Result<usize, TakedownError> {
+    let mut conn = pool.acquire().await?;
+    let mut written = 0;
+    for mut record in logged(&mut conn).await? {
+        let key = record_key(record.log_id);
+        if store.get(&key)?.is_none() {
+            let ids: Vec<Uuid> = record.talks.iter().map(TalkId::as_uuid).collect();
+            let rows = sqlx::query!(
+                r#"select t.id, sv.platform::text || ':' || sv.external_id as "source!"
+                   from talk t join source_video sv on sv.id = t.source_video_id
+                   where t.id = any($1)"#,
+                &ids
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            record.sources = rows
+                .into_iter()
+                .map(|r| (TalkId::from(r.id), r.source))
+                .collect();
+            let json = serde_json::to_vec(&record)
+                .map_err(|e| TakedownError::Record(key.clone(), e.to_string()))?;
+            store.put(&key, &json)?;
+            written += 1;
+        }
+    }
+    Ok(written)
+}
+
+/// Records from the database and the object store, merged by log id, oldest first.
+async fn all_records(
+    conn: &mut PgConnection,
+    store: &dyn ObjectStore,
+) -> Result<Vec<TakedownRecord>, TakedownError> {
+    let mut by_id: BTreeMap<Uuid, TakedownRecord> = logged(conn)
+        .await?
+        .into_iter()
+        .map(|r| (r.log_id, r))
+        .collect();
+    for key in store.list("takedowns/")? {
+        let Some(bytes) = store.get(&key)? else {
+            continue;
+        };
+        let record: TakedownRecord = serde_json::from_slice(&bytes)
+            .map_err(|e| TakedownError::Record(key.clone(), e.to_string()))?;
+        by_id.entry(record.log_id).or_insert(record);
+    }
+    let mut records: Vec<TakedownRecord> = by_id.into_values().collect();
+    records.sort_by_key(|r| (r.at, r.log_id));
+    Ok(records)
+}
+
+/// What `wt takedown --finish` did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct FinishReport {
+    /// Logged scopes looked at.
+    pub scopes: usize,
+    /// Talks whose objects were checked.
+    pub talks: usize,
+    /// Objects deleted per store.
+    pub objects: BTreeMap<String, i64>,
+    /// Records copied to the object store.
+    pub records_written: usize,
+}
+
+/// Retries object deletion for every logged scope and every withdrawn talk, and copies any
+/// missing records.
+pub async fn finish(pool: &PgPool, store: &dyn ObjectStore) -> Result<FinishReport, TakedownError> {
+    let mut conn = pool.acquire().await?;
+    let records = logged(&mut conn).await?;
+    let withdrawn: Vec<Uuid> =
+        sqlx::query_scalar!("select id from talk where state = 'withdrawn' order by id")
+            .fetch_all(&mut *conn)
+            .await?;
+    drop(conn);
+    let talks: BTreeSet<TalkId> = records
+        .iter()
+        .flat_map(|r| r.talks.iter().copied())
+        .chain(withdrawn.into_iter().map(TalkId::from))
+        .collect();
+    let talks: Vec<TalkId> = talks.into_iter().collect();
+    let records_written = write_records(pool, store).await?;
+    Ok(FinishReport {
+        scopes: records.len(),
+        talks: talks.len(),
+        objects: delete_objects(store, &talks)?,
+        records_written,
+    })
+}
+
+/// What `wt takedown --replay` did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReplayReport {
+    /// Records read from the database and the object store.
+    pub records: usize,
+    /// Talks taken down again because rows had come back or they were no longer withdrawn.
+    pub talks_reapplied: Vec<TalkId>,
+    /// Teachers whose withdrawn consent was recorded again.
+    pub consent_withdrawn_again: Vec<Uuid>,
+    /// Recorded talks the database does not hold, such as talks discovered after the
+    /// snapshot, with their source video where recorded. They have no text; once discovery
+    /// finds the source again, exclude the new talk (runbook, procedure 6).
+    pub missing_talks: Vec<(TalkId, Option<String>)>,
+    /// Objects deleted per store.
+    pub objects: BTreeMap<String, i64>,
+}
+
+/// Reapplies every recorded takedown, from the database's own log and the copies in the object
+/// store, after a restore. A talk already withdrawn with nothing left is skipped, so replaying
+/// twice changes nothing the second time.
+pub async fn replay(
+    pool: &PgPool,
+    store: &dyn ObjectStore,
+    actor: &str,
+) -> Result<ReplayReport, TakedownError> {
+    let mut conn = pool.acquire().await?;
+    let records = all_records(&mut conn, store).await?;
+    drop(conn);
+    let mut report = ReplayReport {
+        records: records.len(),
+        ..ReplayReport::default()
+    };
+    let mut seen = BTreeSet::new();
+    for record in &records {
+        let mut tx = pool.begin().await?;
+        // A withdrawal is recorded again only when the current consent row predates the
+        // takedown: a later grant is the teacher's own decision and stands.
+        let mut consent = None;
+        if let (Some(teacher), "teacher") = (record.teacher_id, record.scope.as_str()) {
+            let current = sqlx::query!(
+                r#"select status::text as "status!", created_at as "created_at!"
+                   from current_consent where teacher_id = $1"#,
+                teacher
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let stale = current.is_none_or(|c| c.status != "withdrawn" && c.created_at < record.at);
+            if stale {
+                sqlx::query!(
+                    r#"insert into speaker_consent (teacher_id, status, decided_at, created_by)
+                       values ($1, 'withdrawn', now(), $2)"#,
+                    teacher,
+                    actor
+                )
+                .execute(&mut *tx)
+                .await?;
+                report.consent_withdrawn_again.push(teacher);
+                consent = Some(ConsentStatus::Withdrawn);
+            }
+        }
+        for talk in &record.talks {
+            let state = sqlx::query_scalar!(
+                r#"select state::text as "state!" from talk where id = $1"#,
+                talk.as_uuid()
+            )
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(state) = state else {
+                if seen.insert(*talk) {
+                    let source = record.sources.get(talk).cloned();
+                    report.missing_talks.push((*talk, source));
+                }
+                continue;
+            };
+            let left = count(&mut tx, std::slice::from_ref(talk)).await?;
+            let rows: i64 = left.rows.values().sum();
+            if state != "withdrawn" || rows > 0 || consent.is_some() {
+                run_in(
+                    &mut tx,
+                    &Scope::Talk(*talk),
+                    actor,
+                    consent,
+                    "takedown_replay",
+                )
+                .await?;
+                if seen.insert(*talk) {
+                    report.talks_reapplied.push(*talk);
+                }
+            }
+        }
+        tx.commit().await?;
+    }
+    let talks: BTreeSet<TalkId> = records
+        .iter()
+        .flat_map(|r| r.talks.iter().copied())
+        .collect();
+    let talks: Vec<TalkId> = talks.into_iter().collect();
+    report.objects = delete_objects(store, &talks)?;
+    write_records(pool, store).await?;
     Ok(report)
 }

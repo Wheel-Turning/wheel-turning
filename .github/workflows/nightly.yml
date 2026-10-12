@@ -1,0 +1,97 @@
+# Spec 07, Nightly audit checks: runs `wt audit` every night and on demand, and fails the
+# workflow when a check marked fail has findings. The JSON report is kept as an artifact.
+#
+# Target: with the `WT_AUDIT_DATABASE_URL` secret set, the audit reads that database, which is
+# how it reaches the deployed environment once one exists (Spec 01: through the batch host's
+# port forward or a runner inside the VPC; set `WT_AUDIT_ENV` to `staging` or `prod`, and the
+# `WT_SESSION_SECRET` secret, which configuration requires outside dev). Without the secret it
+# audits a freshly migrated database in a service container, which proves the job and the
+# binary work end to end.
+#
+# Third-party actions are pinned to commit SHAs; Dependabot keeps the pins current.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 10 * * *"  # 10:17 UTC, early morning Pacific
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  audit:
+    name: wt audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: wt
+          POSTGRES_PASSWORD: wt
+          POSTGRES_DB: wt
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wt"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build --locked -p wt-cli
+      - name: Choose the database
+        env:
+          AUDIT_DATABASE_URL: ${{ secrets.WT_AUDIT_DATABASE_URL }}
+          AUDIT_ENV: ${{ vars.WT_AUDIT_ENV }}
+        run: |
+          if [ -n "$AUDIT_DATABASE_URL" ]; then
+            echo "::add-mask::$AUDIT_DATABASE_URL"
+            echo "DATABASE_URL=$AUDIT_DATABASE_URL" >> "$GITHUB_ENV"
+            echo "WT_ENV=${AUDIT_ENV:-prod}" >> "$GITHUB_ENV"
+            echo "Auditing the configured database (${AUDIT_ENV:-prod})."
+          else
+            echo "DATABASE_URL=postgres://wt:wt@localhost:5432/wt" >> "$GITHUB_ENV"
+            echo "WT_ENV=dev" >> "$GITHUB_ENV"
+            echo "WT_AUDIT_SMOKE=1" >> "$GITHUB_ENV"
+            echo "No WT_AUDIT_DATABASE_URL secret: auditing a fresh database."
+          fi
+      - name: Migrate the fresh database
+        if: env.WT_AUDIT_SMOKE == '1'
+        run: target/debug/wt db migrate
+      - name: Run the audit
+        env:
+          WT_SESSION_SECRET: ${{ secrets.WT_SESSION_SECRET }}
+          WT_LOG: warn
+        run: |
+          set -o pipefail
+          target/debug/wt audit --config-dir config | tee audit.json
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -s audit.json ]; then
+            jq -r '.checks[] | select(.findings > 0) | "\(.severity) \(.name): \(.findings)"' audit.json \
+              >> "$GITHUB_STEP_SUMMARY" || true
+            jq -r '.not_yet_checked[] | "not yet checked: \(.[0])"' audit.json \
+              >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: audit-report
+          path: audit.json
+          retention-days: 14
+          if-no-files-found: ignore

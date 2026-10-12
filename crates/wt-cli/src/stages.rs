@@ -543,15 +543,22 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
     )?)
 }
 
-/// Spec 07, takedown step 3: after the database commit, deletes each talk's stored objects,
-/// `transcripts/<talk>/` and `citations/<talk>.json`, then checks nothing is left. Returns how
-/// many objects were deleted. Retrying a failure and the audit's check come with M8.
-pub fn delete_talk_objects(
+/// Spec 07, takedown step 3: after the database commit, copies the takedown records to the
+/// object store, then deletes each talk's objects under every registered prefix and checks
+/// nothing is left. Returns how many objects were deleted. `wt takedown --finish` retries a
+/// failure, and the audit fails until it succeeds.
+pub async fn delete_talk_objects(
+    pool: &PgPool,
     config: &Config,
     talks: &[wt_core::ids::TalkId],
 ) -> anyhow::Result<usize> {
     let store = objects(config)?;
-    audio::delete_talk_objects(&store, talks).context("deleting the talks' stored objects")
+    wt_db::takedown::write_records(pool, &store)
+        .await
+        .context("copying the takedown records to the object store")?;
+    let deleted = wt_db::takedown::delete_objects(&store, talks)
+        .context("deleting the talks' stored objects")?;
+    Ok(usize::try_from(deleted.values().sum::<i64>()).unwrap_or(0))
 }
 
 /// A takedown's printed report with the deleted objects added.

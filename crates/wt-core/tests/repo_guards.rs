@@ -5,10 +5,7 @@
 use std::path::Path;
 use std::process::Command;
 
-const AUDIO_AND_VIDEO: &[&str] = &[
-    "aac", "aif", "aiff", "amr", "flac", "m4a", "m4b", "mka", "mkv", "mov", "mp3", "mp4", "mpeg",
-    "mpg", "oga", "ogg", "opus", "wav", "weba", "webm", "wma",
-];
+const AUDIO_AND_VIDEO: &[&str] = wt_core::scratch::AUDIO_AND_VIDEO_EXTENSIONS;
 
 fn tracked_files() -> Vec<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
