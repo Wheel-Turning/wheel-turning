@@ -115,6 +115,17 @@ On the home page and under About, in the section Your questions.
 - Excerpt withdrawn: This excerpt was removed at the rights holder's request.
 - Question not kept: This question was not kept.
 
+## References and source links
+
+Owner's decision of October 12, 2026 (Spec 05, Answer assembly, rules 2 and 5).
+
+- Source transcript link: Read the talk's transcript at \[source] (opens their page in a new tab)
+- Recording link: Listen at \[h:mm:ss] (opens the source in a new tab). Without a player time: starts at \[h:mm:ss]
+- Our transcript link: Read our transcript (made by machine, may contain errors), or Read our transcript (reviewed)
+- References summary: References (\[n])
+- References introduction, inside the list: Entries follow MLA style. The access date is the day this answer was made.
+- Confidence words after a text entry: resolved, probable, unresolved
+
 ## Footer
 
 Three columns from 900px, stacked below. About: Wheel Turning helps you find what Zen teachers and texts have said about your practice. \[About\] \[Accessibility\]. Rights and removal: If you hold rights in anything shown here, we will remove it on request. \[Rights and removal\]. Sources: \[Every source and its status\]. Last line: Excerpts remain the work of their teachers and publishers.
