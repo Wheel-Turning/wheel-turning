@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state::text as \"state!\", consent_status::text as \"consent_status!\", teacher,\n                  talks as \"talks!\"\n           from v_consent_coverage order by teacher nulls last, state, consent_status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "consent_status!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "teacher",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_consent_coverage",
+            "name": "teacher"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "talks!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_consent_coverage",
+            "name": "talks"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "6f5e26d1f93915a03bd09d0f9014198c4f93d8f93c3650a7d6473aad2a4d5ebf"
+}

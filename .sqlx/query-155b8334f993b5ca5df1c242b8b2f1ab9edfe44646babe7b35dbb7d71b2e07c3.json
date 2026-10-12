@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select day as \"day!\", mode as \"mode!\", teacher_count as \"teacher_count!\",\n                  answers as \"answers!\", avg_latency_ms, thin_answers as \"thin_answers!\"\n           from v_answer_stats where day >= date_trunc('day', $1::timestamptz)\n           order by day, mode, teacher_count",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "mode!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "teacher_count!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "teacher_count"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "answers!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "answers"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "avg_latency_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "avg_latency_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "thin_answers!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_answer_stats",
+            "name": "thin_answers"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "155b8334f993b5ca5df1c242b8b2f1ab9edfe44646babe7b35dbb7d71b2e07c3"
+}

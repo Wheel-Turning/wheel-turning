@@ -373,7 +373,7 @@ async fn sangha_and_donation_fields_never_move_a_passage() {
 
     sqlx::query(
         "update sangha set listed = not listed, donation_verified = not donation_verified,
-                donation_url = 'https://example.invalid/changed'",
+                donation_url = 'https://example.invalid/changed', donation_kind = 'page'",
     )
     .execute(&fx.pool)
     .await

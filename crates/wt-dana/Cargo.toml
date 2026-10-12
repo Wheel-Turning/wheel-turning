@@ -10,4 +10,12 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# A pure function: no I/O, no money, no payment crate (CLAUDE.md rule 7, enforced by cargo deny).
 [dependencies]
+thiserror.workspace = true
+url = "2"
+wt-core.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+uuid.workspace = true
