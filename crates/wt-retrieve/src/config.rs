@@ -27,6 +27,10 @@ pub struct SearchConfig {
     pub fts_top_k: i64,
     /// Vector candidates.
     pub vector_top_k: i64,
+    /// Student-question hits fused as a third list. Kept short: a hit stands for the passage
+    /// after its question, which can be off the subject, so a long list crowded out direct
+    /// passage matches (October 12, 2026).
+    pub question_top_k: i64,
     /// The `k` of reciprocal rank fusion.
     pub rrf_k: f32,
     /// Fused candidates sent to the reranker.
@@ -37,6 +41,9 @@ pub struct SearchConfig {
     pub rerank_min_score: f32,
     /// Seconds before the reranker is abandoned for the fused order.
     pub rerank_timeout_s: u64,
+    /// Reranker sessions run side by side, each scoring one pair at a time, so scores are the
+    /// same as with one session and only the wall time changes.
+    pub rerank_sessions: usize,
 }
 
 impl Default for SearchConfig {
@@ -44,11 +51,13 @@ impl Default for SearchConfig {
         Self {
             fts_top_k: 60,
             vector_top_k: 60,
+            question_top_k: 10,
             rrf_k: 60.0,
             fuse_top_k: 40,
             hnsw_ef_search: 100,
             rerank_min_score: 0.30,
             rerank_timeout_s: 10,
+            rerank_sessions: 1,
         }
     }
 }
@@ -181,8 +190,11 @@ mod tests {
     fn the_shipped_file_matches_the_spec_defaults() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/retrieval.toml");
         let c = RetrievalConfig::load(&path).unwrap();
-        // Calibrated below the spec's starting points for CPU latency (Spec 05, step 4).
-        assert!((1..=40).contains(&c.retrieval.fuse_top_k));
+        // Back at the spec's 40 with parallel reranker sessions (October 12, 2026): 20 dropped
+        // good passages. The question list stays short so it cannot crowd the reranker.
+        assert_eq!(c.retrieval.fuse_top_k, 40);
+        assert!(c.retrieval.question_top_k <= 20);
+        assert!(c.retrieval.rerank_sessions >= 1);
         assert_eq!(c.selection.target_teachers, 3);
         assert_eq!(c.selection.max_sources, 8);
         assert_eq!(c.answer.link_lead_in_ms, 2000);

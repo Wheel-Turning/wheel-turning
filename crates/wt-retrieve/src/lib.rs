@@ -146,7 +146,7 @@ pub async fn retrieve_embedded(
     )
     .await?;
     let question_hits =
-        search::question_vector(&mut tx, &vector, named, cfg.retrieval.vector_top_k).await?;
+        search::question_vector(&mut tx, &vector, named, cfg.retrieval.question_top_k).await?;
     let fused = fuse::rrf(
         &[&fts, &vec_hits, &question_hits],
         cfg.retrieval.rrf_k,

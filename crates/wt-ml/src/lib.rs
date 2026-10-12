@@ -365,7 +365,7 @@ impl Reranker for FakeReranker {
 /// and the model returns one logit.
 pub struct OnnxReranker {
     model_id: String,
-    session: Arc<Mutex<Session>>,
+    sessions: Vec<Arc<Mutex<Session>>>,
     tokenizer: Arc<Tokenizer>,
 }
 
@@ -381,10 +381,24 @@ impl OnnxReranker {
     /// Loads the model and its tokenizer, failing at startup when either is missing.
     /// `settings.model` is `WT_RERANK_MODEL`.
     pub fn load(settings: &OnnxSettings) -> Result<Self, MlError> {
-        let (session, tokenizer) = load_model(settings)?;
+        Self::load_pool(settings, 1)
+    }
+
+    /// Loads `sessions` copies of the model, which score pairs side by side. The threads in
+    /// `settings` are shared among them. Each pair still runs alone in one session, so a score
+    /// does not depend on how many sessions there are.
+    pub fn load_pool(settings: &OnnxSettings, sessions: usize) -> Result<Self, MlError> {
+        let sessions = sessions.max(1);
+        let mut each = settings.clone();
+        each.threads = (settings.threads / sessions).max(1);
+        let (first, tokenizer) = load_model(&each)?;
+        let mut pool = vec![Arc::new(Mutex::new(first))];
+        for _ in 1..sessions {
+            pool.push(Arc::new(Mutex::new(load_model(&each)?.0)));
+        }
         Ok(Self {
             model_id: settings.model.clone(),
-            session: Arc::new(Mutex::new(session)),
+            sessions: pool,
             tokenizer: Arc::new(tokenizer),
         })
     }
@@ -445,6 +459,31 @@ fn score_one(
     }
 }
 
+/// Runs futures concurrently on the current task and returns their outputs in order.
+async fn futures_join_all<F: std::future::Future>(futures: Vec<F>) -> Vec<F::Output> {
+    let mut pinned: Vec<std::pin::Pin<Box<F>>> = futures.into_iter().map(Box::pin).collect();
+    let mut slots: Vec<Option<F::Output>> = Vec::new();
+    slots.resize_with(pinned.len(), || None);
+    std::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (i, f) in pinned.iter_mut().enumerate() {
+            if slots[i].is_none() {
+                match f.as_mut().poll(cx) {
+                    std::task::Poll::Ready(v) => slots[i] = Some(v),
+                    std::task::Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(())
+        }
+    })
+    .await;
+    slots.into_iter().flatten().collect()
+}
+
 #[async_trait]
 impl Reranker for OnnxReranker {
     fn model_id(&self) -> &str {
@@ -452,22 +491,44 @@ impl Reranker for OnnxReranker {
     }
 
     async fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>, MlError> {
-        let mut out = Vec::with_capacity(passages.len());
-        // One blocking task per pair, so a caller that gives up (the rerank timeout) stops the
-        // work after the pair in hand.
-        for passage in passages {
-            let (session, tokenizer, query, passage) = (
-                Arc::clone(&self.session),
+        // Each session works through its share of the pairs in turn, one blocking task per pair,
+        // so a caller that gives up (the rerank timeout) stops each session after the pair in
+        // hand. The sessions run side by side.
+        let n = self.sessions.len();
+        let mut lanes = Vec::with_capacity(n);
+        for (lane, session) in self.sessions.iter().enumerate() {
+            let pairs: Vec<(usize, String)> = passages
+                .iter()
+                .enumerate()
+                .skip(lane)
+                .step_by(n)
+                .map(|(i, p)| (i, p.clone()))
+                .collect();
+            let (session, tokenizer, query) = (
+                Arc::clone(session),
                 Arc::clone(&self.tokenizer),
                 query.to_owned(),
-                passage.clone(),
             );
-            let logit = tokio::task::spawn_blocking(move || {
-                score_one(&session, &tokenizer, &query, &passage)
-            })
-            .await
-            .map_err(|e| MlError::Runtime(format!("rerank task: {e}")))??;
-            out.push(logit);
+            lanes.push(async move {
+                let mut scored = Vec::with_capacity(pairs.len());
+                for (i, passage) in pairs {
+                    let (session, tokenizer, query) =
+                        (Arc::clone(&session), Arc::clone(&tokenizer), query.clone());
+                    let logit = tokio::task::spawn_blocking(move || {
+                        score_one(&session, &tokenizer, &query, &passage)
+                    })
+                    .await
+                    .map_err(|e| MlError::Runtime(format!("rerank task: {e}")))??;
+                    scored.push((i, logit));
+                }
+                Ok::<_, MlError>(scored)
+            });
+        }
+        let mut out = vec![0.0f32; passages.len()];
+        for lane in futures_join_all(lanes).await {
+            for (i, logit) in lane? {
+                out[i] = logit;
+            }
         }
         Ok(out)
     }
