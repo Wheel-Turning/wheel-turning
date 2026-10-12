@@ -63,7 +63,12 @@ pub fn message(query: &str, window: &Window) -> Option<String> {
     let (first, last) = (inside.first()?, inside.last()?);
     let mut text = format!("Question: {query}\n\nSentences:\n");
     for (i, (s, e)) in sentences.iter().enumerate() {
-        text.push_str(&format!("[{}] {}\n", i + 1, window.text(*s, *e)));
+        text.push_str(&format!(
+            "[{}] ({} words) {}\n",
+            i + 1,
+            e - s,
+            window.text(*s, *e)
+        ));
     }
     text.push_str(&format!(
         "\nThe found passage covers sentences {} to {}.\n",
@@ -179,7 +184,7 @@ mod tests {
             seen[0]
                 .0
                 .user
-                .contains("[2] Then we notice the breath going out.")
+                .contains("[2] (7 words) Then we notice the breath going out.")
         );
         assert!(seen[0].0.user.contains("covers sentences 2 to 4"));
     }
