@@ -1225,6 +1225,16 @@ enum ReportCommand {
     Coverage,
     /// Flagged queries, through flagged_queries(): the only questions anyone may read.
     Flagged,
+    /// Feedback submissions and reasons per day, target and mode, from v_feedback_counts.
+    Feedback {
+        /// How far back: a number with d (days) or h (hours), for example 7d.
+        #[arg(long, default_value = "7d", value_parser = parse_since)]
+        since: chrono::Duration,
+        /// Also print each note with its target and reasons, through feedback_notes(), never
+        /// with its question.
+        #[arg(long)]
+        notes: bool,
+    },
 }
 
 /// A pool connected as `wt_analyst` through `DATABASE_URL_ANALYST`, refused when the role can
@@ -1668,6 +1678,18 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
                 ReportCommand::Flagged => {
                     commands::print_json(&wt_db::report::flagged(&pool).await?)?;
+                }
+                ReportCommand::Feedback { since, notes } => {
+                    let from = chrono::Utc::now() - since;
+                    let counts = wt_db::report::feedback(&pool, from).await?;
+                    if notes {
+                        let notes = wt_db::report::feedback_notes(&pool, from).await?;
+                        commands::print_json(
+                            &serde_json::json!({ "counts": counts, "notes": notes }),
+                        )?;
+                    } else {
+                        commands::print_json(&counts)?;
+                    }
                 }
             }
         }

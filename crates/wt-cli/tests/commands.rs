@@ -1880,6 +1880,25 @@ async fn reports_run_as_the_analyst_and_never_show_an_unflagged_question() {
     assert_eq!(flagged.as_array().unwrap().len(), 1);
     assert_eq!(flagged[0]["query_text"], "flagged question");
 
+    // Feedback counts, and notes without their question (Spec 06, `wt report feedback`).
+    sqlx::query(
+        "insert into feedback (answer_id, tester_id, target, kind, note, submission_id)
+         select a.id, q.tester_id, 'summary', k, n, '00000000-0000-0000-0000-0000000000aa'
+         from answer a join query_log q on q.id = a.query_log_id,
+              (values ('unclear', null), ('note', 'the summary lost me')) v(k, n)
+         where q.query_text = 'unflagged secret question'",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let feedback = json(&["report", "feedback", "--since", "1d"]);
+    assert_eq!(feedback.as_array().unwrap().len(), 2, "{feedback}");
+    assert_eq!(feedback[1]["kind"], "unclear");
+    assert_eq!(feedback[1]["submissions"], 1);
+    let notes = json(&["report", "feedback", "--since", "1d", "--notes"]);
+    assert_eq!(notes["notes"][0]["note"], "the summary lost me");
+    assert_eq!(notes["notes"][0]["reasons"][0], "unclear");
+
     // The analyst role cannot read the table itself.
     let pool = wt_db::connect(&wt_core::Secret::new(analyst.clone()))
         .await

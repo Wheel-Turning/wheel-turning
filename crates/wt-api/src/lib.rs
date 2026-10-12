@@ -10,6 +10,7 @@ pub mod accessibility;
 pub mod ask;
 pub mod chrome;
 pub mod excerpt;
+pub mod feedback;
 pub mod limits;
 pub mod privacy;
 pub mod progress;
@@ -177,6 +178,7 @@ pub fn router(state: AppState) -> Router {
         .route("/static/dana.js", get(dana_script))
         .route("/static/references.js", get(references_script))
         .route("/static/progress.js", get(progress_script))
+        .route("/static/answer.js", get(answer_script))
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
@@ -189,7 +191,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ask", post(ask))
         .route("/ask/curated", post(ask_curated))
         .route("/a/{answer}", get(answer_page))
-        .route("/a/{answer}/feedback", post(feedback))
+        .route("/a/{answer}/feedback", post(feedback::post))
         .route("/a/{answer}/dana", post(dana))
         .route("/give/{answer}/{target}", get(give))
         .route("/talk/{talk}", get(talk_page))
@@ -284,6 +286,13 @@ async fn progress_script() -> impl IntoResponse {
     )
 }
 
+async fn answer_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/answer.js"),
+    )
+}
+
 // ---- pages ----------------------------------------------------------------------------------
 
 #[derive(Template)]
@@ -371,7 +380,7 @@ impl FromRequestParts<AppState> for ClientAddress {
 }
 
 /// The generic 404, also what a request without a session gets.
-fn not_found_page() -> Response {
+pub(crate) fn not_found_page() -> Response {
     error_page(
         StatusCode::NOT_FOUND,
         "Page not found",
@@ -844,6 +853,12 @@ struct AnswerPage {
     answer_id: AnswerId,
     csrf: String,
     thanks: bool,
+    /// A feedback control's status after a reload without the script.
+    fb: Option<feedback::Status>,
+    /// The reasons each feedback control offers.
+    excerpt_reasons: &'static [(&'static str, &'static str)],
+    /// See `excerpt_reasons`.
+    summary_reasons: &'static [(&'static str, &'static str)],
     /// The split, after "Show the split" without JavaScript.
     dana: Option<view::DanaView>,
     /// What the donor entered, kept in the fields.
@@ -856,6 +871,18 @@ struct AnswerPage {
     site_giving: bool,
 }
 
+impl AnswerPage {
+    /// The status of excerpt `n`'s feedback control, after a reload without the script.
+    fn excerpt_status(&self, n: &usize) -> Option<&feedback::Status> {
+        self.fb.as_ref().filter(|f| f.is_excerpt(n))
+    }
+
+    /// The status of the summary's feedback control.
+    fn summary_status(&self) -> Option<&feedback::Status> {
+        self.fb.as_ref().filter(|f| f.is_summary())
+    }
+}
+
 /// The dana split fragment, as the script swaps it into the live region.
 #[derive(Template)]
 #[template(path = "dana_split.html")]
@@ -866,9 +893,13 @@ struct DanaFragment {
 #[derive(Debug, Deserialize)]
 struct AnswerQuery {
     thanks: Option<u8>,
+    /// Which feedback control a reload without the script returns to.
+    fb: Option<String>,
+    /// How that submission went: `ok`, `empty` or `long`.
+    fbs: Option<String>,
 }
 
-fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
+pub(crate) fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
     raw.parse().ok()
 }
 
@@ -992,6 +1023,9 @@ async fn answer_page(
             answer_id: answer,
             csrf: s.csrf(&state.site.keys),
             thanks: q.thanks.is_some(),
+            fb: feedback::Status::from_query(q.fb.as_deref(), q.fbs.as_deref()),
+            excerpt_reasons: &feedback::EXCERPT_REASONS,
+            summary_reasons: &feedback::SUMMARY_REASONS,
             dana: None,
             dana_total: String::new(),
             dana_site: String::new(),
@@ -1151,6 +1185,9 @@ async fn dana(
             answer_id: answer,
             csrf: s.csrf(&site.keys),
             thanks: false,
+            fb: None,
+            excerpt_reasons: &feedback::EXCERPT_REASONS,
+            summary_reasons: &feedback::SUMMARY_REASONS,
             dana: Some(view),
             dana_total: form.total,
             dana_site: form.site,
@@ -1158,37 +1195,6 @@ async fn dana(
             site_giving,
         },
     )
-}
-
-#[derive(Debug, Deserialize)]
-struct FeedbackForm {
-    kind: String,
-    csrf: String,
-    passage: Option<String>,
-}
-
-/// `POST /a/{answer}/feedback`: Good, Not faithful, Not relevant, or Flag this query.
-async fn feedback(
-    State(state): State<AppState>,
-    s: Session,
-    Path(answer): Path<String>,
-    Form(form): Form<FeedbackForm>,
-) -> Response {
-    if !s.csrf_ok(&state.site.keys, &form.csrf) {
-        return csrf_refused();
-    }
-    let Some(answer) = parse::<AnswerId>(&answer) else {
-        return not_found_page();
-    };
-    let note = form
-        .passage
-        .as_deref()
-        .filter(|p| parse::<wt_core::ids::PassageId>(p).is_some());
-    match wt_db::answer::feedback(&state.pool, answer, s.tester, &form.kind, note).await {
-        Ok(true) => Redirect::to(&format!("/a/{answer}?thanks=1")).into_response(),
-        Ok(false) => not_found_page(),
-        Err(e) => server_error("recording feedback", &e),
-    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -126,6 +126,26 @@ Owner's decision of October 12, 2026 (Spec 05, Answer assembly, rules 2 and 5).
 - References introduction, inside the list: Entries follow MLA style. The access date is the day this answer was made.
 - Confidence words after a text entry: resolved, probable, unresolved
 
+## Excerpt footer and feedback
+
+Owner's decision of October 12, 2026 (Spec 06, Answer page structure, rules 5 and 6, and Logging, rule 4).
+
+- Footer row, in order: Listen, Read, Cite, Give, Report. Accessible names: Listen at \[h:mm:ss] (opens the source in a new tab). Read the talk's transcript at \[source] (opens their page in a new tab), or Read our transcript (made by machine, may contain errors). Cite this excerpt. Give to \[sangha]. Report this excerpt.
+- Inside Cite: the MLA entry, then the button Copy citation. After copying: Citation copied.
+- Sticky question: the question text only, no label.
+- Excerpt control summary: Feedback on excerpt \[n]
+- Excerpt question: What do you think of this excerpt? Choose any that apply.
+- Excerpt reasons: Helpful. Not relevant to my question. Cut off or missing its context. Words look wrong (a transcription error). Wrong teacher, talk or date. Hard to follow.
+- Summary control summary: Feedback on this summary
+- Summary question: What do you think of this summary? Choose any that apply.
+- Summary reasons: Helpful. Not supported by the excerpts. Misrepresents a teacher. Missing something important. Unclear.
+- Note label: Anything else? (optional)
+- Note help: Notes are read by the project. Your question is not shown with them unless you flag it.
+- Button: Send feedback
+- Status after sending: Thank you. Your feedback on excerpt \[n] was recorded. For the summary: Thank you. Your feedback on the summary was recorded.
+- Nothing chosen: Choose at least one reason or write a note.
+- Note too long: Please keep the note under 1,000 characters.
+
 ## Outside the talks
 
 - Out-of-scope page heading: This is outside what Wheel Turning can help with

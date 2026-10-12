@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into feedback (answer_id, tester_id, target, kind) values ($1, $2, 'query', 'flag_query')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f8afbf50956902568a26c433d22ac1a1d7dcfdb0a3ca98151b08372422f2989e"
+}

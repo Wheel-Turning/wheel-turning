@@ -331,7 +331,7 @@ async fn deleting_my_data_asks_first_and_touches_no_one_else() {
             post(
                 &format!("{permalink}/feedback"),
                 &t.cookie,
-                &format!("kind=good&csrf={}", encode(&t.csrf)),
+                &format!("target=summary&reason=good&csrf={}", encode(&t.csrf)),
                 false,
             ),
         )

@@ -992,3 +992,232 @@ async fn the_dana_script_is_served_from_the_site() {
     assert!(r.body.contains("dana-result"));
     assert!(!r.body.contains("http"), "no external host");
 }
+
+/// The answer page's excerpt footer and feedback control (Spec 06, Answer page structure,
+/// rules 2, 5 and 6, owner's decision of October 12, 2026), with ids, the token and the access
+/// date replaced so the snapshot is stable.
+#[tokio::test]
+async fn the_excerpt_footer_reads_listen_cite_report_with_one_feedback_form() {
+    let fx = start().await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    let body = &page.body;
+    assert!(
+        !body.contains(">Not faithful</button>"),
+        "the old buttons are gone"
+    );
+    assert!(
+        body.contains("<div class=\"sticky-q\" aria-hidden=\"true\" hidden data-sticky-q>"),
+        "the sticky copy is hidden from assistive technology and starts hidden"
+    );
+    let start = body.find("<ul class=\"excerpt-links\">").unwrap();
+    let end = body[start..].find("</details>\n  </article>").unwrap() + start;
+    let mut fragment = body[start..end].to_owned();
+    let uuid =
+        regex::Regex::new("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
+    fragment = uuid.replace_all(&fragment, "[id]").into_owned();
+    fragment = fragment.replace(&csrf(body), "[csrf]");
+    let accessed = wt_api::view::mla_date(chrono::Utc::now().date_naive());
+    fragment = fragment.replace(&accessed, "[accessed]");
+    insta::assert_snapshot!(fragment);
+}
+
+/// Asks about anger and returns the cookie, the token, the permalink and the passage shown.
+async fn asked(fx: &Fx) -> (String, String, String, Uuid) {
+    let cookie = join(fx, "owner").await;
+    let token = csrf(&send(&fx.app, get("/", Some(&cookie))).await.body);
+    let r = send(
+        &fx.app,
+        post("/ask", &cookie, &format!("q=anger&csrf={}", encode(&token))),
+    )
+    .await;
+    let permalink = r.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let passage: Uuid = sqlx::query_scalar("select passage_id from answer_passage")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    (cookie, token, permalink, passage)
+}
+
+/// A form post as the page's script sends it.
+fn hx(path: &str, cookie: &str, form: &str) -> Request<Body> {
+    let mut r = post(path, cookie, form);
+    r.headers_mut()
+        .insert("hx-request", "true".parse().unwrap());
+    r
+}
+
+async fn feedback_rows(pool: &PgPool) -> i64 {
+    sqlx::query_scalar("select count(*) from feedback")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn excerpt_feedback_takes_several_reasons_and_a_note_in_one_submission() {
+    let fx = start().await;
+    let (cookie, token, permalink, passage) = asked(&fx).await;
+    let fb = format!("{permalink}/feedback");
+    let base = format!(
+        "csrf={}&target=excerpt&n=1&passage={passage}",
+        encode(&token)
+    );
+
+    let r = send(
+        &fx.app,
+        post(
+            &fb,
+            &cookie,
+            &format!(
+                "{base}&reason=good&reason=unclear&note={}",
+                encode("Reach me at someone@example.com")
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    let to = r.headers[header::LOCATION].to_str().unwrap().to_owned();
+    assert_eq!(to, format!("{permalink}?fb=p1&fbs=ok#fb-p1"));
+    let rows: Vec<(String, String, Option<Uuid>, Option<String>)> =
+        sqlx::query_as("select kind, target, passage_id, note from feedback order by kind")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
+        ["good", "note", "unclear"]
+    );
+    assert!(
+        rows.iter()
+            .all(|r| r.1 == "excerpt" && r.2 == Some(passage))
+    );
+    let note = rows[1].3.as_deref().unwrap();
+    assert!(!note.contains("someone@example.com"), "{note}");
+    let submissions: i64 = sqlx::query_scalar("select count(distinct submission_id) from feedback")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(submissions, 1);
+
+    // Without the script the page comes back with the control open and the status in it.
+    let back = to.split('#').next().unwrap();
+    let page = send(&fx.app, get(back, Some(&cookie))).await;
+    assert!(page.body.contains("id=\"fb-p1\" open>"), "{}", page.body);
+    assert!(
+        page.body
+            .contains("Thank you. Your feedback on excerpt 1 was recorded.</p>")
+    );
+
+    // With the script the status comes back as text for the live region.
+    let r = send(
+        &fx.app,
+        hx(&fb, &cookie, &format!("{base}&reason=not_relevant")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.body,
+        "Thank you. Your feedback on excerpt 1 was recorded."
+    );
+
+    // Nothing chosen, a summary reason on an excerpt and a note that is too long are refused.
+    let before = feedback_rows(&fx.pool).await;
+    let r = send(&fx.app, hx(&fb, &cookie, &format!("{base}&note=+++"))).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(r.body, "Choose at least one reason or write a note.");
+    let r = send(
+        &fx.app,
+        post(&fb, &cookie, &format!("{base}&reason=unsupported")),
+    )
+    .await;
+    assert_eq!(
+        r.headers[header::LOCATION].to_str().unwrap(),
+        format!("{permalink}?fb=p1&fbs=empty#fb-p1")
+    );
+    let long = "a".repeat(1001);
+    let r = send(&fx.app, hx(&fb, &cookie, &format!("{base}&note={long}"))).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(r.body, "Please keep the note under 1,000 characters.");
+    assert_eq!(feedback_rows(&fx.pool).await, before);
+
+    // A passage that is not in the answer, and another tester, get the generic 404.
+    let stranger = Uuid::new_v4();
+    let r = send(
+        &fx.app,
+        post(
+            &fb,
+            &cookie,
+            &format!(
+                "csrf={}&target=excerpt&n=1&passage={stranger}&reason=good",
+                encode(&token)
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let other = join(&fx, "someone else").await;
+    let other_token = csrf(&send(&fx.app, get("/", Some(&other))).await.body);
+    let r = send(
+        &fx.app,
+        post(
+            &fb,
+            &other,
+            &format!(
+                "csrf={}&target=excerpt&n=1&passage={passage}&reason=good",
+                encode(&other_token)
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(feedback_rows(&fx.pool).await, before);
+}
+
+#[tokio::test]
+async fn summary_feedback_records_its_own_reasons() {
+    let fx = start().await;
+    let (cookie, token, permalink, _) = asked(&fx).await;
+    let fb = format!("{permalink}/feedback");
+    let r = send(
+        &fx.app,
+        hx(
+            &fb,
+            &cookie,
+            &format!(
+                "csrf={}&target=summary&reason=unsupported&reason=misrepresents&reason=missing",
+                encode(&token)
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.body,
+        "Thank you. Your feedback on the summary was recorded."
+    );
+    let rows: Vec<(String, String, Option<Uuid>)> =
+        sqlx::query_as("select kind, target, passage_id from feedback order by kind")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("misrepresents".to_owned(), "summary".to_owned(), None),
+            ("missing".to_owned(), "summary".to_owned(), None),
+            ("unsupported".to_owned(), "summary".to_owned(), None),
+        ]
+    );
+    // An excerpt reason is not a summary reason.
+    let r = send(
+        &fx.app,
+        hx(
+            &fb,
+            &cookie,
+            &format!("csrf={}&target=summary&reason=not_faithful", encode(&token)),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+}
