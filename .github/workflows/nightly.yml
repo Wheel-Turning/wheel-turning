@@ -60,13 +60,17 @@ jobs:
         run: |
           if [ -n "$AUDIT_DATABASE_URL" ]; then
             echo "::add-mask::$AUDIT_DATABASE_URL"
-            echo "DATABASE_URL=$AUDIT_DATABASE_URL" >> "$GITHUB_ENV"
-            echo "WT_ENV=${AUDIT_ENV:-prod}" >> "$GITHUB_ENV"
+            {
+              echo "DATABASE_URL=$AUDIT_DATABASE_URL"
+              echo "WT_ENV=${AUDIT_ENV:-prod}"
+            } >> "$GITHUB_ENV"
             echo "Auditing the configured database (${AUDIT_ENV:-prod})."
           else
-            echo "DATABASE_URL=postgres://wt:wt@localhost:5432/wt" >> "$GITHUB_ENV"
-            echo "WT_ENV=dev" >> "$GITHUB_ENV"
-            echo "WT_AUDIT_SMOKE=1" >> "$GITHUB_ENV"
+            {
+              echo "DATABASE_URL=postgres://wt:wt@localhost:5432/wt"
+              echo "WT_ENV=dev"
+              echo "WT_AUDIT_SMOKE=1"
+            } >> "$GITHUB_ENV"
             echo "No WT_AUDIT_DATABASE_URL secret: auditing a fresh database."
           fi
       - name: Migrate the fresh database
