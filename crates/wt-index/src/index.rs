@@ -1,7 +1,9 @@
 //! The index step (Spec 04, Chunking, embedding and indexing): passages from the corrected
-//! words of each segment, citations mapped onto them, and one transaction that replaces the
-//! talk's passages. [`plan`] is pure; [`write`] runs inside the caller's transaction, which also
-//! moves the talk to `ready`.
+//! words of each segment, citations mapped onto them, and one transaction that brings the talk's
+//! passages up to date. A passage whose segment and content hash are unchanged keeps its id, so
+//! answers, feedback and eval ratings that name it survive a reindex. [`plan`] and
+//! [`match_stored`] are pure; [`write`] runs inside the caller's transaction, which also moves
+//! the talk to `ready`.
 
 use sqlx::PgConnection;
 use sqlx::types::Uuid;
@@ -30,6 +32,10 @@ pub enum IndexError {
     /// The embedder returned the wrong number or length of vectors.
     #[error("embedding: {0}")]
     Embedding(String),
+    /// A passage matched before embedding was gone when the write began, as after a takedown
+    /// or a new transcript. The job is retried and matches again.
+    #[error("passage {0} changed while the talk was being embedded")]
+    Changed(Uuid),
     /// The database refused.
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
@@ -272,15 +278,94 @@ impl Plan {
         self
     }
 
-    /// The texts to embed, in the order [`write`] takes their vectors: the passages, then the
-    /// questions.
-    pub fn texts(&self) -> Vec<String> {
+    /// The texts to embed, in the order [`write`] takes their vectors: the passages whose
+    /// stored vector cannot be kept, then the questions.
+    pub fn texts(&self, reuse: &Reuse) -> Vec<String> {
         self.passages
             .iter()
-            .map(|p| p.passage.text.clone())
+            .zip(&reuse.keep_vector)
+            .filter(|(_, keep)| !**keep)
+            .map(|(p, _)| p.passage.text.clone())
             .chain(self.questions.iter().map(|q| q.text.clone()))
             .collect()
     }
+}
+
+/// A passage the talk already has, as matching sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredPassage {
+    /// `passage.id`.
+    pub id: Uuid,
+    /// Its segment.
+    pub segment_id: Uuid,
+    /// Its chunk's hash, over the text and offsets.
+    pub content_hash: String,
+    /// Whether its vector came from the embedder's model and vector version.
+    pub vector_current: bool,
+}
+
+/// For each planned passage, in order: the stored passage it keeps, and whether that passage's
+/// vector can stay.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reuse {
+    /// The stored passage's id, or none for a new passage.
+    pub ids: Vec<Option<Uuid>>,
+    /// True when the stored vector is current, so the passage needs no embedding.
+    pub keep_vector: Vec<bool>,
+}
+
+/// Matches planned passages to stored ones by segment and content hash, which covers the text
+/// and its offsets. Each stored passage is used at most once. Pure.
+pub fn match_stored(plan: &Plan, stored: &[StoredPassage]) -> Reuse {
+    let mut used = vec![false; stored.len()];
+    let mut reuse = Reuse::default();
+    for p in &plan.passages {
+        let found = stored.iter().enumerate().position(|(i, s)| {
+            !used[i] && s.segment_id == p.segment_id && s.content_hash == p.passage.content_hash
+        });
+        match found {
+            Some(i) => {
+                used[i] = true;
+                reuse.ids.push(Some(stored[i].id));
+                reuse.keep_vector.push(stored[i].vector_current);
+            }
+            None => {
+                reuse.ids.push(None);
+                reuse.keep_vector.push(false);
+            }
+        }
+    }
+    reuse
+}
+
+/// Reads the talk's stored passages and matches the plan to them ([`match_stored`]). A stored
+/// vector is current when it came from `model_id` at `vector_version`.
+pub async fn reuse(
+    conn: &mut PgConnection,
+    talk: Uuid,
+    plan: &Plan,
+    model_id: &str,
+    vector_version: i32,
+) -> Result<Reuse, IndexError> {
+    let stored: Vec<StoredPassage> = sqlx::query!(
+        r#"select id, segment_id, content_hash,
+                  (embedding_model = $2 and vector_version = $3) as "vector_current!"
+           from passage where talk_id = $1 order by ordinal"#,
+        talk,
+        model_id,
+        vector_version
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| StoredPassage {
+        id: r.id,
+        segment_id: r.segment_id,
+        content_hash: r.content_hash,
+        vector_current: r.vector_current,
+    })
+    .collect();
+    Ok(match_stored(plan, &stored))
 }
 
 /// Whether the talk is `ready` with exactly this content hash, so indexing again would change
@@ -313,32 +398,90 @@ fn vector_literal(v: &[f32]) -> String {
     s
 }
 
-/// Replaces the talk's passages, citations and student questions and records the content hash.
-/// `vectors` are the passages' and then the questions', as [`Plan::texts`] lists them. Run it
-/// inside the transaction that moves the talk to `ready`; the caller commits.
+/// Brings the talk's passages, citations and student questions up to date and records the
+/// content hash. A passage `reuse` matched keeps its id and is updated in place, with a new
+/// vector only when its stored one is stale; a new chunk is inserted; a stored passage that
+/// nothing matched is deleted, which cascades to its citations and answers' rows. `vectors` are
+/// those [`Plan::texts`] lists for the same `reuse`. Run it inside the transaction that moves
+/// the talk to `ready`; the caller commits.
+#[allow(clippy::too_many_arguments)]
 pub async fn write(
     conn: &mut PgConnection,
     talk: Uuid,
     plan: &Plan,
+    reuse: &Reuse,
     vectors: &[Vec<f32>],
     model_id: &str,
+    vector_version: i32,
     dim: usize,
 ) -> Result<(), IndexError> {
-    let wanted = plan.passages.len() + plan.questions.len();
-    if vectors.len() != wanted || vectors.iter().any(|v| v.len() != dim) {
+    if reuse.ids.len() != plan.passages.len() || reuse.keep_vector.len() != plan.passages.len() {
+        return Err(IndexError::Embedding(format!(
+            "a match for {} passages, not {}",
+            reuse.ids.len(),
+            plan.passages.len()
+        )));
+    }
+    let to_embed = reuse.keep_vector.iter().filter(|keep| !**keep).count();
+    if vectors.len() != to_embed + plan.questions.len() || vectors.iter().any(|v| v.len() != dim) {
         return Err(IndexError::Embedding(format!(
             "{} vectors for {} passages and {} questions",
             vectors.len(),
-            plan.passages.len(),
+            to_embed,
             plan.questions.len()
         )));
     }
-    let (vectors, question_vectors) = vectors.split_at(plan.passages.len());
-    // Deleting the passages cascades to their citations.
-    sqlx::query!("delete from passage where talk_id = $1", talk)
+    let (vectors, question_vectors) = vectors.split_at(to_embed);
+    let mut fresh = vectors.iter();
+    // Per planned passage: its new vector, or none to keep the stored one.
+    let embeddings: Vec<Option<String>> = reuse
+        .keep_vector
+        .iter()
+        .map(|keep| {
+            if *keep {
+                None
+            } else {
+                fresh.next().map(|v| vector_literal(v))
+            }
+        })
+        .collect();
+
+    // The stored passages, locked: one matched before embedding may have gone since.
+    let present: Vec<Uuid> =
+        sqlx::query_scalar!("select id from passage where talk_id = $1 for update", talk)
+            .fetch_all(&mut *conn)
+            .await?;
+    let kept: Vec<Uuid> = reuse.ids.iter().flatten().copied().collect();
+    if let Some(gone) = kept.iter().find(|id| !present.contains(id)) {
+        return Err(IndexError::Changed(*gone));
+    }
+    // Passages that disappeared go, cascading to their citations and answers' rows. The kept
+    // passages' citations are written again below.
+    sqlx::query!(
+        "delete from passage where talk_id = $1 and id <> all($2)",
+        talk,
+        &kept
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!("delete from citation where talk_id = $1", talk)
         .execute(&mut *conn)
         .await?;
-    let ids: Vec<Uuid> = plan.passages.iter().map(|_| Uuid::new_v4()).collect();
+    // Moves the kept passages out of the way of unique (talk_id, ordinal), which is checked row
+    // by row, so that ordinals can shift.
+    sqlx::query!(
+        "update passage set ordinal = -1 - ordinal where talk_id = $1",
+        talk
+    )
+    .execute(&mut *conn)
+    .await?;
+
+    let ids: Vec<Uuid> = reuse
+        .ids
+        .iter()
+        .map(|id| id.unwrap_or_else(Uuid::new_v4))
+        .collect();
+    let is_new: Vec<bool> = reuse.ids.iter().map(Option::is_none).collect();
     let segs: Vec<Uuid> = plan.passages.iter().map(|p| p.segment_id).collect();
     let kinds: Vec<String> = plan.passages.iter().map(|p| p.kind.clone()).collect();
     let ordinals: Vec<i32> = plan.passages.iter().map(|p| p.ordinal).collect();
@@ -359,15 +502,17 @@ pub async fn write(
         .iter()
         .map(|p| p.passage.content_hash.clone())
         .collect();
-    let embeddings: Vec<String> = vectors.iter().map(|v| vector_literal(v)).collect();
+    // Kept passages: everything but the id, and the vector only where it was stale.
     sqlx::query!(
-        "insert into passage (id, talk_id, segment_id, segment_kind, ordinal, start_ms, end_ms,
-                              text, word_count, content_hash, embedding, embedding_model)
-         select u.id, $1, u.seg, u.kind::segment_kind, u.ord, u.s, u.e, u.txt, u.wc, u.h,
-                u.emb::vector, $12
+        "update passage p set segment_id = u.seg, segment_kind = u.kind::segment_kind,
+                ordinal = u.ord, start_ms = u.s, end_ms = u.e, text = u.txt, word_count = u.wc,
+                content_hash = u.h, embedding = coalesce(u.emb::vector, p.embedding),
+                embedding_model = case when u.emb is null then p.embedding_model else $12 end,
+                vector_version = case when u.emb is null then p.vector_version else $13 end
          from unnest($2::uuid[], $3::uuid[], $4::text[], $5::int4[], $6::int4[], $7::int4[],
-                     $8::text[], $9::int4[], $10::text[], $11::text[])
-              as u(id, seg, kind, ord, s, e, txt, wc, h, emb)",
+                     $8::text[], $9::int4[], $10::text[], $11::text[], $14::bool[])
+              as u(id, seg, kind, ord, s, e, txt, wc, h, emb, new)
+         where p.talk_id = $1 and p.id = u.id and not u.new",
         talk,
         &ids,
         &segs,
@@ -378,8 +523,37 @@ pub async fn write(
         &texts,
         &counts,
         &hashes,
-        &embeddings,
-        model_id
+        &embeddings as &[Option<String>],
+        model_id,
+        vector_version,
+        &is_new
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!(
+        "insert into passage (id, talk_id, segment_id, segment_kind, ordinal, start_ms, end_ms,
+                              text, word_count, content_hash, embedding, embedding_model,
+                              vector_version)
+         select u.id, $1, u.seg, u.kind::segment_kind, u.ord, u.s, u.e, u.txt, u.wc, u.h,
+                u.emb::vector, $12, $13
+         from unnest($2::uuid[], $3::uuid[], $4::text[], $5::int4[], $6::int4[], $7::int4[],
+                     $8::text[], $9::int4[], $10::text[], $11::text[], $14::bool[])
+              as u(id, seg, kind, ord, s, e, txt, wc, h, emb, new)
+         where u.new",
+        talk,
+        &ids,
+        &segs,
+        &kinds,
+        &ordinals,
+        &starts,
+        &ends,
+        &texts,
+        &counts,
+        &hashes,
+        &embeddings as &[Option<String>],
+        model_id,
+        vector_version,
+        &is_new
     )
     .execute(&mut *conn)
     .await?;

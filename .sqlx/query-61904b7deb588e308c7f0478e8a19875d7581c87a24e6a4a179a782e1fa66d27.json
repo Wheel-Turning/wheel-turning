@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update passage p set segment_id = u.seg, segment_kind = u.kind::segment_kind,\n                ordinal = u.ord, start_ms = u.s, end_ms = u.e, text = u.txt, word_count = u.wc,\n                content_hash = u.h, embedding = coalesce(u.emb::vector, p.embedding),\n                embedding_model = case when u.emb is null then p.embedding_model else $12 end,\n                vector_version = case when u.emb is null then p.vector_version else $13 end\n         from unnest($2::uuid[], $3::uuid[], $4::text[], $5::int4[], $6::int4[], $7::int4[],\n                     $8::text[], $9::int4[], $10::text[], $11::text[], $14::bool[])\n              as u(id, seg, kind, ord, s, e, txt, wc, h, emb, new)\n         where p.talk_id = $1 and p.id = u.id and not u.new",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "UuidArray",
+        "TextArray",
+        "Int4Array",
+        "Int4Array",
+        "Int4Array",
+        "TextArray",
+        "Int4Array",
+        "TextArray",
+        "TextArray",
+        "Text",
+        "Int4",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "61904b7deb588e308c7f0478e8a19875d7581c87a24e6a4a179a782e1fa66d27"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from citation where talk_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d4fcf2d9c9175b2fe78fc36aada1b3c31e22e17c8eeadfcc44827e8f57c457d"
+}

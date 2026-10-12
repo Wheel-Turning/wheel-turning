@@ -344,10 +344,12 @@ Embedding input is the passage text and nothing else. No teacher, sangha, title 
 
 The index step, per talk, in one transaction:
 
-1. Delete the talk's existing passages, which cascades to citations.
-2. Insert the new passages with embeddings and the `embedding_model` name.
+1. Match the new passages to the talk's stored ones by segment and content hash. A matched passage keeps its id and is updated in place; a stored passage nothing matches is deleted, which cascades to its citations and `answer_passage` rows. The talk's citations are deleted and written again in step 3.
+2. Insert the new passages with embeddings, the `embedding_model` name and the vector version. A kept passage is embedded again only when its model or vector version differs from the embedder's.
 3. Map each staged citation to the passage that contains its first word, compute span offsets relative to the passage text, and insert `citation` rows with the resolved confidence.
 4. Set `talk.content_hash` to a hash of the passage hashes, `last_verified_at` to now, and state to `ready`.
+
+Decision of October 12, 2026: a reindex keeps the id of every passage whose text is unchanged. Before this, each reindex (after citation resolution, new student questions or a glossary change) deleted the talk's passages and inserted them with new ids, so stored answers lost their `answer_passage` rows, permalinks said "removed at the rights holder's request" for passages that were only renumbered, feedback and eval references broke, and an answer chosen during a reindex could not be saved. The key is the segment and the chunk's `content_hash`, which covers the text and its offsets; the ordinal is not part of it, so a passage keeps its id when an earlier one changes and it moves. Passages live only as long as their segment, so a new transcript (`audio` or a review), whose segments replace the old ones, still gives every passage a new id. `passage.vector_version` (migration 0035) records `wt_ml::VECTOR_VERSION` beside `embedding_model`; rows from before it start at 1 and are embedded again once, the next time their talk is indexed. Matching runs before embedding, outside the transaction; the write locks the talk's passages and, if a matched passage has gone meanwhile (a takedown), fails the job, which is retried and matches again. Takedown still deletes passages, and serving still reads them only through `servable_passage`.
 
 After a batch, run `ANALYZE passage`. HNSW search settings are applied per query in Spec 05. `wt reindex --talk <id> | --all [--model <name>]` reruns the index step from stored segments and the transcript JSON, which is how a new glossary version or embedding model is applied.
 

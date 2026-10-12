@@ -695,14 +695,25 @@ pub async fn run_index(
     }
     // A ready talk keeps serving its old passages until the new ones commit.
     advance_forward(conn, &talk, PipelineState::Indexing).await?;
-    let vectors = embedder.embed(&plan.texts()).await?;
+    // Unchanged passages keep their ids, and their vectors when current.
+    let reuse = index::reuse(
+        conn,
+        talk_id.as_uuid(),
+        &plan,
+        embedder.model_id(),
+        wt_ml::VECTOR_VERSION,
+    )
+    .await?;
+    let vectors = embedder.embed(&plan.texts(&reuse)).await?;
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     index::write(
         &mut tx,
         talk_id.as_uuid(),
         &plan,
+        &reuse,
         &vectors,
         embedder.model_id(),
+        wt_ml::VECTOR_VERSION,
         embedder.dim(),
     )
     .await?;

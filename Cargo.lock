@@ -4646,9 +4646,11 @@ dependencies = [
  "serde",
  "sqlx",
  "thiserror",
+ "tokio",
  "toml",
  "unicode-segmentation",
  "wt-core",
+ "wt-db",
 ]
 
 [[package]]
