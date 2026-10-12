@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select has_table_privilege('query_log', 'select') as \"reads!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reads!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d5c107abb0c0c65dadbee65b792578684c244a6015270e3a6cb15da512cce6ae"
+}

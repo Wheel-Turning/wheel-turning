@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, donation_kind, donation_url, donation_verified from sangha where name = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "donation_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "donation_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "donation_verified",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_verified"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "42a2ca49e355235bc41fd08eeb4a9600c64bdfe4aba8dbb48c2b3b21a1785ebe"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select day as \"day!\", kind as \"kind!\", events as \"events!\"\n           from v_dana_clicks order by day, kind",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "v_dana_clicks",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_dana_clicks",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "events!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_dana_clicks",
+            "name": "events"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "11067aa230240bd8ed4f1002d4108f478a25ccdd0394947233094fc3fb95cdd0"
+}

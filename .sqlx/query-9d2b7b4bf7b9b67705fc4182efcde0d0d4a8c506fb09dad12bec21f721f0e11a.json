@@ -1,0 +1,134 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, name, donation_kind, donation_url, donation_url_template,\n                  donation_verified, donation_checked_by, donation_checked_at, donation_note, listed\n           from sangha order by name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "donation_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "donation_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "donation_url_template",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_url_template"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "donation_verified",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_verified"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "donation_checked_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_checked_by"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "donation_checked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_checked_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "donation_note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_note"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "listed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "listed"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "9d2b7b4bf7b9b67705fc4182efcde0d0d4a8c506fb09dad12bec21f721f0e11a"
+}

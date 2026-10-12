@@ -1672,3 +1672,231 @@ async fn reindex_citations_queues_resolution_after_a_new_work_or_stoplist_and_no
     std::fs::remove_dir_all(&cwd).unwrap();
     std::fs::remove_dir_all(&cfg).unwrap();
 }
+
+const LINKED: &str = r#"
+[[sangha]]
+name = "Fixture Giving Zendo"
+donation_url = "https://give.fixture.example/donate"
+
+[[sangha]]
+name = "Fixture Contact Zendo"
+donation_url = "https://contact.fixture.example/contact"
+donation_kind = "contact"
+donation_note = "A contact page, not a giving page."
+"#;
+
+impl Fx {
+    fn import_text(&self, text: &str) {
+        let path = std::env::temp_dir().join(format!("wt-linked-{}.toml", Uuid::new_v4()));
+        std::fs::write(&path, text).unwrap();
+        self.json(&[
+            "registry",
+            "import",
+            "--file",
+            path.to_str().unwrap(),
+            "--by",
+            "test",
+        ]);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    async fn verified(&self, name: &str) -> bool {
+        sqlx::query_scalar("select donation_verified from sangha where name = $1")
+            .bind(name)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap()
+    }
+}
+
+const GIVING: &str = "Fixture Giving Zendo";
+const GIVING_URL: &str = "https://give.fixture.example/donate";
+
+#[tokio::test]
+async fn sangha_verify_records_who_and_when_and_only_for_the_stored_page() {
+    let fx = start().await;
+    fx.import_text(LINKED);
+    let links = fx.json(&["sangha", "links"]);
+    assert!(
+        links
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["verified"] == false)
+    );
+
+    let verify = |name: &str, url: &str, by: Option<&str>| {
+        let mut args = vec!["sangha", "verify", "--sangha", name, "--url", url];
+        if let Some(by) = by {
+            args.extend(["--by", by]);
+        }
+        fx.wt(&args)
+    };
+    assert!(
+        !verify(GIVING, GIVING_URL, None).status.success(),
+        "--by is required"
+    );
+    let out = verify(
+        GIVING,
+        "https://give.fixture.example/elsewhere",
+        Some("Owner"),
+    );
+    assert!(
+        !out.status.success(),
+        "a link other than the stored one is refused"
+    );
+    let out = verify(
+        "Fixture Contact Zendo",
+        "https://contact.fixture.example/contact",
+        Some("Owner"),
+    );
+    assert!(!out.status.success(), "a contact page is never verified");
+    assert!(stderr(&out).contains("contact"), "{}", stderr(&out));
+    assert!(!fx.verified(GIVING).await);
+
+    let out = verify(GIVING, GIVING_URL, Some("Owner Name"));
+    assert!(out.status.success(), "{}", stderr(&out));
+    let link: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(link["verified"], true);
+    assert_eq!(link["checked_by"], "Owner Name");
+    assert!(link["checked_at"].is_string());
+    let logged: i64 = sqlx::query_scalar(
+        "select count(*) from correction_log where entity = 'sangha' and actor = 'Owner Name'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, 1);
+
+    // The constraint holds against a direct write too.
+    let direct = sqlx::query(
+        "update sangha set donation_verified = true where name = 'Fixture Contact Zendo'",
+    )
+    .execute(&fx.pool)
+    .await;
+    assert!(direct.is_err(), "only a page can be verified");
+
+    // Re-importing an unchanged link keeps the verification; a changed one clears it.
+    fx.import_text(LINKED);
+    assert!(fx.verified(GIVING).await);
+    fx.import_text(&LINKED.replace("/donate", "/give"));
+    assert!(
+        !fx.verified(GIVING).await,
+        "a changed link needs a new check"
+    );
+
+    let link = fx.json(&[
+        "sangha",
+        "unverify",
+        "--sangha",
+        "Fixture Contact Zendo",
+        "--reason",
+        "page moved",
+        "--by",
+        "Owner Name",
+    ]);
+    assert_eq!(link["verified"], false);
+    assert_eq!(link["note"], "page moved");
+}
+
+/// Two questions, one flagged, each with an answer and a dana event.
+async fn two_questions(pool: &PgPool) {
+    let tester: Uuid = sqlx::query_scalar(
+        "insert into tester (label, token_hash) values ('fixture', decode(md5(random()::text), 'hex'))
+         returning id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for (text, flagged) in [
+        ("unflagged secret question", false),
+        ("flagged question", true),
+    ] {
+        let log: Uuid = sqlx::query_scalar(
+            "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,
+                                    passage_count, latency_ms, flagged, flagged_at)
+             values ($1, $2, 'standard', 2, 1, 2, 10, $3, case when $3 then now() end)
+             returning id",
+        )
+        .bind(tester)
+        .bind(text)
+        .bind(flagged)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let answer: Uuid = sqlx::query_scalar(
+            "insert into answer (query_log_id, payload) values ($1, '{}') returning id",
+        )
+        .bind(log)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "insert into dana_event (answer_id, kind, total_cents)
+             values ($1, 'split_computed', 2000)",
+        )
+        .bind(answer)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn reports_run_as_the_analyst_and_never_show_an_unflagged_question() {
+    let fx = start().await;
+    two_questions(&fx.pool).await;
+    let password = wt_core::Secret::new("analyst-test-password-0123456789");
+    wt_db::create_login(&fx.pool, "wt_analyst", "report_login", &password)
+        .await
+        .unwrap();
+    let rest = fx.db.url().expose().split_once('@').unwrap().1.to_owned();
+    let analyst = format!("postgres://report_login:analyst-test-password-0123456789@{rest}");
+    let report = |args: &[&str], url: &str| fx.wt_env(args, &[("DATABASE_URL_ANALYST", url)], &[]);
+    let json = |args: &[&str]| -> serde_json::Value {
+        let out = report(args, &analyst);
+        assert!(out.status.success(), "{args:?}: {}", stderr(&out));
+        let text = stdout(&out);
+        assert!(
+            !text.contains("unflagged secret question"),
+            "{args:?} leaked: {text}"
+        );
+        serde_json::from_str(&text).unwrap()
+    };
+
+    let answers = json(&["report", "answers", "--since", "1d"]);
+    assert_eq!(answers[0]["answers"], 2);
+    let dana = json(&["report", "dana"]);
+    assert_eq!(dana[0]["kind"], "split_computed");
+    assert_eq!(dana[0]["events"], 2);
+    json(&["report", "coverage"]);
+    let flagged = json(&["report", "flagged"]);
+    assert_eq!(flagged.as_array().unwrap().len(), 1);
+    assert_eq!(flagged[0]["query_text"], "flagged question");
+
+    // The analyst role cannot read the table itself.
+    let pool = wt_db::connect(&wt_core::Secret::new(analyst.clone()))
+        .await
+        .unwrap();
+    assert!(
+        sqlx::query("select query_text from query_log")
+            .fetch_all(&pool)
+            .await
+            .is_err(),
+        "wt_analyst must not read query_log"
+    );
+
+    // A role that could read query_log is refused, and so is a missing analyst URL.
+    let out = report(&["report", "dana"], fx.db.url().expose());
+    assert!(!out.status.success(), "the superuser must be refused");
+    assert!(stderr(&out).contains("query_log"), "{}", stderr(&out));
+    let out = fx.wt_env(&["report", "dana"], &[], &["DATABASE_URL_ANALYST"]);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("DATABASE_URL_ANALYST"),
+        "{}",
+        stderr(&out)
+    );
+    let out = report(&["report", "answers", "--since", "soon"], &analyst);
+    assert!(!out.status.success(), "a bad duration is refused");
+}
