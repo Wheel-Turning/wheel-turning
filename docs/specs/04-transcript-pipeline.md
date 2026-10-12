@@ -316,6 +316,9 @@ Real talks while the switch is off (owner's decision of October 7, 2026). Zero d
 
 ## Chunking, embedding and indexing
 
+Sentence boundaries (owner's decision of October 12, 2026). The index step also stores, for each passage, where its sentences start: `passage.sentence_starts integer[]` (word offsets) and `passage.sentence_start_ms integer[]`, from Unicode sentence boundaries and pauses of `sentence_pause_ms`. A stretch of more than `boundary_max_words` (40) words without a boundary, common in text with little punctuation, is split at its longest pause, and failing that every 30 words at a word boundary, so answer excerpts (Spec 05, Answer assembly, rule 8) always have places to start and end. Boundaries never change the stored words. The migration adds both columns with empty defaults, and `wt reindex --all` fills them; it must keep passage ids when the text is unchanged.
+
+
 ```rust
 #[async_trait]
 pub trait Embedder: Send + Sync {

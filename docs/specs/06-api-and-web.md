@@ -322,6 +322,8 @@ Acceptance criteria for question privacy:
 
 ## Rendering sensitive questions
 
+The `out_of_scope` page and the `unrelated` page (Spec 05, Sensitive questions, as amended on October 12, 2026) follow the same rules as the acute page below where they apply: a heading that takes focus, no giving panel, no feedback controls, `Cache-Control: no-store`, and no permalink until the tester presses "Search the talks anyway".
+
 - The notice is a labeled region with a heading. On the acute page it is the `h1` and takes focus on load. A banner sits inside the main landmark above the question, is never collapsible or dismissed by a timer, and uses the body text size.
 - `POST /ask` for an acute question responds `200` with the notice page and `Cache-Control: no-store`, not a `303` to a permalink, because no answer exists. The page has no giving panel, no feedback buttons, no "Flag this query" and no permalink.
 - The numbers are links, so "call 988" is a `tel:988` link, "text 988" is an `sms:988` link, and the web addresses are plain links with names that say where they lead.
