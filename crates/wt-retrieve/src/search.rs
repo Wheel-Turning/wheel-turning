@@ -2,7 +2,7 @@
 //! `servable_passage`, and the student-question search `servable_student_question`, and nothing
 //! else (CLAUDE.md rule 3).
 
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 use wt_core::ids::{PassageId, TalkId, TeacherId};
 
@@ -68,10 +68,35 @@ pub async fn full_text(
     Ok(rows.into_iter().map(PassageId::from).collect())
 }
 
-/// Vector candidates, nearest first. Standard mode orders the whole view by distance so the
-/// HNSW index serves it; named mode filters to one teacher first, an exact scan over that
-/// teacher's passages, so a teacher with few passages is not starved by the index's
-/// post-filter.
+/// The SQL of the standard-mode vector search, public so a test can check its plan.
+pub const VECTOR_SQL: &str = "select passage_id from servable_passage
+                              order by embedding <=> $1::text::vector
+                              limit $2";
+
+/// Settings that put the standard-mode vector search on `passage_embedding_hnsw`, for the
+/// current transaction only. The view's rights filter makes the planner expect a handful of
+/// servable rows (16 against 136,520 on October 12, 2026), so left alone it joins the whole
+/// view and sorts every served passage, 2 to 4 s. With sorting off it walks the index
+/// instead, about 50 ms. The large cost that disabling sort adds would also cross
+/// `jit_above_cost` and spend about 500 ms compiling, so JIT is off too. A strict-order
+/// iterative scan keeps reading the index, in exact distance order, until `limit` passages
+/// pass the view's filter, so passages that do not serve never starve the list.
+pub async fn use_hnsw(conn: &mut PgConnection, ef_search: i64) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "select set_config('hnsw.ef_search', $1, true),
+                set_config('hnsw.iterative_scan', 'strict_order', true),
+                set_config('enable_sort', 'off', true),
+                set_config('jit', 'off', true)",
+    )
+    .bind(ef_search.clamp(1, 1000).to_string())
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Vector candidates, nearest first. Standard mode walks the HNSW index over the whole view
+/// (see [`use_hnsw`]); named mode filters to one teacher first, an exact scan over that
+/// teacher's passages, so a teacher with few passages is never cut short by the index.
 pub async fn vector(
     conn: &mut PgConnection,
     embedding: &[f32],
@@ -82,22 +107,17 @@ pub async fn vector(
     let literal = vector_literal(embedding);
     let rows: Vec<Uuid> = match teacher {
         None => {
-            // `set local` lasts until the end of the caller's transaction.
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "set local hnsw.ef_search = {}",
-                ef_search.clamp(1, 1000)
-            )))
-            .execute(&mut *conn)
-            .await?;
-            sqlx::query_scalar!(
-                r#"select passage_id as "passage_id!" from servable_passage
-                   order by embedding <=> $1::text::vector
-                   limit $2"#,
-                literal,
-                k
-            )
-            .fetch_all(&mut *conn)
-            .await?
+            // Its own transaction, or a savepoint inside the caller's, rolled back at the end
+            // so the planner settings stop here: nothing is written.
+            let mut tx = conn.begin().await?;
+            use_hnsw(&mut tx, ef_search).await?;
+            let rows = sqlx::query_scalar(VECTOR_SQL)
+                .bind(literal)
+                .bind(k)
+                .fetch_all(&mut *tx)
+                .await?;
+            tx.rollback().await?;
+            rows
         }
         Some(t) => {
             sqlx::query_scalar!(
