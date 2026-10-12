@@ -38,6 +38,7 @@ pub mod tester;
 pub mod text_takedown;
 pub mod texts;
 pub mod transcript;
+pub mod triage;
 
 /// Every migration in `migrations/`, embedded at compile time.
 pub static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");

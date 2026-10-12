@@ -13,11 +13,11 @@ use wt_extract::{
     ClaudeClient, ClaudeSettings, LlmClient, LogAlerter, PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_ml::{MlError, OnnxEmbedder, OnnxReranker, OnnxSettings, Reranker};
+use wt_retrieve::sensitive::triage::LlmTriage;
 use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
-use wt_retrieve::{ModelCheck, RetrievalConfig, Sensitivity};
+use wt_retrieve::{RetrievalConfig, Sensitivity, Triage};
 
 use crate::Site;
-use crate::sensitive::LlmSensitivity;
 use crate::session::Keys;
 
 type Source = Box<dyn std::error::Error + Send + Sync>;
@@ -84,16 +84,16 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         }
         Err(e) => return Err(err("loading the reranker")(e)),
     };
-    let (llm, sensitivity_model): (Arc<dyn LlmClient>, Option<Arc<dyn ModelCheck>>) = match claude(
+    let (llm, triage): (Arc<dyn LlmClient>, Option<Arc<dyn Triage>>) = match claude(
         config, &dir, pool,
     ) {
         Ok(c) => {
             let c: Arc<dyn LlmClient> = Arc::new(c);
-            let check: Arc<dyn ModelCheck> = Arc::new(LlmSensitivity::new(c.clone()));
-            (c, Some(check))
+            let gate: Arc<dyn Triage> = Arc::new(LlmTriage::new(c.clone()));
+            (c, Some(gate))
         }
         Err(e) => {
-            tracing::warn!(error = %e, "no language model: answers have no synthesis line and sensitive-question detection has no model layer");
+            tracing::warn!(error = %e, "no language model: answers have no synthesis line and every question logs triage_degraded");
             (Arc::new(UnavailableLlm), None)
         }
     };
@@ -114,14 +114,14 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         retrieval,
         common_words,
         sensitivity: Arc::new(sensitivity),
-        sensitivity_model,
+        triage,
         keys,
         secure_cookies: !config.env.is_dev(),
         site_dana_url: config.site_dana_url.clone(),
     })
 }
 
-/// The Claude client for synthesis, verification and the sensitivity model layer:
+/// The Claude client for synthesis, verification and the triage gate:
 /// `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_EXTRACT` (Haiku-class), each
 /// falling back to `WT_LLM_MODEL`. Real text is refused unless `WT_LLM_REAL_DATA_OK=true`, and
 /// spend counts against the shared monthly cap.
@@ -153,13 +153,14 @@ fn claude(
         }
         models.insert(stage.as_str(), model.to_owned());
     }
-    // The sensitivity model layer is optional: without its model, its calls fail and the rules
-    // and the embedding check decide, which can never lower a level.
+    // The triage gate's model is optional: without it, its calls fail, every question logs
+    // triage_degraded, and the rules and the embedding check decide, which can never lower a
+    // level.
     match config.llm_model_for(LlmStage::Sensitive) {
         Ok(model) if licenses.require(model).is_ok() && prices.get(model).is_some() => {
             models.insert(LlmStage::Sensitive.as_str(), model.to_owned());
         }
-        _ => tracing::warn!("no usable sensitivity model: that layer is off"),
+        _ => tracing::warn!("no usable triage model: the gate is degraded"),
     }
     // Excerpts fall back to the reranker and the trimmed passage without their model.
     match config.llm_model_for(LlmStage::Excerpt) {

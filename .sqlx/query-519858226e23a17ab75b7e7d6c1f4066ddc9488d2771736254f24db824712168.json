@@ -1,0 +1,87 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sensitive_category as \"category!\", relevance,\n                  triage_degraded as \"triage_degraded!\",\n                  sum(questions)::bigint as \"questions!\", sum(answered)::bigint as \"answered!\",\n                  sum(none_found)::bigint as \"none_found!\",\n                  sum(not_relevant)::bigint as \"not_relevant!\", sum(flagged)::bigint as \"flagged!\"\n           from v_query_triage where day >= date_trunc('day', $1::timestamptz)\n           group by 1, 2, 3 order by 1, 2 nulls last, 3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_query_triage",
+            "name": "sensitive_category"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "relevance",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_query_triage",
+            "name": "relevance"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "triage_degraded!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "v_query_triage",
+            "name": "triage_degraded"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "questions!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "answered!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "none_found!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "not_relevant!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "flagged!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "519858226e23a17ab75b7e7d6c1f4066ddc9488d2771736254f24db824712168"
+}

@@ -72,8 +72,13 @@ pub struct NewAnswer<'a> {
     pub latency_ms: i32,
     /// Themes dropped by the filters or the verifier.
     pub themes_dropped: i32,
-    /// `none`, `medical` or `distress`. Acute questions store no answer: see [`log_acute`].
+    /// `none`, `medical` or `distress`. Acute and out-of-scope questions store no answer: see
+    /// [`log_counts_only`].
     pub sensitive_category: &'a str,
+    /// The triage gate's `practice`, `adjacent` or `unrelated`; `None` when it did not answer.
+    pub relevance: Option<&'a str>,
+    /// The gate was off, failed, timed out or found the cap reached.
+    pub triage_degraded: bool,
     /// `share` or `count_only` (Spec 06, Privacy modes).
     pub privacy_mode: &'a str,
     /// When the purge removes the text and the answer.
@@ -104,8 +109,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
                                 theme_count, themes_dropped, sensitive_category, privacy_mode,
-                                text_expires_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id",
+                                text_expires_at, relevance, triage_degraded)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+         returning id",
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -119,7 +125,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.themes_dropped,
         a.sensitive_category,
         a.privacy_mode,
-        a.text_expires_at
+        a.text_expires_at,
+        a.relevance,
+        a.triage_degraded
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -144,16 +152,61 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     Ok(AnswerId::from(answer))
 }
 
-/// Spec 05: an acute question is logged as counts and its category only. No question text, no
-/// answer row and no passages, whatever the tester's privacy mode, so the row records
-/// `count_only`.
-pub async fn log_acute(pool: &PgPool, tester: TesterId, latency_ms: i32) -> Result<(), DbError> {
+/// Spec 05: an acute or out-of-scope question is logged as counts and its category only. No
+/// question text, no answer row and no passages, whatever the tester's privacy mode, so the row
+/// records `count_only`.
+pub async fn log_counts_only(
+    pool: &PgPool,
+    tester: TesterId,
+    category: &str,
+    latency_ms: i32,
+    relevance: Option<&str>,
+    triage_degraded: bool,
+) -> Result<(), DbError> {
     sqlx::query!(
         "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,
-                                passage_count, latency_ms, sensitive_category, privacy_mode)
-         values ($1, null, 'standard', 0, 0, 0, $2, 'acute', 'count_only')",
+                                passage_count, latency_ms, sensitive_category, privacy_mode,
+                                relevance, triage_degraded)
+         values ($1, null, 'standard', 0, 0, 0, $2, $3, 'count_only', $4, $5)",
         tester.as_uuid(),
-        latency_ms
+        latency_ms,
+        category,
+        relevance,
+        triage_degraded
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// A question shown the outside-these-talks page (Spec 05, relevance `unrelated`): a log row
+/// with no answer, its text kept as the tester's privacy mode says. "Search the talks anyway"
+/// asks again and logs its own row.
+pub struct Unanswered<'a> {
+    /// Who asked.
+    pub tester: TesterId,
+    /// The question as kept for the privacy mode.
+    pub query_text: &'a str,
+    /// `share` or `count_only`.
+    pub privacy_mode: &'a str,
+    /// When the purge removes the text.
+    pub text_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The time to the page.
+    pub latency_ms: i32,
+}
+
+/// Logs an [`Unanswered`] question with category `none` and relevance `unrelated`.
+pub async fn log_unrelated(pool: &PgPool, u: &Unanswered<'_>) -> Result<(), DbError> {
+    sqlx::query!(
+        "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,
+                                passage_count, latency_ms, sensitive_category, privacy_mode,
+                                text_expires_at, relevance, triage_degraded)
+         values ($1, $2, 'standard', 0, 0, 0, $3, 'none', $4, $5, 'unrelated', false)",
+        u.tester.as_uuid(),
+        u.query_text,
+        u.latency_ms,
+        u.privacy_mode,
+        u.text_expires_at
     )
     .execute(pool)
     .await?;

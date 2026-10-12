@@ -1,5 +1,5 @@
 //! Spec 05, Sensitive questions: the layered classifier against a labeled fixture of synthetic
-//! questions, and the rule that no failing layer lowers the level. No network: the model layer
+//! questions, and the rule that no failing layer lowers the level. No network: the triage gate
 //! is a fake, and the embedder is the hashing fake or a scripted one.
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
@@ -12,8 +12,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 use wt_ml::{Embedder, FakeEmbedder, MlError};
+use wt_retrieve::sensitive::triage::{self, Confidence, Relevance, Risk, Triage, Verdict};
 use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
-use wt_retrieve::{Level, ModelCheck, Sensitivity};
+use wt_retrieve::{Level, Sensitivity};
 
 fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -58,7 +59,7 @@ async fn check_fixture(s: &Sensitivity, embedder: &dyn Embedder) {
     ] {
         let mut n = 0usize;
         for q in list {
-            let c = s.classify(q, embedder, None).await;
+            let c = s.classify(q, embedder).await;
             if ok(c.level) {
                 n += 1;
             } else {
@@ -105,7 +106,7 @@ async fn the_rules_alone_catch_every_acute_question_when_the_embedder_is_down() 
         .await
         .unwrap();
     for q in fixture().acute {
-        let c = s.classify(&q, &DownEmbedder, None).await;
+        let c = s.classify(&q, &DownEmbedder).await;
         assert_eq!(c.level, Level::Acute, "{q}");
     }
 }
@@ -133,7 +134,7 @@ async fn real_embedder() {
         ("ordinary", &f.ordinary),
     ] {
         for q in list {
-            let c = s.classify(q, &embedder, None).await;
+            let c = s.classify(q, &embedder).await;
             let sims = c
                 .vector
                 .as_deref()
@@ -203,24 +204,33 @@ impl Embedder for DownEmbedder {
     }
 }
 
-/// A model layer that answers a fixed level, fails, or hangs, and counts its calls.
-struct FakeModel {
-    reply: Mutex<Result<Level, String>>,
+/// A gate that answers a fixed verdict, fails, or hangs, and counts its calls.
+struct FakeGate {
+    reply: Mutex<Result<Verdict, String>>,
     hang: bool,
     calls: AtomicUsize,
 }
 
-impl FakeModel {
-    fn says(l: Level) -> Self {
+fn verdict(relevance: Relevance, risk: Risk) -> Verdict {
+    Verdict {
+        relevance,
+        risk,
+        ongoing: true,
+        confidence: Confidence::High,
+    }
+}
+
+impl FakeGate {
+    fn says(risk: Risk) -> Self {
         Self {
-            reply: Mutex::new(Ok(l)),
+            reply: Mutex::new(Ok(verdict(Relevance::Practice, risk))),
             hang: false,
             calls: AtomicUsize::new(0),
         }
     }
     fn fails() -> Self {
         Self {
-            reply: Mutex::new(Err("cap reached".into())),
+            reply: Mutex::new(Err("the monthly language-model cap is reached".into())),
             hang: false,
             calls: AtomicUsize::new(0),
         }
@@ -228,7 +238,7 @@ impl FakeModel {
     fn hangs() -> Self {
         Self {
             hang: true,
-            ..Self::says(Level::None)
+            ..Self::says(Risk::None)
         }
     }
     fn calls(&self) -> usize {
@@ -237,8 +247,8 @@ impl FakeModel {
 }
 
 #[async_trait]
-impl ModelCheck for FakeModel {
-    async fn level(&self, _: &str) -> Result<Level, String> {
+impl Triage for FakeGate {
+    async fn triage(&self, _: &str) -> Result<Verdict, String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if self.hang {
             tokio::time::sleep(Duration::from_secs(3600)).await;
@@ -252,7 +262,7 @@ const SAD: &str = "I feel hopeless about everything";
 
 async fn scripted(questions: &[(&str, usize)]) -> (Sensitivity, Scripted) {
     let (mut config, exemplars) = shipped();
-    config.model.timeout_s = 1;
+    config.triage.triage_timeout_s = 1;
     let e = Scripted {
         exemplars: exemplars.clone(),
         questions: questions
@@ -264,10 +274,18 @@ async fn scripted(questions: &[(&str, usize)]) -> (Sensitivity, Scripted) {
     (s, e)
 }
 
+/// The first two layers, then the gate, as the ask path combines them.
+async fn all_layers(s: &Sensitivity, e: &dyn Embedder, gate: &FakeGate, q: &str) -> Level {
+    let c = s.classify(q, e).await;
+    triage::run(Some(gate), s.triage_settings(), q)
+        .await
+        .raise(c.level)
+}
+
 #[tokio::test]
 async fn the_embedding_layer_raises_a_question_the_rules_missed() {
     let (s, e) = scripted(&[(PLAIN, 1)]).await;
-    let c = s.classify(PLAIN, &e, None).await;
+    let c = s.classify(PLAIN, &e).await;
     assert_eq!(c.layers.rules, Level::None);
     assert_eq!(c.layers.embedding, Some(Level::Distress));
     assert_eq!(c.level, Level::Distress);
@@ -280,54 +298,64 @@ async fn the_embedding_layer_raises_a_question_the_rules_missed() {
 }
 
 #[tokio::test]
-async fn the_model_runs_only_when_the_layers_disagree_and_can_raise() {
-    let (s, e) = scripted(&[(PLAIN, 1)]).await;
-    let model = FakeModel::says(Level::Acute);
-    let c = s.classify(PLAIN, &e, Some(&model)).await;
-    assert_eq!(model.calls(), 1);
-    assert_eq!(c.layers.model, Some(Level::Acute));
-    assert_eq!(c.level, Level::Acute);
-
-    // Both layers say none: no call.
-    let model = FakeModel::says(Level::Acute);
-    let c = s.classify("How do I bow?", &e, Some(&model)).await;
-    assert_eq!(model.calls(), 0);
-    assert_eq!(c.level, Level::None);
+async fn each_gate_risk_maps_to_its_level_on_an_ordinary_question() {
+    let (s, e) = scripted(&[]).await;
+    for (risk, level) in [
+        (Risk::None, Level::None),
+        (Risk::Medical, Level::Medical),
+        (Risk::Distress, Level::Distress),
+        (Risk::Acute, Level::Acute),
+        (Risk::HarmToOthers, Level::Acute),
+        (Risk::Abuse, Level::Acute),
+        (Risk::Dangerous, Level::OutOfScope),
+    ] {
+        let gate = FakeGate::says(risk);
+        assert_eq!(all_layers(&s, &e, &gate, PLAIN).await, level, "{risk:?}");
+        assert_eq!(gate.calls(), 1);
+    }
+    let past = FakeGate {
+        reply: Mutex::new(Ok(Verdict {
+            ongoing: false,
+            ..verdict(Relevance::Practice, Risk::Abuse)
+        })),
+        hang: false,
+        calls: AtomicUsize::new(0),
+    };
+    assert_eq!(all_layers(&s, &e, &past, PLAIN).await, Level::Distress);
 }
 
 #[tokio::test]
-async fn the_model_never_lowers_the_level() {
-    // Rules say distress, the embedding says none: they disagree, and the model says none.
+async fn the_gate_never_lowers_the_level() {
+    // The rules say distress and the gate says none.
     let (s, e) = scripted(&[]).await;
-    let model = FakeModel::says(Level::None);
-    let c = s.classify(SAD, &e, Some(&model)).await;
-    assert_eq!(model.calls(), 1);
-    assert_eq!(c.level, Level::Distress);
+    let gate = FakeGate::says(Risk::None);
+    assert_eq!(all_layers(&s, &e, &gate, SAD).await, Level::Distress);
+    let gate = FakeGate::says(Risk::Medical);
+    assert_eq!(all_layers(&s, &e, &gate, SAD).await, Level::Distress);
 }
 
 #[tokio::test]
-async fn a_failing_or_slow_model_leaves_the_level_where_it_was() {
+async fn a_failing_slow_or_capped_gate_degrades_and_leaves_the_rules_to_decide() {
     let (s, e) = scripted(&[]).await;
-    for model in [FakeModel::fails(), FakeModel::hangs()] {
-        let c = s.classify(SAD, &e, Some(&model)).await;
-        assert_eq!(model.calls(), 1);
-        assert_eq!(c.layers.model, None);
-        assert_eq!(c.level, Level::Distress);
+    for gate in [FakeGate::fails(), FakeGate::hangs()] {
+        let t = triage::run(Some(&gate), s.triage_settings(), SAD).await;
+        assert_eq!(gate.calls(), 1);
+        assert!(t.degraded, "triage_degraded");
+        assert_eq!(t.verdict, None);
+        assert_eq!(t.raise(s.classify(SAD, &e).await.level), Level::Distress);
     }
 }
 
 #[tokio::test]
 async fn a_down_embedder_degrades_to_the_rules_without_lowering() {
     let (s, _) = scripted(&[]).await;
-    let model = FakeModel::says(Level::None);
-    let c = s.classify(SAD, &DownEmbedder, Some(&model)).await;
+    let c = s.classify(SAD, &DownEmbedder).await;
     assert!(c.degraded);
     assert_eq!(c.level, Level::Distress);
     assert_eq!(c.layers.embedding, None);
-    assert_eq!(model.calls(), 0, "the rules decide alone");
     assert!(c.vector.is_none());
 
-    let c = s.classify(PLAIN, &DownEmbedder, None).await;
+    let c = s.classify(PLAIN, &DownEmbedder).await;
     assert!(c.degraded);
     assert_eq!(c.level, Level::None);
 }
@@ -335,28 +363,36 @@ async fn a_down_embedder_degrades_to_the_rules_without_lowering() {
 #[tokio::test]
 async fn an_acute_rule_match_needs_no_other_layer() {
     let (s, _) = scripted(&[]).await;
-    let model = FakeModel::says(Level::None);
-    let c = s
-        .classify("I want to end my life", &DownEmbedder, Some(&model))
-        .await;
+    let c = s.classify("I want to end my life", &DownEmbedder).await;
     assert_eq!(c.level, Level::Acute);
     assert!(!c.degraded);
-    assert_eq!(model.calls(), 0);
 }
 
 #[tokio::test]
-async fn the_model_layer_can_be_turned_off() {
+async fn the_gate_can_be_turned_off_and_then_degrades() {
     let (mut config, exemplars) = shipped();
-    config.model.enabled = false;
-    let e = Scripted {
-        exemplars: exemplars.clone(),
-        questions: HashMap::from([(PLAIN.to_owned(), basis(1))]),
-    };
+    config.triage.enabled = false;
+    let e = FakeEmbedder::new("f");
     let s = Sensitivity::prepare(&config, &exemplars, &e).await.unwrap();
-    let model = FakeModel::says(Level::Acute);
-    let c = s.classify(PLAIN, &e, Some(&model)).await;
-    assert_eq!(model.calls(), 0);
-    assert_eq!(c.level, Level::Distress);
+    let gate = FakeGate::says(Risk::Acute);
+    let t = triage::run(Some(&gate), s.triage_settings(), PLAIN).await;
+    assert_eq!(gate.calls(), 0);
+    assert!(t.degraded);
+}
+
+#[tokio::test]
+async fn shipped_out_of_scope_rules_and_exemplars_are_optional() {
+    let (mut config, mut exemplars) = shipped();
+    config.rules.out_of_scope = vec!["synthetic forbidden phrase".into()];
+    exemplars.out_of_scope.clear();
+    let e = FakeEmbedder::new("f");
+    let s = Sensitivity::prepare(&config, &exemplars, &e).await.unwrap();
+    assert_eq!(
+        s.rules_level("How about a synthetic forbidden phrase?"),
+        Level::OutOfScope
+    );
+    config.rules.out_of_scope = vec!["  ".into()];
+    assert!(Sensitivity::prepare(&config, &exemplars, &e).await.is_err());
 }
 
 #[tokio::test]

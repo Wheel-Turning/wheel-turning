@@ -308,7 +308,13 @@ async fn the_analyst_role_reads_aggregates_and_only_flagged_query_text() {
             "wt_analyst must not select from {table}"
         );
     }
-    for view in ["v_answer_stats", "v_consent_coverage", "v_dana_clicks"] {
+    for view in [
+        "v_answer_stats",
+        "v_consent_coverage",
+        "v_dana_clicks",
+        "v_query_triage",
+        "triage_tally",
+    ] {
         assert!(
             allowed(&analyst, &format!("select * from {view}")).await,
             "wt_analyst reads {view}"

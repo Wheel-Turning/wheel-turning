@@ -3,3 +3,7 @@
 **Distress, banner.** If you are going through something painful, you do not have to carry it alone. In the United States you can call or text 988 at any time. This site shows what teachers have said. It is not counseling.
 
 **Medical, banner.** This site shows what teachers have said. It is not medical advice. For symptoms, medicines or a diagnosis, please talk with a doctor or pharmacist. In an emergency in the United States, call 911.
+
+**Out of scope, full page.** Heading: This is outside what Wheel Turning can help with. Text: Wheel Turning shares what Zen teachers have said about practice. It cannot help with this question. Link: Ask something else.
+
+**Unrelated, full page.** Heading: This question may be outside what these talks cover. Text: The talks here are about Zen practice. You can still search them for this question. Button: Search the talks anyway. Link: Ask something else.

@@ -1,65 +1,32 @@
 //! Sensitive questions in the web app (Spec 05, Sensitive questions; Spec 06, Rendering
-//! sensitive questions): the model layer behind the spend cap, and which notice a page shows.
-//! The classifier itself is [`wt_retrieve::Sensitivity`].
+//! sensitive questions): which notice a page shows, and the triage tally. The classifier is
+//! [`wt_retrieve::Sensitivity`] and the gate [`wt_retrieve::sensitive::triage`].
 
-use std::sync::Arc;
+use sqlx::PgPool;
+use wt_retrieve::sensitive::Layers;
+use wt_retrieve::{Level, Triaged};
 
-use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use wt_core::config::LlmStage;
-use wt_extract::{DataClass, LlmClient, LlmRequest, complete_json};
-use wt_retrieve::{Level, ModelCheck};
-
-/// The model layer's prompt.
-pub const PROMPT: &str = include_str!("../prompts/sensitive.md");
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum Category {
-    None,
-    Medical,
-    Distress,
-    Acute,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-struct Reply {
-    /// One of the four categories.
-    category: Category,
-}
-
-/// The model layer as a Haiku-class call through the shared client, so the monthly cap and the
-/// real-data switch apply: a refused or failed call leaves the other layers' level standing.
-pub struct LlmSensitivity {
-    llm: Arc<dyn LlmClient>,
-}
-
-impl LlmSensitivity {
-    /// Wraps the site's client.
-    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
-        Self { llm }
-    }
-}
-
-#[async_trait]
-impl ModelCheck for LlmSensitivity {
-    async fn level(&self, question: &str) -> Result<Level, String> {
-        let req = LlmRequest {
-            stage: LlmStage::Sensitive,
-            system: PROMPT.to_owned(),
-            user: format!("<question>\n{question}\n</question>"),
-            max_tokens: 64,
-        };
-        let reply: Reply = complete_json(self.llm.as_ref(), &req, DataClass::Real)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(match reply.category {
-            Category::None => Level::None,
-            Category::Medical => Level::Medical,
-            Category::Distress => Level::Distress,
-            Category::Acute => Level::Acute,
-        })
+/// Counts what each layer said about one question in `triage_tally`, with no link to it. A
+/// failure is logged and changes nothing the tester sees.
+pub async fn tally(pool: &PgPool, layers: Layers, degraded: bool, gate: Triaged, level: Level) {
+    const UNANSWERED: &str = "unanswered";
+    let embedding = match layers.embedding {
+        Some(l) => l.as_str(),
+        None if degraded => "down",
+        None => "skipped",
+    };
+    let v = gate.verdict;
+    let t = wt_db::triage::Tally {
+        rules: layers.rules.as_str(),
+        embedding,
+        risk: v.map_or(UNANSWERED, |v| v.risk.as_str()),
+        gate_level: v.map_or(UNANSWERED, |v| v.level().as_str()),
+        relevance: v.map_or(UNANSWERED, |v| v.relevance.as_str()),
+        confidence: v.map_or(UNANSWERED, |v| v.confidence.as_str()),
+        level: level.as_str(),
+    };
+    if let Err(e) = wt_db::triage::count(pool, &t).await {
+        tracing::warn!(error = %e, "counting the triage verdicts");
     }
 }
 
@@ -83,8 +50,8 @@ impl Banner {
         match Level::parse(category) {
             Some(Level::Distress) => Some(Banner::Distress),
             Some(Level::Medical) => Some(Banner::Medical),
-            // An acute question has no answer row; fail high if one ever appears.
-            Some(Level::Acute) => Some(Banner::Support),
+            // Acute and out-of-scope questions have no answer row; fail high if one appears.
+            Some(Level::Acute | Level::OutOfScope) => Some(Banner::Support),
             Some(Level::None) => None,
             None => Some(Banner::Distress),
         }
@@ -115,8 +82,6 @@ pub fn shows(category: &str, curated: bool) -> (bool, bool) {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use serde_json::json;
-    use wt_extract::{FakeLlm, UnavailableLlm};
 
     #[test]
     fn notices_and_omissions_follow_spec_05s_table() {
@@ -132,15 +97,5 @@ mod tests {
             Some(Banner::Distress)
         );
         assert_eq!(Banner::for_answer("none", true), Some(Banner::Support));
-    }
-
-    #[tokio::test]
-    async fn the_model_layer_maps_the_reply_and_reports_a_refusal() {
-        let llm = FakeLlm::new(vec![Ok(json!({"category": "acute"}))]);
-        let m = LlmSensitivity::new(Arc::new(llm));
-        assert_eq!(m.level("a synthetic question").await.unwrap(), Level::Acute);
-
-        let m = LlmSensitivity::new(Arc::new(UnavailableLlm));
-        assert!(m.level("a synthetic question").await.is_err());
     }
 }

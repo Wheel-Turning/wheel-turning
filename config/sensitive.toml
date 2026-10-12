@@ -25,11 +25,15 @@ acute_sim = 0.74
 distress_sim = 0.80
 medical_sim = 0.80
 
-[model]
-# The optional model layer runs only when the rules and the embedding layer disagree, and only
-# while the monthly cap allows. It can raise the level and never lower it.
+# out_of_scope_sim = 0.80 is the default. It has no effect until out_of_scope exemplars exist.
+
+[triage]
+# The triage gate (Spec 05, layer 3, October 12, 2026): every question goes to the model, in
+# parallel with embedding and search, for its relevance to practice and its risk. It can raise
+# the level and never lower it. A failure, a timeout or the monthly cap logs triage_degraded and
+# the rules and exemplars decide. The prompt is crates/wt-retrieve/prompts/triage.md.
 enabled = true
-timeout_s = 5
+triage_timeout_s = 3
 
 [rules]
 # Zen talks use "great death", "die before you die", "kill the Buddha", "step off the
@@ -97,4 +101,8 @@ medical = [
   "hallucinations", "manic", "eating disorder", "anorexia", "bulimia", "insomnia",
   "migraine", "migraines", "detox", "treatment for", "surgery", "terminally ill",
   "terminal illness", "terminal cancer", "chronic pain", "heart attack", "stroke",
+]
+# Harmful requests unrelated to practice (weapons, synthesizing drugs, attacks). The gate finds
+# most of these; `wt sensitive accept` adds phrases the owner confirms from a review sheet.
+out_of_scope = [
 ]

@@ -16,6 +16,7 @@ mod eval_cmds;
 mod index_cmds;
 mod ingest;
 mod rights;
+mod sensitive_cmds;
 mod source;
 mod stages;
 
@@ -52,6 +53,12 @@ enum Command {
     Report {
         #[command(subcommand)]
         command: ReportCommand,
+    },
+    /// Sensitive questions (Spec 05, Finding problem areas): red-team the detector, apply the
+    /// rows the owner confirms, and report counts as the analyst role.
+    Sensitive {
+        #[command(subcommand)]
+        command: sensitive_cmds::SensitiveCommand,
     },
     /// Speaker consent (Spec 03, the consent gate).
     Consent {
@@ -1199,6 +1206,24 @@ enum ReportCommand {
     Flagged,
 }
 
+/// A pool connected as `wt_analyst` through `DATABASE_URL_ANALYST`, refused when the role can
+/// read `query_log`, so a report never runs as a role that could read unflagged questions.
+async fn analyst_pool(config: &Config) -> anyhow::Result<sqlx::PgPool> {
+    let url = config
+        .database_url_analyst
+        .as_ref()
+        .context("wt report runs as the analyst role: set DATABASE_URL_ANALYST")?;
+    let pool = wt_db::connect(url)
+        .await
+        .context("connecting as the analyst role")?;
+    if wt_db::report::reads_query_log(&pool).await? {
+        anyhow::bail!(
+            "DATABASE_URL_ANALYST connects as a role that can read query_log;                      wt report runs only as wt_analyst, which cannot read unflagged questions"
+        );
+    }
+    Ok(pool)
+}
+
 /// `7d` or `24h`.
 fn parse_since(raw: &str) -> Result<chrono::Duration, String> {
     let raw = raw.trim();
@@ -1610,18 +1635,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Report { command } => {
-            let url = config
-                .database_url_analyst
-                .as_ref()
-                .context("wt report runs as the analyst role: set DATABASE_URL_ANALYST")?;
-            let pool = wt_db::connect(url)
-                .await
-                .context("connecting as the analyst role")?;
-            if wt_db::report::reads_query_log(&pool).await? {
-                anyhow::bail!(
-                    "DATABASE_URL_ANALYST connects as a role that can read query_log;                      wt report runs only as wt_analyst, which cannot read unflagged questions"
-                );
-            }
+            let pool = analyst_pool(&config).await?;
             match command {
                 ReportCommand::Answers { since } => {
                     let from = chrono::Utc::now() - since;
@@ -2459,6 +2473,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             index_cmds::reindex(&pool().await?, &config, &args.config_dir, talks, args.model)
                 .await?;
         }
+        Command::Sensitive { command } => sensitive(&config, command).await?,
         Command::Eval { command } => {
             eval_cmds::eval(&pool().await?, &config, command).await?;
         }
@@ -2709,4 +2724,57 @@ async fn glossary_change(
         "glossary_version": glossary.version(),
         "talks_requeued": requeued.len(),
     }))
+}
+
+async fn sensitive(
+    config: &Config,
+    command: sensitive_cmds::SensitiveCommand,
+) -> anyhow::Result<()> {
+    use sensitive_cmds::SensitiveCommand;
+    use wt_retrieve::sensitive::redteam::Target;
+    match command {
+        SensitiveCommand::Redteam {
+            count,
+            category,
+            out_dir,
+        } => {
+            // The models, rules, exemplars and spend cap the server uses; the gate marks the
+            // questions synthetic.
+            let pool = wt_db::connect(&config.database_url).await?;
+            let site = wt_api::site::load(config, &pool)
+                .await
+                .context("loading the models and config/ files the server uses")?;
+            let gate = wt_retrieve::sensitive::triage::LlmTriage::synthetic(site.llm.clone());
+            let targets = category.map_or_else(|| Target::ALL.to_vec(), |t| vec![t]);
+            let sheet = out_dir.join(format!(
+                "review-{}.csv",
+                chrono::Utc::now().date_naive().format("%Y-%m-%d")
+            ));
+            let summary = sensitive_cmds::redteam(
+                site.llm.as_ref(),
+                &site.sensitivity,
+                site.embedder.as_ref(),
+                Some(&gate),
+                &targets,
+                count,
+                &sheet,
+            )
+            .await?;
+            commands::print_json(&summary)?;
+        }
+        SensitiveCommand::Accept {
+            sheet,
+            config_dir,
+            eval_file,
+        } => {
+            let dir = config_dir.unwrap_or_else(wt_api::site::config_dir);
+            commands::print_json(&sensitive_cmds::accept(&sheet, &dir, &eval_file)?)?;
+        }
+        SensitiveCommand::Report { since } => {
+            let pool = analyst_pool(config).await?;
+            let from = chrono::Utc::now() - since;
+            commands::print_json(&wt_db::report::triage(&pool, from).await?)?;
+        }
+    }
+    Ok(())
 }

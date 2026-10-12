@@ -7,17 +7,19 @@
 //!    without regard to case.
 //! 2. Embedding: the query vector against the exemplar sentences in
 //!    `config/sensitive_exemplars.toml`, with a cosine threshold per level.
-//! 3. Model: only when the first two disagree, through [`ModelCheck`], which the web app backs
-//!    with a Haiku-class call that the spend cap may refuse. It can raise the level and never
-//!    lower it.
+//! 3. The triage gate ([`triage`]): every question goes to a Haiku-class model, in parallel
+//!    with embedding and search, which returns its relevance to practice and its risk. It can
+//!    raise the level and never lower it, and a failure, a timeout or a reached spend cap logs
+//!    `triage_degraded` and leaves the first two layers to decide.
 //!
 //! A failed layer cannot lower the result. A down embedder leaves the rules to decide alone and
 //! logs `sensitivity_degraded`. Question text is never logged.
 
-use std::path::Path;
-use std::time::Duration;
+pub mod redteam;
+pub mod triage;
 
-use async_trait::async_trait;
+use std::path::Path;
+
 use serde::Deserialize;
 use wt_ml::{Embedder, MlError};
 
@@ -33,6 +35,10 @@ pub enum Level {
     /// Despair, hopelessness, grief or thoughts of death without stated intent: a banner, no
     /// summary line and no giving panel.
     Distress,
+    /// A question about causing harm that has nothing to do with practice, such as making
+    /// weapons or drugs: a plain page, no retrieval, nothing stored but counts. Below `Acute`,
+    /// so a question that is both gets the support notice.
+    OutOfScope,
     /// Stated intent, a plan or means to harm oneself or someone else, or an emergency in
     /// progress: the full notice page, no retrieval, nothing stored but counts.
     Acute,
@@ -45,6 +51,7 @@ impl Level {
             Level::None => "none",
             Level::Medical => "medical",
             Level::Distress => "distress",
+            Level::OutOfScope => "out_of_scope",
             Level::Acute => "acute",
         }
     }
@@ -55,6 +62,7 @@ impl Level {
             "none" => Some(Level::None),
             "medical" => Some(Level::Medical),
             "distress" => Some(Level::Distress),
+            "out_of_scope" => Some(Level::OutOfScope),
             "acute" => Some(Level::Acute),
             _ => None,
         }
@@ -65,10 +73,25 @@ impl Level {
         self == Level::None
     }
 
-    /// Whether the giving panel is shown: not for `distress` or `acute`.
+    /// Whether the giving panel is shown: not for `distress` or above.
     pub fn shows_giving(self) -> bool {
         self <= Level::Medical
     }
+
+    /// Whether the question is answered at all: not for `out_of_scope` or `acute`, which store
+    /// counts only.
+    pub fn runs_retrieval(self) -> bool {
+        self <= Level::Distress
+    }
+
+    /// Every level, from `none` up.
+    pub const ALL: [Level; 5] = [
+        Level::None,
+        Level::Medical,
+        Level::Distress,
+        Level::OutOfScope,
+        Level::Acute,
+    ];
 }
 
 /// `config/sensitive.toml`. The default holds no rules and flags nothing; it exists only as a
@@ -80,9 +103,9 @@ pub struct SensitiveConfig {
     pub curated_query: String,
     /// `[thresholds]`.
     pub thresholds: Thresholds,
-    /// `[model]`.
+    /// `[triage]`.
     #[serde(default)]
-    pub model: ModelSettings,
+    pub triage: TriageSettings,
     /// `[rules]`.
     pub rules: RuleLists,
 }
@@ -98,23 +121,30 @@ pub struct Thresholds {
     pub distress_sim: f32,
     /// For `medical`.
     pub medical_sim: f32,
+    /// For `out_of_scope`, whose exemplar list may be empty.
+    #[serde(default = "default_out_of_scope_sim")]
+    pub out_of_scope_sim: f32,
 }
 
-/// `[model]`.
+fn default_out_of_scope_sim() -> f32 {
+    0.80
+}
+
+/// `[triage]`: the gate (Spec 05, Sensitive questions, layer 3).
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct ModelSettings {
-    /// Whether the model layer may run at all.
+pub struct TriageSettings {
+    /// Whether the gate may run at all. Off, every question logs `triage_degraded`.
     pub enabled: bool,
-    /// Seconds before the model call is abandoned.
-    pub timeout_s: u64,
+    /// Seconds before the gate's call is abandoned and the other layers decide.
+    pub triage_timeout_s: u64,
 }
 
-impl Default for ModelSettings {
+impl Default for TriageSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            timeout_s: 5,
+            triage_timeout_s: 3,
         }
     }
 }
@@ -129,6 +159,9 @@ pub struct RuleLists {
     pub distress: Vec<String>,
     /// Medical phrases.
     pub medical: Vec<String>,
+    /// Out-of-scope phrases; may be empty, since the gate finds most of these.
+    #[serde(default)]
+    pub out_of_scope: Vec<String>,
 }
 
 /// `config/sensitive_exemplars.toml`.
@@ -144,6 +177,9 @@ pub struct Exemplars {
     pub distress: Vec<String>,
     /// Medical sentences.
     pub medical: Vec<String>,
+    /// Out-of-scope sentences; may be empty.
+    #[serde(default)]
+    pub out_of_scope: Vec<String>,
 }
 
 /// Why the files could not be used.
@@ -219,6 +255,7 @@ impl Exemplars {
             (Level::Acute, &self.acute),
             (Level::Distress, &self.distress),
             (Level::Medical, &self.medical),
+            (Level::OutOfScope, &self.out_of_scope),
         ] {
             out.extend(list.iter().map(|s| (level, s.as_str())));
         }
@@ -226,29 +263,21 @@ impl Exemplars {
     }
 }
 
-/// The model layer. The web app implements it with a Haiku-class call under the spend cap;
-/// tests use fakes. Any error simply leaves the first two layers' result standing.
-#[async_trait]
-pub trait ModelCheck: Send + Sync {
-    /// The level the model gives `question`.
-    async fn level(&self, question: &str) -> Result<Level, String>;
-}
-
-/// What each layer said, for the structured log. Never holds question text.
+/// What the first two layers said, for the structured log and the triage tally. Never holds
+/// question text.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Layers {
     /// The rules.
     pub rules: Level,
     /// The embedding check; `None` when it did not run or failed.
     pub embedding: Option<Level>,
-    /// The model check; `None` when it did not run or failed.
-    pub model: Option<Level>,
 }
 
-/// The outcome of [`Sensitivity::classify`].
+/// The outcome of [`Sensitivity::classify`]: the rules and the embedding check. The gate's
+/// verdict raises it afterwards ([`triage::Triaged::raise`]).
 #[derive(Debug, Clone)]
 pub struct Classified {
-    /// The highest level any layer returned.
+    /// The highest level the first two layers returned.
     pub level: Level,
     /// The embedder was down, so the rules decided alone.
     pub degraded: bool,
@@ -263,7 +292,7 @@ pub struct Sensitivity {
     rules: Vec<(Level, Vec<String>)>,
     exemplars: Vec<(Level, Vec<f32>)>,
     thresholds: Thresholds,
-    model: ModelSettings,
+    triage: TriageSettings,
     curated_query: String,
 }
 
@@ -292,6 +321,16 @@ impl Sensitivity {
                     level.as_str()
                 )));
             }
+        }
+        if config
+            .rules
+            .out_of_scope
+            .iter()
+            .any(|p| normalize(p).is_empty())
+        {
+            return Err(SensitiveError::Invalid(
+                "the out_of_scope rule list holds an empty phrase".into(),
+            ));
         }
         if config.curated_query.trim().is_empty() {
             return Err(SensitiveError::Invalid("curated_query is empty".into()));
@@ -328,6 +367,7 @@ impl Sensitivity {
             (Level::Acute, &config.rules.acute),
             (Level::Distress, &config.rules.distress),
             (Level::Medical, &config.rules.medical),
+            (Level::OutOfScope, &config.rules.out_of_scope),
         ]
         .into_iter()
         .map(|(level, list)| {
@@ -343,7 +383,7 @@ impl Sensitivity {
             rules,
             exemplars,
             thresholds: config.thresholds,
-            model: config.model,
+            triage: config.triage,
             curated_query: config.curated_query.clone(),
         }
     }
@@ -351,6 +391,11 @@ impl Sensitivity {
     /// The fixed query behind the acute page's link.
     pub fn curated_query(&self) -> &str {
         &self.curated_query
+    }
+
+    /// `[triage]`.
+    pub fn triage_settings(&self) -> TriageSettings {
+        self.triage
     }
 
     /// Layer 1 alone: the highest level whose phrase list matches.
@@ -375,12 +420,13 @@ impl Sensitivity {
     }
 
     /// The similarity of `vector` to the closest exemplar of each level, acute first: what the
-    /// thresholds are calibrated against.
-    pub fn similarities(&self, vector: &[f32]) -> [(Level, f32); 3] {
+    /// thresholds are calibrated against. A level without exemplars stays at negative infinity.
+    pub fn similarities(&self, vector: &[f32]) -> [(Level, f32); 4] {
         let mut out = [
             (Level::Acute, f32::NEG_INFINITY),
             (Level::Distress, f32::NEG_INFINITY),
             (Level::Medical, f32::NEG_INFINITY),
+            (Level::OutOfScope, f32::NEG_INFINITY),
         ];
         for (level, e) in &self.exemplars {
             let sim = cosine(vector, e);
@@ -396,18 +442,15 @@ impl Sensitivity {
             Level::Acute => self.thresholds.acute_sim,
             Level::Distress => self.thresholds.distress_sim,
             Level::Medical => self.thresholds.medical_sim,
+            Level::OutOfScope => self.thresholds.out_of_scope_sim,
             Level::None => f32::INFINITY,
         }
     }
 
-    /// Classifies a normalized question. Rules first; an acute match ends there, since nothing
-    /// can raise it. Then the embedding check, and the model only when the two disagree.
-    pub async fn classify(
-        &self,
-        question: &str,
-        embedder: &dyn Embedder,
-        model: Option<&dyn ModelCheck>,
-    ) -> Classified {
+    /// Classifies a normalized question with the first two layers. Rules first; an acute match
+    /// ends there, since nothing can raise it. Then the embedding check. The caller runs the
+    /// gate alongside and raises the result with its verdict.
+    pub async fn classify(&self, question: &str, embedder: &dyn Embedder) -> Classified {
         let rules = self.rules_level(question);
         let mut layers = Layers {
             rules,
@@ -443,18 +486,7 @@ impl Sensitivity {
         };
         let embedding = self.embedding_level(&vector);
         layers.embedding = Some(embedding);
-        let mut level = rules.max(embedding);
-        if let Some(m) = model.filter(|_| rules != embedding && self.model.enabled) {
-            let limit = Duration::from_secs(self.model.timeout_s);
-            match tokio::time::timeout(limit, m.level(question)).await {
-                Ok(Ok(l)) => {
-                    layers.model = Some(l);
-                    level = level.max(l);
-                }
-                Ok(Err(e)) => tracing::warn!(error = %e, "the sensitivity model check failed"),
-                Err(_) => tracing::warn!("the sensitivity model check timed out"),
-            }
-        }
+        let level = rules.max(embedding);
         Classified {
             level,
             degraded: false,
@@ -510,10 +542,12 @@ mod tests {
     fn levels_order_from_none_to_acute() {
         assert!(Level::None < Level::Medical);
         assert!(Level::Medical < Level::Distress);
-        assert!(Level::Distress < Level::Acute);
+        assert!(Level::Distress < Level::OutOfScope);
+        assert!(Level::OutOfScope < Level::Acute);
         assert!(Level::Medical.shows_giving() && !Level::Distress.shows_giving());
         assert!(!Level::Medical.shows_summary() && Level::None.shows_summary());
-        for l in [Level::None, Level::Medical, Level::Distress, Level::Acute] {
+        assert!(Level::Distress.runs_retrieval() && !Level::OutOfScope.runs_retrieval());
+        for l in Level::ALL {
             assert_eq!(Level::parse(l.as_str()), Some(l));
         }
     }
