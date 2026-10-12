@@ -331,6 +331,6 @@ Acceptance criteria for question privacy:
 Acceptance criteria:
 
 - [ ] The acute page has the notice as its `h1`, focus lands on it, and axe passes with no giving panel or feedback controls present.
-- [ ] The response carries `Cache-Control: no-store`, and no permalink or `answer` row is created.
-- [ ] Banners render inside the main landmark above the question and cannot be dismissed.
-- [ ] The `tel:` and `sms:` links and the two web links exist and are named in the page text.
+- [x] The response carries `Cache-Control: no-store`, and no permalink or `answer` row is created.
+- [x] Banners render inside the main landmark above the question and cannot be dismissed.
+- [x] The `tel:` and `sms:` links and the two web links exist and are named in the page text.

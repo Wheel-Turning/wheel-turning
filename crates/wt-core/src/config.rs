@@ -257,7 +257,7 @@ impl Config {
     /// neither is set, so a worker that runs the stage refuses to start (Spec 04).
     pub fn llm_model_for(&self, stage: LlmStage) -> Result<&str, ConfigError> {
         let own = match stage {
-            LlmStage::Extract | LlmStage::Classify | LlmStage::Question => {
+            LlmStage::Extract | LlmStage::Classify | LlmStage::Question | LlmStage::Sensitive => {
                 &self.llm_stage_models.extract
             }
             LlmStage::Synth => &self.llm_stage_models.synth,
@@ -369,6 +369,9 @@ pub enum LlmStage {
     /// Lightly editing a student's question (Spec 04, Student questions). Uses the extraction
     /// model.
     Question,
+    /// The optional model layer of sensitive-question detection (Spec 05, Sensitive
+    /// questions). Uses the extraction model, Haiku-class.
+    Sensitive,
     /// Answer synthesis.
     Synth,
     /// Theme verification.
@@ -384,6 +387,7 @@ impl LlmStage {
             LlmStage::Extract => "extract",
             LlmStage::Classify => "classify",
             LlmStage::Question => "question",
+            LlmStage::Sensitive => "sensitive",
             LlmStage::Synth => "synth",
             LlmStage::Verify => "verify",
             LlmStage::Vision => "vision",
@@ -393,7 +397,7 @@ impl LlmStage {
     /// The setting a missing model is reported under.
     pub fn key(self) -> &'static str {
         match self {
-            LlmStage::Extract | LlmStage::Classify | LlmStage::Question => {
+            LlmStage::Extract | LlmStage::Classify | LlmStage::Question | LlmStage::Sensitive => {
                 "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL"
             }
             LlmStage::Synth => "WT_LLM_MODEL_SYNTH or WT_LLM_MODEL",

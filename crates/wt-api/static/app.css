@@ -101,3 +101,6 @@ footer.site .cols { display: grid; gap: 1.5rem; }
 .f-muted { color: var(--on-dark-muted); }
 footer.site .last { margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid var(--control); color: var(--on-dark-muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.support { font-size: 1rem; }
+.support h1 { font-size: 1.75rem; margin-top: 0.5rem; }
+.support-links { list-style: none; padding: 0; }

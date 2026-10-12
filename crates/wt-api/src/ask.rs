@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use wt_core::ids::{AnswerId, TesterId};
 use wt_db::answer::Payload;
 use wt_extract::DataClass;
-use wt_retrieve::{Mode, NamedDetector, Notice, retrieve};
+use wt_retrieve::{Level, Mode, NamedDetector, Notice, retrieve_embedded};
 use wt_synth::{Synthesis, SynthesisInput};
 
 use crate::Site;
@@ -83,12 +83,36 @@ pub enum AskError {
     Persist(wt_db::DbError),
 }
 
-/// Answers a normalized question as `tester` and stores the answer with its log row.
+/// How a question reached the query path after the sensitivity check (Spec 05, Sensitive
+/// questions). The default is an ordinary question.
+#[derive(Debug, Clone, Default)]
+pub struct Framing {
+    /// `none`, `medical` or `distress`; acute questions never reach the query path. Anything
+    /// but `none` leaves out the summary line.
+    pub level: Level,
+    /// The question's vector from the check, reused for search when it fits.
+    pub vector: Option<Vec<f32>>,
+    /// The acute notice's fixed query, shown with the support notice on top.
+    pub curated: bool,
+}
+
+/// Answers a normalized, ordinary question as `tester` and stores the answer with its log row.
 pub async fn answer(
     pool: &PgPool,
     site: &Site,
     tester: TesterId,
     text: &str,
+) -> Result<Asked, AskError> {
+    answer_framed(pool, site, tester, text, Framing::default()).await
+}
+
+/// [`answer`] for a question the sensitivity check has classified.
+pub async fn answer_framed(
+    pool: &PgPool,
+    site: &Site,
+    tester: TesterId,
+    text: &str,
+    framing: Framing,
 ) -> Result<Asked, AskError> {
     let started = Instant::now();
     let mut timings = StageTimings::default();
@@ -102,9 +126,12 @@ pub async fn answer(
     let parsed = detector.parse(text);
     timings.parse_ms = millis(stage);
 
-    let found = retrieve(
+    // A named teacher is left out of the search text, so the check's vector no longer fits.
+    let vector = framing.vector.filter(|_| parsed.search_text == text);
+    let found = retrieve_embedded(
         pool,
         site.embedder.as_ref(),
+        vector,
         site.reranker.as_deref(),
         &parsed,
         &site.retrieval,
@@ -122,11 +149,12 @@ pub async fn answer(
         .map_err(AskError::Passages)?;
     timings.load_ms = millis(stage);
 
-    // Spec 05: synthesis runs in standard mode only, over the passages as served. Any failure
-    // leaves the answer without the line and nothing else.
+    // Spec 05: synthesis runs in standard mode only, over the passages as served, and not for a
+    // sensitive question, whose page omits the summary line. Any failure leaves the answer
+    // without the line and nothing else.
     let stage = Instant::now();
     let synthesis = match found.mode {
-        Mode::Standard => {
+        Mode::Standard if framing.level.shows_summary() && !framing.curated => {
             let input = SynthesisInput {
                 query: text.to_owned(),
                 passages: served.iter().map(|p| (p.id, p.text.clone())).collect(),
@@ -140,7 +168,7 @@ pub async fn answer(
             )
             .await
         }
-        Mode::NamedTeacher(_) => Synthesis::default(),
+        _ => Synthesis::default(),
     };
     timings.synth_ms = millis(stage);
 
@@ -171,6 +199,7 @@ pub async fn answer(
         themes: synthesis.themes,
         passage_ids: ids,
         rerank_degraded: found.rerank_degraded,
+        curated: framing.curated,
     };
     let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     let stage = Instant::now();
@@ -183,6 +212,7 @@ pub async fn answer(
         thin_coverage: matches!(found.notice, Some(Notice::ThinCoverage { .. })),
         latency_ms: i32::try_from(millis(started)).unwrap_or(i32::MAX),
         themes_dropped: small(synthesis.dropped.len()),
+        sensitive_category: framing.level.as_str(),
     };
     let answer_id = wt_db::answer::persist(pool, &new)
         .await

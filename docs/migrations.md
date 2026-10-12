@@ -42,6 +42,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0028 | `0028_talk_speaker_assigned_by.sql` | Speaker by hand | `talk.speaker_assigned_by`: who assigned the speaker by hand, so classification leaves it alone (Spec 03, Assigning a speaker by hand) | None new: `wt_pipeline` already updates `talk` |
 | 0029 | `0029_student_questions.sql` | Student questions | `student_question` with its HNSW index; view `servable_student_question` with `servable_passage`'s talk, teacher, sangha and rights conditions (Spec 04, Student questions) | select, insert, delete on `student_question` to `wt_pipeline`; select on `servable_student_question` to `wt_pipeline` and `wt_web` |
 | 0030 | `0030_accessibility_report_and_source_status.sql` | Rights and accessibility pages | `accessibility_report` (Spec 06, Accessibility standard); `v_source_rights` gains, at the end, `kind`, `license_name`, `license_url`, `permission_recorded_on`, `license_recorded_on` and `removal_requested`, so `/rights` can state each status with its date | insert on `accessibility_report` to `wt_web`, select and update to `wt_pipeline`; the view keeps its grants |
+| 0031 | `0031_sensitive_questions.sql` | Sensitive questions | `query_log.sensitive_category` (`none`, `distress`, `medical`, `acute`); `query_log.query_text` nullable (Spec 06's privacy-modes migration makes the same change, which is a no-op on a nullable column); check `query_log_acute_keeps_no_text`; view `analyzable_query_log`, `query_log` without acute and distress rows, which topic clusters and evaluation sets read (Spec 05, Sensitive questions) | select on `analyzable_query_log` to `wt_pipeline` |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 
@@ -54,7 +55,6 @@ These come from the October 3 to 5 specs. Each gets its number at merge.
 | Spec | Spec's number | Description | Notes |
 |---|---|---|---|
 | 08 | 0014 | rights ledger | Landed whole in 0015 |
-| 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
+| 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005. `query_text` is already nullable since 0031 |
 | 02 | 0021 | donation links: `sangha.donation_kind`, `donation_note`, `donation_checked_at`, `donation_checked_by` and the `donation_verified_needs_page` check | Alters `sangha` from 0002 |
-| 05 | 0022 | `query_log.sensitive_category` | Alters `query_log` from 0005. Storing an acute question without its text also needs 0019, which makes `query_text` nullable, so it merges after 0019 |
 | 08 | 0027 | quoted passages inline: `citation.kind` in `servable_citation` (#73) | 0027 went to work-level citations, so this takes the next free number |

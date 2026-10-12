@@ -244,9 +244,9 @@ alter table query_log add column sensitive_category text not null default 'none'
 
 Acceptance criteria:
 
-- [ ] On a labeled fixture of synthetic questions, acute recall is 100 percent, distress recall is at least 90 percent, and fewer than 5 percent of ordinary practice questions are flagged.
-- [ ] An acute question runs no retrieval, writes a `query_log` row with counts and category only, and writes no question text and no `answer` row, even in `share` mode.
-- [ ] Acute and distress questions never reach topic clusters or the evaluation sets.
-- [ ] A failure in any detection layer never lowers the level, and a down embedder logs `sensitivity_degraded` and falls back to rules.
-- [ ] Distress and medical answers omit the summary line, and distress answers omit the giving panel.
-- [ ] The curated query runs with the notice on top, no summary line and no giving panel.
+- [x] On a labeled fixture of synthetic questions, acute recall is 100 percent, distress recall is at least 90 percent, and fewer than 5 percent of ordinary practice questions are flagged.
+- [x] An acute question runs no retrieval, writes a `query_log` row with counts and category only, and writes no question text and no `answer` row, even in `share` mode.
+- [x] Acute and distress questions never reach topic clusters or the evaluation sets. Both read the view `analyzable_query_log`, which leaves them out.
+- [x] A failure in any detection layer never lowers the level, and a down embedder logs `sensitivity_degraded` and falls back to rules.
+- [x] Distress and medical answers omit the summary line, and distress answers omit the giving panel.
+- [x] The curated query runs with the notice on top, no summary line and no giving panel.

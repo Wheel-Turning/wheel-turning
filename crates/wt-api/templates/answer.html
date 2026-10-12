@@ -2,13 +2,14 @@
 {% block title %}{{ query }} · Wheel Turning{% endblock %}
 {% block content %}
 <div class="reading">
+{% include "sensitive_banner.html" %}
 <p class="muted">Your question</p>
 <h1 class="question">{{ query }}</h1>
 <p class="result">{{ view.result_line }}</p>
 {% if let Some(n) = view.notice %}<section class="notice" aria-labelledby="notice-h"><h2 id="notice-h" class="visually-hidden">Notice</h2><p>{{ n }}</p></section>{% endif %}
 {% if view.degraded %}<p class="muted small">Alpha: excerpts are ordered by search match only; the relevance check is not installed yet.</p>{% endif %}
 {% if thanks %}<p class="status" role="status">Thank you. Your feedback was recorded.</p>{% endif %}
-{% if !view.themes.is_empty() %}
+{% if summary && !view.themes.is_empty() %}
 <section class="themes" aria-labelledby="themes-h">
   <h2 id="themes-h">How approaches differ</h2>
   <ul>
@@ -27,7 +28,7 @@
     <p class="links">
       <a href="{{ p.source.href }}" target="_blank" rel="noopener noreferrer">{{ p.source.label }}</a>{% if let Some(s) = p.source.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
       {% if let Some(t) = p.transcript_href %} · <a href="{{ t }}">Read in the transcript</a>{% endif %}
-      {% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}
+      {% if giving %}{% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}{% endif %}
       · <a href="/rights?excerpt={{ p.id }}#request">Report this excerpt</a>
     </p>
     <p class="credit">{{ p.credit }}</p>

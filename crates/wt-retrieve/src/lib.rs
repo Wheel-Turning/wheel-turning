@@ -11,6 +11,7 @@ pub mod fuse;
 pub mod query;
 pub mod search;
 pub mod select;
+pub mod sensitive;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -22,6 +23,7 @@ use wt_ml::{Embedder, MlError, Reranker};
 pub use config::RetrievalConfig;
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
+pub use sensitive::{Classified, Level, ModelCheck, Sensitivity};
 
 use select::SelectInput;
 
@@ -97,6 +99,19 @@ pub async fn retrieve(
     query: &ParsedQuery,
     cfg: &RetrievalConfig,
 ) -> Result<Retrieved, RetrieveError> {
+    retrieve_embedded(pool, embedder, None, reranker, query, cfg).await
+}
+
+/// [`retrieve`] with the vector of `query.search_text` when the caller already has it, as the
+/// sensitivity check does for a question that names no teacher.
+pub async fn retrieve_embedded(
+    pool: &PgPool,
+    embedder: &dyn Embedder,
+    vector: Option<Vec<f32>>,
+    reranker: Option<&dyn Reranker>,
+    query: &ParsedQuery,
+    cfg: &RetrievalConfig,
+) -> Result<Retrieved, RetrieveError> {
     let named = match query.mode {
         Mode::NamedTeacher(t) => Some(t),
         Mode::Standard => None,
@@ -104,13 +119,16 @@ pub async fn retrieve(
     let mut timings = Timings::default();
 
     let started = Instant::now();
-    let vector = embedder
-        .embed(std::slice::from_ref(&query.search_text))
-        .await
-        .map_err(RetrieveError::Embed)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| RetrieveError::Embed(MlError::Output("no vector".into())))?;
+    let vector = match vector {
+        Some(v) => v,
+        None => embedder
+            .embed(std::slice::from_ref(&query.search_text))
+            .await
+            .map_err(RetrieveError::Embed)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| RetrieveError::Embed(MlError::Output("no vector".into())))?,
+    };
     timings.embed_ms = millis(started.elapsed());
 
     let started = Instant::now();

@@ -114,8 +114,11 @@ fn no_template_or_stylesheet_references_an_external_host_or_font() {
     let mut all = files(&root.join("templates"));
     all.extend(files(&root.join("static")));
     for (path, text) in all {
-        // The SVG namespace is an identifier, not a request.
-        let text = text.replace("http://www.w3.org/2000/svg", "");
+        // The SVG namespace is an identifier, not a request, and a link the reader follows
+        // loads nothing (the support notices link to 988lifeline.org and findahelpline.com).
+        let text = text
+            .replace("http://www.w3.org/2000/svg", "")
+            .replace("<a href=\"https://", "<a href=\"");
         for needle in ["http://", "https://", "//fonts.", "@import", "@font-face"] {
             assert!(!text.contains(needle), "{path} contains {needle}");
         }
