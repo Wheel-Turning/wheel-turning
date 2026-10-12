@@ -61,6 +61,10 @@ pub struct NewAnswer<'a> {
     pub themes_dropped: i32,
     /// `none`, `medical` or `distress`. Acute questions store no answer: see [`log_acute`].
     pub sensitive_category: &'a str,
+    /// `share` or `count_only` (Spec 06, Privacy modes).
+    pub privacy_mode: &'a str,
+    /// When the purge removes the text and the answer.
+    pub text_expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Spec 06, Logging, rule 1: the query log, the answer and its passages in one transaction, so
@@ -72,8 +76,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
-                                theme_count, themes_dropped, sensitive_category)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning id",
+                                theme_count, themes_dropped, sensitive_category, privacy_mode,
+                                text_expires_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id",
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -85,7 +90,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.latency_ms,
         themes,
         a.themes_dropped,
-        a.sensitive_category
+        a.sensitive_category,
+        a.privacy_mode,
+        a.text_expires_at
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -111,12 +118,13 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
 }
 
 /// Spec 05: an acute question is logged as counts and its category only. No question text, no
-/// answer row and no passages, whatever the tester's privacy mode.
+/// answer row and no passages, whatever the tester's privacy mode, so the row records
+/// `count_only`.
 pub async fn log_acute(pool: &PgPool, tester: TesterId, latency_ms: i32) -> Result<(), DbError> {
     sqlx::query!(
         "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,
-                                passage_count, latency_ms, sensitive_category)
-         values ($1, null, 'standard', 0, 0, 0, $2, 'acute')",
+                                passage_count, latency_ms, sensitive_category, privacy_mode)
+         values ($1, null, 'standard', 0, 0, 0, $2, 'acute', 'count_only')",
         tester.as_uuid(),
         latency_ms
     )
@@ -156,9 +164,8 @@ pub async fn load(
     .await?;
     Ok(row.and_then(|r| {
         Some(Stored {
-            // Only an acute question has no text, and it has no answer row.
-            query_text: r.query_text.unwrap_or_default(),
             sensitive_category: r.sensitive_category,
+            query_text: r.query_text.unwrap_or_default(),
             payload: serde_json::from_value(r.payload).ok()?,
             created_at: r.created_at,
         })

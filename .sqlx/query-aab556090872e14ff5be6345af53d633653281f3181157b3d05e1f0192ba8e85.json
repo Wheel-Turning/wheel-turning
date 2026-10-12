@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,\n                                passage_count, latency_ms, sensitive_category, privacy_mode)\n         values ($1, null, 'standard', 0, 0, 0, $2, 'acute', 'count_only')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aab556090872e14ff5be6345af53d633653281f3181157b3d05e1f0192ba8e85"
+}

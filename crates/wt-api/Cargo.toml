@@ -20,6 +20,7 @@ chrono = { version = "0.4", default-features = false, features = ["std", "clock"
 getrandom = "0.3"
 hmac = "0.13"
 schemars = "1"
+regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

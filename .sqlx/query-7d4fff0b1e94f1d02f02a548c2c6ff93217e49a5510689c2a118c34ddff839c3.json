@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tester set privacy_mode = $2, privacy_chosen = true where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7d4fff0b1e94f1d02f02a548c2c6ff93217e49a5510689c2a118c34ddff839c3"
+}

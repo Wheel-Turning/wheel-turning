@@ -311,13 +311,13 @@ Acceptance criteria for the accessibility standard and the logo:
 
 Acceptance criteria for question privacy:
 
-- [ ] The switch appears on the home page and in About, saves to `tester.privacy_mode`, and applies to the next question.
-- [ ] In `share` mode the stored text has emails, phone numbers, web addresses and runs of nine or more digits removed, and a test covers each pattern.
-- [ ] In `count_only` mode the text is deleted after the TTL and the answer row goes with it, the counts stay, and the permalink shows "This question was not kept."
-- [ ] A flagged question survives the purge in both modes.
-- [ ] A request with `Sec-GPC: 1` from a tester who has never chosen is treated as `count_only`, and an explicit choice overrides it.
-- [ ] A purge leaves `dana_event` rows with a null `answer_id`, and the daily click count does not change.
-- [ ] `POST /about/delete-my-data` removes every row that belongs to the tester after a confirmation, and does not touch another tester's rows.
+- [x] The switch appears on the home page and in About, saves to `tester.privacy_mode`, and applies to the next question. (`wt-api/tests/privacy.rs`.)
+- [x] In `share` mode the stored text has emails, phone numbers, web addresses and runs of nine or more digits removed, and a test covers each pattern. (`wt-api` unit tests in `privacy.rs` and `tests/privacy.rs`.)
+- [x] In `count_only` mode the text is deleted after the TTL and the answer row goes with it, the counts stay, and the permalink shows "This question was not kept." (`wt-api/tests/privacy.rs`. The purge runs hourly inside `wt-api`, through `purge_expired_queries()`.)
+- [x] A flagged question survives the purge in both modes. (`wt-api/tests/privacy.rs`; its text goes once the full retention period has passed.)
+- [x] A request with `Sec-GPC: 1` from a tester who has never chosen is treated as `count_only`, and an explicit choice overrides it. (`wt-api/tests/privacy.rs`.)
+- [x] A purge leaves `dana_event` rows with a null `answer_id`, and the daily click count does not change. (`wt-api/tests/privacy.rs`.)
+- [x] `POST /about/delete-my-data` removes every row that belongs to the tester after a confirmation, and does not touch another tester's rows. (`wt-api/tests/privacy.rs`. A dana event already detached from a purged answer can no longer be traced to its tester and stays as a count.)
 - [ ] `wt report topics` folds any cluster of fewer than 3 questions into "other" and prints no individual question text, and `wt report gaps` lists only cluster-level counts.
 
 ## Rendering sensitive questions

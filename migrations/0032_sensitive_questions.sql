@@ -1,9 +1,8 @@
 -- Spec 05, Sensitive questions: the category each question was given before retrieval.
 --
--- An acute question is stored as counts and its category only, with no text and no answer row,
--- so query_text becomes nullable here. Spec 06's privacy-modes migration makes the same change;
--- dropping not null from a column that is already nullable does nothing, so the two can land in
--- either order.
+-- An acute question is stored as counts and its category only, with no text and no answer row.
+-- 0031 (privacy modes) already made query_text nullable; this repeats it, which does nothing,
+-- so the file stands on its own.
 
 alter table query_log alter column query_text drop not null;
 

@@ -13,7 +13,11 @@
   <p class="help">A question takes a few seconds.</p>
 </form>
 <p>Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.</p>
-<p class="muted">Your questions are logged. They are read only in aggregate, and one is opened only if you flag it. <a href="/about#privacy">Read how this works</a></p>
+<section id="privacy" aria-labelledby="privacy-h">
+<h2 id="privacy-h">Your questions</h2>
+<p>Your questions are kept so the project can improve. Only totals are read, and one question is opened only if you flag it. You can switch this off or delete your questions at any time. <a href="/about#privacy">Read how this works</a></p>
+{% include "privacy_switch.html" %}
+</section>
 <h2>Examples</h2>
 <ul class="examples">
   {% for ex in examples %}<li><form method="post" action="/ask"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ ex }}"><button type="submit" class="link">{{ ex }}</button></form></li>{% endfor %}

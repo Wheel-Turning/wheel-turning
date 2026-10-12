@@ -94,9 +94,13 @@ pub struct Framing {
     pub vector: Option<Vec<f32>>,
     /// The acute notice's fixed query, shown with the support notice on top.
     pub curated: bool,
+    /// The request carried `Sec-GPC: 1`, which keeps the question as count only for a tester
+    /// who never chose (Spec 06, Privacy modes).
+    pub gpc: bool,
 }
 
-/// Answers a normalized, ordinary question as `tester` and stores the answer with its log row.
+/// Answers a normalized, ordinary question as `tester` and stores the answer with its log row,
+/// kept in the tester's privacy mode.
 pub async fn answer(
     pool: &PgPool,
     site: &Site,
@@ -106,7 +110,8 @@ pub async fn answer(
     answer_framed(pool, site, tester, text, Framing::default()).await
 }
 
-/// [`answer`] for a question the sensitivity check has classified.
+/// [`answer`] for a question the sensitivity check has classified, or a request that may carry
+/// `Sec-GPC: 1`.
 pub async fn answer_framed(
     pool: &PgPool,
     site: &Site,
@@ -203,9 +208,22 @@ pub async fn answer_framed(
     };
     let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     let stage = Instant::now();
+    let choice = wt_db::privacy::choice(pool, tester)
+        .await
+        .map_err(AskError::Persist)?;
+    let privacy_mode = site.privacy.effective(choice.as_ref(), framing.gpc);
+    // Keep mode stores the text with obvious personal details removed; count-only keeps it as
+    // asked, for a day.
+    let kept = if privacy_mode == wt_db::privacy::SHARE {
+        crate::privacy::scrub(text)
+    } else {
+        text.to_owned()
+    };
     let new = wt_db::answer::NewAnswer {
         tester,
-        query_text: text,
+        query_text: &kept,
+        privacy_mode,
+        text_expires_at: Some(site.privacy.expires_at(privacy_mode)),
         payload,
         teacher_count: small(found.teacher_count),
         sangha_count: small(sanghas),
