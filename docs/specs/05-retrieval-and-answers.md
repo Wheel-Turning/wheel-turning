@@ -1,6 +1,6 @@
 # Spec 05: Retrieval, synthesis and dana
 
-Implements M5 (retrieval and answer assembly), M6 (synthesis) and the dana calculator of M7. A question comes in and a persisted, renderable `AnswerView` comes out. Rules come from the PRD's answer experience and ranking sections, and tunable values live in `config/retrieval.toml`.
+Implements M5 (retrieval and answer assembly), M6 (synthesis, now the summary) and the dana calculator of M7. A question comes in and a persisted, renderable `AnswerView` comes out. Rules come from the PRD's answer experience and ranking sections, and tunable values live in `config/retrieval.toml`.
 
 The query path, in order:
 
@@ -9,7 +9,7 @@ The query path, in order:
 3. Fuse the two result lists with reciprocal rank fusion.
 4. Rerank the fused candidates with the cross-encoder and drop those below a relevance threshold.
 5. Select passages with per-teacher caps, diversity and a source ceiling.
-6. In standard mode, draft themes, filter them deterministically and verify them.
+6. In standard mode, draft the summary, filter its sentences deterministically and verify them.
 7. Assemble the `AnswerView` and compute the dana panel.
 8. Persist the query log, answer and answer passages, then render.
 
@@ -61,44 +61,59 @@ Steps in `wt-retrieve`:
 7. Selection in named mode. Take the top `named_max_passages` by score with MMR and `named_per_talk_cap`. If fewer than `named_min_passages` survive, the answer says how many passages from that teacher were found, or that none were, and never substitutes another teacher.
 8. No soft preference for a minimum number of sanghas is implemented in v1. If the PRD's optional test is run later, it needs `sangha_id` added to `SelectInput`, a flag default off, and a visible disclosure on any answer where it overrides relevance.
 
-## Synthesis and verifier
+## Summary and verifier
 
-Synthesis exists to say how approaches differ in one short line, never to speak for a teacher. It runs only in standard mode. Passages always render, so a synthesis failure removes the line and nothing else.
+The summary (owner's decision of October 12, 2026, replacing the one-line themes and moving Spec 00's post-beta item 4 before beta) lets a reader get the idea without reading every excerpt, in the manner of a Consensus research answer, and never speaks for a teacher. It runs only in standard mode and only over the excerpts the page shows (Answer assembly, rule 8). Excerpts always render, so a summary failure removes the summary and nothing else. Answers stored before this decision keep their themes, which render as before under "How approaches differ".
+
+Shape, top to bottom, in a container with the stable id `summary`:
+
+1. Headline: one sentence that answers the question as the excerpts do.
+2. Framing: one or two sentences that set out what the excerpts address.
+3. Where the talks agree: up to `max_themes` sentences, each citing excerpts from at least two teachers.
+4. Where they differ: up to `max_themes` sentences, each citing excerpts from at least two teachers.
+5. Points to keep in mind: up to two model sentences about context a quoted line leaves out, each citing the excerpt it concerns, then notes the code writes from counts: "Only \<n> talk(s) in this collection matched this question closely." when the answer's excerpts come from two talks or fewer, and "\<k> of the \<n> excerpts come from teachers at \<sangha>." when one sangha holds more than half of at least three excerpts.
+6. In sum: one sentence.
+7. In place of an evidence-strength meter, a line the code writes: "Drawn from \<n> talks by \<k> teachers.", counted over the excerpts the shown sentences cite.
+8. Quoted lines: one numbered entry per citation marker, in order of first appearance, holding the verbatim quotation, the teacher, the talk title and date, and a link to the excerpt below.
+
+The model sees the question and each excerpt as `E1..En`, with a header naming its teacher (display name) and the talk's year, followed by its sentences numbered `[1]..[m]` (the excerpt's sentences, from the boundaries the index step stores). It returns JSON only and never quoted text (CLAUDE.md rule 5):
 
 ```rust
-pub struct SynthesisInput { pub query: String, pub passages: Vec<(PassageRef, String)> }  // refs P1..Pn in score order
-pub struct ThemeDraft { pub description: String, pub passage_refs: Vec<String> }
-pub struct SynthesisOutput { pub themes: Vec<ThemeDraft> }
-pub struct VerifierOutput { pub supported: bool, pub unsupported_part: Option<String> }
+pub struct Cite { pub excerpt: String, pub start: i64, pub end: i64 }  // "E2", sentence numbers
+pub struct DraftSentence { pub text: String, pub cites: Vec<Cite> }
+pub struct SummaryDraft {
+    pub headline: Option<DraftSentence>, pub framing: Vec<DraftSentence>,
+    pub agree: Vec<DraftSentence>, pub differ: Vec<DraftSentence>,
+    pub keep_in_mind: Vec<DraftSentence>, pub sum_up: Option<DraftSentence>,
+}
 ```
 
-The generation prompt, stored in `crates/wt-synth/prompts/synthesize.md`, must state these rules to the model:
+The prompt, in `crates/wt-synth/prompts/summarize.md`, tells the model to describe what is said in a talk ("In a 2011 talk, Weitsman says ...") and never what a teacher believes, thinks or holds; to name a teacher only by the name in the excerpt's header and a year only from it; to add no advice, interpretation or quotation marks; to cite, for each sentence, the shortest run of one or two sentences of each excerpt that supports it; and to leave out any section it cannot support.
 
-- You receive a question and numbered passages from different talks. Return at most four themes.
-- Each theme is one sentence of at most 30 words describing a difference or a shared emphasis in how the passages approach the question.
-- Each theme cites at least two passage numbers that support every part of the sentence.
-- State only what the passages say. Do not add advice, interpretation, quotations or names of teachers.
-- Return the structured output and nothing else.
+The code turns each citation into a quotation: the cited sentences of the excerpt, sliced verbatim from `servable_passage` rows and stored as a span like an excerpt's (the passage ids it covers and word offsets, never text). A permalink rebuilds it; a citation whose quotation no longer serves is dropped, and a sentence left with no citation is dropped with it.
 
-Deterministic filters then run in this order, and each drop is counted and logged with its reason:
+Deterministic filters run on each sentence in this order, and each drop is counted and logged with its reason:
 
-1. The output matches the schema, and at most `max_themes` (default 4) remain.
-2. Every cited ref exists in the offered set. Duplicate refs are collapsed.
-3. At least two distinct passages support the theme.
-4. The description is one sentence of at most 30 words.
-5. It contains no quotation marks and no teacher alias from the registry.
-6. Grounding. After stopword removal and simple stemming, at least `min_grounding_ratio` (default 0.4) of its content words appear in the union of its cited passages. This ratio is tuned on the claim audit and is a coarse guard against drift, not a proof.
+1. The output matches the schema; sentences beyond a section's limit are dropped.
+2. Every citation names an offered excerpt and a run of its sentences at most `quote_max_words` (60) words long. Duplicate citations are collapsed. A sentence with an invalid citation, or none, is dropped.
+3. A sentence of agreement or difference cites excerpts from at least two distinct teachers.
+4. The text is one sentence of at most `summary_max_words` (40) words.
+5. It contains no quotation mark and no excerpt label such as E3.
+6. Attribution. A teacher's name (any word of four or more letters from a registry alias, other than title words such as roshi) appears only when that teacher gave a cited excerpt, and a year appears only when a cited talk is from that year.
+7. Belief words. "believes", "believe", "thinks", "holds that" and "is convinced" are refused, since a sentence reports what a talk says.
+8. Grounding. After stopword removal, simple stemming and removal of names and years, at least `min_grounding_ratio` (default 0.4) of its content words appear in its cited excerpts. This ratio is a coarse guard against drift, not a proof.
 
-Each surviving theme goes to the verifier, a second model call that sees only the theme and its cited passages. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a theme is supported only if every distinct assertion in it is stated or directly entailed by at least one cited passage, and that a claim of difference requires the cited passages to show different emphases. A theme the verifier does not mark supported is dropped. Verifier calls run in parallel. `WT_LLM_MODEL_VERIFY` may name a different model and defaults to `WT_LLM_MODEL`.
+Each surviving sentence goes to the verifier, a second model call that sees only that sentence and its cited excerpts with their headers. The verifier prompt, in `crates/wt-synth/prompts/verify.md`, says a sentence is supported only if every distinct assertion in it, including who said it and when, is stated in or directly entailed by a cited excerpt; that a claim of agreement or difference needs cited excerpts that show it; and that a sentence stating what a teacher believes, rather than what a talk says, is unsupported. Verifier calls run in parallel. `WT_LLM_MODEL_VERIFY` may name a different model and defaults to `WT_LLM_MODEL`.
 
 Outcomes:
 
-- Zero themes survive: the page omits the synthesis line.
-- A generation or verifier call fails or exceeds `synthesis_timeout_s` (default 20): the page omits the synthesis line and the log records `synthesis_failed`.
-- The code, not the model, maps refs back to passage ids, and the rendered theme shows its passages as footnote chips.
-- Every drop with its reason is written to the job log so the 50-answer integrity audit can read it.
+- The headline does not survive: the page omits the summary, and the drops are logged.
+- A generation or verifier call fails or exceeds `synthesis_timeout_s` (default 20): the page omits the summary and the log records `synthesis_failed`.
+- The code, not the model, maps excerpt labels back to passage ids and sentence numbers to quotations.
+- Every drop with its reason is written to the job log so the 50-answer integrity audit can read it, and each summary sentence is one claim row in the review file (Spec 07).
+- `query_log.theme_count` counts the summary's sentences shown and `themes_dropped` its drops.
 
-The model receives passage text, so `DataClass::Real` rules from Spec 04 apply. In named-teacher mode no synthesis call is made.
+The model receives excerpt text, so `DataClass::Real` rules from Spec 04 apply. In named-teacher mode no summary call is made.
 
 ## Answer assembly
 
@@ -108,7 +123,8 @@ The assembler turns selected passage ids into the structure the page renders. Al
 pub struct AnswerView {
     pub answer_id: AnswerId, pub query: String, pub mode: AnswerMode,   // Standard | NamedTeacher
     pub teacher_count: u8, pub notice: Option<Notice>,
-    pub themes: Vec<ThemeView>,                 // description plus passage ids
+    pub themes: Vec<ThemeView>,                 // answers stored before the summary
+    pub summary: Option<SummaryView>,           // sentences by section, quotation markers
     pub groups: Vec<TeacherGroup>,
     pub talks_cited: Vec<TalkRef>, pub texts: Vec<TextRef>,
     pub dana: DanaPanel,
@@ -137,7 +153,7 @@ Rules:
    - Every footnote marker, and the metadata line of each passage, links to its entry (`#ref-<n>`). A small script in `static/` opens the list when a link targets an entry inside it, and without JavaScript the reader opens it.
    A citation of a work as a whole is listed by work alone and links to `work.link_out_url` (Spec 08, Work-level citations). Text excerpts appear only where Spec 08 allows them: the "From the texts" section, and a verified quotation collapsed under its footnote (Spec 08, Quoted passages inline). Both read through `servable_text_unit`, which requires an excerptable edition.
 6. Texts never count toward the teacher count and never enter the dana split.
-7. The answer is persisted as `answer.payload` holding mode, counts, theme text with passage ids, ordered passage ids and each passage's excerpt span (rule 8), never passage text.
+7. The answer is persisted as `answer.payload` holding mode, counts, the summary's sentences with the passage ids and quotation spans they cite (theme text with passage ids for answers stored before the summary), ordered passage ids and each passage's excerpt span (rule 8), never passage text.
 8. Excerpts (owner's decision of October 12, 2026). Passages are fixed when a talk is indexed and are the unit retrieval finds; what the page shows is an excerpt cut for the question at answer time: the fewest whole sentences that address it, which may reach into the passages just before and after. 18 percent of passages started mid-sentence and 16 percent ended without sentence punctuation when this was decided.
    - Window. The selected passage plus the passage before and the passage after it in the same talk and the same segment, read from `servable_passage`. A window never crosses a segment boundary, so it never reaches into a student's turn, and a neighbor that does not serve is left out.
    - Sentences. The window's words split into sentences at the boundaries the index step stores for each passage (Spec 04, Chunking, rule on sentence boundaries), so text with little punctuation still has boundaries. The displayed words are never changed: boundaries only decide where an excerpt may start and end.
@@ -146,14 +162,14 @@ Rules:
      2. The reranker. Spans of whole sentences that overlap the passage and fit the limits, at most `excerpt_max_spans` (8) of them built from the passage's best-scoring sentences outward, are scored against the question, and the shortest span scoring at least `excerpt_keep_ratio` (0.9) of the best is kept.
      3. Otherwise the passage itself, trimmed to its first and last whole sentences when that keeps at least `excerpt_min_words`.
    - What is stored. Each passage in the payload carries `span`: the ids of the passages the excerpt covers in order, the word offset where it starts in the first and ends in the last, and which step chose it. A permalink rebuilds the text from `servable_passage` rows by those offsets; if a covered neighbor no longer serves, the excerpt falls back to its own passage, and if the passage itself no longer serves, the withdrawn marker shows as before.
-   - On the page. The blockquote shows the excerpt. "Listen at" and the transcript anchor follow the excerpt's first word, using the start times the index step stores for each sentence. Footnote markers whose spans fall inside the excerpt keep their places. The synthesis line and the verifier read the excerpts, not the raw passages, so a theme is grounded in what the reader sees.
+   - On the page. The blockquote shows the excerpt. "Listen at" and the transcript anchor follow the excerpt's first word, using the start times the index step stores for each sentence. Footnote markers whose spans fall inside the excerpt keep their places. The summary and the verifier read the excerpts, not the raw passages, so a sentence is grounded in what the reader sees.
    - Ranking is not changed: selection, the teacher count and the dana split work on passages as before. A permalink re-renders through the serving views, and a passage that no longer serves renders as a one-line withdrawn marker.
 
 Migration for the October 12, 2026 rules (next free number, see `docs/migrations.md`): `talk.transcript_from_source boolean not null default false`, set by the `audio` job whenever it writes a transcript and backfilled from each talk's current transcript origin; `source_video.transcript_url text`, null meaning the source page itself; `teacher.citation_name text` and `teacher.citation_sort text`; and `servable_passage` recreated so its `display_level` is `excerpts` for a talk with `transcript_from_source`. `wt teacher cite --teacher <name> --citation-name <text> --sort <text> --by <name>` sets the citation fields with a `correction_log` row, and `wt teacher cite --sheet <csv>` applies a reviewed sheet.
 
 Excerpt keys under `[excerpt]` in `config/retrieval.toml`: `excerpt_min_words = 25`, `excerpt_timeout_s = 5`, `excerpt_max_spans = 8`, `excerpt_keep_ratio = 0.9`.
 
-Tuning keys under `[answer]` and `[synthesis]` in `config/retrieval.toml`: `link_lead_in_ms = 2000`, `max_themes = 4`, `min_grounding_ratio = 0.4`, `synthesis_timeout_s = 20`.
+Tuning keys under `[answer]` and `[synthesis]` in `config/retrieval.toml`: `link_lead_in_ms = 2000`, `max_themes = 3` (sentences in each of the agree and differ sections), `summary_max_words = 40`, `quote_max_words = 60`, `min_grounding_ratio = 0.4`, `synthesis_timeout_s = 20`.
 
 ## Dana calculator
 
@@ -216,6 +232,15 @@ M6, synthesis
 - [x] A generation timeout and a verifier failure each leave a fully rendered answer without a synthesis line. (`wt-api/tests/pages.rs`.)
 - [x] Named mode makes no synthesis call. (`wt-api/tests/pages.rs`.)
 - [ ] On the claim-audit sample, no theme that a reviewer marks invented survives the filters and verifier.
+
+M6, the summary (owner's decision of October 12, 2026)
+
+- [ ] Each summary filter (citation, two teachers, one sentence, quotation mark or label, attribution, belief words, grounding) has a fixture that it drops and one that it passes.
+- [ ] Every citation marker's quotation is the cited excerpt's sentences, verbatim, rebuilt from `servable_passage` on a permalink; the payload stores spans, never text.
+- [ ] The page shows the headline, framing, sections, the code's notes for few talks and one sangha, the drawn-from line and the quoted lines in a container with id `summary`, with the excerpts below.
+- [ ] A verifier that rejects the headline, a generation timeout and a verifier failure each leave a fully rendered answer without a summary; named mode makes no summary call.
+- [ ] Takedown strips summary sentences that cite a removed passage, and the whole summary when it strips the headline.
+- [ ] `wt eval run` on the 20 Gate A questions records summary latency, and the PR reports p50 and p90 and the cost per answer.
 
 M7, dana calculator
 
