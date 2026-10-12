@@ -374,7 +374,7 @@ Owner's decisions of October 7, 2026 (PRD, Rights, notice and removal). Talks ar
 | f | `removed` | Not shown | Nothing; permanent exclusions | No |
 
 1. `teacher.display_level` holds the teacher's level, default `full`. `talk.display_level` may set a talk narrower; the narrower of the two applies, in the order f, e, a, d, b, c from narrowest. A talk can never be set wider than its teacher.
-2. `servable_passage` gains `display_level` and returns only talks at `excerpts` or `full`. The transcript page reads the same view and refuses any talk not at `full`. Rule 3's guard still holds: the page is built from servable passages in order, not from the `passage` table.
+2. `servable_passage` gains `display_level` and returns only talks at `excerpts` or `full`. A talk whose current transcript comes from its source (`talk.transcript_from_source`) is served at `excerpts` at most, whatever its teacher's level, since the source shows the whole transcript (owner's decision of October 12, 2026). The transcript page reads the same view and refuses any talk not at `full`. Rule 3's guard still holds: the page is built from servable passages in order, not from the `passage` table.
 3. `wt teacher display --teacher <name> --level <a|b|c|d|e|f> --by <name> [--evidence <ref>] [--talk <id>]` sets a level and writes `correction_log`. `e` writes the owner export (Spec 04, Owner exports) and then runs the teacher takedown; `f` is the existing `wt teacher opt-out`. A change to a narrower level takes effect in the serving view at once; a change to a wider one needs `--evidence` when the teacher asked for the narrower one.
 4. A report or a message asking for any narrower level is honored without argument, like a removal, within one business day.
 5. Notices and permission requests say that full transcripts are shown and list the levels (Spec 09).
@@ -439,7 +439,7 @@ Decision of October 7, 2026. San Francisco Zen Center, the Shunryu Suzuki archiv
 4. Duplicates. SFZC's collection holds most of the Suzuki archive. Talks are keyed by their EngageWisdom serial, so a talk both collections list under one serial is one record. Both collections are one source key, `sfzc`, with one mandate and one permission request. The sample confirmed that both sites use the same serials.
 5. Talk type. Every talk a collection lists is a dharma talk unless a title pattern says otherwise (`default_talk_type = "dharma_talk"`), since the pages give no length.
 6. Media and text. Classification and the gate run as for any talk. The transcript route in Spec 04, Aligned source transcripts, uses the source's text for the teacher's words and the audio only for timing and speakers, so the audio is fetched into scratch and deleted as rule 6 requires.
-7. Link style. `link_style = "engagewisdom"` links the talk page; the page's player has no time parameter, so the page shows "starts at h:mm:ss".
+7. Link style. `link_style = "engagewisdom"` links the talk page; the page's player has no time parameter, so the page shows "starts at h:mm:ss". The same page holds the talk's transcript, so it is also the talk's source transcript (Spec 05, Answer assembly, rule 2, as amended on October 12, 2026).
 
 ```toml
 [[source]]
