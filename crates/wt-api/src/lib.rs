@@ -10,6 +10,7 @@ pub mod accessibility;
 pub mod ask;
 pub mod chrome;
 pub mod limits;
+pub mod privacy;
 pub mod rights;
 pub mod session;
 pub mod site;
@@ -21,7 +22,7 @@ use std::time::Duration;
 use askama::Template;
 use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -59,6 +60,8 @@ pub struct Site {
     pub limits: Limits,
     /// `WT_OWNER_NAME`: who runs the site, for About. Without it About says "an individual".
     pub owner_name: Option<String>,
+    /// Question privacy settings.
+    pub privacy: privacy::Settings,
     /// `WT_TRUST_FORWARDED_FOR`: behind the load balancer, the client address is the last
     /// entry of `X-Forwarded-For`. Off, the connection's peer address is used.
     pub trust_forwarded_for: bool,
@@ -93,6 +96,7 @@ impl Site {
         Self {
             limits: Limits::new(retrieval.answer.ask_rate_per_hour),
             owner_name: None,
+            privacy: privacy::Settings::default(),
             trust_forwarded_for: false,
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
@@ -140,6 +144,8 @@ pub fn router(state: AppState) -> Router {
         .route("/accessibility/report", post(accessibility::report))
         .route("/", get(home))
         .route("/about", get(about))
+        .route("/about/privacy", post(privacy::save))
+        .route("/about/delete-my-data", post(privacy::delete))
         .route("/ask", post(ask))
         .route("/a/{answer}", get(answer_page))
         .route("/a/{answer}/feedback", post(feedback))
@@ -360,16 +366,16 @@ impl FromRequestParts<AppState> for Session {
 }
 
 impl Session {
-    fn csrf(&self, keys: &Keys) -> String {
+    pub(crate) fn csrf(&self, keys: &Keys) -> String {
         keys.csrf(&self.cookie)
     }
 
-    fn csrf_ok(&self, keys: &Keys, token: &str) -> bool {
+    pub(crate) fn csrf_ok(&self, keys: &Keys, token: &str) -> bool {
         keys.check_csrf(&self.cookie, token)
     }
 }
 
-fn csrf_refused() -> Response {
+pub(crate) fn csrf_refused() -> Response {
     error_page(
         StatusCode::FORBIDDEN,
         "Please try again",
@@ -419,17 +425,38 @@ const EXAMPLES: [&str; 3] = [
 #[template(path = "home.html")]
 struct HomePage {
     chrome: Chrome,
+    switch: privacy::Switch,
+    saved: bool,
     csrf: String,
     question: String,
     error: Option<String>,
     examples: [&'static str; 3],
 }
 
-async fn home(State(state): State<AppState>, s: Session) -> Response {
+/// `?saved=1` after the privacy switch, `?deleted=1` after deleting questions.
+#[derive(Debug, Deserialize)]
+struct Saved {
+    saved: Option<u8>,
+    deleted: Option<u8>,
+}
+
+async fn home(
+    State(state): State<AppState>,
+    s: Session,
+    headers: HeaderMap,
+    Query(q): Query<Saved>,
+) -> Response {
+    let switch = match privacy::switch(&state.pool, &state.site.privacy, &s, &headers, "home").await
+    {
+        Ok(sw) => sw,
+        Err(e) => return server_error("loading the privacy choice", &e),
+    };
     page(
         StatusCode::OK,
         &HomePage {
             chrome: Chrome::new("/", Current::Ask, Some(s.csrf(&state.site.keys))),
+            switch,
+            saved: q.saved.is_some(),
             csrf: s.csrf(&state.site.keys),
             question: String::new(),
             error: None,
@@ -443,14 +470,33 @@ async fn home(State(state): State<AppState>, s: Session) -> Response {
 struct AboutPage<'a> {
     chrome: Chrome,
     owner: Option<&'a str>,
+    switch: privacy::Switch,
+    csrf: String,
+    saved: bool,
+    deleted: bool,
 }
 
-async fn about(State(state): State<AppState>, s: Session) -> Response {
+async fn about(
+    State(state): State<AppState>,
+    s: Session,
+    headers: HeaderMap,
+    Query(q): Query<Saved>,
+) -> Response {
+    let switch =
+        match privacy::switch(&state.pool, &state.site.privacy, &s, &headers, "about").await {
+            Ok(sw) => sw,
+            Err(e) => return server_error("loading the privacy choice", &e),
+        };
+    let csrf = s.csrf(&state.site.keys);
     page(
         StatusCode::OK,
         &AboutPage {
-            chrome: Chrome::new("/about", Current::About, Some(s.csrf(&state.site.keys))),
+            chrome: Chrome::new("/about", Current::About, Some(csrf.clone())),
             owner: state.site.owner_name.as_deref(),
+            switch,
+            csrf,
+            saved: q.saved.is_some(),
+            deleted: q.deleted.is_some(),
         },
     )
 }
@@ -463,7 +509,12 @@ struct AskForm {
 
 /// `POST /ask`: runs the query path, persists the answer and its log row together, and
 /// redirects to the permalink.
-async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm>) -> Response {
+async fn ask(
+    State(state): State<AppState>,
+    s: Session,
+    headers: HeaderMap,
+    Form(form): Form<AskForm>,
+) -> Response {
     let site = &state.site;
     if !s.csrf_ok(&site.keys, &form.csrf) {
         return csrf_refused();
@@ -472,10 +523,16 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
         return too_many(wait, "You have asked a lot of questions this hour.");
     }
     let Ok(text) = query::normalize(&form.q) else {
+        let switch = match privacy::switch(&state.pool, &site.privacy, &s, &headers, "home").await {
+            Ok(sw) => sw,
+            Err(e) => return server_error("loading the privacy choice", &e),
+        };
         return page(
             StatusCode::BAD_REQUEST,
             &HomePage {
                 chrome: Chrome::new("/", Current::Ask, Some(s.csrf(&site.keys))),
+                switch,
+                saved: false,
                 csrf: s.csrf(&site.keys),
                 question: form.q,
                 error: Some("Please write between 3 and 500 characters.".to_owned()),
@@ -483,7 +540,7 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
             },
         );
     };
-    match ask::answer(&state.pool, site, s.tester, &text).await {
+    match ask::answer_with_gpc(&state.pool, site, s.tester, &text, privacy::gpc(&headers)).await {
         Ok(asked) => Redirect::to(&format!("/a/{}", asked.answer_id)).into_response(),
         Err(e) => server_error("answering", &e),
     }
@@ -524,7 +581,17 @@ async fn answer_page(
     };
     let stored = match wt_db::answer::load(&state.pool, answer, s.tester).await {
         Ok(Some(a)) => a,
-        Ok(None) => return not_found_page(),
+        Ok(None) => {
+            return match wt_db::privacy::was_purged(&state.pool, answer, s.tester).await {
+                Ok(true) => error_page(
+                    StatusCode::GONE,
+                    "Question not kept",
+                    "This question was not kept.",
+                ),
+                Ok(false) => not_found_page(),
+                Err(e) => server_error("checking a purged answer", &e),
+            };
+        }
         Err(e) => return server_error("loading the answer", &e),
     };
     let served: Vec<Served> =

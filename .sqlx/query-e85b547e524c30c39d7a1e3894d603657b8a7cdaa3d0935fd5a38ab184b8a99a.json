@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select delete_tester_questions($1) as \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e85b547e524c30c39d7a1e3894d603657b8a7cdaa3d0935fd5a38ab184b8a99a"
+}
