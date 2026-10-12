@@ -99,12 +99,15 @@ impl Default for SelectionConfig {
 pub struct AnswerConfig {
     /// How far before a passage its source link starts.
     pub link_lead_in_ms: i64,
+    /// Asks a tester may make in an hour before the friendly 429 (Spec 06).
+    pub ask_rate_per_hour: u32,
 }
 
 impl Default for AnswerConfig {
     fn default() -> Self {
         Self {
             link_lead_in_ms: 2000,
+            ask_rate_per_hour: 30,
         }
     }
 }

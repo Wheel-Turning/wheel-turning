@@ -284,6 +284,11 @@ async fn asking_stores_the_answer_and_only_its_owner_can_read_it() {
             .contains("https://www.youtube.com/watch?v=vid1&#38;t=63s")
     );
     assert!(page.body.contains("Used with permission of Ada Fixture."));
+    assert!(
+        page.body.contains("/rights?excerpt="),
+        "every passage has Report this excerpt"
+    );
+    assert!(page.body.contains(">Report this excerpt</a>"));
 
     let logged: (i64, i64) = sqlx::query_as(
         "select (select count(*) from query_log), (select count(*) from answer_passage)",

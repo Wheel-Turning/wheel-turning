@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into accessibility_report (page_path, description, assistive_tech, contact)\n         values ($1, $2, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa20ce5afce9b17d90c0eab0394d544aacf09e152c72dd1a09d025abde3e205e"
+}

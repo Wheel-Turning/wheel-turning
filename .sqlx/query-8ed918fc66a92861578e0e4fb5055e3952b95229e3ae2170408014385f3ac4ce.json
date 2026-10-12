@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update accessibility_report\n         set status = $2, handled_by = $3, handled_at = now(), note = coalesce($4, note)\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8ed918fc66a92861578e0e4fb5055e3952b95229e3ae2170408014385f3ac4ce"
+}
