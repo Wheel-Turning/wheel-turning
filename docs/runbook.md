@@ -176,3 +176,27 @@ speech.
 - [ ] The consent coverage report is reviewed: `wt consent list`, and `v_consent_coverage`.
 - [ ] The disclosure copy (Spec 09) matches what the logging code stores.
 - [ ] SSZ's permission note and speaker-release line are recorded (Spec 00, blockers).
+
+## 10. Local backups and disk space, until the database moves to RDS
+
+While the real data lives on the owner's PC (the `wt-m3-ssz` container and `data/`), a nightly job
+copies it off the machine (owner's decision of October 12, 2026).
+
+1. Setup, once. An S3 bucket in us-east-2 with versioning on and all public access blocked; its
+   lifecycle from `scripts/ops/backup-bucket-lifecycle.json`
+   (`aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-configuration
+   file://scripts/ops/backup-bucket-lifecycle.json`); an IAM user `wt-backup` allowed only
+   `s3:ListBucket` on the bucket and `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on its
+   objects, never `s3:DeleteObjectVersion`; and its key in the AWS CLI profile `wt-backup`.
+2. Nightly. `WT_BACKUP_BUCKET=<bucket> scripts/ops/backup-local.sh` dumps the database, checks the
+   dump lists, uploads it under `db/`, mirrors `data/objects` with deletions and copies
+   `data/records`. A scheduled task runs it at 03:00; `data/backups/last-success` holds the time
+   of the last good run and `data/backups/backup.log` the history.
+3. Takedowns. Database dumps and every older object version expire after seven days, so taken-down
+   material leaves the backups within the seven days the takedown note (procedure 3) promises.
+4. Restore. Download a dump with `aws s3 cp s3://<bucket>/db/<file> .`, restore it into a fresh
+   pgvector container with `pg_restore -d wt --no-owner <file>`, copy `objects/` and `records/`
+   back into `data/`, then follow procedure 6 to replay takedowns recorded after the dump.
+5. Disk. Each worktree keeps its own `target/` of 20 to 120 GB. `scripts/dev/clean-idle-targets.sh`
+   clears every worktree's `target/` that has not been built for 12 hours, never the main
+   checkout's; a scheduled task runs it daily, and `--dry-run` shows what it would clear.
