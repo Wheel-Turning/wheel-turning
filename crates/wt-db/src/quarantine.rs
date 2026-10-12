@@ -99,12 +99,7 @@ pub async fn release(
              requeue it with wt pipeline retry"
         )));
     }
-    let passages: i64 = sqlx::query_scalar!(
-        r#"select count(*) as "n!" from passage where talk_id = $1"#,
-        talk.as_uuid()
-    )
-    .fetch_one(&mut *tx)
-    .await?;
+    let passages = crate::audit::held_passages(&mut tx, talk).await?;
     // Names come from a constant in this crate, never from input.
     let rights_ok: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "select ({RIGHTS_VALID}) from talk t where t.id = $1"

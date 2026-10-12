@@ -10,6 +10,8 @@ tests/deny-fixture/Cargo.lock
 
 # Data that must never be committed: exports, models, scratch, audio
 /data/
+# Tests that run the wt binary in a crate directory write its local object store there.
+/crates/*/data/
 /models/
 /scratch/
 /data-inbox/

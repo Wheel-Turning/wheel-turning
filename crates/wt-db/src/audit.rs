@@ -534,6 +534,20 @@ async fn check(
     })
 }
 
+/// Passages a talk holds, served or not: the re-check before a quarantined talk is released,
+/// which the serving view cannot answer while the talk is out of serving.
+pub(crate) async fn held_passages(
+    conn: &mut sqlx::PgConnection,
+    talk: wt_core::ids::TalkId,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"select count(*) as "n!" from passage where talk_id = $1"#,
+        talk.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await
+}
+
 /// The stores outside the database that the audit reads.
 pub struct Files<'a> {
     /// Transcript and citation objects, and takedown records.
