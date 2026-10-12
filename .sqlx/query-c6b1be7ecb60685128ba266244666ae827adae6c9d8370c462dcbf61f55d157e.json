@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\" from servable_passage where passage_id = any($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c6b1be7ecb60685128ba266244666ae827adae6c9d8370c462dcbf61f55d157e"
+}
