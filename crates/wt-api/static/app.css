@@ -107,3 +107,11 @@ footer.site .cols { display: grid; gap: 1.5rem; }
 .f-muted { color: var(--on-dark-muted); }
 footer.site .last { margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid var(--control); color: var(--on-dark-muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.dana { margin-top: 3rem; padding: 1.5rem 1rem; background: var(--band); border-top: 3px solid var(--gold-deep); }
+.dana h2 { margin-top: 0; }
+.dana .fields { display: grid; gap: 1rem; margin-bottom: 1rem; }
+@media (min-width: 600px) { .dana .fields { grid-template-columns: 1fr 1fr; align-items: end; } }
+.dana input { width: 100%; box-sizing: border-box; min-height: 44px; font: inherit; padding: 0.5rem 0.75rem; border: 2px solid var(--control); border-radius: 0.5rem; background: #fff; color: var(--ink); }
+.dana .split { padding-left: 1.25rem; }
+.dana .split li { margin: 0.4rem 0; }
+.dana .outlay { font-weight: 600; }

@@ -1,0 +1,12 @@
+<h3 id="dana-result-h" tabindex="-1">The split</h3>
+{% if let Some(e) = d.error %}<p class="error">{{ e }}</p>{% else %}
+{% if d.lines.is_empty() %}<p>None of the sanghas in this answer has a verified giving page yet, so there is nothing to split.</p>{% else %}
+<ul class="split">
+  {% for l in d.lines %}<li>{{ l.name }}: ${{ l.amount }}. <a href="{{ l.href }}" target="_blank" rel="noopener noreferrer">Open the giving page of {{ l.name }}<span class="visually-hidden"> (opens in a new tab)</span></a>.</li>{% endfor %}
+</ul>
+{% endif %}
+{% if let Some(s) = d.site %}<p>This site, optional: ${{ s.amount }}. <a href="{{ s.href }}" target="_blank" rel="noopener noreferrer">Open the site's giving page<span class="visually-hidden"> (opens in a new tab)</span></a>.</p>{% endif %}
+{% if !d.lines.is_empty() || d.site.is_some() %}<p class="outlay">Total you would give: ${{ d.outlay }}</p>{% endif %}
+{% if !d.lines.is_empty() %}<p class="muted small">Shares are equal. The site line is extra and is not taken from the sanghas.</p>{% endif %}
+{% for n in d.notes %}<p class="muted small">{{ n }}</p>{% endfor %}
+{% endif %}

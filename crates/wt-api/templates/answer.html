@@ -52,6 +52,23 @@
   </ul>
 </section>
 {% endif %}
+<section class="dana" id="dana" aria-labelledby="dana-h">
+  <h2 id="dana-h">Dana</h2>
+  <p>Dana means giving. If this answer helped, you can give to the sanghas whose teaching it drew on. This site never handles your money. Each link opens that sangha's own page.</p>
+  <form method="post" action="/a/{{ answer_id }}/dana#dana" data-dana>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% if dana_first %}<input type="hidden" name="first" value="1">{% endif %}
+    <div class="fields">
+      <div><label for="dana-total">Total to share among the sanghas (US dollars)</label>
+      <input id="dana-total" name="total" type="text" inputmode="decimal" autocomplete="off" value="{{ dana_total }}"></div>
+      {% if site_giving %}<div><label for="dana-site">Optional gift to this site (US dollars)</label>
+      <input id="dana-site" name="site" type="text" inputmode="decimal" autocomplete="off" value="{{ dana_site }}"></div>{% endif %}
+    </div>
+    <button type="submit">Show the split</button>
+  </form>
+  <div id="dana-result" role="status" aria-live="polite">{% if let Some(d) = dana %}{% include "dana_split.html" %}{% endif %}</div>
+</section>
+<script src="/static/dana.js" defer></script>
 <section aria-labelledby="flag-h" class="flag">
   <h2 id="flag-h">Flag this query</h2>
   <p>A flagged query can be read by the founder, so they can see what went wrong.</p>

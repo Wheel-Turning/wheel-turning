@@ -651,5 +651,5 @@ Acceptance criteria:
 - [ ] `check-links` prints the table and writes the CSV, and a test proves it never sets the verified flag.
 - [x] `verify` requires `--by` and records the date and name. (`wt-cli/tests/commands.rs`.)
 - [ ] Two failed checks in a row unverify a link, and the audit warns when a link is older than `link_review_days`.
-- [ ] A sangha of kind `contact` produces no give button, appears in `excluded` in the split, and the dana panel shows its note.
+- [x] A sangha of kind `contact` produces no give button, appears in `excluded` in the split, and the dana panel shows its note. (`wt-api/tests/pages.rs`; the constraint keeps a contact page unverified, so it never gets a give link.)
 - [ ] A grep test finds no `@` in any registry seed file.

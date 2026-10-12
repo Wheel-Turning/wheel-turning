@@ -93,6 +93,7 @@ pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
         common_words,
         keys,
         secure_cookies: !config.env.is_dev(),
+        site_dana_url: config.site_dana_url.clone(),
     })
 }
 
