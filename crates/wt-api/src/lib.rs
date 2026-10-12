@@ -9,6 +9,7 @@
 pub mod accessibility;
 pub mod ask;
 pub mod chrome;
+pub mod excerpt;
 pub mod limits;
 pub mod privacy;
 pub mod rights;
@@ -50,6 +51,9 @@ pub struct Site {
     /// Drafts and verifies synthesis themes; [`UnavailableLlm`] when no model may be called,
     /// which leaves every answer without a synthesis line.
     pub llm: Arc<dyn LlmClient>,
+    /// `WT_LLM_REAL_DATA_OK`: a real talk's text may go to the model. Off, excerpts are chosen
+    /// without it (Spec 05, Answer assembly, rule 8).
+    pub real_data_ok: bool,
     /// `config/retrieval.toml`.
     pub retrieval: RetrievalConfig,
     /// `config/common_words.txt`.
@@ -111,6 +115,7 @@ impl Site {
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
             llm: Arc::new(UnavailableLlm),
+            real_data_ok: false,
             retrieval,
             common_words: String::new(),
             sensitivity: Arc::new(fake_sensitivity()),
@@ -763,10 +768,27 @@ async fn load_answer(
             .flatten(),
         None => None,
     };
+    // Each excerpt is rebuilt from the serving rows of the passages its span covers.
+    let mut covered: Vec<wt_core::ids::PassageId> = stored.payload.passage_ids.clone();
+    covered.extend(
+        stored
+            .payload
+            .spans
+            .iter()
+            .flat_map(|s| s.covers.iter().copied()),
+    );
+    covered.sort_unstable();
+    covered.dedup();
+    let rows = match wt_db::answer::excerpt_rows(&state.pool, &covered).await {
+        Ok(r) => r,
+        Err(e) => return Err(Box::new(server_error("loading excerpts", &e))),
+    };
+    let excerpts = excerpt::rebuild(&stored.payload.spans, &served, &rows);
     let mut view = view::assemble(
         answer,
         &stored.payload,
         &served,
+        &excerpts,
         named.as_deref(),
         state.site.retrieval.answer.link_lead_in_ms,
     );

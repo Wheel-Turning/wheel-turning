@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 askama = "0.14"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 async-trait = "0.1"
 axum.workspace = true
 base64 = "0.22"

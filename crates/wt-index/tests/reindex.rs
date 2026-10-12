@@ -274,3 +274,42 @@ async fn a_passage_gone_since_matching_fails_the_write() {
     let err = index::write(&mut tx, fx.talk, &plan, &reuse, &[], MODEL, 2, DIM).await;
     assert!(matches!(err, Err(index::IndexError::Changed(_))), "{err:?}");
 }
+
+#[tokio::test]
+async fn a_reindex_fills_sentence_boundaries_and_keeps_ids() {
+    let fx = start().await;
+    let segments = [seg(&fx, 0, A), seg(&fx, 1, B), seg(&fx, 2, C)];
+    index(&fx, &segments, &[], MODEL).await;
+    let before = passages(&fx).await;
+    // As a talk indexed before boundaries were stored.
+    sqlx::query(
+        "update passage set sentence_starts = '{}', sentence_start_ms = '{}' where talk_id = $1",
+    )
+    .bind(fx.talk)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let (plan, _, embedded) = index(&fx, &segments, &[], MODEL).await;
+    assert_eq!(embedded, 0);
+    assert_eq!(passages(&fx).await, before, "same ids, same words");
+    let stored: Vec<(Vec<i32>, Vec<i32>)> = sqlx::query_as(
+        "select sentence_starts, sentence_start_ms from passage where talk_id = $1
+         order by ordinal",
+    )
+    .bind(fx.talk)
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    let planned: Vec<(Vec<i32>, Vec<i32>)> = plan
+        .passages
+        .iter()
+        .map(|p| {
+            (
+                p.passage.sentence_starts.clone(),
+                p.passage.sentence_start_ms.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(stored, planned);
+    assert!(stored.iter().all(|(s, _)| s.first() == Some(&0)));
+}

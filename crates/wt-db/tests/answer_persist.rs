@@ -34,6 +34,7 @@ async fn a_passage_replaced_before_the_save_is_left_out_of_the_answer() {
         passage_ids: vec![gone, kept],
         rerank_degraded: false,
         curated: false,
+        spans: Vec::new(),
     };
     let answer = persist(
         &fx.pool,

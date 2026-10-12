@@ -257,9 +257,11 @@ impl Config {
     /// neither is set, so a worker that runs the stage refuses to start (Spec 04).
     pub fn llm_model_for(&self, stage: LlmStage) -> Result<&str, ConfigError> {
         let own = match stage {
-            LlmStage::Extract | LlmStage::Classify | LlmStage::Question | LlmStage::Sensitive => {
-                &self.llm_stage_models.extract
-            }
+            LlmStage::Extract
+            | LlmStage::Classify
+            | LlmStage::Question
+            | LlmStage::Sensitive
+            | LlmStage::Excerpt => &self.llm_stage_models.extract,
             LlmStage::Synth => &self.llm_stage_models.synth,
             LlmStage::Verify => &self.llm_stage_models.verify,
             LlmStage::Vision => &self.llm_stage_models.vision,
@@ -372,6 +374,9 @@ pub enum LlmStage {
     /// The optional model layer of sensitive-question detection (Spec 05, Sensitive
     /// questions). Uses the extraction model, Haiku-class.
     Sensitive,
+    /// Choosing an answer excerpt's sentences (Spec 05, Answer assembly, rule 8). Uses the
+    /// extraction model, Haiku-class.
+    Excerpt,
     /// Answer synthesis.
     Synth,
     /// Theme verification.
@@ -388,6 +393,7 @@ impl LlmStage {
             LlmStage::Classify => "classify",
             LlmStage::Question => "question",
             LlmStage::Sensitive => "sensitive",
+            LlmStage::Excerpt => "excerpt",
             LlmStage::Synth => "synth",
             LlmStage::Verify => "verify",
             LlmStage::Vision => "vision",
@@ -397,9 +403,11 @@ impl LlmStage {
     /// The setting a missing model is reported under.
     pub fn key(self) -> &'static str {
         match self {
-            LlmStage::Extract | LlmStage::Classify | LlmStage::Question | LlmStage::Sensitive => {
-                "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL"
-            }
+            LlmStage::Extract
+            | LlmStage::Classify
+            | LlmStage::Question
+            | LlmStage::Sensitive
+            | LlmStage::Excerpt => "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL",
             LlmStage::Synth => "WT_LLM_MODEL_SYNTH or WT_LLM_MODEL",
             LlmStage::Verify => "WT_LLM_MODEL_VERIFY or WT_LLM_MODEL",
             LlmStage::Vision => "WT_LLM_MODEL_VISION or WT_LLM_MODEL",

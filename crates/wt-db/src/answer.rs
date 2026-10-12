@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
 use wt_core::answer::StoredTheme;
+use wt_core::excerpt::{ExcerptSpan, Window, WindowPassage};
 use wt_core::ids::{AnswerId, PassageId, SanghaId, TalkId, TeacherId, TesterId};
 
 use crate::DbError;
@@ -38,6 +39,18 @@ pub struct Payload {
     /// feelings", which the page renders with the full support notice on top (Spec 05).
     #[serde(default)]
     pub curated: bool,
+    /// Each passage's excerpt (Spec 05, Answer assembly, rule 8): the passages it covers, its
+    /// word offsets and which step chose it. An answer stored before excerpts has none, and its
+    /// passages show whole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spans: Vec<ExcerptSpan>,
+}
+
+impl Payload {
+    /// The stored span of `passage`, if any.
+    pub fn span(&self, passage: PassageId) -> Option<&ExcerptSpan> {
+        self.spans.iter().find(|s| s.passage_id == passage)
+    }
 }
 
 /// One ask to persist.
@@ -301,6 +314,72 @@ pub async fn passages(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Served>, D
         .collect();
     out.sort_by_key(|s| ids.iter().position(|id| *id == s.id));
     Ok(out)
+}
+
+/// Each passage's excerpt window: the passage and the passages just before and after it in the
+/// same talk and segment that still serve, in order (Spec 05, Answer assembly, rule 8). A
+/// passage that no longer serves has no window. Returned in the order of `ids`.
+pub async fn windows(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Window>, DbError> {
+    let uuids: Vec<Uuid> = ids.iter().map(|p| p.as_uuid()).collect();
+    let rows = sqlx::query!(
+        r#"select p.passage_id as "anchor!", n.passage_id as "passage_id!", n.text as "text!",
+                  n.ordinal as "ordinal!", n.start_ms as "start_ms!",
+                  n.sentence_starts as "sentence_starts!", n.sentence_start_ms as "sentence_start_ms!"
+           from servable_passage p
+           join servable_passage n
+             on n.talk_id = p.talk_id and n.segment_id = p.segment_id
+            and n.ordinal between p.ordinal - 1 and p.ordinal + 1
+           where p.passage_id = any($1)
+           order by p.passage_id, n.ordinal"#,
+        &uuids
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut out = Vec::new();
+    for id in ids {
+        let passages: Vec<WindowPassage> = rows
+            .iter()
+            .filter(|r| r.anchor == id.as_uuid())
+            .map(|r| WindowPassage {
+                id: PassageId::from(r.passage_id),
+                text: r.text.clone(),
+                ordinal: r.ordinal,
+                start_ms: r.start_ms,
+                sentence_starts: r.sentence_starts.clone(),
+                sentence_start_ms: r.sentence_start_ms.clone(),
+            })
+            .collect();
+        if let Some(selected) = passages.iter().position(|p| p.id == *id) {
+            out.push(Window { passages, selected });
+        }
+    }
+    Ok(out)
+}
+
+/// The serving rows of the given passages, for rebuilding stored excerpts. A passage that no
+/// longer serves is absent.
+pub async fn excerpt_rows(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<WindowPassage>, DbError> {
+    let uuids: Vec<Uuid> = ids.iter().map(|p| p.as_uuid()).collect();
+    let rows = sqlx::query!(
+        r#"select passage_id as "passage_id!", text as "text!", ordinal as "ordinal!",
+                  start_ms as "start_ms!", sentence_starts as "sentence_starts!",
+                  sentence_start_ms as "sentence_start_ms!"
+           from servable_passage where passage_id = any($1)"#,
+        &uuids
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| WindowPassage {
+            id: PassageId::from(r.passage_id),
+            text: r.text,
+            ordinal: r.ordinal,
+            start_ms: r.start_ms,
+            sentence_starts: r.sentence_starts,
+            sentence_start_ms: r.sentence_start_ms,
+        })
+        .collect())
 }
 
 /// A serving talk's card and its passages in order. `None` when the talk does not serve.

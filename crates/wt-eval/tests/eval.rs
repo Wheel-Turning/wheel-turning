@@ -270,9 +270,18 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
     assert_eq!(r.named.len(), 1);
     assert_eq!(r.named[0].teacher.as_deref(), Some("Ada Fixture"));
     assert_eq!(r.teacher_counts.values().sum::<usize>(), 3);
-    assert_eq!(r.latency.len(), 9);
+    assert_eq!(r.latency.len(), 10);
+    // Excerpts: the fixture passages are whole sentences too short to trim, so each shows as
+    // it is and none starts or ends mid-sentence.
+    let shown: usize = results.iter().map(|a| a.payload.passage_ids.len()).sum();
+    assert_eq!(r.excerpts.count, shown);
+    assert!(r.excerpts.mean_words > 10.0, "{:?}", r.excerpts);
+    assert_eq!(r.excerpts.mid_sentence, 0, "{:?}", r.excerpts);
+    assert_eq!(r.excerpts.by_chooser.get("passage"), Some(&shown));
     let text = report::render(&r);
     for needle in [
+        "mean",
+        "mid-sentence",
         "Questions passing",
         "Claim audit",
         "Answers by teacher count",

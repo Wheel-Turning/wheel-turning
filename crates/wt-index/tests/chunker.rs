@@ -123,3 +123,84 @@ fn long_sentences_split_at_the_maximum_and_pauses_break() {
 fn an_empty_segment_has_no_passages() {
     assert!(chunk(&[], &ChunkSettings::default()).is_empty());
 }
+
+/// One unpunctuated stretch of `n` words, one every 400 ms, with `pauses` inserted.
+fn unpunctuated(n: usize, pauses: &[(usize, i32)]) -> Vec<Word> {
+    let mut at = 0;
+    (0..n)
+        .map(|i| {
+            if let Some((_, extra)) = pauses.iter().find(|(j, _)| *j == i) {
+                at += extra;
+            }
+            let w = Word::new(format!("w{i}"), at, at + 400, 0.9);
+            at += 400;
+            w
+        })
+        .collect()
+}
+
+#[test]
+fn sentence_boundaries_never_change_the_passages() {
+    let words = segment(&[30, 250, 12, 80], &[(30, 900)]);
+    let wide = ChunkSettings {
+        boundary_max_words: 10_000,
+        ..ChunkSettings::default()
+    };
+    let a = chunk(&words, &ChunkSettings::default());
+    let b = chunk(&words, &wide);
+    let strip = |ps: Vec<Passage>| -> Vec<(String, String)> {
+        ps.into_iter().map(|p| (p.text, p.content_hash)).collect()
+    };
+    assert_eq!(strip(a), strip(b));
+}
+
+#[test]
+fn a_long_unpunctuated_stretch_splits_at_its_longest_pause() {
+    // 100 words without punctuation, touching gaps everywhere but a pause before word 47 and
+    // a shorter one before word 20.
+    let words = unpunctuated(100, &[(47, 600), (20, 300)]);
+    let starts = wt_index::chunker::sentence_boundaries(&words, &ChunkSettings::default());
+    assert_eq!(starts[0], 0);
+    assert!(starts.contains(&47), "{starts:?}");
+    assert!(starts.contains(&20), "{starts:?}");
+    let mut ends = starts[1..].to_vec();
+    ends.push(100);
+    for (s, e) in starts.iter().zip(&ends) {
+        assert!(e - s <= 40, "{s}..{e} in {starts:?}");
+    }
+}
+
+#[test]
+fn without_any_pause_a_long_stretch_splits_every_30_words() {
+    let words = unpunctuated(100, &[]);
+    let starts = wt_index::chunker::sentence_boundaries(&words, &ChunkSettings::default());
+    assert_eq!(starts, vec![0, 30, 60, 90]);
+}
+
+#[test]
+fn passages_store_sentence_starts_as_word_offsets_with_their_times() {
+    let words = segment(&[30; 12], &[]);
+    let passages = chunk(&words, &ChunkSettings::default());
+    for p in &passages {
+        let n = i32::try_from(p.text.split_whitespace().count()).unwrap();
+        assert_eq!(p.sentence_starts.len(), p.sentence_start_ms.len());
+        assert!(p.sentence_starts.windows(2).all(|w| w[0] < w[1]));
+        assert!(p.sentence_starts.iter().all(|&s| (0..n).contains(&s)));
+        for (s, ms) in p.sentence_starts.iter().zip(&p.sentence_start_ms) {
+            let word = p
+                .text
+                .split_whitespace()
+                .nth(usize::try_from(*s).unwrap())
+                .unwrap();
+            assert!(word.starts_with('W'), "{word} starts a sentence");
+            let j = p.words.0 + usize::try_from(*s).unwrap();
+            assert_eq!(*ms, words[j].start_ms);
+        }
+    }
+    // Passages built from whole sentences start on one.
+    assert!(
+        passages
+            .iter()
+            .all(|p| p.sentence_starts.first() == Some(&0))
+    );
+}

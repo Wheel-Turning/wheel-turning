@@ -139,6 +139,7 @@ max_words = 220
 hard_break_ms = 8000
 min_words = 60
 merge_cap_words = 260
+boundary_max_words = 40     # longer stretches without a boundary are split for answer excerpts (Spec 04)
 
 [asr]
 # Speech recognition (Spec 04, Transcription). whisper.cpp's whisper-cli runs from

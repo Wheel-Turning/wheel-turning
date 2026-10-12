@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update passage p set sentence_starts = u.ss::int4[], sentence_start_ms = u.sm::int4[]\n         from unnest($2::uuid[], $3::text[], $4::text[]) as u(id, ss, sm)\n         where p.talk_id = $1 and p.id = u.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b82cbb922d3789612fe6efb30d1ba09aeab3c5c105fb723deb4f52a1463d7e43"
+}

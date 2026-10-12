@@ -7,6 +7,7 @@
 //! sangha details afterwards.
 
 pub mod config;
+pub mod excerpt;
 pub mod fuse;
 pub mod query;
 pub mod search;
@@ -20,7 +21,7 @@ use sqlx::PgPool;
 use wt_core::ids::{PassageId, TeacherId};
 use wt_ml::{Embedder, MlError, Reranker};
 
-pub use config::RetrievalConfig;
+pub use config::{ExcerptConfig, RetrievalConfig};
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
 pub use sensitive::{Classified, Level, ModelCheck, Sensitivity};

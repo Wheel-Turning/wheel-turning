@@ -15,8 +15,9 @@ use wt_synth::{Synthesis, SynthesisInput};
 
 use crate::Site;
 
-/// Milliseconds per stage of one answer.
+/// Milliseconds per stage of one answer. A stage a run's build did not have reads as zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct StageTimings {
     /// Loading aliases and detecting a named teacher.
     pub parse_ms: u64,
@@ -30,6 +31,9 @@ pub struct StageTimings {
     pub select_ms: u64,
     /// Reading the chosen passages through `servable_passage`.
     pub load_ms: u64,
+    /// Reading each passage's window and cutting its excerpt (Spec 05, Answer assembly,
+    /// rule 8).
+    pub excerpt_ms: u64,
     /// Theme generation and verification; zero in named mode.
     pub synth_ms: u64,
     /// Writing the query log and answer.
@@ -154,15 +158,29 @@ pub async fn answer_framed(
         .map_err(AskError::Passages)?;
     timings.load_ms = millis(stage);
 
-    // Spec 05: synthesis runs in standard mode only, over the passages as served, and not for a
-    // sensitive question, whose page omits the summary line. Any failure leaves the answer
-    // without the line and nothing else.
+    // Spec 05, rule 8: the page shows an excerpt of each passage cut for the question.
+    let stage = Instant::now();
+    let windows = wt_db::answer::windows(pool, &ids)
+        .await
+        .map_err(AskError::Passages)?;
+    let excerpts = crate::excerpt::choose(site, text, &served, &windows).await;
+    timings.excerpt_ms = millis(stage);
+
+    // Spec 05: synthesis runs in standard mode only, over the excerpts as the page shows them,
+    // and not for a sensitive question, whose page omits the summary line. Any failure leaves
+    // the answer without the line and nothing else.
     let stage = Instant::now();
     let synthesis = match found.mode {
         Mode::Standard if framing.level.shows_summary() && !framing.curated => {
             let input = SynthesisInput {
                 query: text.to_owned(),
-                passages: served.iter().map(|p| (p.id, p.text.clone())).collect(),
+                passages: served
+                    .iter()
+                    .map(|p| {
+                        let text = excerpts.get(&p.id).map_or(&p.text, |e| &e.text);
+                        (p.id, text.clone())
+                    })
+                    .collect(),
             };
             wt_synth::synthesize(
                 site.llm.as_ref(),
@@ -205,6 +223,10 @@ pub async fn answer_framed(
         passage_ids: ids,
         rerank_degraded: found.rerank_degraded,
         curated: framing.curated,
+        spans: served
+            .iter()
+            .filter_map(|p| excerpts.get(&p.id).and_then(|e| e.span.clone()))
+            .collect(),
     };
     let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     let stage = Instant::now();

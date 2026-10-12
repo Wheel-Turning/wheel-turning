@@ -17,6 +17,8 @@ pub struct RetrievalConfig {
     pub answer: AnswerConfig,
     /// `[synthesis]`.
     pub synthesis: SynthesisConfig,
+    /// `[excerpt]`.
+    pub excerpt: ExcerptConfig,
 }
 
 /// `[retrieval]`: search, fusion and reranking.
@@ -143,6 +145,32 @@ impl Default for SynthesisConfig {
     }
 }
 
+/// `[excerpt]`: cutting each passage's excerpt for the question (Spec 05, Answer assembly,
+/// rule 8).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExcerptConfig {
+    /// No excerpt is shorter than this many words.
+    pub excerpt_min_words: usize,
+    /// Seconds before the model step, and then the reranker step, is abandoned.
+    pub excerpt_timeout_s: u64,
+    /// Candidate spans the reranker step scores for one passage.
+    pub excerpt_max_spans: usize,
+    /// The reranker step keeps the shortest span scoring at least this share of the best.
+    pub excerpt_keep_ratio: f32,
+}
+
+impl Default for ExcerptConfig {
+    fn default() -> Self {
+        Self {
+            excerpt_min_words: 25,
+            excerpt_timeout_s: 5,
+            excerpt_max_spans: 8,
+            excerpt_keep_ratio: 0.9,
+        }
+    }
+}
+
 /// Why the file could not be used.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -200,6 +228,10 @@ mod tests {
         assert_eq!(c.answer.link_lead_in_ms, 2000);
         assert_eq!(c.synthesis.max_themes, 4);
         assert_eq!(c.synthesis.synthesis_timeout_s, 20);
+        assert_eq!(c.excerpt.excerpt_min_words, 25);
+        assert_eq!(c.excerpt.excerpt_timeout_s, 5);
+        assert_eq!(c.excerpt.excerpt_max_spans, 8);
+        assert!((c.excerpt.excerpt_keep_ratio - 0.9).abs() < f32::EPSILON);
     }
 
     #[test]

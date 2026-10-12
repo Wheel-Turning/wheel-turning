@@ -31,7 +31,24 @@ pub async fn export(pool: &PgPool, run: Uuid, lead_in_ms: i64) -> Result<String,
     let mut served: BTreeMap<Uuid, Vec<Served>> = BTreeMap::new();
     let mut talks = BTreeSet::new();
     for a in &answers {
-        let s = wt_db::answer::passages(pool, &a.payload.passage_ids).await?;
+        let mut s = wt_db::answer::passages(pool, &a.payload.passage_ids).await?;
+        // The reviewer rates what the page shows: each passage's excerpt (Spec 05, Answer
+        // assembly, rule 8), with its source link at the excerpt's first word.
+        let mut covered = a.payload.passage_ids.clone();
+        covered.extend(
+            a.payload
+                .spans
+                .iter()
+                .flat_map(|sp| sp.covers.iter().copied()),
+        );
+        let rows = wt_db::answer::excerpt_rows(pool, &covered).await?;
+        let excerpts = wt_api::excerpt::rebuild(&a.payload.spans, &s, &rows);
+        for p in &mut s {
+            if let Some(e) = excerpts.get(&p.id) {
+                p.text.clone_from(&e.text);
+                p.start_ms = e.start_ms;
+            }
+        }
         talks.extend(s.iter().map(|p| p.talk.id));
         served.insert(a.answer_id, s);
     }
