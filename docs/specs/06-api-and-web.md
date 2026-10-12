@@ -268,7 +268,7 @@ The owner role can still read every table, as the logging list says, so this sec
 - [ ] `/give` logs a click and redirects only to the registry URL. A tampered `amount_cents`, an unverified sangha and an unlisted sangha are each rejected.
 - [ ] The dana fragment equals the output of the `wt-dana` function for the same inputs, and the no-JavaScript path shows the same split.
 - [ ] `flag_query` sets the flag, and the flagged query is readable only through `flagged_queries()`.
-- [ ] `wt report` commands run as `dg_analyst` and cannot read unflagged query text.
+- [x] `wt report` commands run as `dg_analyst` and cannot read unflagged query text. (`wt-cli/tests/commands.rs`: each report runs as a `wt_analyst` login and prints no unflagged question, and `wt report` refuses a connection that can read `query_log`.)
 - [ ] A failed log insert produces an error page and no answer.
 - [x] The rate limit returns `429` after `ask_rate_per_hour` asks in an hour. (`wt-api/tests/site.rs`; `ask_rate_per_hour` is in `[answer]` of `config/retrieval.toml`.)
 - [x] Security headers and `robots` rules are present on every response. (`wt-api/tests/pages.rs` and `tests/site.rs`; the headers are set by one layer over the whole router.)

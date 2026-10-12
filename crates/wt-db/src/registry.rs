@@ -76,22 +76,32 @@ pub async fn import(
     let mut report = ImportReport::default();
 
     for s in &file.sanghas {
+        // A changed link, template or kind clears the verification: a person checked the old
+        // one, not this one (Spec 02, Donation links).
         sqlx::query!(
-            r#"insert into sangha (name, lineage, affiliation, donation_url, donation_url_template, listed)
-               values ($1, $2, $3, $4, $5, $6)
+            r#"insert into sangha (name, lineage, affiliation, donation_url, donation_url_template,
+                                   listed, donation_kind, donation_note)
+               values ($1, $2, $3, $4, $5, $6, $7, $8)
                on conflict (name) do update set
                  lineage = excluded.lineage, affiliation = excluded.affiliation,
                  donation_url = excluded.donation_url,
                  donation_url_template = excluded.donation_url_template,
                  listed = excluded.listed,
-                 donation_verified = case when sangha.donation_url is distinct from excluded.donation_url
-                                          then false else sangha.donation_verified end"#,
+                 donation_kind = excluded.donation_kind,
+                 donation_note = excluded.donation_note,
+                 donation_verified = case
+                   when (sangha.donation_url, sangha.donation_url_template, sangha.donation_kind)
+                        is distinct from
+                        (excluded.donation_url, excluded.donation_url_template, excluded.donation_kind)
+                   then false else sangha.donation_verified end"#,
             s.name,
             s.lineage,
             s.affiliation,
             s.donation_url,
             s.donation_url_template,
-            s.listed
+            s.listed,
+            s.kind(),
+            s.donation_note
         )
         .execute(&mut *tx)
         .await?;

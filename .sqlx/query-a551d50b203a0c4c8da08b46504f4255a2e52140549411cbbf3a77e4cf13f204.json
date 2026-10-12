@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update sangha set donation_verified = true, donation_verified_at = now(),\n                donation_checked_at = now(), donation_checked_by = $2, donation_note = null\n         where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a551d50b203a0c4c8da08b46504f4255a2e52140549411cbbf3a77e4cf13f204"
+}

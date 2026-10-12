@@ -40,6 +40,18 @@ enum Command {
         #[command(subcommand)]
         command: RegistryCommand,
     },
+    /// Sanghas' donation links: list them, and record that a person checked one (Spec 02,
+    /// Donation links and verification).
+    Sangha {
+        #[command(subcommand)]
+        command: SanghaCommand,
+    },
+    /// Aggregate reports, run as the analyst role through DATABASE_URL_ANALYST (Spec 06,
+    /// Logging, rule 6). None of them can read an unflagged question.
+    Report {
+        #[command(subcommand)]
+        command: ReportCommand,
+    },
     /// Speaker consent (Spec 03, the consent gate).
     Consent {
         #[command(subcommand)]
@@ -1133,6 +1145,67 @@ enum RegistryCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum SanghaCommand {
+    /// Every sangha's donation link, kind and verification, as JSON.
+    Links,
+    /// Record that you opened a sangha's giving page and confirmed it takes gifts for the
+    /// sangha. Only a page can be verified, and only the link you name, which must be the stored
+    /// one. Records your name and the time.
+    Verify {
+        /// The sangha's name, as in the registry.
+        #[arg(long)]
+        sangha: String,
+        /// The page you opened, exactly as stored (see `wt sangha links`).
+        #[arg(long)]
+        url: String,
+        /// Who checked the page.
+        #[arg(long)]
+        by: String,
+    },
+    /// Clear a sangha's verification, with the reason kept in its donation note.
+    Unverify {
+        /// The sangha's name.
+        #[arg(long)]
+        sangha: String,
+        /// Why, for example "the page no longer takes gifts".
+        #[arg(long)]
+        reason: String,
+        /// Who is making the change.
+        #[arg(long)]
+        by: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ReportCommand {
+    /// Answers per day, mode and teacher count, from v_answer_stats.
+    Answers {
+        /// How far back: a number with d (days) or h (hours), for example 7d.
+        #[arg(long, default_value = "7d", value_parser = parse_since)]
+        since: chrono::Duration,
+    },
+    /// Dana events per day and kind, from v_dana_clicks.
+    Dana,
+    /// Talks per state, consent status and teacher, from v_consent_coverage.
+    Coverage,
+    /// Flagged queries, through flagged_queries(): the only questions anyone may read.
+    Flagged,
+}
+
+/// `7d` or `24h`.
+fn parse_since(raw: &str) -> Result<chrono::Duration, String> {
+    let raw = raw.trim();
+    let bad = || format!("{raw:?} is not a duration such as 7d or 24h");
+    let (n, unit) = raw.split_at(raw.len().saturating_sub(1));
+    let n: i64 = n.parse().map_err(|_| bad())?;
+    match unit {
+        "d" => chrono::Duration::try_days(n).ok_or_else(bad),
+        "h" => chrono::Duration::try_hours(n).ok_or_else(bad),
+        _ => Err(bad()),
+    }
+}
+
+#[derive(Debug, Subcommand)]
 enum ConsentCommand {
     /// Record a teacher's consent and apply it to their talks. declined and withdrawn run the
     /// teacher takedown, which needs --yes.
@@ -1483,6 +1556,45 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Registry {
             command: RegistryCommand::Import { file, by },
         } => commands::registry_import(&pool().await?, &file, &by).await?,
+        Command::Sangha { command } => {
+            let pool = pool().await?;
+            match command {
+                SanghaCommand::Links => commands::print_json(&wt_db::donation::list(&pool).await?)?,
+                SanghaCommand::Verify { sangha, url, by } => commands::print_json(
+                    &wt_db::donation::verify(&pool, &sangha, &url, &by).await?,
+                )?,
+                SanghaCommand::Unverify { sangha, reason, by } => commands::print_json(
+                    &wt_db::donation::unverify(&pool, &sangha, &reason, &by).await?,
+                )?,
+            }
+        }
+        Command::Report { command } => {
+            let url = config
+                .database_url_analyst
+                .as_ref()
+                .context("wt report runs as the analyst role: set DATABASE_URL_ANALYST")?;
+            let pool = wt_db::connect(url)
+                .await
+                .context("connecting as the analyst role")?;
+            if wt_db::report::reads_query_log(&pool).await? {
+                anyhow::bail!(
+                    "DATABASE_URL_ANALYST connects as a role that can read query_log;                      wt report runs only as wt_analyst, which cannot read unflagged questions"
+                );
+            }
+            match command {
+                ReportCommand::Answers { since } => {
+                    let from = chrono::Utc::now() - since;
+                    commands::print_json(&wt_db::report::answers(&pool, from).await?)?;
+                }
+                ReportCommand::Dana => commands::print_json(&wt_db::report::dana(&pool).await?)?,
+                ReportCommand::Coverage => {
+                    commands::print_json(&wt_db::report::coverage(&pool).await?)?;
+                }
+                ReportCommand::Flagged => {
+                    commands::print_json(&wt_db::report::flagged(&pool).await?)?;
+                }
+            }
+        }
         Command::Consent {
             command:
                 ConsentCommand::Set {

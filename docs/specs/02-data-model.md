@@ -552,7 +552,7 @@ Procedure:
 
 1. The registry is seeded from `registry/sanghas.toml`, below. Every link starts unverified.
 2. `wt sangha check-links` checks each link automatically. It requires HTTPS, a final host that matches the registered host, a success status within three redirects, no password field on the page, and page text that contains one of give, donate, dana, support or contribute. It prints a table, writes `reports/donation_links.csv`, and never sets `donation_verified`.
-3. A person opens each page and decides. `wt sangha verify --key <key> --by "<name>"` sets the flag with the date and name when the kind is `page`. `wt sangha unverify --key <key> --reason "<text>"` clears it.
+3. A person opens each page and decides. `wt sangha verify --key <key> --by "<name>"` sets the flag with the date and name when the kind is `page`. `wt sangha unverify --key <key> --reason "<text>"` clears it. (As built, October 11, 2026: sanghas are keyed by name, so the commands take `--sangha "<name>"`, and `verify` also takes `--url`, the page the person opened, which must equal the stored link. `wt sangha links` lists every link. Both commands write `correction_log`.)
 4. The registry stores organization pages and never a personal email address. A sangha that takes gifts only through a person's email gets kind `contact`, is never verified, shows no give button, and the dana panel explains why. A contact page is kind `contact`, and a homepage is not a donation page. The owner may send that sangha the notice and ask it to publish a giving page.
 5. Every `link_review_days` (default 90) the audit warns and `check-links` reruns. A link that fails two checks in a row becomes unverified, with the reason in `donation_note`.
 6. None of the seeded pages is known to accept an amount in its address, so `donation_url_template` stays empty and the suggested amount appears as text.
@@ -647,9 +647,9 @@ donation_note = "The site asks people to email a named individual and has no giv
 Acceptance criteria:
 
 - [ ] The seed loads 13 sanghas, all unverified, with 2 of kind `contact`.
-- [ ] The constraint rejects `donation_verified` on a sangha whose kind is not `page`.
+- [x] The constraint rejects `donation_verified` on a sangha whose kind is not `page`. (`wt-cli/tests/commands.rs`.)
 - [ ] `check-links` prints the table and writes the CSV, and a test proves it never sets the verified flag.
-- [ ] `verify` requires `--by` and records the date and name.
+- [x] `verify` requires `--by` and records the date and name. (`wt-cli/tests/commands.rs`.)
 - [ ] Two failed checks in a row unverify a link, and the audit warns when a link is older than `link_review_days`.
 - [ ] A sangha of kind `contact` produces no give button, appears in `excluded` in the split, and the dana panel shows its note.
 - [ ] A grep test finds no `@` in any registry seed file.

@@ -204,9 +204,9 @@ M6, synthesis
 
 M7, dana calculator
 
-- [ ] All property tests in the dana section pass with at least 1,000 cases each.
-- [ ] URL template validation rejects a non-HTTPS template and a template whose host differs from the donation URL.
-- [ ] `cargo deny` still passes with no payment dependency in `wt-dana`.
+- [x] All property tests in the dana section pass with at least 1,000 cases each. (`wt-dana/tests/properties.rs`, 2,000 cases each.)
+- [x] URL template validation rejects a non-HTTPS template and a template whose host differs from the donation URL. (`wt_dana::validate_template`, run by registry import and again by `split`; a template failing the re-check falls back to the plain page.)
+- [x] `cargo deny` still passes with no payment dependency in `wt-dana`. (Its dependencies are `url`, `thiserror` and `wt-core`.)
 
 ## Sensitive questions
 

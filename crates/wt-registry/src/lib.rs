@@ -64,8 +64,14 @@ pub struct SanghaEntry {
     pub affiliation: Option<String>,
     /// The sangha's own donation page.
     pub donation_url: Option<String>,
-    /// Optional template with `{amount_cents}`.
+    /// Optional template with `{amount_cents}` or `{amount}`: HTTPS, on the donation page's
+    /// host (Spec 05, Dana calculator, rule 6).
     pub donation_url_template: Option<String>,
+    /// `page`, `contact` or `none` (Spec 02, Donation links). Defaults to `page` when a
+    /// donation URL is given and `none` otherwise. Only a `page` can be verified.
+    pub donation_kind: Option<String>,
+    /// Why a link is a contact page, missing or unverified.
+    pub donation_note: Option<String>,
     /// False means attribution only, never a give button.
     #[serde(default = "yes")]
     pub listed: bool,
@@ -120,6 +126,9 @@ impl RegistryFile {
                 "a sangha name appears twice".to_owned(),
             ));
         }
+        for s in &self.sanghas {
+            s.check_donation()?;
+        }
         let mut aliases = BTreeSet::new();
         for teacher in &self.teachers {
             if !sanghas.contains(teacher.sangha.as_str()) {
@@ -137,6 +146,40 @@ impl RegistryFile {
             }
         }
         Ok(())
+    }
+}
+
+impl SanghaEntry {
+    /// The donation link's kind, with the default filled in.
+    pub fn kind(&self) -> &str {
+        match (&self.donation_kind, &self.donation_url) {
+            (Some(k), _) => k,
+            (None, Some(_)) => "page",
+            (None, None) => "none",
+        }
+    }
+
+    fn check_donation(&self) -> Result<(), RegistryError> {
+        let invalid = |why: String| {
+            Err(RegistryError::Invalid(format!(
+                "sangha {}: {why}",
+                self.name
+            )))
+        };
+        if !["page", "contact", "none"].contains(&self.kind()) {
+            return invalid(format!("unknown donation_kind {:?}", self.kind()));
+        }
+        if let Some(url) = &self.donation_url
+            && !url.starts_with("https://")
+        {
+            return invalid("donation_url must use https".to_owned());
+        }
+        match (&self.donation_url, &self.donation_url_template) {
+            (None, Some(_)) => invalid("donation_url_template needs a donation_url".to_owned()),
+            (Some(url), Some(t)) => wt_dana::validate_template(url, t)
+                .or_else(|e| invalid(format!("donation_url_template: {e}"))),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -362,5 +405,55 @@ mod tests {
             sangha = "Nowhere"
         "#;
         assert!(RegistryFile::parse(missing, "t").is_err());
+    }
+
+    fn sangha(extra: &str) -> String {
+        format!(
+            "[[sangha]]
+name = \"A\"
+{extra}
+"
+        )
+    }
+
+    #[test]
+    fn donation_templates_must_be_https_on_the_page_host() {
+        let page = r#"donation_url = "https://give.example.org/donate""#;
+        let good = format!(
+            r#"{page}
+donation_url_template = "https://give.example.org/donate?amount={{amount}}""#
+        );
+        let file = RegistryFile::parse(&sangha(&good), "t").unwrap();
+        assert_eq!(file.sanghas[0].kind(), "page");
+        for bad in [
+            r#"donation_url_template = "http://give.example.org/donate?amount={amount}""#,
+            r#"donation_url_template = "https://other.example.org/donate?amount={amount}""#,
+            r#"donation_url_template = "https://give.example.org/donate""#,
+        ] {
+            let text = sangha(&format!(
+                "{page}
+{bad}"
+            ));
+            assert!(RegistryFile::parse(&text, "t").is_err(), "{bad}");
+        }
+        let orphan = r#"donation_url_template = "https://give.example.org/?a={amount}""#;
+        assert!(RegistryFile::parse(&sangha(orphan), "t").is_err());
+        let plain_http = r#"donation_url = "http://give.example.org/donate""#;
+        assert!(RegistryFile::parse(&sangha(plain_http), "t").is_err());
+    }
+
+    #[test]
+    fn donation_kind_defaults_and_is_checked() {
+        let none = RegistryFile::parse(&sangha(""), "t").unwrap();
+        assert_eq!(none.sanghas[0].kind(), "none");
+        let contact = sangha(
+            r#"donation_url = "https://z.example.org/contact"
+donation_kind = "contact""#,
+        );
+        assert_eq!(
+            RegistryFile::parse(&contact, "t").unwrap().sanghas[0].kind(),
+            "contact"
+        );
+        assert!(RegistryFile::parse(&sangha(r#"donation_kind = "venmo""#), "t").is_err());
     }
 }
