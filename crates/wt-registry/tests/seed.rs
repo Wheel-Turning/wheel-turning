@@ -28,7 +28,7 @@ fn who(title: &str) -> SpeakerMatch<String> {
 fn the_seed_loads_and_holds_no_email_address() {
     let file = RegistryFile::load(&seed_path()).unwrap();
     assert_eq!(file.sanghas.len(), 8);
-    assert_eq!(file.teachers.len(), 11);
+    assert_eq!(file.teachers.len(), 18);
     let text = std::fs::read_to_string(seed_path()).unwrap();
     assert!(
         !text.contains('@'),
