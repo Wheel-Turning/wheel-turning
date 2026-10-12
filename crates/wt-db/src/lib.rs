@@ -53,6 +53,9 @@ pub enum DbError {
     /// A migration failed to apply.
     #[error(transparent)]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    /// The request breaks a rule the database layer keeps, such as a reserved name.
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// Connection options from a secret connection string.

@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.id, s.name, s.version, r.build, r.config, r.started_at, r.finished_at,\n                  (select count(*) from eval_question q where q.set_id = s.id) as \"set_size!\"\n           from eval_run r join eval_set s on s.id = r.set_id where r.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "eval_run",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "eval_set",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "eval_set",
+            "name": "version"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "build",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "eval_run",
+            "name": "build"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "config",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "eval_run",
+            "name": "config"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "eval_run",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "finished_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "eval_run",
+            "name": "finished_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "set_size!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "347a06b8994bdd77633aab2f50d0518e8c07f897eb6d75dfcbbd638847771b3e"
+}

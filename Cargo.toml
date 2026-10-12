@@ -25,6 +25,7 @@ wt-retrieve = { path = "crates/wt-retrieve" }
 wt-synth = { path = "crates/wt-synth" }
 wt-api = { path = "crates/wt-api" }
 wt-dana = { path = "crates/wt-dana" }
+wt-eval = { path = "crates/wt-eval" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"
