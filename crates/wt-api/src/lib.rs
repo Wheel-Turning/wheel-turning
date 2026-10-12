@@ -5,11 +5,13 @@
 //! `servable_passage`, and the templates escape it. Model text reaches only the "How approaches
 //! differ" section, as verified themes whose passages the code, not the model, names.
 
+pub mod ask;
 pub mod session;
+pub mod site;
 pub mod view;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use askama::Template;
 use axum::extract::{FromRequestParts, Path, Query, Request, State};
@@ -22,11 +24,10 @@ use axum::{Form, Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use wt_core::ids::{AnswerId, SanghaId, TalkId, TesterId};
-use wt_db::answer::{Payload, Served};
-use wt_extract::{DataClass, LlmClient, UnavailableLlm};
+use wt_db::answer::Served;
+use wt_extract::{LlmClient, UnavailableLlm};
 use wt_ml::{Embedder, FakeEmbedder, Reranker};
-use wt_retrieve::{Mode, NamedDetector, Notice, RetrievalConfig, query, retrieve};
-use wt_synth::{Synthesis, SynthesisInput};
+use wt_retrieve::{RetrievalConfig, query};
 
 use session::Keys;
 
@@ -350,7 +351,6 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
     if !s.csrf_ok(&site.keys, &form.csrf) {
         return csrf_refused();
     }
-    let started = Instant::now();
     let Ok(text) = query::normalize(&form.q) else {
         return page(
             StatusCode::BAD_REQUEST,
@@ -362,96 +362,9 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
             },
         );
     };
-    let aliases = match wt_db::answer::aliases(&state.pool).await {
-        Ok(a) => a,
-        Err(e) => return server_error("loading teacher aliases", &e),
-    };
-    let alias_names: Vec<String> = aliases.iter().map(|(_, a)| a.clone()).collect();
-    let detector = match NamedDetector::new(aliases, &site.common_words) {
-        Ok(d) => d,
-        Err(e) => return server_error("building the alias matcher", &e),
-    };
-    let parsed = detector.parse(&text);
-    let found = match retrieve(
-        &state.pool,
-        site.embedder.as_ref(),
-        site.reranker.as_deref(),
-        &parsed,
-        &site.retrieval,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return server_error("retrieving", &e),
-    };
-    let ids: Vec<_> = found.chosen.iter().map(|c| c.id).collect();
-    let served = match wt_db::answer::passages(&state.pool, &ids).await {
-        Ok(s) => s,
-        Err(e) => return server_error("loading passages", &e),
-    };
-    // Spec 05: synthesis runs in standard mode only, over the passages as served. Any failure
-    // leaves the answer without the line and nothing else.
-    let synthesis = match found.mode {
-        Mode::Standard => {
-            let input = SynthesisInput {
-                query: text.clone(),
-                passages: served.iter().map(|p| (p.id, p.text.clone())).collect(),
-            };
-            wt_synth::synthesize(
-                site.llm.as_ref(),
-                &input,
-                &alias_names,
-                &site.synthesis(),
-                DataClass::Real,
-            )
-            .await
-        }
-        Mode::NamedTeacher(_) => Synthesis::default(),
-    };
-    let sanghas = served
-        .iter()
-        .map(|p| p.talk.sangha_id)
-        .collect::<std::collections::BTreeSet<_>>()
-        .len();
-    let (notice, notice_count) = match found.notice {
-        Some(Notice::ThinCoverage { teachers }) => (Some("thin_coverage"), Some(teachers)),
-        Some(Notice::NoneFound) => (Some("none_found"), None),
-        Some(Notice::NamedNone) => (Some("named_none"), None),
-        Some(Notice::NamedFew { found }) => (Some("named_few"), Some(found)),
-        Some(Notice::MultiNamed) => (Some("multi_named"), None),
-        None => (None, None),
-    };
-    let (mode, named) = match found.mode {
-        Mode::Standard => ("standard", None),
-        Mode::NamedTeacher(t) => ("named_teacher", Some(t)),
-    };
-    let payload = Payload {
-        mode: mode.to_owned(),
-        named_teacher_id: named,
-        notice: notice.map(str::to_owned),
-        notice_count,
-        themes: synthesis.themes,
-        passage_ids: ids,
-        rerank_degraded: found.rerank_degraded,
-    };
-    let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
-    let latency = small(usize::try_from(started.elapsed().as_millis()).unwrap_or(usize::MAX));
-    let new = wt_db::answer::NewAnswer {
-        tester: s.tester,
-        query_text: &text,
-        payload,
-        teacher_count: small(found.teacher_count),
-        sangha_count: small(sanghas),
-        thin_coverage: matches!(found.notice, Some(Notice::ThinCoverage { .. })),
-        latency_ms: latency,
-        themes_dropped: small(synthesis.dropped.len()),
-    };
-    match wt_db::answer::persist(&state.pool, &new).await {
-        Ok(id) => {
-            tracing::info!(latency_ms = latency, "answer stored");
-            Redirect::to(&format!("/a/{id}")).into_response()
-        }
-        Err(e) => server_error("storing the answer", &e),
+    match ask::answer(&state.pool, site, s.tester, &text).await {
+        Ok(asked) => Redirect::to(&format!("/a/{}", asked.answer_id)).into_response(),
+        Err(e) => server_error("answering", &e),
     }
 }
 
