@@ -308,7 +308,12 @@ async fn without_real_data_ok_no_text_goes_to_the_model() {
     let seen = llm.seen.lock().unwrap();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].1, DataClass::Real);
-    assert!(seen[0].0.user.contains("[3] When the mind wanders"));
+    assert!(
+        seen[0]
+            .0
+            .user
+            .contains("[3] (18 words) When the mind wanders")
+    );
     assert!(
         !seen[0].0.user.contains("A different turn"),
         "no other segment"
