@@ -19,3 +19,5 @@ unicode-segmentation = "1"
 
 [dev-dependencies]
 toml = "1"
+wt-db = { workspace = true, features = ["test-support"] }
+tokio.workspace = true

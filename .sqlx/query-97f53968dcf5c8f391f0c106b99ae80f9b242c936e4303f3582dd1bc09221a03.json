@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "delete from passage where talk_id = $1",
+  "query": "update passage set ordinal = -1 - ordinal where talk_id = $1",
   "describe": {
     "columns": [],
     "parameters": {
@@ -10,5 +10,5 @@
     },
     "nullable": []
   },
-  "hash": "2a38aa62b7581b674f82d38ff725e242c723b09dcfb7c0c2fe5569d5a4bc5b09"
+  "hash": "97f53968dcf5c8f391f0c106b99ae80f9b242c936e4303f3582dd1bc09221a03"
 }
