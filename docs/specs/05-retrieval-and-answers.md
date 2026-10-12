@@ -137,9 +137,21 @@ Rules:
    - Every footnote marker, and the metadata line of each passage, links to its entry (`#ref-<n>`). A small script in `static/` opens the list when a link targets an entry inside it, and without JavaScript the reader opens it.
    A citation of a work as a whole is listed by work alone and links to `work.link_out_url` (Spec 08, Work-level citations). Text excerpts appear only where Spec 08 allows them: the "From the texts" section, and a verified quotation collapsed under its footnote (Spec 08, Quoted passages inline). Both read through `servable_text_unit`, which requires an excerptable edition.
 6. Texts never count toward the teacher count and never enter the dana split.
-7. The answer is persisted as `answer.payload` holding mode, counts, theme text with passage ids, and ordered passage ids, never passage text. A permalink re-renders through the serving views, and a passage that no longer serves renders as a one-line withdrawn marker.
+7. The answer is persisted as `answer.payload` holding mode, counts, theme text with passage ids, ordered passage ids and each passage's excerpt span (rule 8), never passage text.
+8. Excerpts (owner's decision of October 12, 2026). Passages are fixed when a talk is indexed and are the unit retrieval finds; what the page shows is an excerpt cut for the question at answer time: the fewest whole sentences that address it, which may reach into the passages just before and after. 18 percent of passages started mid-sentence and 16 percent ended without sentence punctuation when this was decided.
+   - Window. The selected passage plus the passage before and the passage after it in the same talk and the same segment, read from `servable_passage`. A window never crosses a segment boundary, so it never reaches into a student's turn, and a neighbor that does not serve is left out.
+   - Sentences. The window's words split into sentences at the boundaries the index step stores for each passage (Spec 04, Chunking, rule on sentence boundaries), so text with little punctuation still has boundaries. The displayed words are never changed: boundaries only decide where an excerpt may start and end.
+   - Choosing the span, in order:
+     1. The model. The question and the window's sentences, numbered, go to the model with the prompt in `crates/wt-synth/prompts/excerpt.md`, which asks for the shortest run of consecutive sentences that answers the question as the teacher does, including a sentence before it only when the answer makes no sense without it. It returns JSON `{"start": <n>, "end": <n>}` and never text. Code checks that the run is inside the window, overlaps the selected passage by at least one sentence, and holds between `excerpt_min_words` (25) and the 250-word excerpt limit; otherwise the next step decides. Calls for an answer's passages run in parallel under `excerpt_timeout_s` (5) and count against the spend cap. A real talk's text goes to the model only when `WT_LLM_REAL_DATA_OK` is true.
+     2. The reranker. Spans of whole sentences that overlap the passage and fit the limits, at most `excerpt_max_spans` (8) of them built from the passage's best-scoring sentences outward, are scored against the question, and the shortest span scoring at least `excerpt_keep_ratio` (0.9) of the best is kept.
+     3. Otherwise the passage itself, trimmed to its first and last whole sentences when that keeps at least `excerpt_min_words`.
+   - What is stored. Each passage in the payload carries `span`: the ids of the passages the excerpt covers in order, the word offset where it starts in the first and ends in the last, and which step chose it. A permalink rebuilds the text from `servable_passage` rows by those offsets; if a covered neighbor no longer serves, the excerpt falls back to its own passage, and if the passage itself no longer serves, the withdrawn marker shows as before.
+   - On the page. The blockquote shows the excerpt. "Listen at" and the transcript anchor follow the excerpt's first word, using the start times the index step stores for each sentence. Footnote markers whose spans fall inside the excerpt keep their places. The synthesis line and the verifier read the excerpts, not the raw passages, so a theme is grounded in what the reader sees.
+   - Ranking is not changed: selection, the teacher count and the dana split work on passages as before. A permalink re-renders through the serving views, and a passage that no longer serves renders as a one-line withdrawn marker.
 
 Migration for the October 12, 2026 rules (next free number, see `docs/migrations.md`): `talk.transcript_from_source boolean not null default false`, set by the `audio` job whenever it writes a transcript and backfilled from each talk's current transcript origin; `source_video.transcript_url text`, null meaning the source page itself; `teacher.citation_name text` and `teacher.citation_sort text`; and `servable_passage` recreated so its `display_level` is `excerpts` for a talk with `transcript_from_source`. `wt teacher cite --teacher <name> --citation-name <text> --sort <text> --by <name>` sets the citation fields with a `correction_log` row, and `wt teacher cite --sheet <csv>` applies a reviewed sheet.
+
+Excerpt keys under `[excerpt]` in `config/retrieval.toml`: `excerpt_min_words = 25`, `excerpt_timeout_s = 5`, `excerpt_max_spans = 8`, `excerpt_keep_ratio = 0.9`.
 
 Tuning keys under `[answer]` and `[synthesis]` in `config/retrieval.toml`: `link_lead_in_ms = 2000`, `max_themes = 4`, `min_grounding_ratio = 0.4`, `synthesis_timeout_s = 20`.
 
@@ -193,6 +205,9 @@ M5, retrieval and assembly
 - [ ] Each `link_style` of Spec 03 (Seattle Soto Zen sources item 4) renders the right link: `vimeo` gives the page address with `#t=<seconds>s`, and `none` gives the "starts at h:mm:ss" text. (Moved from M3, decision of October 5, 2026.)
 - [x] The 50-question set runs end to end on the target host, and per-stage timings are recorded in the eval run. Latency is reported and not a pass or fail. (`wt eval run` records each answer's stage timings in `eval_result`, Spec 07. Run `65751c22` on October 12, 2026 asked the 20 approved Gate A questions against the real-data database on the owner's PC, which hosts the alpha: total p50 9.3 s, p90 24.9 s; rerank p50 3.7 s; synthesis p50 4.1 s. The other 30 questions of `eval/questions_v1.toml` are drafts awaiting the owner, and run unchanged once approved.)
 
+- [ ] Excerpts (rule 8): on fixtures, an excerpt starts and ends on sentence boundaries, can include a sentence from the passage before or after within the same segment, never crosses a segment boundary or the 250-word limit, and is rebuilt verbatim from `servable_passage` on a permalink. A model reply outside the window or the limits falls back to the reranker step, a reranker failure falls back to the trimmed passage, and with `WT_LLM_REAL_DATA_OK` unset no real text goes to the model. "Listen at" follows the excerpt's first word.
+- [ ] `wt eval report` prints the mean excerpt length and the share of excerpts starting or ending mid-sentence, and on `gate_a@1` that share is under 2 percent.
+
 M6, synthesis
 
 - [x] Each deterministic filter has a fixture that it drops and a fixture that it passes. (`wt-synth` `filter` unit tests and `tests/synth.rs`.)
@@ -217,13 +232,14 @@ Categories:
 - `acute`: stated intent, a plan or means to harm oneself or someone else, or an emergency in progress.
 - `distress`: despair, hopelessness, grief or thoughts of death without stated intent.
 - `medical`: symptoms, medicines, doses, diagnoses or a health emergency.
+- `out_of_scope`: a question about causing harm that has nothing to do with practice, such as making weapons or drugs (October 12, 2026).
 - `none`.
 
 Detection runs locally in `wt-retrieve` as `Sensitivity::classify` and works in layers:
 
 1. Rules. A phrase list per category in `config/sensitive.toml`, matched on word boundaries without regard to case, with common misspellings.
 2. Embedding check. The query embedding is compared with exemplar sentences per category in `config/sensitive_exemplars.toml`, written by the owner and, if possible, reviewed by a clinician. Thresholds are `acute_sim`, `distress_sim` and `medical_sim`.
-3. Optional model check. Only when the first two layers disagree, and only if the spend cap allows, a Haiku-class call classifies the query as JSON. It can raise the level and never lower it.
+3. Triage gate (owner's decision of October 12, 2026, replacing the optional model check). Every question goes to the model with the prompt in `crates/wt-retrieve/prompts/triage.md`, in parallel with embedding and search, and comes back as JSON: `relevance` (`practice`, `adjacent` or `unrelated`), `risk` (`none`, `distress`, `medical`, `acute`, `harm_to_others`, `abuse` or `dangerous`) and `confidence`. The question is data in the prompt, never instructions. The gate can raise the level the other layers set and never lower it: `acute` and `harm_to_others` map to `acute`; `abuse` maps to `acute` when the abuse is ongoing and to `distress` otherwise; `distress` and `medical` map to themselves; `dangerous` (weapons, synthesizing drugs, attacks or other harm unrelated to practice) maps to `out_of_scope`. A call that fails, times out after `triage_timeout_s` (3) or finds the spend cap reached leaves the other layers to decide and logs `triage_degraded`. When the gate returns after retrieval has started and the level becomes `acute` or `out_of_scope`, the retrieval result is discarded and nothing beyond counts is stored.
 4. The highest level any layer returns wins. If a layer fails, the result cannot go down. If the embedder is down, the rules decide alone and `sensitivity_degraded` is logged.
 
 | Level | Retrieval | Notice | Summary line | Giving panel | What is stored |
@@ -231,6 +247,8 @@ Detection runs locally in `wt-retrieve` as `Sensitivity::classify` and works in 
 | acute | Not run | A full page with the support notice | None | None | Counts only. No question text and no answer row |
 | distress | Runs | A banner above the answer | Omitted | Omitted | As the tester's privacy mode says |
 | medical | Runs | A banner above the answer | Omitted | Shown | As the tester's privacy mode says |
+| out_of_scope | Not run | A plain page saying the site shares what Zen teachers have said about practice and cannot help with this | None | None | Counts only, as for acute |
+| none, relevance `unrelated` | Not run at first | A short page saying the question seems outside what these talks cover, with the question and a "Search the talks anyway" button that runs it as usual | As usual once run | As usual once run | As the tester's privacy mode says |
 | none | Runs | None | As usual | As usual | As usual |
 
 The acute page offers one link, "Show teachings on facing difficult feelings", which runs the fixed query in `sensitive.curated_query` with the notice on top, no summary line and no giving panel. The page never says a question was detected as anything. Copy is in Spec 09.
@@ -242,11 +260,19 @@ alter table query_log add column sensitive_category text not null default 'none'
   check (sensitive_category in ('none','distress','medical','acute'));
 ```
 
+For the triage gate, a migration (next free number) widens the check to add `out_of_scope` and adds `query_log.relevance text` (`practice`, `adjacent`, `unrelated` or null when the gate did not answer) and `query_log.triage_degraded boolean not null default false`. The gate's reason and confidence are logged as counts by category only, never with question text.
+
+Finding problem areas (owner's decision of October 12, 2026). Fixed rules and examples will miss phrasings nobody wrote down, so two loops look for misses:
+
+1. Red team. `wt sensitive redteam --count <n> [--category <c>]` has the model write new edge-case questions for each category and for benign practice questions near them (grief, death in the precepts, illness in a teacher's story), runs every layer on them, and writes the disagreements and misses, with the layer verdicts, to `data/sensitive/review-<date>.csv` for the owner. Nothing changes until the owner confirms a row: `wt sensitive accept --sheet <csv>` adds a confirmed row as a rule phrase, an exemplar or an evaluation question, as the sheet's `action` column says. Generated questions are synthetic and never stored in `query_log`.
+2. Signals from use. `wt sensitive report --since <duration>` runs as `wt_analyst` and prints counts only: questions by category and relevance, disagreements between the gate and the rules or exemplars, `triage_degraded`, `out_of_scope` and `unrelated` rates, and topic clusters (Spec 06, `wt report topics`) where none-found, Not relevant votes or flags are high. It never prints question text; a flagged question is read through `flagged_queries()` as before.
 Acceptance criteria:
 
 - [x] On a labeled fixture of synthetic questions, acute recall is 100 percent, distress recall is at least 90 percent, and fewer than 5 percent of ordinary practice questions are flagged.
 - [x] An acute question runs no retrieval, writes a `query_log` row with counts and category only, and writes no question text and no `answer` row, even in `share` mode.
 - [x] Acute and distress questions never reach topic clusters or the evaluation sets. Both read the view `analyzable_query_log`, which leaves them out.
 - [x] A failure in any detection layer never lowers the level, and a down embedder logs `sensitivity_degraded` and falls back to rules.
+- [ ] Triage gate: with a `FakeLlm`, each `risk` value maps to its level, a gate verdict lower than the rules' never lowers it, a timeout or a reached cap logs `triage_degraded` and the rules decide, an `acute` or `out_of_scope` verdict that arrives after retrieval started leaves no answer row and no question text, and an `unrelated` question shows the outside-these-talks page whose "Search the talks anyway" button runs it.
+- [ ] `wt sensitive redteam` with a `FakeLlm` writes a review sheet of misses and disagreements and stores nothing in `query_log`; `wt sensitive accept` adds confirmed rows as rules, exemplars or evaluation questions; `wt sensitive report` runs as `wt_analyst` and prints no question text.
 - [x] Distress and medical answers omit the summary line, and distress answers omit the giving panel.
 - [x] The curated query runs with the notice on top, no summary line and no giving panel.

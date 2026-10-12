@@ -126,6 +126,14 @@ Owner's decision of October 12, 2026 (Spec 05, Answer assembly, rules 2 and 5).
 - References introduction, inside the list: Entries follow MLA style. The access date is the day this answer was made.
 - Confidence words after a text entry: resolved, probable, unresolved
 
+## Outside the talks
+
+- Out-of-scope page heading: This is outside what Wheel Turning can help with
+- Out-of-scope body: Wheel Turning shares what Zen teachers have said about practice. It cannot help with this question.
+- Unrelated page heading: This question may be outside what these talks cover
+- Unrelated body: The talks here are about Zen practice. You can still search them for this question.
+- Unrelated button: Search the talks anyway
+
 ## Footer
 
 Three columns from 900px, stacked below. About: Wheel Turning helps you find what Zen teachers and texts have said about your practice. \[About\] \[Accessibility\]. Rights and removal: If you hold rights in anything shown here, we will remove it on request. \[Rights and removal\]. Sources: \[Every source and its status\]. Last line: Excerpts remain the work of their teachers and publishers.
