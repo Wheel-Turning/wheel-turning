@@ -23,7 +23,16 @@ pub struct ChunkSettings {
     pub min_words: usize,
     /// ...when the result stays within this many words.
     pub merge_cap_words: usize,
+    /// A stretch longer than this many words without a sentence boundary is split for answer
+    /// excerpts, at its longest pause or else every [`BOUNDARY_EVERY_WORDS`] words. These
+    /// boundaries never move passages.
+    pub boundary_max_words: usize,
 }
+
+/// A long stretch without a pause to split at gets a boundary every this many words.
+pub const BOUNDARY_EVERY_WORDS: usize = 30;
+/// A split leaves at least this many words on each side.
+const BOUNDARY_MIN_PIECE: usize = 10;
 
 impl Default for ChunkSettings {
     fn default() -> Self {
@@ -34,6 +43,7 @@ impl Default for ChunkSettings {
             hard_break_ms: 8000,
             min_words: 60,
             merge_cap_words: 260,
+            boundary_max_words: 40,
         }
     }
 }
@@ -53,6 +63,13 @@ pub struct Passage {
     pub word_count: usize,
     /// SHA-256 over the text and offsets.
     pub content_hash: String,
+    /// Word offsets into `text` where sentences start, for answer excerpts (Spec 04, sentence
+    /// boundaries). Not part of `content_hash`: they never change the words.
+    #[serde(default)]
+    pub sentence_starts: Vec<i32>,
+    /// When each of those sentences starts.
+    #[serde(default)]
+    pub sentence_start_ms: Vec<i32>,
 }
 
 /// Word ranges of sentences: Unicode sentence boundaries over the joined text, plus a pause of
@@ -92,8 +109,52 @@ fn sentences(words: &[Word], cfg: &ChunkSettings) -> Vec<(usize, usize)> {
     out
 }
 
+/// Word indexes where sentences start, for answer excerpts: the sentences the chunker uses, with
+/// any stretch over `boundary_max_words` split at its longest pause, or failing that every
+/// [`BOUNDARY_EVERY_WORDS`] words (Spec 04, Chunking, embedding and indexing).
+pub fn sentence_boundaries(words: &[Word], cfg: &ChunkSettings) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (from, to) in sentences(words, cfg) {
+        split_long(words, from, to, cfg.boundary_max_words.max(1), &mut out);
+    }
+    out
+}
+
+/// Pushes the start of `from..to` and of every piece it is split into.
+fn split_long(words: &[Word], from: usize, to: usize, max: usize, out: &mut Vec<usize>) {
+    if to - from <= max {
+        out.push(from);
+        return;
+    }
+    let min = BOUNDARY_MIN_PIECE.min((to - from) / 2).max(1);
+    let mut best: Option<(usize, i32)> = None;
+    for i in (from + min)..=(to - min) {
+        let gap = words[i].start_ms - words[i - 1].end_ms;
+        if gap > 0 && best.is_none_or(|(_, g)| gap > g) {
+            best = Some((i, gap));
+        }
+    }
+    match best {
+        Some((i, _)) => {
+            split_long(words, from, i, max, out);
+            split_long(words, i, to, max, out);
+        }
+        None => {
+            let mut k = from;
+            while k < to {
+                out.push(k);
+                k += BOUNDARY_EVERY_WORDS;
+                if to.saturating_sub(k) < BOUNDARY_MIN_PIECE {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Splits `words` into passages.
 pub fn chunk(words: &[Word], cfg: &ChunkSettings) -> Vec<Passage> {
+    let boundaries = sentence_boundaries(words, cfg);
     let max = cfg.max_words.max(1);
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     // Indexes into `ranges` where a stretch starts, after a hard break.
@@ -165,6 +226,27 @@ pub fn chunk(words: &[Word], cfg: &ChunkSettings) -> Vec<Passage> {
             let (start_ms, end_ms) = (words[a].start_ms, words[b - 1].end_ms);
             let content_hash =
                 sha256_hex(format!("{start_ms}\u{1f}{end_ms}\u{1f}{text}").as_bytes());
+            // Offsets count the words of `text`, which leaves out empty words.
+            let mut offset = 0usize;
+            let mut sentence_starts: Vec<i32> = Vec::new();
+            let mut sentence_start_ms = Vec::new();
+            for (j, w) in words.iter().enumerate().take(b).skip(a) {
+                let o = i32::try_from(offset).unwrap_or(i32::MAX);
+                if boundaries.binary_search(&j).is_ok() && sentence_starts.last() != Some(&o) {
+                    sentence_starts.push(o);
+                    sentence_start_ms.push(w.start_ms);
+                }
+                offset += w.text.split_whitespace().count();
+            }
+            if sentence_starts
+                .last()
+                .and_then(|&o| usize::try_from(o).ok())
+                == Some(offset)
+            {
+                // A boundary on trailing empty words falls past the text.
+                sentence_starts.pop();
+                sentence_start_ms.pop();
+            }
             Passage {
                 words: (a, b),
                 text,
@@ -172,6 +254,8 @@ pub fn chunk(words: &[Word], cfg: &ChunkSettings) -> Vec<Passage> {
                 end_ms,
                 word_count: b - a,
                 content_hash,
+                sentence_starts,
+                sentence_start_ms,
             }
         })
         .collect()

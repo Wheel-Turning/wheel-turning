@@ -33,3 +33,9 @@ ask_rate_per_hour = 30     # per tester, in-memory token bucket (Spec 06)
 max_themes = 4
 min_grounding_ratio = 0.4  # tuned on the claim audit; a coarse guard against drift
 synthesis_timeout_s = 20   # per generation or verifier call
+
+[excerpt]                  # Spec 05, Answer assembly, rule 8
+excerpt_min_words = 25
+excerpt_timeout_s = 5      # the model step, then the reranker step, for all of an answer's passages at once
+excerpt_max_spans = 8      # candidate spans the reranker step scores per passage
+excerpt_keep_ratio = 0.9   # the shortest span scoring at least this share of the best wins

@@ -239,9 +239,15 @@ pub fn plan(
 
     let mut h = format!("model\u{1f}{vector_id}\u{1e}");
     for p in &passages {
+        // The sentence boundaries go in too, so a talk indexed before they were stored is
+        // indexed again; they never touch the passage's own hash, which keeps its id.
         h.push_str(&format!(
-            "{}\u{1f}{}\u{1f}{}\u{1e}",
-            p.segment_id, p.kind, p.passage.content_hash
+            "{}\u{1f}{}\u{1f}{}\u{1f}{:?}\u{1f}{:?}\u{1e}",
+            p.segment_id,
+            p.kind,
+            p.passage.content_hash,
+            p.passage.sentence_starts,
+            p.passage.sentence_start_ms
         ));
     }
     for c in &planned {
@@ -554,6 +560,33 @@ pub async fn write(
         model_id,
         vector_version,
         &is_new
+    )
+    .execute(&mut *conn)
+    .await?;
+    // Sentence boundaries for answer excerpts (Spec 04), as array literals since each passage
+    // has its own number of them.
+    let literal = |v: &[i32]| {
+        let items: Vec<String> = v.iter().map(i32::to_string).collect();
+        format!("{{{}}}", items.join(","))
+    };
+    let sentence_starts: Vec<String> = plan
+        .passages
+        .iter()
+        .map(|p| literal(&p.passage.sentence_starts))
+        .collect();
+    let sentence_ms: Vec<String> = plan
+        .passages
+        .iter()
+        .map(|p| literal(&p.passage.sentence_start_ms))
+        .collect();
+    sqlx::query!(
+        "update passage p set sentence_starts = u.ss::int4[], sentence_start_ms = u.sm::int4[]
+         from unnest($2::uuid[], $3::text[], $4::text[]) as u(id, ss, sm)
+         where p.talk_id = $1 and p.id = u.id",
+        talk,
+        &ids,
+        &sentence_starts,
+        &sentence_ms
     )
     .execute(&mut *conn)
     .await?;

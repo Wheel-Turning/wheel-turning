@@ -6,6 +6,7 @@
 //! maps refs back to passage ids. A failed or slow call removes the synthesis line and nothing
 //! else, so the caller always renders the passages. Every drop is logged with its reason.
 
+pub mod excerpt;
 pub mod filter;
 
 use std::collections::BTreeMap;

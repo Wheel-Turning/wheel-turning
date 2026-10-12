@@ -110,6 +110,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         embedder: Arc::new(embedder),
         reranker,
         llm,
+        real_data_ok: config.llm_real_data_ok,
         retrieval,
         common_words,
         sensitivity: Arc::new(sensitivity),
@@ -159,6 +160,13 @@ fn claude(
             models.insert(LlmStage::Sensitive.as_str(), model.to_owned());
         }
         _ => tracing::warn!("no usable sensitivity model: that layer is off"),
+    }
+    // Excerpts fall back to the reranker and the trimmed passage without their model.
+    match config.llm_model_for(LlmStage::Excerpt) {
+        Ok(model) if licenses.require(model).is_ok() && prices.get(model).is_some() => {
+            models.insert(LlmStage::Excerpt.as_str(), model.to_owned());
+        }
+        _ => tracing::warn!("no usable excerpt model: excerpts are chosen without it"),
     }
     tracing::info!(
         ?models,

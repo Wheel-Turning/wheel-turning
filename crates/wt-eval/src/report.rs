@@ -143,8 +143,100 @@ pub struct Report {
     pub latency: Vec<(String, Percentiles)>,
     /// Dana events on the run's answers, by kind.
     pub dana: BTreeMap<String, i64>,
+    /// Excerpt length and sentence boundaries (Spec 05, Answer assembly, rule 8).
+    pub excerpts: ExcerptStats,
     /// Per question.
     pub questions: Vec<QuestionLine>,
+}
+
+/// How the run's excerpts came out, measured on the passages as they serve now. An answer stored
+/// before excerpts counts its whole passages, so an older run gives the baseline.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct ExcerptStats {
+    /// Excerpts measured.
+    pub count: usize,
+    /// Their mean length in words.
+    pub mean_words: f64,
+    /// Excerpts starting or ending away from a stored sentence boundary.
+    pub mid_sentence: usize,
+    /// That share of `count`.
+    pub mid_sentence_share: f64,
+    /// Excerpts whose first word follows no sentence punctuation or whose last word ends
+    /// without it, a stricter reading for text with little punctuation.
+    pub unpunctuated_edge: usize,
+    /// Excerpts by the step that chose them; `whole` for an answer without spans.
+    pub by_chooser: BTreeMap<String, usize>,
+    /// The same passages shown whole, as before excerpts: their mean length in words...
+    pub whole_mean_words: f64,
+    /// ...and the share starting or ending mid-sentence.
+    pub whole_mid_sentence_share: f64,
+}
+
+/// Measures each answer's excerpts against the windows serving now.
+async fn excerpt_stats(pool: &PgPool, answers: &[RunAnswer]) -> Result<ExcerptStats, EvalError> {
+    let mut out = ExcerptStats::default();
+    let mut words = 0usize;
+    let (mut whole_words, mut whole_mid) = (0usize, 0usize);
+    for a in answers {
+        let windows = wt_db::answer::windows(pool, &a.payload.passage_ids).await?;
+        for w in &windows {
+            let Some(selected) = w.passages.get(w.selected) else {
+                continue;
+            };
+            let span = a.payload.span(selected.id);
+            let located = span.and_then(|s| w.locate(s));
+            let (start, end) = located.unwrap_or_else(|| w.selected_range());
+            let chooser = match (span, located) {
+                (Some(s), Some(_)) => s.chooser.as_str(),
+                (Some(_), None) => "withdrawn_neighbor",
+                (None, _) => "whole",
+            };
+            *out.by_chooser.entry(chooser.to_owned()).or_default() += 1;
+            out.count += 1;
+            words += end - start;
+            let (mid_start, mid_end) = w.mid_sentence(start, end);
+            if mid_start || mid_end {
+                out.mid_sentence += 1;
+            }
+            if unpunctuated_edge(w, start, end) {
+                out.unpunctuated_edge += 1;
+            }
+            let (a, b) = w.selected_range();
+            whole_words += b - a;
+            let (ms, me) = w.mid_sentence(a, b);
+            if ms || me {
+                whole_mid += 1;
+            }
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    if out.count > 0 {
+        out.mean_words = words as f64 / out.count as f64;
+        out.mid_sentence_share = out.mid_sentence as f64 / out.count as f64;
+        out.whole_mean_words = whole_words as f64 / out.count as f64;
+        out.whole_mid_sentence_share = whole_mid as f64 / out.count as f64;
+    }
+    Ok(out)
+}
+
+/// Whether window words `start..end` begin after a word without sentence punctuation (or with
+/// a lower-case word at the window's start) or end on one.
+fn unpunctuated_edge(w: &wt_core::excerpt::Window, start: usize, end: usize) -> bool {
+    use wt_core::excerpt::ends_sentence;
+    let text = w.text(0, w.len());
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let starts_clean = match start.checked_sub(1) {
+        Some(i) => words.get(i).is_some_and(|p| ends_sentence(p)),
+        None => words
+            .first()
+            .and_then(|f| f.chars().find(|c| c.is_alphanumeric()))
+            .is_some_and(char::is_uppercase),
+    };
+    let ends_clean = end
+        .checked_sub(1)
+        .and_then(|i| words.get(i))
+        .is_some_and(|l| ends_sentence(l));
+    !(starts_clean && ends_clean)
 }
 
 /// Builds the report for a run.
@@ -286,6 +378,7 @@ pub async fn build(pool: &PgPool, run: Uuid, pass_ratio: f64) -> Result<Report, 
         named: named(&answers),
         latency: latency(&answers),
         dana,
+        excerpts: excerpt_stats(pool, &answers).await?,
         questions,
     })
 }
@@ -330,13 +423,14 @@ pub fn percentiles(values: &[u64]) -> Percentiles {
 
 fn latency(answers: &[RunAnswer]) -> Vec<(String, Percentiles)> {
     type Get = fn(&wt_api::ask::StageTimings) -> u64;
-    let stages: [(&str, Get); 9] = [
+    let stages: [(&str, Get); 10] = [
         ("parse", |t| t.parse_ms),
         ("embed", |t| t.embed_ms),
         ("search", |t| t.search_ms),
         ("rerank", |t| t.rerank_ms),
         ("select", |t| t.select_ms),
         ("load", |t| t.load_ms),
+        ("excerpt", |t| t.excerpt_ms),
         ("synth", |t| t.synth_ms),
         ("persist", |t| t.persist_ms),
         ("total", |t| t.total_ms),
@@ -441,6 +535,35 @@ pub fn render(r: &Report) -> String {
         "  Reranker unavailable on: {} answers",
         r.rerank_degraded
     );
+    let _ = writeln!(s);
+
+    let e = &r.excerpts;
+    let _ = writeln!(s, "Excerpts");
+    let _ = writeln!(
+        s,
+        "  {} excerpts, mean {:.1} words; starting or ending mid-sentence: {} ({:.1}%, under 2% passes)",
+        e.count,
+        e.mean_words,
+        e.mid_sentence,
+        e.mid_sentence_share * 100.0
+    );
+    let _ = writeln!(
+        s,
+        "  An edge without sentence punctuation: {}",
+        e.unpunctuated_edge
+    );
+    let _ = writeln!(
+        s,
+        "  The same passages shown whole: mean {:.1} words, {:.1}% mid-sentence",
+        e.whole_mean_words,
+        e.whole_mid_sentence_share * 100.0
+    );
+    let choosers: Vec<String> = e
+        .by_chooser
+        .iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect();
+    let _ = writeln!(s, "  Chosen by: {}", choosers.join(", "));
     let _ = writeln!(s);
 
     let _ = writeln!(s, "Named-teacher queries");

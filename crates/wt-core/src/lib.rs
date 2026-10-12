@@ -2,6 +2,7 @@
 
 pub mod answer;
 pub mod config;
+pub mod excerpt;
 pub mod gate;
 pub mod ids;
 pub mod licenses;

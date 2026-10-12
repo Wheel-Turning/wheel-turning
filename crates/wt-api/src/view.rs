@@ -1,6 +1,9 @@
 //! Answer assembly for the page (Spec 05, Answer assembly; Spec 06, Answer page structure).
 //! Passage text comes only from `servable_passage` rows and the templates escape it.
 
+use std::collections::BTreeMap;
+
+use wt_core::excerpt::Excerpt;
 use wt_core::ids::{AnswerId, PassageId, TalkId};
 use wt_db::answer::{Payload, Served, TalkCard};
 
@@ -92,7 +95,7 @@ pub struct PassageView {
     pub id: PassageId,
     /// Its number on the page, from 1 in reading order, for feedback and chips.
     pub number: usize,
-    /// Verbatim text.
+    /// The excerpt cut for the question, verbatim (Spec 05, Answer assembly, rule 8).
     pub text: String,
     /// Title, date, series and part.
     pub meta: String,
@@ -175,11 +178,13 @@ pub struct AnswerView {
 }
 
 /// Groups the served passages by teacher in payload order, which is best first, so groups
-/// are ordered by their best passage and passages inside a group by score (rule 1).
+/// are ordered by their best passage and passages inside a group by score (rule 1). Each shows
+/// its excerpt; "Listen at" and the transcript anchor follow the excerpt's first word (rule 8).
 pub fn assemble(
     answer: AnswerId,
     payload: &Payload,
     served: &[Served],
+    excerpts: &BTreeMap<PassageId, Excerpt>,
     named_teacher: Option<&str>,
     lead_in_ms: i64,
 ) -> AnswerView {
@@ -188,14 +193,18 @@ pub fn assemble(
     let mut seen_talks: Vec<TalkId> = Vec::new();
     for s in served {
         let card = &s.talk;
+        let excerpt = excerpts.get(&s.id);
+        let (text, start_ms, ordinal) = excerpt.map_or((&s.text, s.start_ms, s.ordinal), |e| {
+            (&e.text, e.start_ms, e.first_ordinal)
+        });
         let view = PassageView {
             id: s.id,
             number: 0,
-            text: s.text.clone(),
+            text: text.clone(),
             meta: meta(card),
-            source: source_link(card, s.start_ms, lead_in_ms),
+            source: source_link(card, start_ms, lead_in_ms),
             transcript_href: (card.display_level == "full")
-                .then(|| format!("/talk/{}/transcript#p{}", card.id, s.ordinal)),
+                .then(|| format!("/talk/{}/transcript#p{ordinal}", card.id)),
             give_href: gives(card).then(|| format!("/give/{answer}/{}", card.sangha_id)),
             credit: credit_line(card),
             question: None,
