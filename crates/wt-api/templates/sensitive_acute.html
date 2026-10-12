@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Please reach out for help now · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<section class="notice support" aria-labelledby="support-h">
+<h1 id="support-h" tabindex="-1" autofocus>Please reach out for help now</h1>
+{% include "support_text.html" %}
+</section>
+<ul class="support-links">
+  <li><form method="post" action="/ask/curated"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="link">Show teachings on facing difficult feelings</button></form></li>
+  <li><a href="/">Ask something else</a></li>
+</ul>
+</div>
+{% endblock %}

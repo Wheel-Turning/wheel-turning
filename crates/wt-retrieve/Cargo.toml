@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 aho-corasick = "1"
+async-trait = "0.1"
 serde.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
@@ -23,5 +24,6 @@ wt-core.workspace = true
 wt-ml.workspace = true
 
 [dev-dependencies]
+async-trait = "0.1"
 wt-db = { workspace = true, features = ["test-support"] }
 wt-registry.workspace = true

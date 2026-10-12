@@ -1,0 +1,73 @@
+# Exemplar sentences for the embedding layer of sensitive-question detection (Spec 05).
+#
+# PLACEHOLDER, NOT YET REVIEWED. Claude wrote these on October 11, 2026 so the layer could be
+# built and tested. Spec 05 asks the owner to write them and, if possible, a clinician to
+# review them. Until both have, `reviewed` stays false and the server logs a warning at start.
+#
+# Each sentence is embedded once at start. A question whose cosine similarity to its closest
+# exemplar reaches the category's threshold in config/sensitive.toml gets that category. Write
+# them the way a person would actually type a question, short and plain, and cover the ways a
+# category shows up rather than repeating one phrasing.
+
+reviewed = false
+
+acute = [
+  "I am going to kill myself tonight.",
+  "I have a plan to end my life.",
+  "I have been saving pills so I can take them all at once.",
+  "I don't want to be alive anymore and I know how I would do it.",
+  "I want to die and I am thinking about how.",
+  "How can I stop myself from hurting myself right now?",
+  "I keep cutting myself and I can't stop.",
+  "Everyone would be better off if I were gone, and I've decided to go.",
+  "I am standing on the bridge right now.",
+  "I wrote letters to my family saying goodbye.",
+  "I want to hurt the person who hurt me, and I have a weapon.",
+  "I am so angry I could kill my husband.",
+  "I am afraid I will hurt my children.",
+  "My friend says she is going to take her life this weekend.",
+  "Someone in my house is hitting me and I am scared.",
+  "I took too many of my pills an hour ago.",
+  "My chest hurts and my arm is numb right now.",
+  "Does meditation help when you have decided to die?",
+]
+
+distress = [
+  "I feel hopeless and nothing will ever change.",
+  "I can't see any reason to keep going.",
+  "Some days I wish I could just disappear.",
+  "I think about death all the time.",
+  "I'm so tired of living like this.",
+  "My mother died last month and I can't function.",
+  "How do I live after my child died?",
+  "I lost my partner and the grief is crushing me.",
+  "I feel completely alone and no one would notice if I was gone.",
+  "I feel worthless and empty inside.",
+  "My depression is so heavy I can barely get out of bed.",
+  "I cry every day and can't stop.",
+  "Everything feels pointless and dark.",
+  "I was abused as a child and it still haunts me.",
+  "I hate myself so much.",
+  "My life is falling apart and I don't know how to hold on.",
+  "I have panic attacks that make me feel like I'm dying.",
+  "How do I keep practicing when I am in despair?",
+]
+
+medical = [
+  "Should I stop taking my antidepressants if I meditate?",
+  "Can meditation replace my medication?",
+  "What dose of my medicine is safe while on retreat?",
+  "I was just diagnosed with cancer.",
+  "I get dizzy and my heart races when I sit.",
+  "I have chest pain during zazen.",
+  "Is it safe to fast on retreat with diabetes?",
+  "My psychiatrist wants me to stop meditating.",
+  "I hear voices when I meditate for a long time.",
+  "Meditation is making my bipolar symptoms worse.",
+  "Can I sit sesshin while pregnant?",
+  "I have seizures; is long sitting safe?",
+  "I take sleeping pills; does that hurt my practice?",
+  "My doctor says I have a heart condition.",
+  "What do I do about side effects from my medication?",
+  "I have chronic pain from an illness and can't sit.",
+]

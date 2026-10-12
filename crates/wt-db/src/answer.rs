@@ -34,6 +34,10 @@ pub struct Payload {
     /// The reranker was unavailable, so no relevance threshold applied.
     #[serde(default)]
     pub rerank_degraded: bool,
+    /// The fixed query behind the acute notice's "Show teachings on facing difficult
+    /// feelings", which the page renders with the full support notice on top (Spec 05).
+    #[serde(default)]
+    pub curated: bool,
 }
 
 /// One ask to persist.
@@ -55,6 +59,8 @@ pub struct NewAnswer<'a> {
     pub latency_ms: i32,
     /// Themes dropped by the filters or the verifier.
     pub themes_dropped: i32,
+    /// `none`, `medical` or `distress`. Acute questions store no answer: see [`log_acute`].
+    pub sensitive_category: &'a str,
     /// `share` or `count_only` (Spec 06, Privacy modes).
     pub privacy_mode: &'a str,
     /// When the purge removes the text and the answer.
@@ -70,8 +76,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
-                                theme_count, themes_dropped, privacy_mode, text_expires_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id",
+                                theme_count, themes_dropped, sensitive_category, privacy_mode,
+                                text_expires_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id",
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -83,6 +90,7 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.latency_ms,
         themes,
         a.themes_dropped,
+        a.sensitive_category,
         a.privacy_mode,
         a.text_expires_at
     )
@@ -109,6 +117,22 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     Ok(AnswerId::from(answer))
 }
 
+/// Spec 05: an acute question is logged as counts and its category only. No question text, no
+/// answer row and no passages, whatever the tester's privacy mode, so the row records
+/// `count_only`.
+pub async fn log_acute(pool: &PgPool, tester: TesterId, latency_ms: i32) -> Result<(), DbError> {
+    sqlx::query!(
+        "insert into query_log (tester_id, query_text, mode, teacher_count, sangha_count,
+                                passage_count, latency_ms, sensitive_category, privacy_mode)
+         values ($1, null, 'standard', 0, 0, 0, $2, 'acute', 'count_only')",
+        tester.as_uuid(),
+        latency_ms
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// A stored answer, as its owner sees it.
 #[derive(Debug, Clone)]
 pub struct Stored {
@@ -116,6 +140,8 @@ pub struct Stored {
     pub query_text: String,
     /// The payload.
     pub payload: Payload,
+    /// `none`, `medical` or `distress`: which notice the page shows.
+    pub sensitive_category: String,
     /// When it was asked.
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -128,7 +154,7 @@ pub async fn load(
     tester: TesterId,
 ) -> Result<Option<Stored>, DbError> {
     let row = sqlx::query!(
-        "select q.query_text, a.payload, a.created_at from answer a
+        "select q.query_text, q.sensitive_category, a.payload, a.created_at from answer a
          join query_log q on q.id = a.query_log_id
          where a.id = $1 and q.tester_id = $2",
         answer.as_uuid(),
@@ -138,6 +164,7 @@ pub async fn load(
     .await?;
     Ok(row.and_then(|r| {
         Some(Stored {
+            sensitive_category: r.sensitive_category,
             query_text: r.query_text.unwrap_or_default(),
             payload: serde_json::from_value(r.payload).ok()?,
             created_at: r.created_at,

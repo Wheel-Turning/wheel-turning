@@ -1,0 +1,100 @@
+# Sensitive questions (Spec 05). Read by `wt_retrieve::sensitive`. These rules run before
+# retrieval and never affect ranking.
+#
+# Phrases are matched on word boundaries without regard to case. Apostrophes are dropped and
+# other punctuation counts as a space, so "can't go on" and "cant go on" are the same phrase.
+# List common misspellings as phrases of their own. The highest level any layer returns wins,
+# so a phrase belongs in the most serious category it can mean: "suicidal" is acute even though
+# some who write it state no intent.
+#
+# OWNER: review these lists, with a clinician if possible, before inviting testers. A missed
+# acute phrase is the failure that matters most; a false alarm costs one notice.
+
+# The fixed query behind the acute page's "Show teachings on facing difficult feelings".
+curated_query = "How do teachers say to stay with very difficult feelings, such as fear, despair and grief, with kindness?"
+
+[thresholds]
+# Cosine similarity to the closest exemplar in config/sensitive_exemplars.toml at or above
+# which the embedding layer returns the category. Calibrated on October 11, 2026 for
+# bge-m3-int8 against the synthetic fixture in
+# crates/wt-retrieve/tests/fixtures/sensitive_questions.toml (`cargo test -p wt-retrieve --test
+# sensitive real_embedder -- --ignored --nocapture` prints every similarity). The 60 ordinary
+# practice questions peaked at 0.67 for acute, 0.77 for distress and 0.74 for medical.
+# Recalibrate when the model or the exemplars change.
+acute_sim = 0.74
+distress_sim = 0.80
+medical_sim = 0.80
+
+[model]
+# The optional model layer runs only when the rules and the embedding layer disagree, and only
+# while the monthly cap allows. It can raise the level and never lower it.
+enabled = true
+timeout_s = 5
+
+[rules]
+# Zen talks use "great death", "die before you die", "kill the Buddha", "step off the
+# hundred-foot pole", "the unconscious", "old age, sickness and death" and "withdrawal" from
+# the world as practice language, so bare words like those are left out on purpose and the
+# embedding layer weighs them instead.
+acute = [
+  # Suicide and self-harm, stated or planned.
+  "suicide", "suicidal", "suicde", "sucide", "suicid", "suiside", "suicidle", "sewercide",
+  "kill myself", "killing myself", "kil myself", "kill my self", "kms", "kys", "unalive",
+  "end my life", "ending my life", "end it all", "take my own life", "taking my own life",
+  "want to die", "wanna die", "want to be dead", "wish i was dead", "wish i were dead",
+  "dont want to be alive", "dont want to live", "do not want to live", "dont wanna live",
+  "better off dead", "better off without me", "no reason to live", "not worth living",
+  "hurt myself", "hurting myself", "harm myself", "harming myself", "self harm", "selfharm",
+  "cut myself", "cutting myself", "cut my wrists", "slit my wrists", "overdose", "overdosed",
+  "od on", "hang myself", "hanging myself", "shoot myself", "jump off a bridge",
+  "jump off a building", "jump off the roof", "jump in front of", "goodbye note",
+  "suicide note", "plan to die", "planning to die", "painless way", "lethal dose",
+  "stockpiling pills", "saving up pills", "took all my pills", "took too many pills",
+  "swallowed pills", "swallowed a bottle",
+  # Harm to others.
+  "kill him", "kill her", "kill them", "kill someone", "kill somebody", "kill people",
+  "kill everyone", "kill my wife", "kill my husband", "kill my partner", "kill my boss",
+  "kill my father", "kill my mother", "kill my dad", "kill my mom", "kill my family",
+  "kill my neighbor", "kill my kids", "murder him", "murder her", "murder them",
+  "murder someone", "want to hurt someone", "want to hurt somebody", "want to hurt him",
+  "want to hurt her", "want to hurt them", "want to hurt people", "going to hurt someone",
+  "hurt my kids", "hurt my child", "hurt my baby", "shoot up", "get a gun", "bought a gun",
+  # An emergency in progress.
+  "having a heart attack", "having a stroke", "cant breathe", "can not breathe",
+  "cannot breathe", "not breathing", "bleeding heavily", "wont stop bleeding",
+  "call an ambulance", "is hitting me", "being abused", "he hits me", "she hits me",
+  "threatening to kill", "i am in danger", "im in danger", "in danger right now",
+]
+distress = [
+  "hopeless", "hopelessness", "hopless", "despair", "despairing", "no hope", "lost all hope",
+  "no point in living", "no point living", "whats the point of living", "point of living",
+  "cant go on", "can not go on", "cannot go on", "cant take it anymore", "cant do this anymore",
+  "give up on life", "giving up on life", "dont want to wake up", "wish i hadnt been born",
+  "wish i had never been born", "disappear forever", "tired of living", "tired of life",
+  "worthless", "empty inside", "nothing matters anymore", "my life is falling apart",
+  "panic attack", "panic attacks", "depressed", "depression", "deppressed", "depresed",
+  "grief", "grieving", "greif", "greiving", "bereaved", "bereavement", "mourning",
+  "my mother died", "my father died", "my mom died", "my dad died", "my son died",
+  "my daughter died", "my child died", "my wife died", "my husband died", "my partner died",
+  "my friend died", "my brother died", "my sister died", "passed away", "lost my mother",
+  "lost my father", "lost my mom", "lost my dad", "lost my son", "lost my daughter",
+  "lost my child", "lost my baby", "lost my wife", "lost my husband", "lost my partner",
+  "miscarriage", "stillborn", "thoughts of death", "think about death all the time",
+  "thinking about dying", "think about dying", "so alone", "so lonely", "completely alone", "nobody cares",
+  "no one cares", "cant stop crying", "trauma", "traumatized", "ptsd", "was abused",
+  "self loathing", "hate myself",
+]
+medical = [
+  "medication", "medications", "my medicine", "meds", "medicaton", "medecine", "pills",
+  "dose", "doses", "dosage", "mg", "milligrams", "prescription", "prescribed",
+  "antidepressant", "antidepressants", "ssri", "ssris", "lithium", "xanax", "benzo", "benzos",
+  "benzodiazepine", "zoloft", "prozac", "lexapro", "adderall", "ritalin", "opioid", "opioids",
+  "insulin", "chemo", "chemotherapy", "side effect", "side effects", "symptom", "symptoms",
+  "diagnosis", "diagnosed", "diagnoses", "diagnose", "my doctor", "psychiatrist", "cancer",
+  "tumor", "tumour", "seizure", "seizures", "epilepsy", "diabetes", "blood pressure",
+  "chest pain", "fainted", "fainting", "dizzy", "dizziness", "fever", "infection", "pregnant",
+  "pregnancy", "bipolar", "schizophrenia", "psychosis", "psychotic", "hallucinating",
+  "hallucinations", "manic", "eating disorder", "anorexia", "bulimia", "insomnia",
+  "migraine", "migraines", "detox", "treatment for", "surgery", "terminally ill",
+  "terminal illness", "terminal cancer", "chronic pain", "heart attack", "stroke",
+]

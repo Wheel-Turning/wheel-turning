@@ -111,7 +111,9 @@ pub(crate) async fn eval(
             }))?;
         }
         EvalCommand::Run { set, limit } => {
-            let site = wt_api::site::load(config, pool).context("loading the models")?;
+            let site = wt_api::site::load(config, pool)
+                .await
+                .context("loading the models")?;
             let run_config = run_config(config, &site)?;
             let run = wt_eval::run::run(pool, &site, &set, &run_config, limit, |p| {
                 let o = &p.outcome;

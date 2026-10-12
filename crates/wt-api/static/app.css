@@ -107,6 +107,9 @@ footer.site .cols { display: grid; gap: 1.5rem; }
 .f-muted { color: var(--on-dark-muted); }
 footer.site .last { margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid var(--control); color: var(--on-dark-muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+.support { font-size: 1rem; }
+.support h1 { font-size: 1.75rem; margin-top: 0.5rem; }
+.support-links { list-style: none; padding: 0; }
 .dana { margin-top: 3rem; padding: 1.5rem 1rem; background: var(--band); border-top: 3px solid var(--gold-deep); }
 .dana h2 { margin-top: 0; }
 .dana .fields { display: grid; gap: 1rem; margin-bottom: 1rem; }

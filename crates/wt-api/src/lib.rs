@@ -12,6 +12,7 @@ pub mod chrome;
 pub mod limits;
 pub mod privacy;
 pub mod rights;
+pub mod sensitive;
 pub mod session;
 pub mod site;
 pub mod view;
@@ -33,7 +34,8 @@ use wt_core::ids::{AnswerId, SanghaId, TalkId, TesterId};
 use wt_db::answer::Served;
 use wt_extract::{LlmClient, UnavailableLlm};
 use wt_ml::{Embedder, FakeEmbedder, Reranker};
-use wt_retrieve::{RetrievalConfig, query};
+use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
+use wt_retrieve::{Level, ModelCheck, RetrievalConfig, Sensitivity, query};
 
 use chrome::{Chrome, Current};
 use limits::Limiter;
@@ -52,6 +54,11 @@ pub struct Site {
     pub retrieval: RetrievalConfig,
     /// `config/common_words.txt`.
     pub common_words: String,
+    /// Sensitive-question detection, run on every question before retrieval (Spec 05).
+    pub sensitivity: Arc<Sensitivity>,
+    /// Its model layer; `None` without a language model, which leaves the rules and the
+    /// embedding check.
+    pub sensitivity_model: Option<Arc<dyn ModelCheck>>,
     /// Signs session cookies and CSRF tokens.
     pub keys: Keys,
     /// Marks the cookie `Secure`; everywhere but `dev`.
@@ -106,6 +113,8 @@ impl Site {
             llm: Arc::new(UnavailableLlm),
             retrieval,
             common_words: String::new(),
+            sensitivity: Arc::new(fake_sensitivity()),
+            sensitivity_model: None,
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
             site_dana_url: None,
@@ -121,6 +130,21 @@ impl Site {
             timeout: Duration::from_secs(c.synthesis_timeout_s),
         }
     }
+}
+
+/// The shipped `config/sensitive.toml` and exemplars, embedded with the hashing fake, for test
+/// sites.
+fn fake_sensitivity() -> Sensitivity {
+    let config =
+        SensitiveConfig::parse(include_str!("../../../config/sensitive.toml")).unwrap_or_default();
+    let exemplars = Exemplars::parse(include_str!("../../../config/sensitive_exemplars.toml"))
+        .unwrap_or_default();
+    let vectors = exemplars
+        .sentences()
+        .into_iter()
+        .map(|(level, text)| (level, FakeEmbedder::vector(text)))
+        .collect();
+    Sensitivity::from_vectors(&config, vectors)
 }
 
 /// Shared state handed to every route.
@@ -152,6 +176,7 @@ pub fn router(state: AppState) -> Router {
         .route("/about/privacy", post(privacy::save))
         .route("/about/delete-my-data", post(privacy::delete))
         .route("/ask", post(ask))
+        .route("/ask/curated", post(ask_curated))
         .route("/a/{answer}", get(answer_page))
         .route("/a/{answer}/feedback", post(feedback))
         .route("/a/{answer}/dana", post(dana))
@@ -533,6 +558,10 @@ async fn ask(
         return csrf_refused();
     }
     if let Err(wait) = site.limits.ask.check(&s.tester.to_string()) {
+        // The limit never stands between an acute question and the notice.
+        if site.sensitivity.rules_level(&form.q) == Level::Acute {
+            return acute(&state, &s, std::time::Instant::now()).await;
+        }
         return too_many(wait, "You have asked a lot of questions this hour.");
     }
     let Ok(text) = query::normalize(&form.q) else {
@@ -553,10 +582,99 @@ async fn ask(
             },
         );
     };
-    match ask::answer_with_gpc(&state.pool, site, s.tester, &text, privacy::gpc(&headers)).await {
+    // Spec 05: before retrieval, and never part of ranking.
+    let started = std::time::Instant::now();
+    let sensitive = site
+        .sensitivity
+        .classify(
+            &text,
+            site.embedder.as_ref(),
+            site.sensitivity_model.as_deref(),
+        )
+        .await;
+    tracing::info!(
+        sensitive_category = sensitive.level.as_str(),
+        sensitivity_degraded = sensitive.degraded,
+        rules = sensitive.layers.rules.as_str(),
+        embedding = sensitive.layers.embedding.map(Level::as_str),
+        model = sensitive.layers.model.map(Level::as_str),
+        "sensitivity"
+    );
+    if sensitive.level == Level::Acute {
+        return acute(&state, &s, started).await;
+    }
+    let framing = ask::Framing {
+        level: sensitive.level,
+        vector: sensitive.vector,
+        curated: false,
+        gpc: privacy::gpc(&headers),
+    };
+    answered(ask::answer_framed(&state.pool, site, s.tester, &text, framing).await)
+}
+
+fn answered(result: Result<ask::Asked, ask::AskError>) -> Response {
+    match result {
         Ok(asked) => Redirect::to(&format!("/a/{}", asked.answer_id)).into_response(),
         Err(e) => server_error("answering", &e),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct CsrfForm {
+    csrf: String,
+}
+
+/// `POST /ask/curated`: the acute notice's "Show teachings on facing difficult feelings". Runs
+/// the fixed query with the support notice on top, no summary line and no giving panel.
+async fn ask_curated(
+    State(state): State<AppState>,
+    s: Session,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    let site = &state.site;
+    if !s.csrf_ok(&site.keys, &form.csrf) {
+        return csrf_refused();
+    }
+    if let Err(wait) = site.limits.ask.check(&s.tester.to_string()) {
+        return too_many(wait, "You have asked a lot of questions this hour.");
+    }
+    let framing = ask::Framing {
+        level: Level::Distress,
+        vector: None,
+        curated: true,
+        gpc: privacy::gpc(&headers),
+    };
+    let text = site.sensitivity.curated_query();
+    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing).await)
+}
+
+#[derive(Template)]
+#[template(path = "sensitive_acute.html")]
+struct AcutePage {
+    chrome: Chrome,
+    csrf: String,
+}
+
+/// Spec 06: a `200` with the notice and `Cache-Control: no-store`, since no answer exists. The
+/// log row holds counts and the category only, never the text.
+async fn acute(state: &AppState, s: &Session, started: std::time::Instant) -> Response {
+    let latency = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
+    if let Err(e) = wt_db::answer::log_acute(&state.pool, s.tester, latency).await {
+        // The notice matters more than the count, so it is shown anyway.
+        tracing::error!(error = %e, "logging an acute question's counts");
+    }
+    let mut response = page(
+        StatusCode::OK,
+        &AcutePage {
+            chrome: Chrome::new("/ask", Current::Other, Some(s.csrf(&state.site.keys))),
+            csrf: s.csrf(&state.site.keys),
+        },
+    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 // ---- answer ---------------------------------------------------------------------------------
@@ -566,6 +684,12 @@ async fn ask(
 struct AnswerPage {
     chrome: Chrome,
     query: String,
+    /// Spec 05's notice for a sensitive question, above the question.
+    banner: Option<sensitive::Banner>,
+    /// Whether the summary line may show.
+    summary: bool,
+    /// Whether the giving panel may show.
+    giving: bool,
     question_label: &'static str,
     view: view::AnswerView,
     answer_id: AnswerId,
@@ -672,6 +796,10 @@ async fn answer_page(
         Ok(None) => return not_found_page(),
         Err(r) => return *r,
     };
+    let (summary, giving) = sensitive::shows(
+        &loaded.stored.sensitive_category,
+        loaded.stored.payload.curated,
+    );
     page(
         StatusCode::OK,
         &AnswerPage {
@@ -680,6 +808,12 @@ async fn answer_page(
                 Current::Other,
                 Some(s.csrf(&state.site.keys)),
             ),
+            banner: sensitive::Banner::for_answer(
+                &loaded.stored.sensitive_category,
+                loaded.stored.payload.curated,
+            ),
+            summary,
+            giving,
             query: loaded.stored.query_text,
             question_label: view::QUESTION_LABEL,
             view: loaded.view,
@@ -786,6 +920,14 @@ async fn dana(
         Ok(None) => return not_found_page(),
         Err(r) => return *r,
     };
+    // Spec 05: a distress answer and the curated query have no giving panel.
+    let (summary, giving) = sensitive::shows(
+        &loaded.stored.sensitive_category,
+        loaded.stored.payload.curated,
+    );
+    if !giving {
+        return not_found_page();
+    }
     // Texts never enter the split (Spec 05, Answer assembly, rule 6): only talk passages
     // name sanghas.
     let ids: Vec<SanghaId> = loaded
@@ -825,6 +967,12 @@ async fn dana(
                 Current::Other,
                 Some(s.csrf(&state.site.keys)),
             ),
+            banner: sensitive::Banner::for_answer(
+                &loaded.stored.sensitive_category,
+                loaded.stored.payload.curated,
+            ),
+            summary,
+            giving,
             query: loaded.stored.query_text,
             question_label: view::QUESTION_LABEL,
             view: loaded.view,

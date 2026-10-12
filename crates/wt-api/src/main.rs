@@ -13,7 +13,9 @@ async fn main() -> anyhow::Result<()> {
     init_logging(config.env, &config.log, LogOutput::Stdout)?;
 
     let pool = wt_db::lazy_pool(&config.database_url)?;
-    let site = wt_api::site::load(&config, &pool).context("loading the site")?;
+    let site = wt_api::site::load(&config, &pool)
+        .await
+        .context("loading the site")?;
     tokio::spawn(wt_api::privacy::purge_loop(
         pool.clone(),
         site.privacy.retention_days,

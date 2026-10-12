@@ -1,5 +1,5 @@
-//! Builds the [`Site`] from configuration: the models, the retrieval settings and the session
-//! key. The web server and `wt eval run` both load it here, so an evaluation answers with the
+//! Builds the [`Site`] from configuration: the models, the retrieval settings, sensitive-question
+//! detection and the session key. The web server and `wt eval run` both load it here, so an evaluation answers with the
 //! same models and settings as the page (Spec 07, Evaluation harness).
 
 use std::collections::BTreeMap;
@@ -13,9 +13,11 @@ use wt_extract::{
     ClaudeClient, ClaudeSettings, LlmClient, LogAlerter, PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_ml::{MlError, OnnxEmbedder, OnnxReranker, OnnxSettings, Reranker};
-use wt_retrieve::RetrievalConfig;
+use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
+use wt_retrieve::{ModelCheck, RetrievalConfig, Sensitivity};
 
 use crate::Site;
+use crate::sensitive::LlmSensitivity;
 use crate::session::Keys;
 
 type Source = Box<dyn std::error::Error + Send + Sync>;
@@ -36,14 +38,14 @@ fn err<E: Into<Source>>(what: &'static str) -> impl FnOnce(E) -> SiteError {
 }
 
 /// The configuration directory: `WT_CONFIG_DIR`, default `config`. It holds `retrieval.toml`,
-/// `common_words.txt` and `llm_prices.toml`.
+/// `common_words.txt`, `llm_prices.toml`, `sensitive.toml` and `sensitive_exemplars.toml`.
 pub fn config_dir() -> PathBuf {
     PathBuf::from(std::env::var("WT_CONFIG_DIR").unwrap_or_else(|_| "config".into()))
 }
 
 /// Loads the embedder, the reranker if installed, the language model if it may be called, the
-/// retrieval settings and the session key.
-pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
+/// retrieval settings, sensitive-question detection and the session key.
+pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
     let mut settings = OnnxSettings::new(&config.model_dir, &config.embed_model);
     settings.runtime.clone_from(&config.ort_dylib);
     let embedder = OnnxEmbedder::load(&settings).map_err(err("loading the embedding model"))?;
@@ -51,6 +53,16 @@ pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
     let retrieval = RetrievalConfig::load(&dir.join("retrieval.toml"))
         .map_err(err("loading retrieval.toml"))?;
     let common_words = std::fs::read_to_string(dir.join("common_words.txt")).unwrap_or_default();
+    // Spec 05: without its rules and exemplars the server does not start.
+    let sensitivity = Sensitivity::prepare(
+        &SensitiveConfig::load(&dir.join("sensitive.toml"))
+            .map_err(err("loading sensitive.toml"))?,
+        &Exemplars::load(&dir.join("sensitive_exemplars.toml"))
+            .map_err(err("loading sensitive_exemplars.toml"))?,
+        &embedder,
+    )
+    .await
+    .map_err(err("preparing sensitive-question detection"))?;
     let keys = match &config.session_secret {
         Some(secret) => Keys::new(secret.expose().as_bytes()),
         None => {
@@ -69,11 +81,17 @@ pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
         }
         Err(e) => return Err(err("loading the reranker")(e)),
     };
-    let llm: Arc<dyn LlmClient> = match claude(config, &dir, pool) {
-        Ok(c) => Arc::new(c),
+    let (llm, sensitivity_model): (Arc<dyn LlmClient>, Option<Arc<dyn ModelCheck>>) = match claude(
+        config, &dir, pool,
+    ) {
+        Ok(c) => {
+            let c: Arc<dyn LlmClient> = Arc::new(c);
+            let check: Arc<dyn ModelCheck> = Arc::new(LlmSensitivity::new(c.clone()));
+            (c, Some(check))
+        }
         Err(e) => {
-            tracing::warn!(error = %e, "no language model: answers have no synthesis line");
-            Arc::new(UnavailableLlm)
+            tracing::warn!(error = %e, "no language model: answers have no synthesis line and sensitive-question detection has no model layer");
+            (Arc::new(UnavailableLlm), None)
         }
     };
     let owner_name = std::env::var("WT_OWNER_NAME")
@@ -91,15 +109,18 @@ pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
         llm,
         retrieval,
         common_words,
+        sensitivity: Arc::new(sensitivity),
+        sensitivity_model,
         keys,
         secure_cookies: !config.env.is_dev(),
         site_dana_url: config.site_dana_url.clone(),
     })
 }
 
-/// The Claude client for synthesis and verification: `WT_LLM_MODEL_SYNTH` and
-/// `WT_LLM_MODEL_VERIFY`, each falling back to `WT_LLM_MODEL`. Real passage text is refused
-/// unless `WT_LLM_REAL_DATA_OK=true`, and spend counts against the shared monthly cap.
+/// The Claude client for synthesis, verification and the sensitivity model layer:
+/// `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_EXTRACT` (Haiku-class), each
+/// falling back to `WT_LLM_MODEL`. Real text is refused unless `WT_LLM_REAL_DATA_OK=true`, and
+/// spend counts against the shared monthly cap.
 fn claude(
     config: &Config,
     config_dir: &Path,
@@ -127,6 +148,14 @@ fn claude(
             )));
         }
         models.insert(stage.as_str(), model.to_owned());
+    }
+    // The sensitivity model layer is optional: without its model, its calls fail and the rules
+    // and the embedding check decide, which can never lower a level.
+    match config.llm_model_for(LlmStage::Sensitive) {
+        Ok(model) if licenses.require(model).is_ok() && prices.get(model).is_some() => {
+            models.insert(LlmStage::Sensitive.as_str(), model.to_owned());
+        }
+        _ => tracing::warn!("no usable sensitivity model: that layer is off"),
     }
     tracing::info!(
         ?models,

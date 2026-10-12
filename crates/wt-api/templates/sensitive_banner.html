@@ -1,0 +1,14 @@
+{% if let Some(b) = banner %}
+<section class="notice support" aria-labelledby="support-h">
+{% if b.is_support() %}
+<h2 id="support-h">Please reach out for help now</h2>
+{% include "support_text.html" %}
+{% else if b.is_distress() %}
+<h2 id="support-h" class="visually-hidden">Where to find support</h2>
+<p>If you are going through something painful, you do not have to carry it alone. In the United States you can <a href="tel:988" aria-label="call 988">call</a> or <a href="sms:988">text 988</a> at any time. This site shows what teachers have said. It is not counseling.</p>
+{% else %}
+<h2 id="support-h" class="visually-hidden">Not medical advice</h2>
+<p>This site shows what teachers have said. It is not medical advice. For symptoms, medicines or a diagnosis, please talk with a doctor or pharmacist. In an emergency in the United States, <a href="tel:911">call 911</a>.</p>
+{% endif %}
+</section>
+{% endif %}
