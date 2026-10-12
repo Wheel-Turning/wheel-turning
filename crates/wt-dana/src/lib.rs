@@ -167,7 +167,7 @@ pub fn dollars(cents: i64) -> String {
 
 /// The giving link for one share: the template with the amount filled in when it passes the
 /// re-check, otherwise the donation page itself.
-fn link(page: &str, template: Option<&str>, cents: i64) -> String {
+pub fn giving_link(page: &str, template: Option<&str>, cents: i64) -> String {
     match template {
         Some(t) if validate_template(page, t).is_ok() => t
             .replace("{amount_cents}", &encode(&cents.to_string()))
@@ -229,7 +229,7 @@ pub fn split_with_limit(input: &DanaInput, max_total_cents: i64) -> Result<DanaS
             let page = r.url.unwrap_or_default();
             DanaLine {
                 sangha_id: r.sangha_id,
-                link: link(&page, r.url_template.as_deref(), cents),
+                link: giving_link(&page, r.url_template.as_deref(), cents),
                 name: r.name,
                 cents,
             }

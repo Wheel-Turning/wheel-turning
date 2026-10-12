@@ -358,6 +358,15 @@ pub async fn aliases(pool: &PgPool) -> Result<Vec<(TeacherId, String)>, DbError>
         .collect())
 }
 
+/// Where a give click goes: the registry's page and its amount template, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GiveTarget {
+    /// The giving page.
+    pub url: String,
+    /// The page with an amount placeholder.
+    pub template: Option<String>,
+}
+
 /// Spec 06, Logging, rule 3: the donation link for a give click, from the registry row and
 /// never from the request, logged as `link_click`. `None` when the answer is not the tester's
 /// or the sangha is unlisted, unverified or has no link.
@@ -366,10 +375,10 @@ pub async fn give(
     answer: AnswerId,
     tester: TesterId,
     sangha: SanghaId,
-) -> Result<Option<String>, DbError> {
+) -> Result<Option<GiveTarget>, DbError> {
     let mut tx = pool.begin().await?;
-    let url = sqlx::query_scalar!(
-        r#"select s.donation_url as "url!" from sangha s
+    let row = sqlx::query!(
+        r#"select s.donation_url as "url!", s.donation_url_template from sangha s
            where s.id = $3 and s.listed and s.donation_verified and s.donation_url is not null
              and exists (select 1 from answer a join query_log q on q.id = a.query_log_id
                          where a.id = $1 and q.tester_id = $2)"#,
@@ -379,7 +388,7 @@ pub async fn give(
     )
     .fetch_optional(&mut *tx)
     .await?;
-    if url.is_some() {
+    if row.is_some() {
         sqlx::query!(
             "insert into dana_event (answer_id, sangha_id, kind) values ($1, $2, 'link_click')",
             answer.as_uuid(),
@@ -389,7 +398,10 @@ pub async fn give(
         .await?;
     }
     tx.commit().await?;
-    Ok(url)
+    Ok(row.map(|r| GiveTarget {
+        url: r.url,
+        template: r.donation_url_template,
+    }))
 }
 
 /// A teacher's display name, for the named-teacher notices.
@@ -400,4 +412,101 @@ pub async fn teacher_name(pool: &PgPool, teacher: TeacherId) -> Result<Option<St
     )
     .fetch_optional(pool)
     .await?)
+}
+
+/// A cited sangha's giving details for the dana panel, from the registry row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DanaSangha {
+    /// The sangha.
+    pub id: SanghaId,
+    /// Its name.
+    pub name: String,
+    /// Its giving page.
+    pub donation_url: Option<String>,
+    /// The page with an amount placeholder.
+    pub donation_url_template: Option<String>,
+    /// A person checked the page.
+    pub donation_verified: bool,
+    /// False when the sangha asked for attribution only.
+    pub listed: bool,
+    /// Why the link is a contact page, missing or unverified.
+    pub donation_note: Option<String>,
+}
+
+/// The registry rows of the given sanghas, by name.
+pub async fn dana_sanghas(pool: &PgPool, ids: &[SanghaId]) -> Result<Vec<DanaSangha>, DbError> {
+    let uuids: Vec<Uuid> = ids.iter().map(|s| s.as_uuid()).collect();
+    let rows = sqlx::query!(
+        "select id, name, donation_url, donation_url_template, donation_verified, listed,
+                donation_note
+         from sangha where id = any($1) order by name",
+        &uuids
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| DanaSangha {
+            id: SanghaId::from(r.id),
+            name: r.name,
+            donation_url: r.donation_url,
+            donation_url_template: r.donation_url_template,
+            donation_verified: r.donation_verified,
+            listed: r.listed,
+            donation_note: r.donation_note,
+        })
+        .collect())
+}
+
+/// What the dana panel logs (Spec 06, Logging, rule 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DanaEvent {
+    /// The donor started using the panel.
+    PanelOpen,
+    /// A split was shown, with the gift total entered.
+    SplitComputed {
+        /// The gift total in cents.
+        total_cents: i32,
+    },
+}
+
+/// Logs a panel event on an answer the tester asked. Returns false, logging nothing, when the
+/// answer is not theirs.
+pub async fn dana_event(
+    pool: &PgPool,
+    answer: AnswerId,
+    tester: TesterId,
+    event: DanaEvent,
+) -> Result<bool, DbError> {
+    let (kind, total) = match event {
+        DanaEvent::PanelOpen => ("panel_open", None),
+        DanaEvent::SplitComputed { total_cents } => ("split_computed", Some(total_cents)),
+    };
+    let done = sqlx::query!(
+        "insert into dana_event (answer_id, kind, total_cents)
+         select a.id, $3, $4 from answer a join query_log q on q.id = a.query_log_id
+         where a.id = $1 and q.tester_id = $2",
+        answer.as_uuid(),
+        tester.as_uuid(),
+        kind,
+        total
+    )
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// The site line's give click: logged as `link_click` with no sangha when the answer is the
+/// tester's. Returns whether it was logged.
+pub async fn give_site(pool: &PgPool, answer: AnswerId, tester: TesterId) -> Result<bool, DbError> {
+    let done = sqlx::query!(
+        "insert into dana_event (answer_id, sangha_id, kind)
+         select a.id, null, 'link_click' from answer a join query_log q on q.id = a.query_log_id
+         where a.id = $1 and q.tester_id = $2",
+        answer.as_uuid(),
+        tester.as_uuid()
+    )
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }

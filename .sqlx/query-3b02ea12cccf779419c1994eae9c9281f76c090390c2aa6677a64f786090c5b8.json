@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select s.donation_url as \"url!\", s.donation_url_template from sangha s\n           where s.id = $3 and s.listed and s.donation_verified and s.donation_url is not null\n             and exists (select 1 from answer a join query_log q on q.id = a.query_log_id\n                         where a.id = $1 and q.tester_id = $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "url!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_url"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "donation_url_template",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "sangha",
+            "name": "donation_url_template"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "3b02ea12cccf779419c1994eae9c9281f76c090390c2aa6677a64f786090c5b8"
+}
