@@ -32,6 +32,9 @@ pub trait ObjectStore: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>, ObjectError>;
     /// Deletes every object whose key starts with `prefix` and returns how many.
     fn delete_prefix(&self, prefix: &str) -> Result<usize, ObjectError>;
+    /// The keys under `prefix`, sorted. A prefix ending in `/` names a directory; anything else
+    /// names one object, as in [`ObjectStore::delete_prefix`]. An empty prefix lists everything.
+    fn list(&self, prefix: &str) -> Result<Vec<String>, ObjectError>;
 }
 
 /// Objects as files under a directory.
@@ -110,6 +113,35 @@ impl ObjectStore for LocalObjects {
             Ok(0)
         }
     }
+
+    fn list(&self, prefix: &str) -> Result<Vec<String>, ObjectError> {
+        let trimmed = prefix.trim_end_matches('/');
+        let path = if trimmed.is_empty() {
+            self.root.clone()
+        } else {
+            self.path(trimmed)?
+        };
+        let mut keys: Vec<String> = if path.is_dir() {
+            walk(&path).iter().filter_map(|p| self.key_of(p)).collect()
+        } else if path.is_file() {
+            self.key_of(&path).into_iter().collect()
+        } else {
+            Vec::new()
+        };
+        keys.sort();
+        Ok(keys)
+    }
+}
+
+impl LocalObjects {
+    fn key_of(&self, path: &Path) -> Option<String> {
+        let rel = path.strip_prefix(&self.root).ok()?;
+        let parts: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        Some(parts.join("/"))
+    }
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
@@ -169,6 +201,19 @@ mod tests {
             store.get("transcripts/t2/v1.json").unwrap_or_default(),
             None
         );
+        store
+            .put("citations/t1.json", b"{}")
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            store.list("transcripts/t1/").unwrap_or_default(),
+            ["transcripts/t1/v1.json", "transcripts/t1/v2.json"]
+        );
+        assert_eq!(
+            store.list("citations/t1.json").unwrap_or_default(),
+            ["citations/t1.json"]
+        );
+        assert_eq!(store.list("").unwrap_or_default().len(), 3);
+        assert!(store.list("transcripts/t9/").unwrap_or_default().is_empty());
         assert_eq!(
             store.delete_prefix("transcripts/t1/").unwrap_or_default(),
             2

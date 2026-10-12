@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select state::text as \"state!\" from talk where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a01c294a2c9b85314dfeff4a2c73058775f38cd3ff70cc86be319ff93fbacdf3"
+}

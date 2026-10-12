@@ -6,10 +6,14 @@ mod common;
 
 use common::{ACTOR, ADA, BO, consent, make_ready, talk};
 use sqlx::PgPool;
+use sqlx::types::Uuid;
 use wt_core::Env;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
-use wt_db::audit::{AuditReport, AuditSettings, Severity, run};
+use wt_core::objects::{LocalObjects, ObjectStore};
+use wt_db::audit::{
+    AuditReport, AuditSettings, Files, SCRATCH_TTL_H, Severity, run, run_with_files,
+};
 
 /// A ready, consented talk whose sangha's donation link was just verified, so every check
 /// starts clean.
@@ -711,4 +715,166 @@ async fn stored_student_questions_get_rule_threes_checks() {
         .await
         .unwrap();
     assert_eq!(left, 0);
+}
+
+// ---- checks that read object storage and the scratch directory --------------------------------
+
+struct Dirs {
+    objects: LocalObjects,
+    scratch: std::path::PathBuf,
+    root: std::path::PathBuf,
+}
+
+impl Dirs {
+    fn new() -> Self {
+        let root = std::env::temp_dir().join(format!("wt-audit-{}", Uuid::new_v4()));
+        let scratch = root.join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        Dirs {
+            objects: LocalObjects::new(root.join("objects")),
+            scratch,
+            root,
+        }
+    }
+
+    async fn audit(&self, pool: &PgPool, ttl_h: u64) -> AuditReport {
+        let files = Files {
+            objects: &self.objects,
+            scratch_root: &self.scratch,
+            scratch_ttl_h: ttl_h,
+        };
+        run_with_files(pool, AuditSettings::defaults(Env::Prod), &files)
+            .await
+            .unwrap()
+    }
+}
+
+impl Drop for Dirs {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+const CLEAN_TRANSCRIPT: &[u8] = br#"{"schema":1,"words":[{"i":0,"w":"sit","s":0,"e":400,"p":0.9}],
+    "spans":[{"kind":"talk","s":0,"e":400,"w0":0,"w1":1}]}"#;
+
+#[tokio::test]
+async fn the_file_checks_pass_on_a_clean_store_and_scratch() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    let dirs = Dirs::new();
+    dirs.objects
+        .put(&format!("transcripts/{t}/v1.json"), CLEAN_TRANSCRIPT)
+        .unwrap();
+    // A job running now has a fresh scratch directory.
+    std::fs::create_dir_all(dirs.scratch.join(t.to_string())).unwrap();
+
+    let report = dirs.audit(&fx.pool, SCRATCH_TTL_H).await;
+    only(&report, &[]);
+    assert!(!report.failed());
+    assert!(report.checks.iter().any(|c| c.name == "audio_residue"));
+    let pending: Vec<&str> = report.not_yet_checked.iter().map(|(n, _)| *n).collect();
+    assert_eq!(pending, ["audio_residue (scratch bucket)"]);
+}
+
+#[tokio::test]
+async fn audio_residue_fails_for_an_old_scratch_directory_or_an_audio_object() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    let dirs = Dirs::new();
+    std::fs::create_dir_all(dirs.scratch.join(t.to_string())).unwrap();
+
+    // With a zero TTL the directory is already too old.
+    let report = dirs.audit(&fx.pool, 0).await;
+    only(&report, &["audio_residue"]);
+    assert!(report.failed());
+    std::fs::remove_dir_all(dirs.scratch.join(t.to_string())).unwrap();
+    only(&dirs.audit(&fx.pool, 0).await, &[]);
+
+    dirs.objects
+        .put(&format!("transcripts/{t}/talk.M4A"), b"not really audio")
+        .unwrap();
+    let report = dirs.audit(&fx.pool, SCRATCH_TTL_H).await;
+    only(&report, &["audio_residue"]);
+    assert_eq!(findings(&report, "audio_residue"), 1);
+}
+
+#[tokio::test]
+async fn student_speech_fails_for_a_transcript_object_with_student_words() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    let dirs = Dirs::new();
+    let key = format!("transcripts/{t}/v1.json");
+    for bad in [
+        br#"{"words":[],"spans":[{"kind":"qa_student","s":0,"e":10}]}"#.as_slice(),
+        br#"{"words":[{"w":"hello","speaker":"SPEAKER_02"}],"spans":[]}"#.as_slice(),
+    ] {
+        dirs.objects.put(&key, bad).unwrap();
+        let report = dirs.audit(&fx.pool, SCRATCH_TTL_H).await;
+        only(&report, &["student_speech"]);
+        assert!(report.failed());
+    }
+    dirs.objects.put(&key, CLEAN_TRANSCRIPT).unwrap();
+    only(&dirs.audit(&fx.pool, SCRATCH_TTL_H).await, &[]);
+}
+
+#[tokio::test]
+async fn takedown_completeness_fails_while_objects_remain_and_passes_after_finish() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    let dirs = Dirs::new();
+    dirs.objects
+        .put(&format!("transcripts/{t}/v1.json"), CLEAN_TRANSCRIPT)
+        .unwrap();
+    dirs.objects
+        .put(&format!("citations/{t}.json"), b"[]")
+        .unwrap();
+    // The database step committed and object deletion failed.
+    wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(t), ACTOR)
+        .await
+        .unwrap();
+
+    let report = dirs.audit(&fx.pool, SCRATCH_TTL_H).await;
+    only(&report, &["takedown_completeness"]);
+    assert_eq!(findings(&report, "takedown_completeness"), 2);
+    assert!(report.failed());
+
+    wt_db::takedown::finish(&fx.pool, &dirs.objects)
+        .await
+        .unwrap();
+    only(&dirs.audit(&fx.pool, SCRATCH_TTL_H).await, &[]);
+}
+
+#[tokio::test]
+async fn takedown_completeness_follows_the_log_when_a_restore_undoes_the_state() {
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    wt_db::takedown::run(&fx.pool, &wt_db::takedown::Scope::Talk(t), ACTOR)
+        .await
+        .unwrap();
+    // A partial restore brings the talk back to ready with a transcript row, while the log keeps
+    // the takedown. Triggers are off for the session, as in a restore.
+    let mut conn = fx.pool.acquire().await.unwrap();
+    sqlx::query("set session_replication_role = replica")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query("update talk set state = 'ready' where id = $1")
+        .bind(t.as_uuid())
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into transcript (talk_id, version, origin, s3_key, content_hash)
+         values ($1, 1, 'asr', 'restored', 'h')",
+    )
+    .bind(t.as_uuid())
+    .execute(&mut *conn)
+    .await
+    .unwrap();
+    drop(conn);
+
+    let report = audit(&fx.pool, Env::Prod).await;
+    assert!(findings(&report, "takedown_completeness") >= 1);
+    assert!(report.failed());
 }

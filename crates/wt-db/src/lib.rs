@@ -24,6 +24,7 @@ pub mod llm;
 pub mod locator;
 pub mod privacy;
 pub mod public_forms;
+pub mod quarantine;
 pub mod questions;
 pub mod reference;
 pub mod registry;

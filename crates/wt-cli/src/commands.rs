@@ -7,7 +7,6 @@ use std::process::ExitCode;
 use anyhow::{Context, bail};
 use serde::Serialize;
 use sqlx::PgPool;
-use wt_core::Env;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
 use wt_db::audit::AuditSettings;
@@ -47,8 +46,10 @@ pub async fn registry_import(pool: &PgPool, file: &Path, by: &str) -> anyhow::Re
     print_json(&report)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn consent_set(
     pool: &PgPool,
+    config: &wt_core::Config,
     teacher: &str,
     status: ConsentStatus,
     evidence: Option<&str>,
@@ -64,7 +65,13 @@ pub async fn consent_set(
     let propagation = wt_db::consent::set_consent(pool, teacher, status, evidence, scope_note, by)
         .await
         .with_context(|| format!("recording consent {status} for {teacher}"))?;
-    print_json(&propagation)
+    let talks = propagation
+        .takedown
+        .as_ref()
+        .map(|t| t.talks.clone())
+        .unwrap_or_default();
+    let deleted = crate::stages::delete_talk_objects(pool, config, &talks).await?;
+    print_json(&crate::stages::with_objects(&propagation, deleted))
 }
 
 pub async fn consent_list(pool: &PgPool) -> anyhow::Result<()> {
@@ -338,6 +345,7 @@ async fn exclude_row(pool: &PgPool, talk: &str, reason: &str, by: &str) -> anyho
 
 pub async fn exclude(
     pool: &PgPool,
+    config: &wt_core::Config,
     talk: TalkId,
     reason: &str,
     by: &str,
@@ -350,7 +358,8 @@ pub async fn exclude(
     let report = wt_db::consent::exclude_talk(pool, talk, reason, by)
         .await
         .with_context(|| format!("excluding talk {talk}"))?;
-    print_json(&report)
+    let deleted = crate::stages::delete_talk_objects(pool, config, &[talk]).await?;
+    print_json(&crate::stages::with_objects(&report, deleted))
 }
 
 pub async fn takedown(
@@ -365,8 +374,9 @@ pub async fn takedown(
         Target::Talk(id) => Scope::Talk(id),
         Target::Teacher(name) => Scope::Teacher(name),
     };
+    let store = crate::stages::objects(config)?;
     if dry_run {
-        let report: TakedownReport = wt_db::takedown::dry_run(pool, &scope)
+        let report: TakedownReport = wt_db::takedown::dry_run_with_objects(pool, &scope, &store)
             .await
             .context("counting what the takedown would remove")?;
         return print_json(&report);
@@ -374,14 +384,44 @@ pub async fn takedown(
     if !yes {
         return refuse_unconfirmed(pool, &scope, "the takedown").await;
     }
-    let report = wt_db::takedown::run(pool, &scope, actor)
+    let report = wt_db::takedown::complete(pool, &scope, actor, &store)
         .await
-        .context("running the takedown")?;
-    let deleted = crate::stages::delete_talk_objects(config, &report.talks)?;
-    print_json(&crate::stages::with_objects(&report, deleted))
+        .context("running the takedown; if only objects failed, rerun with --finish")?;
+    print_json(&report)
 }
 
-pub async fn audit(pool: &PgPool, env: Env, config_dir: &Path) -> anyhow::Result<ExitCode> {
+/// `wt takedown --finish`: retries object deletion for every logged scope.
+pub async fn takedown_finish(pool: &PgPool, config: &wt_core::Config) -> anyhow::Result<()> {
+    let store = crate::stages::objects(config)?;
+    let report = wt_db::takedown::finish(pool, &store)
+        .await
+        .context("finishing logged takedowns")?;
+    print_json(&report)
+}
+
+/// `wt takedown --replay`: after a database restore, reapplies every recorded takedown.
+pub async fn takedown_replay(
+    pool: &PgPool,
+    config: &wt_core::Config,
+    actor: &str,
+    yes: bool,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        yes,
+        "--replay reapplies every recorded takedown to this database; rerun with --yes"
+    );
+    let store = crate::stages::objects(config)?;
+    let report = wt_db::takedown::replay(pool, &store, actor)
+        .await
+        .context("replaying recorded takedowns")?;
+    print_json(&report)
+}
+
+pub async fn audit(
+    pool: &PgPool,
+    config: &wt_core::Config,
+    config_dir: &Path,
+) -> anyhow::Result<ExitCode> {
     // Without a pipeline.toml, as in a bare checkout, the tool is private.
     let pipeline = config_dir.join("pipeline.toml");
     let deployment = if pipeline.exists() {
@@ -391,9 +431,15 @@ pub async fn audit(pool: &PgPool, env: Env, config_dir: &Path) -> anyhow::Result
     };
     let settings = AuditSettings {
         public: deployment.public(),
-        ..AuditSettings::defaults(env)
+        ..AuditSettings::defaults(config.env)
     };
-    let report = wt_db::audit::run(pool, settings)
+    let store = crate::stages::objects(config)?;
+    let files = wt_db::audit::Files {
+        objects: &store,
+        scratch_root: &config.scratch_dir,
+        scratch_ttl_h: wt_db::audit::SCRATCH_TTL_H,
+    };
+    let report = wt_db::audit::run_with_files(pool, settings, &files)
         .await
         .context("running the audit")?;
     print_json(&report)?;

@@ -311,6 +311,13 @@ fn remove(path: &Path) -> Result<(), ScratchError> {
     Ok(())
 }
 
+/// File extensions of audio and video. Nothing outside scratch may hold one: the repository
+/// guards check the committed tree and the nightly audit checks object storage.
+pub const AUDIO_AND_VIDEO_EXTENSIONS: &[&str] = &[
+    "aac", "aif", "aiff", "amr", "flac", "m4a", "m4b", "mka", "mkv", "mov", "mp3", "mp4", "mpeg",
+    "mpg", "oga", "ogg", "opus", "wav", "weba", "webm", "wma",
+];
+
 /// Talk directories under `root`, for the audit and the reaper: any that exists outside a
 /// running job is audio residue.
 pub fn leftovers(root: &Path) -> std::io::Result<Vec<PathBuf>> {

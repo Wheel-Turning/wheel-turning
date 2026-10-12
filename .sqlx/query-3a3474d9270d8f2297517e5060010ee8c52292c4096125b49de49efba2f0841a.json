@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select new_value = '\"quarantined\"'::jsonb and old_value = '\"ready\"'::jsonb as \"ok!\"\n           from correction_log where entity = 'talk' and entity_id = $1 and field = 'state'\n           order by created_at desc limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ok!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3a3474d9270d8f2297517e5060010ee8c52292c4096125b49de49efba2f0841a"
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set state = 'quarantined', quarantine_reason = $2\n         where id = $1 and state = 'ready' returning id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2979947ff92fd3bb679a8924fbfeee2a12f5b6320c27e3f25a082eb6a071682f"
+}

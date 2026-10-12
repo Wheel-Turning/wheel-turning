@@ -1,14 +1,20 @@
-//! `dg audit` (Spec 07): integrity checks over the live database. Checks marked `Fail` make the
-//! command exit nonzero when they have findings; `Warn` checks are listed only.
+//! `wt audit` (Spec 07): integrity checks over the live database, object storage and the scratch
+//! directory. Checks marked `Fail` make the command exit nonzero when they have findings; `Warn`
+//! checks are listed only.
 //!
-//! M2 runs every check that reads only the database. The parts that read the scratch directory
-//! or object storage (audio residue, transcript JSON speakers, takedown objects) join when the
-//! transcript pipeline writes those stores in M4, and are listed as not yet checked.
+//! [`run`] reads only the database. [`run_with_files`] adds the parts that read the scratch
+//! directory and object storage: audio residue, student speech in transcript JSON, and objects
+//! left for taken-down talks. The scratch bucket waits for the S3 client.
+
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use sqlx::PgPool;
+use sqlx::types::Uuid;
 use wt_core::Env;
-use wt_core::stores::{OnTakedown, STORES, StoreKind};
+use wt_core::objects::{ObjectError, ObjectStore};
+use wt_core::scratch;
+use wt_core::stores::{self, OnTakedown, STORES, StoreKind};
 
 use crate::DbError;
 
@@ -91,7 +97,7 @@ impl AuditSettings {
 /// A talk whose rights still allow its text to be stored: a valid basis, a known holder, a
 /// speaker and a sangha, and not excluded or withdrawn. It says nothing about the pipeline
 /// state, so quarantined and partly indexed talks keep their passages without drifting.
-const RIGHTS_VALID: &str = "t.state not in ('excluded', 'withdrawn')
+pub(crate) const RIGHTS_VALID: &str = "t.state not in ('excluded', 'withdrawn')
   and ((t.rights_basis = 'speaker_consent' and t.consent_status = 'granted')
     or (t.rights_basis in ('license', 'mandate') and exists (
           select 1 from license_evidence le where le.id = t.license_evidence_id and le.allowed)))
@@ -136,6 +142,12 @@ where q.text ~ '[0-9]{6,}'
                              union select name from sangha) r
               where (length(r.n) >= 3 or r.n like '% %')
                 and q.text ~* ('\m' || regexp_replace(r.n, '([^[:alnum:] ])', '\\\1', 'g') || '\M'))"#;
+
+/// Talks whose words must be gone: withdrawn, or covered by a recorded takedown.
+const TAKEN_DOWN: &str = "select t.id from talk t where t.state = 'withdrawn'
+   union select l.talk_id from takedown_log l where l.talk_id is not null
+   union select e::uuid from takedown_log l,
+                jsonb_array_elements_text(coalesce(l.counts->'talks', '[]')) e";
 
 /// Runs every database check.
 pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, DbError> {
@@ -215,7 +227,8 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
 
     checks.push(check(pool, "student_speech", Severity::Fail, STUDENT_SPEECH).await?);
 
-    // Takedown completeness: any row left in a deleting store for a talk in a logged scope.
+    // Takedown completeness: any row left in a deleting store for a withdrawn talk or a talk in
+    // a scope recorded in takedown_log, which also catches a restore that brought one back.
     let mut leftovers = Vec::new();
     for store in STORES
         .iter()
@@ -224,7 +237,7 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         if let StoreKind::Table { table, talk_column } = store.kind {
             leftovers.push(format!(
                 "select '{name}: ' || x.{talk_column}::text from {table} x
-                 where x.{talk_column} in (select t.id from talk t where t.state = 'withdrawn')",
+                 where x.{talk_column} in ({TAKEN_DOWN})",
                 name = store.name
             ));
         }
@@ -519,4 +532,206 @@ async fn check(
         findings: i64::try_from(rows.len()).unwrap_or(i64::MAX),
         examples: rows.into_iter().flatten().take(20).collect(),
     })
+}
+
+/// Passages a talk holds, served or not: the re-check before a quarantined talk is released,
+/// which the serving view cannot answer while the talk is out of serving.
+pub(crate) async fn held_passages(
+    conn: &mut sqlx::PgConnection,
+    talk: wt_core::ids::TalkId,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"select count(*) as "n!" from passage where talk_id = $1"#,
+        talk.as_uuid()
+    )
+    .fetch_one(&mut *conn)
+    .await
+}
+
+/// The stores outside the database that the audit reads.
+pub struct Files<'a> {
+    /// Transcript and citation objects, and takedown records.
+    pub objects: &'a dyn ObjectStore,
+    /// The scratch root, `WT_SCRATCH_DIR`.
+    pub scratch_root: &'a Path,
+    /// A scratch directory older than this is audio residue (Spec 07, `scratch_resume_ttl_h`).
+    pub scratch_ttl_h: u64,
+}
+
+/// `scratch_resume_ttl_h`'s default. Since a retry no longer resumes from scratch (Spec 04,
+/// Media handling, rule 5), only a job running now has a scratch directory, and none runs a day.
+pub const SCRATCH_TTL_H: u64 = 24;
+
+/// Why the audit could not read a store.
+#[derive(Debug, thiserror::Error)]
+pub enum AuditError {
+    /// The database refused.
+    #[error(transparent)]
+    Db(#[from] DbError),
+    /// Object storage refused.
+    #[error("object storage: {0}")]
+    Objects(#[from] ObjectError),
+    /// The scratch directory could not be read.
+    #[error("scratch directory {0}: {1}")]
+    Scratch(PathBuf, std::io::Error),
+}
+
+impl From<sqlx::Error> for AuditError {
+    fn from(e: sqlx::Error) -> Self {
+        AuditError::Db(DbError::Sqlx(e))
+    }
+}
+
+/// Every check, including the parts that read object storage and the scratch directory:
+/// audio residue, student speech in transcript JSON, and objects left for taken-down talks.
+/// The scratch bucket waits for the S3 client and stays listed as not yet checked.
+pub async fn run_with_files(
+    pool: &PgPool,
+    settings: AuditSettings,
+    files: &Files<'_>,
+) -> Result<AuditReport, AuditError> {
+    let mut report = run(pool, settings).await?;
+
+    let mut residue = Vec::new();
+    let ttl = std::time::Duration::from_secs(files.scratch_ttl_h.saturating_mul(3600));
+    for dir in scratch::leftovers(files.scratch_root)
+        .map_err(|e| AuditError::Scratch(files.scratch_root.to_owned(), e))?
+    {
+        let age = std::fs::metadata(&dir)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .unwrap_or_default();
+        if age >= ttl {
+            residue.push(format!("scratch {}", dir.display()));
+        }
+    }
+    let keys = files.objects.list("")?;
+    for key in &keys {
+        let ext = key.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        if ext.is_some_and(|e| scratch::AUDIO_AND_VIDEO_EXTENSIONS.contains(&e.as_str())) {
+            residue.push(format!("object {key}"));
+        }
+    }
+    report
+        .checks
+        .push(result("audio_residue", Severity::Fail, residue));
+
+    let mut speech = Vec::new();
+    for key in keys.iter().filter(|k| is_transcript_key(k)) {
+        if let Some(bytes) = files.objects.get(key)?
+            && let Some(why) = student_speech_in(&bytes)
+        {
+            speech.push(format!("{key}: {why}"));
+        }
+    }
+    extend(&mut report, "student_speech", speech);
+
+    let taken_down: Vec<Uuid> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select id from ({TAKEN_DOWN}) x(id) where id is not null"
+    )))
+    .fetch_all(pool)
+    .await?;
+    let mut left = Vec::new();
+    for talk in taken_down {
+        for (name, prefix) in stores::talk_objects(&talk.to_string()) {
+            for key in files.objects.list(&prefix)? {
+                left.push(format!("{name}: {key}"));
+            }
+        }
+    }
+    extend(&mut report, "takedown_completeness", left);
+
+    report.not_yet_checked = vec![(
+        "audio_residue (scratch bucket)",
+        "needs the S3 client; the bucket's one-day lifecycle rule expires objects meanwhile",
+    )];
+    Ok(report)
+}
+
+fn result(name: &'static str, severity: Severity, found: Vec<String>) -> CheckResult {
+    CheckResult {
+        name,
+        severity,
+        findings: i64::try_from(found.len()).unwrap_or(i64::MAX),
+        examples: found.into_iter().take(20).collect(),
+    }
+}
+
+/// Adds findings from the files to a database check of the same name.
+fn extend(report: &mut AuditReport, name: &str, found: Vec<String>) {
+    if let Some(check) = report.checks.iter_mut().find(|c| c.name == name) {
+        check.findings += i64::try_from(found.len()).unwrap_or(i64::MAX);
+        let room = 20usize.saturating_sub(check.examples.len());
+        check.examples.extend(found.into_iter().take(room));
+    }
+}
+
+/// `transcripts/<talk>/v<n>.json`.
+fn is_transcript_key(key: &str) -> bool {
+    let parts: Vec<&str> = key.split('/').collect();
+    matches!(parts.as_slice(), ["transcripts", _, file]
+        if file.strip_prefix('v').and_then(|f| f.strip_suffix(".json"))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+}
+
+/// Why a transcript object holds student speech, if it does: a `qa_student` span, or a span or
+/// word attributed to any speaker but the teacher. A transcript that cannot be parsed is a
+/// finding too, since it cannot be shown to be clean.
+pub fn student_speech_in(bytes: &[u8]) -> Option<String> {
+    let doc: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => return Some(format!("not readable JSON ({e})")),
+    };
+    let not_teacher = |v: &serde_json::Value| {
+        v.get("speaker")
+            .is_some_and(|s| s.as_str().is_none_or(|s| s != "teacher"))
+    };
+    let spans = doc.get("spans").and_then(|s| s.as_array());
+    for span in spans.into_iter().flatten() {
+        if span.get("kind").and_then(|k| k.as_str()) == Some("qa_student") {
+            return Some("a qa_student span".to_owned());
+        }
+        if not_teacher(span) {
+            return Some("a span attributed to another speaker".to_owned());
+        }
+    }
+    let words = doc.get("words").and_then(|w| w.as_array());
+    if words.into_iter().flatten().any(not_teacher) {
+        return Some("a word attributed to another speaker".to_owned());
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_keys_are_versions_only() {
+        assert!(is_transcript_key("transcripts/t1/v1.json"));
+        assert!(is_transcript_key("transcripts/t1/v12.json"));
+        for other in [
+            "transcripts/t1/questions.json",
+            "transcripts/t1/glossary_suggestions.csv",
+            "transcripts/t1/v.json",
+            "citations/t1.json",
+        ] {
+            assert!(!is_transcript_key(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn student_speech_is_found_in_spans_and_words() {
+        let clean = br#"{"words":[{"i":0,"w":"sit","s":0,"e":1,"p":0.9}],
+                         "spans":[{"kind":"talk","s":0,"e":1},{"kind":"qa_teacher","s":1,"e":2}]}"#;
+        assert_eq!(student_speech_in(clean), None);
+        let student = br#"{"words":[],"spans":[{"kind":"qa_student","s":0,"e":1}]}"#;
+        assert!(student_speech_in(student).is_some());
+        let speaker = br#"{"words":[{"w":"hi","speaker":"SPEAKER_01"}],"spans":[]}"#;
+        assert!(student_speech_in(speaker).is_some());
+        let teacher = br#"{"words":[{"w":"hi","speaker":"teacher"}],"spans":[]}"#;
+        assert_eq!(student_speech_in(teacher), None);
+        assert!(student_speech_in(b"not json").is_some());
+    }
 }
