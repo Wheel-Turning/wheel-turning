@@ -73,7 +73,10 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
     // Without the reranker export, answers run on the fused order and say so (Spec 05, step 4).
     let mut rerank_settings = OnnxSettings::new(&config.model_dir, &config.rerank_model);
     rerank_settings.runtime.clone_from(&config.ort_dylib);
-    let reranker: Option<Arc<dyn Reranker>> = match OnnxReranker::load(&rerank_settings) {
+    let reranker: Option<Arc<dyn Reranker>> = match OnnxReranker::load_pool(
+        &rerank_settings,
+        retrieval.retrieval.rerank_sessions,
+    ) {
         Ok(r) => Some(Arc::new(r)),
         Err(MlError::Files(missing)) => {
             tracing::warn!(model = %config.rerank_model, %missing, "no reranker loaded: relevance threshold off");

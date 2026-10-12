@@ -71,7 +71,21 @@ pub struct NewAnswer<'a> {
 /// no answer is shown without its log row.
 pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbError> {
     let mut tx = pool.begin().await?;
-    let passages = i32::try_from(a.payload.passage_ids.len()).unwrap_or(i32::MAX);
+    // The index step replaces a talk's passages, so one chosen seconds ago may be gone by now
+    // (October 12, 2026: answers failed on the answer_passage foreign key during a reindex).
+    // Keep only the passages that still serve; the rest are not shown as withdrawn either.
+    let chosen: Vec<Uuid> = a.payload.passage_ids.iter().map(|p| p.as_uuid()).collect();
+    let live: std::collections::HashSet<Uuid> = sqlx::query_scalar!(
+        r#"select passage_id as "passage_id!" from servable_passage where passage_id = any($1)"#,
+        &chosen
+    )
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+    let mut payload = a.payload.clone();
+    payload.passage_ids.retain(|p| live.contains(&p.as_uuid()));
+    let passages = i32::try_from(payload.passage_ids.len()).unwrap_or(i32::MAX);
     let themes = i32::try_from(a.payload.themes.len()).unwrap_or(i32::MAX);
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
@@ -96,7 +110,8 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     )
     .fetch_one(&mut *tx)
     .await?;
-    let payload = serde_json::to_value(&a.payload).unwrap_or(serde_json::Value::Null);
+    let ids: Vec<Uuid> = payload.passage_ids.iter().map(|p| p.as_uuid()).collect();
+    let payload = serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null);
     let answer = sqlx::query_scalar!(
         "insert into answer (query_log_id, payload) values ($1, $2) returning id",
         log,
@@ -104,7 +119,6 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     )
     .fetch_one(&mut *tx)
     .await?;
-    let ids: Vec<Uuid> = a.payload.passage_ids.iter().map(|p| p.as_uuid()).collect();
     sqlx::query!(
         "insert into answer_passage (answer_id, passage_id, rank)
          select $1, p, (r - 1)::int from unnest($2::uuid[]) with ordinality as u(p, r)",
