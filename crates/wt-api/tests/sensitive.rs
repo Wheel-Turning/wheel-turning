@@ -360,6 +360,13 @@ async fn a_distress_answer_has_the_banner_and_no_summary_line_or_giving_panel() 
         llm.seen.lock().unwrap().is_empty(),
         "no synthesis call for a distress question"
     );
+    assert!(!page.body.contains("id=\"dana\""), "no dana panel");
+    let id: Uuid = sqlx::query_scalar("select id from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let split = fx.post(&format!("/a/{id}/dana"), "total=20").await;
+    assert_eq!(split.status, StatusCode::NOT_FOUND, "and no split for it");
 }
 
 #[tokio::test]
@@ -374,6 +381,7 @@ async fn a_medical_answer_has_its_banner_and_keeps_the_giving_panel() {
     assert!(!page.body.contains("How approaches differ"));
     assert!(page.body.contains("Give to North Fixture Zendo"));
     assert!(llm.seen.lock().unwrap().is_empty());
+    assert!(page.body.contains("id=\"dana\""), "the dana panel stays");
 }
 
 #[tokio::test]

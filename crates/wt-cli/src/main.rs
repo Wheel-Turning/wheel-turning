@@ -12,6 +12,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 
 mod asr_cmds;
 mod commands;
+mod eval_cmds;
 mod index_cmds;
 mod ingest;
 mod rights;
@@ -150,6 +151,12 @@ enum Command {
     /// Reruns the index step from stored segments, with a new glossary or embedding model
     /// (Spec 04).
     Reindex(ReindexArgs),
+    /// The evaluation harness (Spec 07): load, run, export-review, import-ratings, report,
+    /// compare.
+    Eval {
+        #[command(subcommand)]
+        command: eval_cmds::EvalCommand,
+    },
     /// Exports for the evaluation notebooks (Spec 07).
     Export {
         #[command(subcommand)]
@@ -2396,6 +2403,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             let talks = if args.all { None } else { Some(args.talk) };
             index_cmds::reindex(&pool().await?, &config, &args.config_dir, talks, args.model)
                 .await?;
+        }
+        Command::Eval { command } => {
+            eval_cmds::eval(&pool().await?, &config, command).await?;
         }
         Command::Export {
             command: ExportCommand::Transcripts { format: _, out },

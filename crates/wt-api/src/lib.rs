@@ -72,6 +72,9 @@ pub struct Site {
     /// `WT_TRUST_FORWARDED_FOR`: behind the load balancer, the client address is the last
     /// entry of `X-Forwarded-For`. Off, the connection's peer address is used.
     pub trust_forwarded_for: bool,
+    /// `WT_SITE_DANA_URL`: the site's own giving page, for the separate site line. Without it
+    /// the panel offers no site line.
+    pub site_dana_url: Option<String>,
 }
 
 /// The rate limits (Spec 06): asks per tester, and the public forms per address.
@@ -114,6 +117,7 @@ impl Site {
             sensitivity_model: None,
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
+            site_dana_url: None,
         }
     }
 
@@ -161,6 +165,7 @@ pub fn router(state: AppState) -> Router {
         .route("/static/menu.js", get(chrome::menu_js))
         .route("/static/brand/favicon.svg", get(chrome::favicon_svg))
         .route("/favicon.ico", get(chrome::favicon_ico))
+        .route("/static/dana.js", get(dana_script))
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
@@ -174,7 +179,8 @@ pub fn router(state: AppState) -> Router {
         .route("/ask/curated", post(ask_curated))
         .route("/a/{answer}", get(answer_page))
         .route("/a/{answer}/feedback", post(feedback))
-        .route("/give/{answer}/{sangha}", get(give))
+        .route("/a/{answer}/dana", post(dana))
+        .route("/give/{answer}/{target}", get(give))
         .route("/talk/{talk}", get(talk_page))
         .route("/talk/{talk}/transcript", get(transcript_page))
         .fallback(not_found)
@@ -243,6 +249,13 @@ async fn stylesheet() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         include_str!("../static/app.css"),
+    )
+}
+
+async fn dana_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/dana.js"),
     )
 }
 
@@ -682,6 +695,23 @@ struct AnswerPage {
     answer_id: AnswerId,
     csrf: String,
     thanks: bool,
+    /// The split, after "Show the split" without JavaScript.
+    dana: Option<view::DanaView>,
+    /// What the donor entered, kept in the fields.
+    dana_total: String,
+    /// See `dana_total`.
+    dana_site: String,
+    /// The next split is the panel's first use, so it also logs `panel_open`.
+    dana_first: bool,
+    /// The site has a giving page, so the panel offers the site line.
+    site_giving: bool,
+}
+
+/// The dana split fragment, as the script swaps it into the live region.
+#[derive(Template)]
+#[template(path = "dana_split.html")]
+struct DanaFragment {
+    d: view::DanaView,
 }
 
 #[derive(Debug, Deserialize)]
@@ -693,35 +723,38 @@ fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
     raw.parse().ok()
 }
 
-/// `GET /a/{answer}`: re-renders the answer through the serving view, for its owner only.
-async fn answer_page(
-    State(state): State<AppState>,
-    s: Session,
-    Path(answer): Path<String>,
-    Query(q): Query<AnswerQuery>,
-) -> Response {
-    let Some(answer) = parse::<AnswerId>(&answer) else {
-        return not_found_page();
-    };
+/// An answer re-rendered through the serving views, with its served passages.
+struct Loaded {
+    stored: wt_db::answer::Stored,
+    served: Vec<Served>,
+    view: view::AnswerView,
+}
+
+/// Loads the answer for its owner. `Ok(None)` is the generic 404.
+async fn load_answer(
+    state: &AppState,
+    s: &Session,
+    answer: AnswerId,
+) -> Result<Option<Loaded>, Box<Response>> {
     let stored = match wt_db::answer::load(&state.pool, answer, s.tester).await {
         Ok(Some(a)) => a,
         Ok(None) => {
             return match wt_db::privacy::was_purged(&state.pool, answer, s.tester).await {
-                Ok(true) => error_page(
+                Ok(true) => Err(Box::new(error_page(
                     StatusCode::GONE,
                     "Question not kept",
                     "This question was not kept.",
-                ),
-                Ok(false) => not_found_page(),
-                Err(e) => server_error("checking a purged answer", &e),
+                ))),
+                Ok(false) => Ok(None),
+                Err(e) => Err(Box::new(server_error("checking a purged answer", &e))),
             };
         }
-        Err(e) => return server_error("loading the answer", &e),
+        Err(e) => return Err(Box::new(server_error("loading the answer", &e))),
     };
     let served: Vec<Served> =
         match wt_db::answer::passages(&state.pool, &stored.payload.passage_ids).await {
             Ok(p) => p,
-            Err(e) => return server_error("loading passages", &e),
+            Err(e) => return Err(Box::new(server_error("loading passages", &e))),
         };
     let named = match stored.payload.named_teacher_id {
         Some(t) => wt_db::answer::teacher_name(&state.pool, t)
@@ -737,10 +770,194 @@ async fn answer_page(
         named.as_deref(),
         state.site.retrieval.answer.link_lead_in_ms,
     );
-    let (summary, giving) = sensitive::shows(&stored.sensitive_category, stored.payload.curated);
     match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
         Ok(q) => view::attach_questions(&mut view, &q),
-        Err(e) => return server_error("loading student questions", &e),
+        Err(e) => return Err(Box::new(server_error("loading student questions", &e))),
+    }
+    Ok(Some(Loaded {
+        stored,
+        served,
+        view,
+    }))
+}
+
+/// `GET /a/{answer}`: re-renders the answer through the serving view, for its owner only.
+async fn answer_page(
+    State(state): State<AppState>,
+    s: Session,
+    Path(answer): Path<String>,
+    Query(q): Query<AnswerQuery>,
+) -> Response {
+    let Some(answer) = parse::<AnswerId>(&answer) else {
+        return not_found_page();
+    };
+    let loaded = match load_answer(&state, &s, answer).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return not_found_page(),
+        Err(r) => return *r,
+    };
+    let (summary, giving) = sensitive::shows(
+        &loaded.stored.sensitive_category,
+        loaded.stored.payload.curated,
+    );
+    page(
+        StatusCode::OK,
+        &AnswerPage {
+            chrome: Chrome::new(
+                format!("/a/{answer}"),
+                Current::Other,
+                Some(s.csrf(&state.site.keys)),
+            ),
+            banner: sensitive::Banner::for_answer(
+                &loaded.stored.sensitive_category,
+                loaded.stored.payload.curated,
+            ),
+            summary,
+            giving,
+            query: loaded.stored.query_text,
+            question_label: view::QUESTION_LABEL,
+            view: loaded.view,
+            answer_id: answer,
+            csrf: s.csrf(&state.site.keys),
+            thanks: q.thanks.is_some(),
+            dana: None,
+            dana_total: String::new(),
+            dana_site: String::new(),
+            dana_first: true,
+            site_giving: state.site.site_dana_url.is_some(),
+        },
+    )
+}
+
+#[derive(Debug, Deserialize)]
+struct DanaForm {
+    csrf: String,
+    #[serde(default)]
+    total: String,
+    #[serde(default)]
+    site: String,
+    /// The script's beacon on the panel's first use: log `panel_open` and nothing else.
+    open: Option<String>,
+    /// Without the script, the first split also logs `panel_open`.
+    first: Option<String>,
+}
+
+/// The message for amounts that are not dollars.
+const DANA_AMOUNTS: &str = "Please enter amounts in US dollars, such as 20 or 12.50.";
+
+/// Spec 05's split for the amounts entered, or the message to show instead, with the gift
+/// total in cents when a split was computed.
+fn compute_dana(
+    answer: AnswerId,
+    form: &DanaForm,
+    sanghas: &[wt_db::answer::DanaSangha],
+    site_giving: bool,
+) -> (view::DanaView, Option<i64>) {
+    let total = wt_dana::parse_dollars(&form.total);
+    let site = if site_giving {
+        wt_dana::parse_dollars(&form.site)
+    } else {
+        Some(0)
+    };
+    let (Some(total), Some(site)) = (total, site) else {
+        return (view::DanaView::message(DANA_AMOUNTS), None);
+    };
+    if total == 0 && site == 0 {
+        return (
+            view::DanaView::message("Enter an amount to see the split."),
+            None,
+        );
+    }
+    let input = wt_dana::DanaInput {
+        gift_total_cents: total,
+        site_cents: site,
+        recipients: view::recipients(sanghas),
+        tiebreak_seed: view::dana_seed(answer),
+    };
+    match wt_dana::split(&input) {
+        Ok(split) => (
+            view::dana_view(answer, &split, sanghas, site_giving),
+            Some(total),
+        ),
+        Err(wt_dana::DanaError::TooLarge { max_cents }) => (
+            view::DanaView::message(&format!(
+                "Please enter no more than ${} in all.",
+                wt_dana::dollars(max_cents)
+            )),
+            None,
+        ),
+        Err(wt_dana::DanaError::Negative) => (view::DanaView::message(DANA_AMOUNTS), None),
+    }
+}
+
+/// `POST /a/{answer}/dana`: the split for the entered amounts, as the live region's fragment
+/// when the script asks (`HX-Request`) and as the whole page otherwise. Logs `split_computed`
+/// with the gift total, and `panel_open` on the panel's first use.
+async fn dana(
+    State(state): State<AppState>,
+    s: Session,
+    Path(answer): Path<String>,
+    headers: axum::http::HeaderMap,
+    Form(form): Form<DanaForm>,
+) -> Response {
+    let site = &state.site;
+    if !s.csrf_ok(&site.keys, &form.csrf) {
+        return csrf_refused();
+    }
+    let Some(answer) = parse::<AnswerId>(&answer) else {
+        return not_found_page();
+    };
+    let open = wt_db::answer::DanaEvent::PanelOpen;
+    if form.open.is_some() {
+        return match wt_db::answer::dana_event(&state.pool, answer, s.tester, open).await {
+            Ok(true) => StatusCode::NO_CONTENT.into_response(),
+            Ok(false) => not_found_page(),
+            Err(e) => server_error("logging the dana panel", &e),
+        };
+    }
+    let loaded = match load_answer(&state, &s, answer).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return not_found_page(),
+        Err(r) => return *r,
+    };
+    // Spec 05: a distress answer and the curated query have no giving panel.
+    let (summary, giving) = sensitive::shows(
+        &loaded.stored.sensitive_category,
+        loaded.stored.payload.curated,
+    );
+    if !giving {
+        return not_found_page();
+    }
+    // Texts never enter the split (Spec 05, Answer assembly, rule 6): only talk passages
+    // name sanghas.
+    let ids: Vec<SanghaId> = loaded
+        .served
+        .iter()
+        .map(|p| p.talk.sangha_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let sanghas = match wt_db::answer::dana_sanghas(&state.pool, &ids).await {
+        Ok(r) => r,
+        Err(e) => return server_error("loading the cited sanghas", &e),
+    };
+    let site_giving = site.site_dana_url.is_some();
+    let (view, total) = compute_dana(answer, &form, &sanghas, site_giving);
+    if form.first.is_some()
+        && let Err(e) = wt_db::answer::dana_event(&state.pool, answer, s.tester, open).await
+    {
+        return server_error("logging the dana panel", &e);
+    }
+    if let Some(total) = total {
+        let event = wt_db::answer::DanaEvent::SplitComputed {
+            total_cents: i32::try_from(total).unwrap_or(i32::MAX),
+        };
+        if let Err(e) = wt_db::answer::dana_event(&state.pool, answer, s.tester, event).await {
+            return server_error("logging the dana split", &e);
+        }
+    }
+    if headers.get("hx-request").is_some() {
+        return page(StatusCode::OK, &DanaFragment { d: view });
     }
     page(
         StatusCode::OK,
@@ -751,17 +968,22 @@ async fn answer_page(
                 Some(s.csrf(&state.site.keys)),
             ),
             banner: sensitive::Banner::for_answer(
-                &stored.sensitive_category,
-                stored.payload.curated,
+                &loaded.stored.sensitive_category,
+                loaded.stored.payload.curated,
             ),
             summary,
             giving,
-            query: stored.query_text,
+            query: loaded.stored.query_text,
             question_label: view::QUESTION_LABEL,
-            view,
+            view: loaded.view,
             answer_id: answer,
-            csrf: s.csrf(&state.site.keys),
-            thanks: q.thanks.is_some(),
+            csrf: s.csrf(&site.keys),
+            thanks: false,
+            dana: Some(view),
+            dana_total: form.total,
+            dana_site: form.site,
+            dana_first: false,
+            site_giving,
         },
     )
 }
@@ -797,18 +1019,51 @@ async fn feedback(
     }
 }
 
-/// `GET /give/{answer}/{sangha}`: logs the click and redirects to the registry's link.
+#[derive(Debug, Deserialize)]
+struct GiveQuery {
+    amount_cents: Option<String>,
+}
+
+/// `GET /give/{answer}/{target}`: logs the click and redirects to the registry's link, or for
+/// `site` to `WT_SITE_DANA_URL`. `amount_cents` only fills a verified page's amount template;
+/// anything but a whole number of cents within the ceiling is refused.
 async fn give(
     State(state): State<AppState>,
     s: Session,
-    Path((answer, sangha)): Path<(String, String)>,
+    Path((answer, target)): Path<(String, String)>,
+    Query(q): Query<GiveQuery>,
 ) -> Response {
-    let (Some(answer), Some(sangha)) = (parse::<AnswerId>(&answer), parse::<SanghaId>(&sangha))
-    else {
+    let Some(answer) = parse::<AnswerId>(&answer) else {
+        return not_found_page();
+    };
+    let amount = match q.amount_cents.as_deref() {
+        None => None,
+        Some(raw) => match raw.parse::<i64>() {
+            Ok(c) if (0..=wt_dana::MAX_TOTAL_CENTS).contains(&c) => Some(c),
+            _ => return not_found_page(),
+        },
+    };
+    if target == "site" {
+        let Some(url) = state.site.site_dana_url.as_deref() else {
+            return not_found_page();
+        };
+        return match wt_db::answer::give_site(&state.pool, answer, s.tester).await {
+            Ok(true) => Redirect::to(url).into_response(),
+            Ok(false) => not_found_page(),
+            Err(e) => server_error("logging a give click", &e),
+        };
+    }
+    let Some(sangha) = parse::<SanghaId>(&target) else {
         return not_found_page();
     };
     match wt_db::answer::give(&state.pool, answer, s.tester, sangha).await {
-        Ok(Some(url)) => Redirect::to(&url).into_response(),
+        Ok(Some(t)) => {
+            let url = match amount {
+                Some(c) => wt_dana::giving_link(&t.url, t.template.as_deref(), c),
+                None => t.url,
+            };
+            Redirect::to(&url).into_response()
+        }
         Ok(None) => not_found_page(),
         Err(e) => server_error("logging a give click", &e),
     }

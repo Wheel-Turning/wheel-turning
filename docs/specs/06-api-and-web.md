@@ -265,8 +265,8 @@ The owner role can still read every table, as the logging list says, so this sec
 - [x] `POST /ask` persists an answer, responds `303` to the permalink, and the permalink is readable only by the tester who asked. (`wt-api/tests/pages.rs`.)
 - [ ] Snapshot tests with `insta` cover the answer page for standard, named, thin coverage, none found, and multi-named cases.
 - [x] A passage whose text contains `<script>` renders escaped, and no model text appears outside the synthesis section. (`wt-api/tests/pages.rs`.)
-- [ ] `/give` logs a click and redirects only to the registry URL. A tampered `amount_cents`, an unverified sangha and an unlisted sangha are each rejected.
-- [ ] The dana fragment equals the output of the `wt-dana` function for the same inputs, and the no-JavaScript path shows the same split.
+- [x] `/give` logs a click and redirects only to the registry URL. A tampered `amount_cents`, an unverified sangha and an unlisted sangha are each rejected. (`wt-api/tests/pages.rs`; `amount_cents` must be whole cents within the ceiling and only fills a verified page's template, and `/give/<answer>/site` goes to `WT_SITE_DANA_URL`.)
+- [x] The dana fragment equals the output of the `wt-dana` function for the same inputs, and the no-JavaScript path shows the same split. (`wt-api/tests/pages.rs`. Until htmx is vendored, `static/dana.js`, a short script of our own, posts the form with `HX-Request: true` and swaps the fragment into the live region, so htmx can replace it with no server change. `panel_open` is logged on the first focus inside the panel, or by the first split without the script.)
 - [ ] `flag_query` sets the flag, and the flagged query is readable only through `flagged_queries()`.
 - [x] `wt report` commands run as `dg_analyst` and cannot read unflagged query text. (`wt-cli/tests/commands.rs`: each report runs as a `wt_analyst` login and prints no unflagged question, and `wt report` refuses a connection that can read `query_log`.)
 - [ ] A failed log insert produces an error page and no answer.
@@ -302,7 +302,7 @@ Acceptance criteria for the accessibility standard and the logo:
 - [ ] Status and confidence badges carry words, and a grayscale screenshot test shows no information lost.
 - [ ] At 320 CSS pixels and at 400 percent zoom, no page needs two-dimensional scrolling. With 200 percent text and a text spacing override, no content or function is lost.
 - [ ] Dynamic updates are announced: the dana split and feedback status appear in a polite live region, and focus moves to the result heading when the user asked for the result.
-- [ ] The dana panel preselects nothing and states, before any link opens, that no money passes through the site.
+- [x] The dana panel preselects nothing and states, before any link opens, that no money passes through the site. (The amount fields start empty, and Spec 09's introduction sits above the form.)
 - [ ] Source links name what they open, for example "Listen at 12:34 (opens the source video in a new tab)".
 - [ ] The manual pass for the release is recorded: keyboard only, NVDA with Firefox, VoiceOver on iOS and macOS, TalkBack with Chrome, forced colors, reduced motion and no JavaScript.
 - [x] The header mark is inline, hidden from assistive technology, named by the adjacent text, stays visible in forced colors mode, and the footer mark follows `--on-dark`. (`wt-api/tests/site.rs` for the markup; the mark draws in `currentColor`, which forced colors map to the text color. The source files are `docs/brand/`, since `brand/source/` and `Logo.zip` are not in the repository.)

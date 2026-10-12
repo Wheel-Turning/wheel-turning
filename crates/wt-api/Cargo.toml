@@ -29,6 +29,7 @@ sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 wt-core.workspace = true
+wt-dana.workspace = true
 wt-db.workspace = true
 wt-extract.workspace = true
 wt-ml.workspace = true

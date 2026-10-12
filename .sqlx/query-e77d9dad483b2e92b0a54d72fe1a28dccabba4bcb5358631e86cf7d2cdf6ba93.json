@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into eval_rating (run_id, question_id, passage_id, reviewer, faithful,\n                                      relevant, note)\n             values ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e77d9dad483b2e92b0a54d72fe1a28dccabba4bcb5358631e86cf7d2cdf6ba93"
+}

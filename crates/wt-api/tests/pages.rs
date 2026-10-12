@@ -579,3 +579,416 @@ async fn the_pages_show_a_students_question_as_context_not_quotation() {
     );
     assert!(page.body.contains(label));
 }
+
+// ---- dana panel and give links (Spec 05, Dana calculator; Spec 06, item 8 and Logging) -------
+
+const NORTH_URL: &str = "https://example.invalid/north";
+const SOUTH_URL: &str = "https://give.south.example/donate";
+const SITE_URL: &str = "https://site.example/give";
+
+/// Two answers' worth of fixture: Ada at North and Bo moved to South, both pages verified.
+async fn dana_fixture(site_url: Option<&str>) -> Fx {
+    let mut site = Site::with_fakes(MODEL);
+    site.site_dana_url = site_url.map(str::to_owned);
+    let fx = start_with(site, true).await;
+    sqlx::query(
+        "insert into sangha (name, donation_url, donation_url_template, donation_kind)
+         values ('South Fixture Zendo', $1, $1 || '?amount={amount}', 'page')",
+    )
+    .bind(SOUTH_URL)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update talk set sangha_id = (select id from sangha where name = 'South Fixture Zendo')
+         where teacher_id = (select id from teacher where display_name = 'Bo Fixture')",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    for (name, url) in [
+        ("North Fixture Zendo", NORTH_URL),
+        ("South Fixture Zendo", SOUTH_URL),
+    ] {
+        wt_db::donation::verify(&fx.pool, name, url, "test")
+            .await
+            .unwrap();
+    }
+    fx
+}
+
+/// Asks as `cookie` and returns the permalink, the answer id and the page's CSRF token.
+async fn ask_as(fx: &Fx, cookie: &str) -> (String, Uuid, String) {
+    let token = csrf(&send(&fx.app, get("/", Some(cookie))).await.body);
+    let asked = send(
+        &fx.app,
+        post(
+            "/ask",
+            cookie,
+            &format!(
+                "q={}&csrf={}",
+                encode("How do I work with anger?"),
+                encode(&token)
+            ),
+        ),
+    )
+    .await;
+    assert_eq!(asked.status, StatusCode::SEE_OTHER, "{}", asked.body);
+    let permalink = asked.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let id = permalink.trim_start_matches("/a/").parse().unwrap();
+    (permalink, id, token)
+}
+
+fn fragment_post(path: &str, cookie: &str, form: &str) -> Request<Body> {
+    Request::post(path)
+        .header(header::COOKIE, format!("wt_session={cookie}"))
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header("HX-Request", "true")
+        .body(Body::from(form.to_owned()))
+        .unwrap()
+}
+
+async fn events(pool: &PgPool, kind: &str) -> i64 {
+    sqlx::query_scalar("select count(*) from dana_event where kind = $1")
+        .bind(kind)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// id, name, donation URL, template, verified, listed.
+type SanghaRow = (Uuid, String, Option<String>, Option<String>, bool, bool);
+
+/// The calculator's own lines for this answer, as the page should print them.
+async fn expected_lines(pool: &PgPool, answer: Uuid, total: i64, site: i64) -> Vec<String> {
+    let rows: Vec<SanghaRow> = sqlx::query_as(
+        "select id, name, donation_url, donation_url_template, donation_verified, listed
+         from sangha where name like '%Fixture Zendo'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let recipients = rows
+        .into_iter()
+        .map(
+            |(id, name, url, url_template, verified, listed)| wt_dana::Recipient {
+                sangha_id: id.into(),
+                name,
+                url,
+                url_template,
+                verified,
+                listed,
+            },
+        )
+        .collect();
+    let split = wt_dana::split(&wt_dana::DanaInput {
+        gift_total_cents: total,
+        site_cents: site,
+        recipients,
+        tiebreak_seed: wt_dana::seed_from(answer.as_bytes()),
+    })
+    .unwrap();
+    split
+        .lines
+        .iter()
+        .map(|l| format!("{}: ${}.", l.name, wt_dana::dollars(l.cents)))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_dana_fragment_and_the_no_script_page_show_the_calculators_split() {
+    let fx = dana_fixture(None).await;
+    let cookie = join(&fx, "owner").await;
+    let (permalink, id, token) = ask_as(&fx, &cookie).await;
+    let page = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    assert!(page.body.contains("<h2 id=\"dana-h\">Dana</h2>"));
+    assert!(page.body.contains("This site never handles your money."));
+    assert!(page.body.contains("Show the split"));
+    assert!(page.body.contains("role=\"status\" aria-live=\"polite\""));
+    assert!(page.body.contains("name=\"first\""));
+    assert!(
+        !page.body.contains("Optional gift to this site"),
+        "no site page, no site field"
+    );
+    let dana = format!("{permalink}/dana");
+
+    // An uneven total, so the extra cent goes where the seed says.
+    let expected = expected_lines(&fx.pool, id, 1001, 0).await;
+    assert_eq!(expected.len(), 2);
+    let fragment = send(
+        &fx.app,
+        fragment_post(
+            &dana,
+            &cookie,
+            &format!("total=10.01&csrf={}", encode(&token)),
+        ),
+    )
+    .await;
+    assert_eq!(fragment.status, StatusCode::OK);
+    assert!(!fragment.body.contains("<html"), "a fragment, not a page");
+    assert!(
+        fragment
+            .body
+            .contains("id=\"dana-result-h\" tabindex=\"-1\"")
+    );
+    for line in &expected {
+        assert!(
+            fragment.body.contains(&encode_html(line)),
+            "{line} in {}",
+            fragment.body
+        );
+    }
+    assert!(fragment.body.contains("Total you would give: $10.01"));
+    assert!(fragment.body.contains("Shares are equal."));
+    assert_eq!(events(&fx.pool, "split_computed").await, 1);
+    assert_eq!(
+        events(&fx.pool, "panel_open").await,
+        0,
+        "the script logs the open itself"
+    );
+
+    // Without the script: the whole page, the same split, the amount kept, the open logged.
+    let full = send(
+        &fx.app,
+        post(
+            &dana,
+            &cookie,
+            &format!("total=10.01&first=1&csrf={}", encode(&token)),
+        ),
+    )
+    .await;
+    assert_eq!(full.status, StatusCode::OK);
+    assert!(full.body.contains("<html"));
+    for line in &expected {
+        assert!(full.body.contains(&encode_html(line)), "{line}");
+    }
+    assert!(full.body.contains("value=\"10.01\""));
+    assert!(
+        !full.body.contains("name=\"first\""),
+        "the open is logged once"
+    );
+    assert_eq!(events(&fx.pool, "panel_open").await, 1);
+    assert_eq!(events(&fx.pool, "split_computed").await, 2);
+    let total: i32 = sqlx::query_scalar(
+        "select total_cents from dana_event where kind = 'split_computed' limit 1",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(total, 1001);
+
+    // The script's beacon logs the open and returns nothing.
+    let beacon = send(
+        &fx.app,
+        post(&dana, &cookie, &format!("open=1&csrf={}", encode(&token))),
+    )
+    .await;
+    assert_eq!(beacon.status, StatusCode::NO_CONTENT);
+    assert_eq!(events(&fx.pool, "panel_open").await, 2);
+
+    // Bad amounts show a message and log no split.
+    for bad in ["total=ten", "total=-5", "total=100001", "total="] {
+        let r = send(
+            &fx.app,
+            fragment_post(&dana, &cookie, &format!("{bad}&csrf={}", encode(&token))),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK);
+        assert!(r.body.contains("class=\"error\""), "{bad}: {}", r.body);
+    }
+    assert_eq!(events(&fx.pool, "split_computed").await, 2);
+
+    // CSRF, and someone else's answer.
+    let refused = send(&fx.app, fragment_post(&dana, &cookie, "total=5&csrf=wrong")).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    let other = join(&fx, "someone else").await;
+    let other_token = csrf(&send(&fx.app, get("/", Some(&other))).await.body);
+    let theirs = send(
+        &fx.app,
+        fragment_post(
+            &dana,
+            &other,
+            &format!("total=5&csrf={}", encode(&other_token)),
+        ),
+    )
+    .await;
+    assert_eq!(theirs.status, StatusCode::NOT_FOUND);
+}
+
+fn encode_html(s: &str) -> String {
+    s.replace('&', "&#38;").replace('\'', "&#39;")
+}
+
+#[tokio::test]
+async fn the_site_line_is_separate_and_a_contact_page_drops_out_with_its_note() {
+    let fx = dana_fixture(Some(SITE_URL)).await;
+    // South turns out to take gifts only through a contact page (Spec 02, Donation links, 4).
+    sqlx::query(
+        "update sangha set donation_verified = false, donation_kind = 'contact',
+                donation_note = 'Gifts by contact page only.'
+         where name = 'South Fixture Zendo'",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let cookie = join(&fx, "owner").await;
+    let (permalink, id, token) = ask_as(&fx, &cookie).await;
+    let page = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    assert!(
+        page.body
+            .contains("Optional gift to this site (US dollars)")
+    );
+    let r = send(
+        &fx.app,
+        fragment_post(
+            &format!("{permalink}/dana"),
+            &cookie,
+            &format!("total=20&site=5&csrf={}", encode(&token)),
+        ),
+    )
+    .await;
+    assert!(
+        r.body.contains("North Fixture Zendo: $20.00."),
+        "{}",
+        r.body
+    );
+    assert!(
+        !r.body.contains("South Fixture Zendo: $"),
+        "a contact page drops out"
+    );
+    assert!(
+        r.body
+            .contains("South Fixture Zendo: Gifts by contact page only."),
+        "with its note"
+    );
+    assert!(r.body.contains("This site, optional: $5.00."));
+    assert!(r.body.contains(&format!("href=\"/give/{id}/site\"")));
+    assert!(r.body.contains("Total you would give: $25.00"));
+
+    // With no eligible sangha the panel says so plainly.
+    wt_db::donation::unverify(&fx.pool, "North Fixture Zendo", "checking again", "test")
+        .await
+        .unwrap();
+    let r = send(
+        &fx.app,
+        fragment_post(
+            &format!("{permalink}/dana"),
+            &cookie,
+            &format!("total=20&csrf={}", encode(&token)),
+        ),
+    )
+    .await;
+    assert!(
+        r.body
+            .contains("None of the sanghas in this answer has a verified giving page yet")
+    );
+}
+
+#[tokio::test]
+async fn give_redirects_only_to_the_registry_link_and_logs_each_click() {
+    let fx = dana_fixture(Some(SITE_URL)).await;
+    let cookie = join(&fx, "owner").await;
+    let (_, id, _) = ask_as(&fx, &cookie).await;
+    let sangha = |name: &str| {
+        let name = name.to_owned();
+        let pool = fx.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>("select id from sangha where name = $1")
+                .bind(name)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let north = sangha("North Fixture Zendo").await;
+    let south = sangha("South Fixture Zendo").await;
+
+    let r = send(
+        &fx.app,
+        get(
+            &format!("/give/{id}/{north}?amount_cents=500"),
+            Some(&cookie),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers[header::LOCATION],
+        NORTH_URL,
+        "no template, the page itself"
+    );
+    let r = send(
+        &fx.app,
+        get(
+            &format!("/give/{id}/{south}?amount_cents=1234"),
+            Some(&cookie),
+        ),
+    )
+    .await;
+    assert_eq!(
+        r.headers[header::LOCATION].to_str().unwrap(),
+        format!("{SOUTH_URL}?amount=12.34"),
+        "the verified template takes the amount"
+    );
+    let r = send(&fx.app, get(&format!("/give/{id}/site"), Some(&cookie))).await;
+    assert_eq!(r.headers[header::LOCATION], SITE_URL);
+    let clicks: Vec<Option<Uuid>> = sqlx::query_scalar(
+        "select sangha_id from dana_event where kind = 'link_click' order by created_at",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(clicks, [Some(north), Some(south), None]);
+
+    // A tampered amount is refused, and logs nothing.
+    for bad in ["abc", "-1", "10000001", "1.5"] {
+        let r = send(
+            &fx.app,
+            get(
+                &format!("/give/{id}/{south}?amount_cents={bad}"),
+                Some(&cookie),
+            ),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{bad}");
+    }
+    // Unverified and unlisted sanghas are refused.
+    wt_db::donation::unverify(&fx.pool, "South Fixture Zendo", "checking", "test")
+        .await
+        .unwrap();
+    let r = send(&fx.app, get(&format!("/give/{id}/{south}"), Some(&cookie))).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "unverified");
+    sqlx::query("update sangha set listed = false where id = $1")
+        .bind(north)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let r = send(&fx.app, get(&format!("/give/{id}/{north}"), Some(&cookie))).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "unlisted");
+    assert_eq!(events(&fx.pool, "link_click").await, 3);
+
+    // Someone else's answer, and the site line without a site page.
+    let other = join(&fx, "someone else").await;
+    let r = send(&fx.app, get(&format!("/give/{id}/site"), Some(&other))).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    let fx2 = dana_fixture(None).await;
+    let cookie2 = join(&fx2, "owner").await;
+    let (_, id2, _) = ask_as(&fx2, &cookie2).await;
+    let r = send(&fx2.app, get(&format!("/give/{id2}/site"), Some(&cookie2))).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "no site page configured");
+}
+
+#[tokio::test]
+async fn the_dana_script_is_served_from_the_site() {
+    let fx = start().await;
+    let r = send(&fx.app, get("/static/dana.js", None)).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.headers[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/javascript")
+    );
+    assert!(r.body.contains("dana-result"));
+    assert!(!r.body.contains("http"), "no external host");
+}

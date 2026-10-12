@@ -284,6 +284,108 @@ pub fn assemble(
     }
 }
 
+// ---- dana panel (Spec 05, Dana calculator; Spec 06, Answer page structure, item 8) ----------
+
+/// One sangha's line of the split.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DanaLineView {
+    /// The sangha.
+    pub name: String,
+    /// Its share, in dollars with two decimals.
+    pub amount: String,
+    /// The app's `/give` route, which logs the click and redirects.
+    pub href: String,
+}
+
+/// The site's own line, separate from the sanghas'.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SiteLineView {
+    /// The amount, in dollars with two decimals.
+    pub amount: String,
+    /// The app's `/give/<answer>/site` route.
+    pub href: String,
+}
+
+/// What the dana result region shows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DanaView {
+    /// One line per eligible sangha, in the calculator's order.
+    pub lines: Vec<DanaLineView>,
+    /// The site line, when the donor entered an amount and the site has a giving page.
+    pub site: Option<SiteLineView>,
+    /// Everything the donor would give.
+    pub outlay: String,
+    /// "Sangha: note" for each cited sangha left out that has a note, such as a contact page.
+    pub notes: Vec<String>,
+    /// A problem with what was entered, shown instead of a split.
+    pub error: Option<String>,
+}
+
+impl DanaView {
+    /// A view that shows only a message.
+    pub fn message(text: &str) -> Self {
+        Self {
+            error: Some(text.to_owned()),
+            ..Self::default()
+        }
+    }
+}
+
+/// The calculator's recipients: each cited sangha, as its registry row has it.
+pub fn recipients(sanghas: &[wt_db::answer::DanaSangha]) -> Vec<wt_dana::Recipient> {
+    sanghas
+        .iter()
+        .map(|s| wt_dana::Recipient {
+            sangha_id: s.id,
+            name: s.name.clone(),
+            url: s.donation_url.clone(),
+            url_template: s.donation_url_template.clone(),
+            verified: s.donation_verified,
+            listed: s.listed,
+        })
+        .collect()
+}
+
+/// The tiebreak seed for an answer, so its leftover cents always land the same way.
+pub fn dana_seed(answer: AnswerId) -> u64 {
+    wt_dana::seed_from(answer.as_uuid().as_bytes())
+}
+
+/// Turns a computed split into what the page shows. Lines link to the app's `/give` route with
+/// the share, which the route uses only to fill a verified page's amount template.
+pub fn dana_view(
+    answer: AnswerId,
+    split: &wt_dana::DanaSplit,
+    sanghas: &[wt_db::answer::DanaSangha],
+    site_giving: bool,
+) -> DanaView {
+    let lines = split
+        .lines
+        .iter()
+        .map(|l| DanaLineView {
+            name: l.name.clone(),
+            amount: wt_dana::dollars(l.cents),
+            href: format!("/give/{answer}/{}?amount_cents={}", l.sangha_id, l.cents),
+        })
+        .collect();
+    let site = (site_giving && split.site_cents > 0).then(|| SiteLineView {
+        amount: wt_dana::dollars(split.site_cents),
+        href: format!("/give/{answer}/site"),
+    });
+    let notes = sanghas
+        .iter()
+        .filter(|s| s.listed && split.excluded.contains(&s.id))
+        .filter_map(|s| s.donation_note.as_ref().map(|n| format!("{}: {n}", s.name)))
+        .collect();
+    DanaView {
+        lines,
+        site,
+        outlay: wt_dana::dollars(split.total_outlay_cents),
+        notes,
+        error: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

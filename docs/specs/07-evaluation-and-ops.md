@@ -41,6 +41,8 @@ Commands:
 5. `wt eval report --run <id>` prints: the share of questions that pass, where a question passes when at least `question_pass_ratio` (default 0.67) of its rated passages are both faithful and relevant; claim-audit counts by verdict; the teacher-count distribution and the number of thin-coverage answers; the outcome of each named-teacher query; stage latency percentiles; and dana event counts. It marks the PRD verdicts: fewer than half of questions passing is a retrieval fail, and any invented claim surviving is a synthesis fail.
 6. `wt eval compare --a <run> --b <run>` shows per-question changes between two runs, which is how a tuning change is judged.
 
+Built October 11, 2026 in `crates/wt-eval` (commands 1 to 6). `wt_api::ask::answer` is the one query path for the page and the run, and each answer's stage timings (parse, embed, search, rerank, select, load, synth, persist, total) and outcome go in `eval_result.timings` and `eval_result.outcome` (migration `0033_eval_runs.sql`). The `eval` tester is created revoked, so no session can use it, `wt tester invite` refuses the label, and `v_answer_stats` and `v_dana_clicks` leave its answers out. The run's `config` holds the build, the commit (marked `-dirty` for a changed tree), `retrieval.toml` and `pipeline.toml` as read, and the embedder, reranker, synthesis and verifier model names. In the review page questions are `q01`, `q02`, ... by place in the set, and each theme sentence is one claim row; the claim text stored in `claim_audit` comes from the answer, not the file. A reviewer's second import for a run replaces the first. The 50-question set is `eval/questions_v1.toml`: the 20 Gate A questions, then 30 drafts tagged `draft`, which the report shows apart and leaves out of both verdicts until the owner approves them and loads the set as a new version.
+
 ## Gate A notebook retrieval test
 
 The PRD orders its risks by how cheaply they can be tested, and the cheapest high-impact one is whether retrieval over practitioner-style questions returns faithful passages. Gate A tests that in a notebook over real cleared transcripts before any retrieval or interface code is built in Rust.
@@ -120,9 +122,9 @@ The runbook is `docs/runbook.md`, written as the work is built, and it contains 
 
 ## Acceptance criteria
 
-- [ ] A full `wt eval run` of the 50-question set completes without code changes, and `wt eval report` prints every metric listed above.
-- [ ] `wt eval export-review` produces a standalone HTML file that works offline, and `wt eval import-ratings` loads its output into `eval_rating` and `claim_audit`.
-- [ ] A 20-answer claim audit imports and the report counts supported, drifting and invented claims.
+- [ ] A full `wt eval run` of the 50-question set completes without code changes, and `wt eval report` prints every metric listed above. (The report's metrics are tested in `wt-eval/tests/eval.rs`. Open until the owner approves the 30 draft questions and the full set runs.)
+- [x] `wt eval export-review` produces a standalone HTML file that works offline, and `wt eval import-ratings` loads its output into `eval_rating` and `claim_audit`. (`wt-eval/tests/eval.rs`.)
+- [x] A 20-answer claim audit imports and the report counts supported, drifting and invented claims. (`wt-eval/tests/eval.rs`.)
 - [ ] Each audit check has a test with a failing fixture that makes `wt audit` exit nonzero and a passing fixture that does not, and warn-level checks do not change the exit code.
 - [ ] Takedown on a fixture teacher leaves zero rows and zero objects in every registered store, including S3 emulated by MinIO in tests.
 - [ ] Takedown strips affected themes from stored answers and nulls affected rating notes.

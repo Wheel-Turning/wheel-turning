@@ -1,0 +1,235 @@
+# Practitioner question set, version 1 (Spec 07, Evaluation harness): 50 questions.
+#
+# Questions 1 to 20 are the Gate A set (eval/gate_a_questions.toml), unchanged and in the same
+# order, so their results compare across the notebook and `wt eval`.
+#
+# Questions 21 to 50 are DRAFTS written on October 11, 2026 to the PRD's coverage list: more
+# multi-voice topics, single-teacher topics, grief, practice questions, the named-teacher query
+# for Norman Fischer that tests thin coverage, and questions that should surface texts, with a
+# named-author query for Dogen. Each carries the tag "draft". The owner must approve or replace
+# them before their results count: `wt eval report` reports draft questions apart and leaves them
+# out of every verdict. To approve, remove the "draft" tag and load the file as a new version
+# (`--version 2`), since a loaded set never changes.
+#
+# Load:  wt eval load --file eval/questions_v1.toml --name practitioner --version 1
+
+# Compassion
+[[question]]
+text = "I try to be compassionate toward my mother but I end up exhausted and resentful. Is that a failure of practice?"
+tags = ["multi_voice", "compassion"]
+
+[[question]]
+text = "How do I practice compassion for someone who has really hurt me?"
+tags = ["multi_voice", "compassion"]
+
+# Anger
+[[question]]
+text = "Anger comes up hard during zazen and I can't stop replaying an argument. What do I do with it?"
+tags = ["multi_voice", "anger"]
+
+[[question]]
+text = "Is it ever right to be angry, or is anger always something to let go of?"
+tags = ["multi_voice", "anger"]
+
+# Heart Sutra
+[[question]]
+text = "We chant 'form is emptiness, emptiness is form' every week and I still don't know what it means. How should I understand it?"
+tags = ["multi_voice", "heart_sutra"]
+
+[[question]]
+text = "If there is no eye, ear, nose, tongue, body or mind, who is it that practices?"
+tags = ["multi_voice", "heart_sutra"]
+
+# Precepts
+[[question]]
+text = "I took the precepts but I keep breaking the one about right speech. How should I relate to that?"
+tags = ["multi_voice", "precepts"]
+
+[[question]]
+text = "Are the precepts rules I follow, or something else?"
+tags = ["multi_voice", "precepts"]
+
+# Repentance
+[[question]]
+text = "How is the repentance verse supposed to work when I don't feel sorry, or feel sorry all the time?"
+tags = ["multi_voice", "repentance"]
+
+[[question]]
+text = "I did something years ago that still makes me ashamed. Can practice help with that?"
+tags = ["multi_voice", "repentance"]
+
+# Practicing within sangha
+[[question]]
+text = "There's someone in my sangha I find really difficult. How do I keep practicing with them?"
+tags = ["multi_voice", "sangha"]
+
+[[question]]
+text = "Why should I sit with a group when I can sit at home?"
+tags = ["multi_voice", "sangha"]
+
+# Discrimination and suffering
+[[question]]
+text = "As a person of color, I often feel out of place in Zen centers. How do teachers talk about that?"
+tags = ["multi_voice", "discrimination"]
+
+[[question]]
+text = "How does Zen practice respond to injustice and racism, not just personal suffering?"
+tags = ["multi_voice", "discrimination"]
+
+# Single-teacher topics: narrower subjects a few talks treat in depth.
+[[question]]
+text = "My legs hurt so much in sesshin that it's all I can think about. How should I work with pain?"
+tags = ["single_teacher", "body"]
+
+[[question]]
+text = "What is the point of oryoki and all the forms around eating?"
+tags = ["single_teacher", "forms"]
+
+[[question]]
+text = "How do I keep practicing when work and family leave me no time to sit?"
+tags = ["single_teacher", "daily_life"]
+
+[[question]]
+text = "What does shikantaza actually ask me to do on the cushion?"
+tags = ["single_teacher", "zazen"]
+
+# Grief
+[[question]]
+text = "My father died last month and sitting feels unbearable. How do teachers talk about grief?"
+tags = ["grief"]
+
+[[question]]
+text = "If everything is impermanent, why does losing someone still hurt this much?"
+tags = ["grief", "impermanence"]
+
+# Multi-voice topics, second questions
+
+[[question]]
+text = "Is being kind to myself just a way of being selfish?"
+tags = ["multi_voice", "compassion", "draft"]
+
+[[question]]
+text = "The news makes me so angry I can't sleep. How do teachers talk about anger at the world?"
+tags = ["multi_voice", "anger", "draft"]
+
+[[question]]
+text = "The Heart Sutra says there is no attainment. Then why am I practicing?"
+tags = ["multi_voice", "heart_sutra", "draft"]
+
+[[question]]
+text = "How do I keep the precept of not killing when I eat meat and swat mosquitoes?"
+tags = ["multi_voice", "precepts", "draft"]
+
+[[question]]
+text = "What does making amends look like in Zen, beyond chanting the verse?"
+tags = ["multi_voice", "repentance", "draft"]
+
+[[question]]
+text = "I feel lonely even when I sit with the sangha. Is that normal?"
+tags = ["multi_voice", "sangha", "draft"]
+
+[[question]]
+text = "How do I practice with prejudice I find in myself?"
+tags = ["multi_voice", "discrimination", "draft"]
+
+# Single-teacher topics
+
+[[question]]
+text = "Why do we chant, and does it matter if I don't understand the words?"
+tags = ["single_teacher", "chanting", "draft"]
+
+[[question]]
+text = "The bodhisattva vows say to save all beings. How can I take a vow I can't keep?"
+tags = ["single_teacher", "vows", "draft"]
+
+[[question]]
+text = "What is a koan, and how am I supposed to work with one?"
+tags = ["single_teacher", "koans", "draft"]
+
+[[question]]
+text = "What does it mean to take refuge in Buddha, Dharma and Sangha?"
+tags = ["single_teacher", "refuge", "draft"]
+
+[[question]]
+text = "Why do we bow so much? It feels like worship."
+tags = ["single_teacher", "forms", "draft"]
+
+# Grief
+
+[[question]]
+text = "My dog died and people say it shouldn't hurt this much. How do teachers talk about that kind of loss?"
+tags = ["grief", "draft"]
+
+[[question]]
+text = "A close friend is dying. How can I be with her without falling apart?"
+tags = ["grief", "death", "draft"]
+
+[[question]]
+text = "I am afraid of dying. What does Zen say about facing my own death?"
+tags = ["grief", "death", "draft"]
+
+# Practice questions
+
+[[question]]
+text = "I keep falling asleep when I sit. What should I do?"
+tags = ["practice", "zazen", "draft"]
+
+[[question]]
+text = "How long should a beginner sit each day?"
+tags = ["practice", "zazen", "draft"]
+
+[[question]]
+text = "My mind won't stop planning and rehearsing during zazen. Is that a problem?"
+tags = ["practice", "zazen", "draft"]
+
+[[question]]
+text = "Is it all right to practice with another Buddhist tradition at the same time?"
+tags = ["practice", "sangha", "draft"]
+
+[[question]]
+text = "How do I bring practice into a stressful job?"
+tags = ["practice", "daily_life", "draft"]
+
+[[question]]
+text = "What is the difference between practice and trying to improve myself?"
+tags = ["practice", "daily_life", "draft"]
+
+[[question]]
+text = "How do I know whether my practice is working?"
+tags = ["practice", "draft"]
+
+# Named teacher: filters to one teacher; Norman Fischer tests thin coverage (PRD)
+
+[[question]]
+text = "What has Norman Fischer said about grief?"
+tags = ["named_teacher", "grief", "draft"]
+
+[[question]]
+text = "What does Kanshin say about working with the body in zazen?"
+tags = ["named_teacher", "zazen", "draft"]
+
+[[question]]
+text = "How does Tim Burnett talk about difficult emotions?"
+tags = ["named_teacher", "emotions", "draft"]
+
+# Texts and a named author: these should surface the texts section (PRD)
+
+[[question]]
+text = "What did Dogen mean by \"to study the self is to forget the self\"?"
+tags = ["named_author", "texts", "draft"]
+
+[[question]]
+text = "What does the Genjokoan say about delusion and enlightenment?"
+tags = ["texts", "genjokoan", "draft"]
+
+[[question]]
+text = "How do teachers explain Dogen's being-time, Uji?"
+tags = ["texts", "uji", "draft"]
+
+[[question]]
+text = "What does the Platform Sutra say about sudden awakening?"
+tags = ["texts", "draft"]
+
+[[question]]
+text = "What does the Dhammapada say about hatred?"
+tags = ["texts", "anger", "draft"]

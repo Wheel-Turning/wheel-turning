@@ -113,6 +113,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         sensitivity_model,
         keys,
         secure_cookies: !config.env.is_dev(),
+        site_dana_url: config.site_dana_url.clone(),
     })
 }
 
