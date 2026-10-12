@@ -1,9 +1,11 @@
 //! Spec 05, Sensitive questions, and Spec 06, Rendering sensitive questions: what `POST /ask`
-//! does and stores for acute, distress and medical questions, and the curated query. Synthetic
-//! questions, teachers and passages only.
+//! does and stores for acute, distress, medical and out-of-scope questions, unrelated
+//! questions, the triage gate, and the curated query. Synthetic questions, teachers and
+//! passages only.
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::Router;
@@ -19,7 +21,8 @@ use wt_db::test_support::TestDb;
 use wt_extract::{FakeLlm, LlmClient};
 use wt_ml::FakeEmbedder;
 use wt_registry::RegistryFile;
-use wt_retrieve::{Level, ModelCheck};
+use wt_retrieve::Triage;
+use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, Verdict};
 
 const REGISTRY: &str = r#"
 [[sangha]]
@@ -439,51 +442,280 @@ async fn the_curated_query_runs_with_the_notice_on_top_and_neither_summary_nor_g
     assert_eq!(refused.status, StatusCode::FORBIDDEN);
 }
 
-/// A model layer that always answers `level`.
-struct Says(Level);
+/// A triage gate with a fixed verdict or error, after an optional delay.
+struct Gate {
+    reply: Result<Verdict, String>,
+    delay: Duration,
+}
 
-#[async_trait]
-impl ModelCheck for Says {
-    async fn level(&self, _: &str) -> Result<Level, String> {
-        Ok(self.0)
+impl Gate {
+    fn says(relevance: Relevance, risk: Risk) -> Arc<dyn Triage> {
+        Arc::new(Self {
+            reply: Ok(Verdict {
+                relevance,
+                risk,
+                ongoing: true,
+                confidence: Confidence::High,
+            }),
+            delay: Duration::ZERO,
+        })
+    }
+    fn late(relevance: Relevance, risk: Risk, ms: u64) -> Arc<dyn Triage> {
+        Arc::new(Self {
+            reply: Ok(Verdict {
+                relevance,
+                risk,
+                ongoing: true,
+                confidence: Confidence::High,
+            }),
+            delay: Duration::from_millis(ms),
+        })
+    }
+    fn fails() -> Arc<dyn Triage> {
+        Arc::new(Self {
+            reply: Err("the monthly language-model cap is reached".into()),
+            delay: Duration::ZERO,
+        })
+    }
+    fn hangs() -> Arc<dyn Triage> {
+        Arc::new(Self {
+            reply: Err("never".into()),
+            delay: Duration::from_secs(3600),
+        })
     }
 }
 
-/// A model layer that always fails, as when the monthly cap is reached.
-struct CapReached;
-
 #[async_trait]
-impl ModelCheck for CapReached {
-    async fn level(&self, _: &str) -> Result<Level, String> {
-        Err("the monthly language-model cap is reached".into())
+impl Triage for Gate {
+    async fn triage(&self, _: &str) -> Result<Verdict, String> {
+        tokio::time::sleep(self.delay).await;
+        self.reply.clone()
     }
+}
+
+fn gated(gate: Arc<dyn Triage>) -> Site {
+    Site {
+        triage: Some(gate),
+        ..site(themes())
+    }
+}
+
+const PRACTICE: Relevance = Relevance::Practice;
+const PLAIN: &str = "How do I work with anger?";
+
+/// `(category, relevance, triage_degraded, has text)` of every log row, oldest first.
+async fn logged(pool: &PgPool) -> Vec<(String, Option<String>, bool, bool)> {
+    sqlx::query_as(
+        "select sensitive_category, relevance, triage_degraded, query_text is not null
+         from query_log order by created_at",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
-async fn the_model_layer_can_raise_a_question_to_acute_and_never_lowers_one() {
-    // The rules say distress and the hashing embedder matches no exemplar: the layers disagree,
-    // so the model is asked.
-    let fx = start(Site {
-        sensitivity_model: Some(Arc::new(Says(Level::Acute))),
-        ..site(themes())
-    })
-    .await;
+async fn the_gate_can_raise_a_question_to_acute_and_never_lowers_one() {
+    // The rules say distress; the gate says acute.
+    let fx = start(gated(Gate::says(PRACTICE, Risk::Acute))).await;
     let r = fx.ask(DISTRESS).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.contains(HEADING));
+    assert_eq!(fx.counts().await, (1, 0));
+    assert_eq!(
+        logged(&fx.pool).await,
+        [("acute".into(), Some("practice".into()), false, false)]
+    );
 
-    for model in [
-        Arc::new(Says(Level::None)) as Arc<dyn ModelCheck>,
-        Arc::new(CapReached),
+    // Harm to others, and ongoing abuse, are acute as well.
+    for risk in [Risk::HarmToOthers, Risk::Abuse] {
+        let fx = start(gated(Gate::says(PRACTICE, risk))).await;
+        assert!(fx.ask(PLAIN).await.body.contains(HEADING), "{risk:?}");
+    }
+
+    // A gate verdict below the rules' leaves the rules' level.
+    for gate in [
+        Gate::says(PRACTICE, Risk::None),
+        Gate::says(PRACTICE, Risk::Medical),
     ] {
+        let fx = start(gated(gate)).await;
+        let page = fx.answer(DISTRESS).await;
+        assert!(page.body.contains("you do not have to carry it alone"));
+        assert_eq!(logged(&fx.pool).await[0].0, "distress");
+    }
+
+    // A medical verdict on an ordinary question gives the medical banner.
+    let fx = start(gated(Gate::says(PRACTICE, Risk::Medical))).await;
+    let page = fx.answer(PLAIN).await;
+    assert!(page.body.contains("It is not medical advice."));
+}
+
+#[tokio::test]
+async fn a_failed_slow_or_capped_gate_logs_triage_degraded_and_the_rules_decide() {
+    for gate in [Some(Gate::fails()), Some(Gate::hangs()), None] {
         let fx = start(Site {
-            sensitivity_model: Some(model),
+            triage: gate,
             ..site(themes())
         })
         .await;
         let page = fx.answer(DISTRESS).await;
         assert!(page.body.contains("you do not have to carry it alone"));
+        assert_eq!(
+            logged(&fx.pool).await,
+            [("distress".into(), None, true, true)]
+        );
     }
+}
+
+#[tokio::test]
+async fn an_out_of_scope_question_gets_the_plain_page_and_stores_counts_only() {
+    let llm = themes();
+    let fx = start(Site {
+        triage: Some(Gate::says(Relevance::Unrelated, Risk::Dangerous)),
+        ..site(llm.clone())
+    })
+    .await;
+    let question = "a synthetic harmful request unrelated to practice";
+    let r = fx.ask(question).await;
+    assert_eq!(r.status, StatusCode::OK, "a page, not a redirect");
+    assert!(r.headers.get(header::LOCATION).is_none());
+    assert_eq!(r.headers[header::CACHE_CONTROL], "no-store");
+    let main = main_of(&r.body);
+    assert!(
+        main.contains(
+            "<h1 id=\"outside-h\" tabindex=\"-1\" autofocus>This is outside what Wheel \
+             Turning can help with</h1>"
+        ),
+        "{main}"
+    );
+    assert!(main.contains(
+        "Wheel Turning shares what Zen teachers have said about practice. It cannot help with \
+         this question."
+    ));
+    for absent in [
+        "Flag this query",
+        "feedback",
+        "/give/",
+        "/a/",
+        "Give to",
+        "blockquote",
+        question,
+        "Search the talks anyway",
+    ] {
+        assert!(!r.body.contains(absent), "{absent} must not appear");
+    }
+    assert!(llm.seen.lock().unwrap().is_empty(), "no synthesis");
+    assert_eq!(fx.counts().await, (1, 0));
+    assert_eq!(
+        logged(&fx.pool).await,
+        [(
+            "out_of_scope".into(),
+            Some("unrelated".into()),
+            false,
+            false
+        )]
+    );
+    let refused = sqlx::query(
+        "update query_log set query_text = 'kept' where sensitive_category = 'out_of_scope'",
+    )
+    .execute(&fx.pool)
+    .await;
+    assert!(refused.is_err(), "an out_of_scope row can never hold text");
+    let analyzable: i64 = sqlx::query_scalar("select count(*) from analyzable_query_log")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(analyzable, 0);
+}
+
+#[tokio::test]
+async fn a_late_acute_or_out_of_scope_verdict_discards_the_retrieval_result() {
+    for (risk, heading) in [
+        (Risk::Acute, HEADING),
+        (
+            Risk::Dangerous,
+            "This is outside what Wheel Turning can help with",
+        ),
+    ] {
+        let llm = themes();
+        // The gate answers well after the fixture's retrieval has finished.
+        let fx = start(Site {
+            triage: Some(Gate::late(PRACTICE, risk, 400)),
+            ..site(llm.clone())
+        })
+        .await;
+        let r = fx.ask(PLAIN).await;
+        assert_eq!(r.status, StatusCode::OK, "{risk:?}");
+        assert!(r.body.contains(heading));
+        assert!(!r.body.contains("blockquote"));
+        assert_eq!(fx.counts().await, (1, 0), "no answer row");
+        assert!(!logged(&fx.pool).await[0].3, "no question text");
+        assert!(llm.seen.lock().unwrap().is_empty(), "no synthesis");
+    }
+}
+
+#[tokio::test]
+async fn an_unrelated_question_shows_the_outside_page_and_searches_anyway_on_request() {
+    let fx = start(gated(Gate::says(Relevance::Unrelated, Risk::None))).await;
+    let question = "What is a good recipe for banana bread?";
+    let r = fx.ask(question).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers[header::CACHE_CONTROL], "no-store");
+    let main = main_of(&r.body);
+    assert!(main.contains(
+        "<h1 id=\"outside-h\" tabindex=\"-1\" autofocus>This question may be outside what \
+         these talks cover</h1>"
+    ));
+    assert!(main.contains(
+        "The talks here are about Zen practice. You can still search them for this question."
+    ));
+    assert!(main.contains(question), "the question is shown");
+    assert!(main.contains("<input type=\"hidden\" name=\"anyway\" value=\"1\">"));
+    assert!(main.contains("<button type=\"submit\">Search the talks anyway</button>"));
+    for absent in ["Flag this query", "Give to", "/a/", "blockquote"] {
+        assert!(!r.body.contains(absent), "{absent} must not appear");
+    }
+    assert_eq!(fx.counts().await, (1, 0), "logged, with no answer yet");
+    assert_eq!(
+        logged(&fx.pool).await,
+        [("none".into(), Some("unrelated".into()), false, true)]
+    );
+
+    // "Search the talks anyway" runs it as usual.
+    let anyway = fx
+        .post("/ask", &format!("q={}&anyway=1", encode(question)))
+        .await;
+    assert_eq!(anyway.status, StatusCode::SEE_OTHER, "{}", anyway.body);
+    let page = fx.follow(&anyway).await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("Your question"));
+    assert_eq!(fx.counts().await, (2, 1));
+}
+
+#[tokio::test]
+async fn an_answered_question_stores_its_relevance_and_the_tally_counts_each_layer() {
+    let fx = start(gated(Gate::says(Relevance::Adjacent, Risk::None))).await;
+    fx.answer(PLAIN).await;
+    fx.answer(PLAIN).await;
+    assert_eq!(
+        logged(&fx.pool).await[0],
+        ("none".into(), Some("adjacent".into()), false, true)
+    );
+    let tally: Vec<(String, String, String, String, i64)> =
+        sqlx::query_as("select rules, risk, relevance, level, n from triage_tally")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        tally,
+        [(
+            "none".into(),
+            "none".into(),
+            "adjacent".into(),
+            "none".into(),
+            2
+        )]
+    );
 }
 
 #[tokio::test]

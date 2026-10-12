@@ -1870,6 +1870,12 @@ async fn reports_run_as_the_analyst_and_never_show_an_unflagged_question() {
     assert_eq!(dana[0]["kind"], "split_computed");
     assert_eq!(dana[0]["events"], 2);
     json(&["report", "coverage"]);
+    // Spec 05, Finding problem areas: counts only, as the analyst.
+    let triage = json(&["sensitive", "report", "--since", "1d"]);
+    assert_eq!(triage["totals"]["questions"], 2);
+    assert_eq!(triage["by_category"][0]["category"], "none");
+    let out = report(&["sensitive", "report"], fx.db.url().expose());
+    assert!(!out.status.success(), "the superuser must be refused");
     let flagged = json(&["report", "flagged"]);
     assert_eq!(flagged.as_array().unwrap().len(), 1);
     assert_eq!(flagged[0]["query_text"], "flagged question");

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}This question may be outside what these talks cover · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<section class="notice" aria-labelledby="outside-h">
+<h1 id="outside-h" tabindex="-1" autofocus>This question may be outside what these talks cover</h1>
+<p>The talks here are about Zen practice. You can still search them for this question.</p>
+</section>
+<p class="muted">Your question</p>
+<p class="question">{{ question }}</p>
+<form method="post" action="/ask">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="q" value="{{ question }}">
+<input type="hidden" name="anyway" value="1">
+<button type="submit">Search the talks anyway</button>
+</form>
+<p><a href="/">Ask something else</a></p>
+</div>
+{% endblock %}

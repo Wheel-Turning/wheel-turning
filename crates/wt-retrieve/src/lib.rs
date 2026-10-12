@@ -24,7 +24,8 @@ use wt_ml::{Embedder, MlError, Reranker};
 pub use config::{ExcerptConfig, RetrievalConfig};
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
-pub use sensitive::{Classified, Level, ModelCheck, Sensitivity};
+pub use sensitive::triage::{Relevance, Triage, Triaged};
+pub use sensitive::{Classified, Level, Sensitivity};
 
 use select::SelectInput;
 

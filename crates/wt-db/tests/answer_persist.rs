@@ -48,6 +48,8 @@ async fn a_passage_replaced_before_the_save_is_left_out_of_the_answer() {
             latency_ms: 10,
             themes_dropped: 0,
             sensitive_category: "none",
+            relevance: None,
+            triage_degraded: false,
             privacy_mode: "share",
             text_expires_at: None,
         },

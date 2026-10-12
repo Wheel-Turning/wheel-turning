@@ -1,0 +1,107 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select rules as \"rules!\", embedding as \"embedding!\", risk as \"risk!\",\n                  gate_level as \"gate_level!\", relevance as \"relevance!\",\n                  confidence as \"confidence!\", level as \"level!\", sum(n)::bigint as \"n!\"\n           from triage_tally where day >= ($1::timestamptz)::date\n           group by 1, 2, 3, 4, 5, 6, 7 order by 8 desc, 1, 2, 3, 4, 5, 6, 7",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rules!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "rules"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "embedding!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "embedding"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "risk!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "risk"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "gate_level!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "gate_level"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "relevance!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "relevance"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "confidence"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "level!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "triage_tally",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "19ae6b4de22e0b735dfe8bb808eb66d98a68ad3863db688226dd0c757514a408"
+}

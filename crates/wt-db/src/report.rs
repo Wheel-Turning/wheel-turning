@@ -156,3 +156,210 @@ pub async fn flagged(pool: &PgPool) -> Result<Vec<Flagged>, DbError> {
         })
         .collect())
 }
+
+/// Questions by category, relevance and whether the gate was degraded, from `v_query_triage`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TriageRow {
+    /// `none`, `medical`, `distress`, `out_of_scope` or `acute`.
+    pub category: String,
+    /// `practice`, `adjacent`, `unrelated`, or absent when the gate did not answer.
+    pub relevance: Option<String>,
+    /// The gate was off, failed, timed out or found the cap reached.
+    pub triage_degraded: bool,
+    /// Questions.
+    pub questions: i64,
+    /// Of those, answered: an unrelated question answered was searched anyway.
+    pub answered: i64,
+    /// Answers that found nothing.
+    pub none_found: i64,
+    /// Answers with a Not relevant vote.
+    pub not_relevant: i64,
+    /// Flagged questions.
+    pub flagged: i64,
+}
+
+/// What each layer said, summed from `triage_tally`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LayerRow {
+    /// The rules' level.
+    pub rules: String,
+    /// The exemplars' level, `down` or `skipped`.
+    pub embedding: String,
+    /// The gate's risk, or `unanswered`.
+    pub risk: String,
+    /// The level that risk maps to, or `unanswered`.
+    pub gate_level: String,
+    /// The gate's relevance, or `unanswered`.
+    pub relevance: String,
+    /// The gate's confidence, or `unanswered`.
+    pub confidence: String,
+    /// The level the question got.
+    pub level: String,
+    /// Questions.
+    pub n: i64,
+}
+
+/// Totals and rates over the period.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct TriageTotals {
+    /// Questions.
+    pub questions: i64,
+    /// With `triage_degraded`.
+    pub triage_degraded: i64,
+    /// Given `out_of_scope`.
+    pub out_of_scope: i64,
+    /// Given relevance `unrelated` at level none.
+    pub unrelated: i64,
+    /// Of those, searched anyway.
+    pub unrelated_searched_anyway: i64,
+    /// `triage_degraded` over questions.
+    pub triage_degraded_rate: f64,
+    /// `out_of_scope` over questions.
+    pub out_of_scope_rate: f64,
+    /// Questions shown the outside-these-talks page, over questions.
+    pub unrelated_rate: f64,
+    /// Answers.
+    pub answered: i64,
+    /// Answers that found nothing, over answers.
+    pub none_found_rate: f64,
+    /// Answers with a Not relevant vote, over answers.
+    pub not_relevant_rate: f64,
+    /// Flagged questions, over questions.
+    pub flagged_rate: f64,
+    /// Gate answers whose level differs from the rules'.
+    pub gate_vs_rules: i64,
+    /// Gate answers whose level differs from the exemplars', where the exemplars ran.
+    pub gate_vs_exemplars: i64,
+    /// Questions the gate raised above both other layers.
+    pub gate_raised: i64,
+}
+
+/// `wt sensitive report`: counts only, never question text.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct TriageReport {
+    /// The start of the period.
+    pub since: DateTime<Utc>,
+    /// Totals and rates.
+    pub totals: TriageTotals,
+    /// Questions by category, relevance and degradation.
+    pub by_category: Vec<TriageRow>,
+    /// Layer combinations where the gate disagreed with the rules or the exemplars.
+    pub disagreements: Vec<LayerRow>,
+}
+
+fn rank(level: &str) -> Option<u8> {
+    ["none", "medical", "distress", "out_of_scope", "acute"]
+        .iter()
+        .position(|l| *l == level)
+        .and_then(|i| u8::try_from(i).ok())
+}
+
+fn rate(n: i64, of: i64) -> f64 {
+    if of == 0 { 0.0 } else { n as f64 / of as f64 }
+}
+
+/// Counts since `since` from `v_query_triage` and `triage_tally`, both readable by
+/// `wt_analyst`.
+pub async fn triage(pool: &PgPool, since: DateTime<Utc>) -> Result<TriageReport, DbError> {
+    let rows = sqlx::query!(
+        r#"select sensitive_category as "category!", relevance,
+                  triage_degraded as "triage_degraded!",
+                  sum(questions)::bigint as "questions!", sum(answered)::bigint as "answered!",
+                  sum(none_found)::bigint as "none_found!",
+                  sum(not_relevant)::bigint as "not_relevant!", sum(flagged)::bigint as "flagged!"
+           from v_query_triage where day >= date_trunc('day', $1::timestamptz)
+           group by 1, 2, 3 order by 1, 2 nulls last, 3"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    let by_category: Vec<TriageRow> = rows
+        .into_iter()
+        .map(|r| TriageRow {
+            category: r.category,
+            relevance: r.relevance,
+            triage_degraded: r.triage_degraded,
+            questions: r.questions,
+            answered: r.answered,
+            none_found: r.none_found,
+            not_relevant: r.not_relevant,
+            flagged: r.flagged,
+        })
+        .collect();
+    let layers = sqlx::query!(
+        r#"select rules as "rules!", embedding as "embedding!", risk as "risk!",
+                  gate_level as "gate_level!", relevance as "relevance!",
+                  confidence as "confidence!", level as "level!", sum(n)::bigint as "n!"
+           from triage_tally where day >= ($1::timestamptz)::date
+           group by 1, 2, 3, 4, 5, 6, 7 order by 8 desc, 1, 2, 3, 4, 5, 6, 7"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut t = TriageTotals::default();
+    let mut not_relevant = 0;
+    let mut none_found = 0;
+    let mut flagged = 0;
+    for r in &by_category {
+        t.questions += r.questions;
+        t.answered += r.answered;
+        none_found += r.none_found;
+        not_relevant += r.not_relevant;
+        flagged += r.flagged;
+        if r.triage_degraded {
+            t.triage_degraded += r.questions;
+        }
+        if r.category == "out_of_scope" {
+            t.out_of_scope += r.questions;
+        }
+        if r.category == "none" && r.relevance.as_deref() == Some("unrelated") {
+            t.unrelated += r.questions - r.answered;
+            t.unrelated_searched_anyway += r.answered;
+        }
+    }
+    let mut disagreements = Vec::new();
+    for r in layers {
+        let row = LayerRow {
+            rules: r.rules,
+            embedding: r.embedding,
+            risk: r.risk,
+            gate_level: r.gate_level,
+            relevance: r.relevance,
+            confidence: r.confidence,
+            level: r.level,
+            n: r.n,
+        };
+        let Some(gate) = rank(&row.gate_level) else {
+            continue;
+        };
+        let rules = rank(&row.rules);
+        let embedding = rank(&row.embedding);
+        let vs_rules = rules != Some(gate);
+        let vs_exemplars = embedding.is_some_and(|e| e != gate);
+        if vs_rules {
+            t.gate_vs_rules += row.n;
+        }
+        if vs_exemplars {
+            t.gate_vs_exemplars += row.n;
+        }
+        if rules.into_iter().chain(embedding).all(|l| l < gate) {
+            t.gate_raised += row.n;
+        }
+        if vs_rules || vs_exemplars {
+            disagreements.push(row);
+        }
+    }
+    t.triage_degraded_rate = rate(t.triage_degraded, t.questions);
+    t.out_of_scope_rate = rate(t.out_of_scope, t.questions);
+    t.unrelated_rate = rate(t.unrelated, t.questions);
+    t.none_found_rate = rate(none_found, t.answered);
+    t.not_relevant_rate = rate(not_relevant, t.answered);
+    t.flagged_rate = rate(flagged, t.questions);
+    Ok(TriageReport {
+        since,
+        totals: t,
+        by_category,
+        disagreements,
+    })
+}

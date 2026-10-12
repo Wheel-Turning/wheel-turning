@@ -35,8 +35,8 @@ use wt_core::ids::{AnswerId, SanghaId, TalkId, TesterId};
 use wt_db::answer::Served;
 use wt_extract::{LlmClient, UnavailableLlm};
 use wt_ml::{Embedder, FakeEmbedder, Reranker};
-use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
-use wt_retrieve::{Level, ModelCheck, RetrievalConfig, Sensitivity, query};
+use wt_retrieve::sensitive::{Exemplars, SensitiveConfig, triage};
+use wt_retrieve::{Level, RetrievalConfig, Sensitivity, Triage, Triaged, query};
 
 use chrome::{Chrome, Current};
 use limits::Limiter;
@@ -60,9 +60,9 @@ pub struct Site {
     pub common_words: String,
     /// Sensitive-question detection, run on every question before retrieval (Spec 05).
     pub sensitivity: Arc<Sensitivity>,
-    /// Its model layer; `None` without a language model, which leaves the rules and the
-    /// embedding check.
-    pub sensitivity_model: Option<Arc<dyn ModelCheck>>,
+    /// The triage gate (Spec 05, layer 3); `None` without a language model, which logs
+    /// `triage_degraded` on every question and leaves the rules and the embedding check.
+    pub triage: Option<Arc<dyn Triage>>,
     /// Signs session cookies and CSRF tokens.
     pub keys: Keys,
     /// Marks the cookie `Secure`; everywhere but `dev`.
@@ -119,7 +119,7 @@ impl Site {
             retrieval,
             common_words: String::new(),
             sensitivity: Arc::new(fake_sensitivity()),
-            sensitivity_model: None,
+            triage: None,
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
             site_dana_url: None,
@@ -548,6 +548,9 @@ async fn about(
 struct AskForm {
     q: String,
     csrf: String,
+    /// Set by the outside-these-talks page's "Search the talks anyway".
+    #[serde(default)]
+    anyway: Option<String>,
 }
 
 /// `POST /ask`: runs the query path, persists the answer and its log row together, and
@@ -587,39 +590,80 @@ async fn ask(
             },
         );
     };
-    // Spec 05: before retrieval, and never part of ranking.
+    // Spec 05: never part of ranking. The triage gate starts first and runs alongside the
+    // embedding check and search; an acute rule match needs nothing else.
     let started = std::time::Instant::now();
+    let gate = (site.sensitivity.rules_level(&text) != Level::Acute).then(|| {
+        let (gate, settings, q) = (
+            site.triage.clone(),
+            site.sensitivity.triage_settings(),
+            text.clone(),
+        );
+        tokio::spawn(async move { triage::run(gate.as_deref(), settings, &q).await })
+    });
     let sensitive = site
         .sensitivity
-        .classify(
-            &text,
-            site.embedder.as_ref(),
-            site.sensitivity_model.as_deref(),
-        )
+        .classify(&text, site.embedder.as_ref())
         .await;
     tracing::info!(
         sensitive_category = sensitive.level.as_str(),
         sensitivity_degraded = sensitive.degraded,
         rules = sensitive.layers.rules.as_str(),
         embedding = sensitive.layers.embedding.map(Level::as_str),
-        model = sensitive.layers.model.map(Level::as_str),
         "sensitivity"
     );
+    let tally = |triaged: Triaged, level: Level| {
+        sensitive::tally(
+            &state.pool,
+            sensitive.layers,
+            sensitive.degraded,
+            triaged,
+            level,
+        )
+    };
     if sensitive.level == Level::Acute {
+        if let Some(gate) = gate {
+            gate.abort();
+        }
+        tally(Triaged::not_run(), Level::Acute).await;
         return acute(&state, &s, started).await;
     }
     let framing = ask::Framing {
         level: sensitive.level,
-        vector: sensitive.vector,
+        vector: sensitive.vector.clone(),
         curated: false,
         gpc: privacy::gpc(&headers),
+        anyway: form.anyway.is_some(),
     };
-    answered(ask::answer_framed(&state.pool, site, s.tester, &text, framing).await)
+    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate).await {
+        Ok(ask::Gated::Answered(asked)) => {
+            tally(asked.triaged, asked.level).await;
+            Redirect::to(&format!("/a/{}", asked.answer_id)).into_response()
+        }
+        Ok(ask::Gated::Stopped { stop, triaged }) => {
+            let level = match stop {
+                ask::Stop::CountsOnly(level) => level,
+                ask::Stop::Unrelated => Level::None,
+            };
+            tally(triaged, level).await;
+            match stop {
+                ask::Stop::CountsOnly(Level::Acute) => acute_page(&state, &s),
+                ask::Stop::CountsOnly(_) => out_of_scope_page(&state, &s),
+                ask::Stop::Unrelated => unrelated_page(&state, &s, text),
+            }
+        }
+        Err(e) => server_error("answering", &e),
+    }
 }
 
-fn answered(result: Result<ask::Asked, ask::AskError>) -> Response {
+fn answered(result: Result<ask::Gated, ask::AskError>) -> Response {
     match result {
-        Ok(asked) => Redirect::to(&format!("/a/{}", asked.answer_id)).into_response(),
+        Ok(ask::Gated::Answered(asked)) => {
+            Redirect::to(&format!("/a/{}", asked.answer_id)).into_response()
+        }
+        Ok(ask::Gated::Stopped { stop, .. }) => {
+            server_error("answering", &ask::AskError::Stopped(stop))
+        }
         Err(e) => server_error("answering", &e),
     }
 }
@@ -649,9 +693,10 @@ async fn ask_curated(
         vector: None,
         curated: true,
         gpc: privacy::gpc(&headers),
+        anyway: false,
     };
     let text = site.sensitivity.curated_query();
-    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing).await)
+    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None).await)
 }
 
 #[derive(Template)]
@@ -665,21 +710,69 @@ struct AcutePage {
 /// log row holds counts and the category only, never the text.
 async fn acute(state: &AppState, s: &Session, started: std::time::Instant) -> Response {
     let latency = i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX);
-    if let Err(e) = wt_db::answer::log_acute(&state.pool, s.tester, latency).await {
+    if let Err(e) =
+        wt_db::answer::log_counts_only(&state.pool, s.tester, "acute", latency, None, false).await
+    {
         // The notice matters more than the count, so it is shown anyway.
         tracing::error!(error = %e, "logging an acute question's counts");
     }
-    let mut response = page(
+    acute_page(state, s)
+}
+
+/// The acute notice page, for a question whose counts are already logged.
+fn acute_page(state: &AppState, s: &Session) -> Response {
+    no_store(page(
         StatusCode::OK,
         &AcutePage {
             chrome: Chrome::new("/ask", Current::Other, Some(s.csrf(&state.site.keys))),
             csrf: s.csrf(&state.site.keys),
         },
-    );
+    ))
+}
+
+fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+#[derive(Template)]
+#[template(path = "sensitive_out_of_scope.html")]
+struct OutOfScopePage {
+    chrome: Chrome,
+}
+
+/// Spec 05's `out_of_scope` page, rendered as Spec 06 renders the acute page: a heading that
+/// takes focus, no giving panel, no feedback, no permalink and `Cache-Control: no-store`.
+fn out_of_scope_page(state: &AppState, s: &Session) -> Response {
+    no_store(page(
+        StatusCode::OK,
+        &OutOfScopePage {
+            chrome: Chrome::new("/ask", Current::Other, Some(s.csrf(&state.site.keys))),
+        },
+    ))
+}
+
+#[derive(Template)]
+#[template(path = "sensitive_unrelated.html")]
+struct UnrelatedPage {
+    chrome: Chrome,
+    csrf: String,
+    question: String,
+}
+
+/// Spec 05's outside-these-talks page for an `unrelated` question: the question and "Search
+/// the talks anyway", which asks it again as usual. No permalink until then.
+fn unrelated_page(state: &AppState, s: &Session, question: String) -> Response {
+    no_store(page(
+        StatusCode::OK,
+        &UnrelatedPage {
+            chrome: Chrome::new("/ask", Current::Other, Some(s.csrf(&state.site.keys))),
+            csrf: s.csrf(&state.site.keys),
+            question,
+        },
+    ))
 }
 
 // ---- answer ---------------------------------------------------------------------------------

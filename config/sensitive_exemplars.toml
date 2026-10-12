@@ -71,3 +71,8 @@ medical = [
   "What do I do about side effects from my medication?",
   "I have chronic pain from an illness and can't sit.",
 ]
+
+# Optional: harmful requests unrelated to practice. Empty until the owner confirms some from a
+# `wt sensitive redteam` review sheet; config/sensitive.toml's out_of_scope_sim applies.
+out_of_scope = [
+]
