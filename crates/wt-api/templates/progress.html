@@ -1,0 +1,21 @@
+{# Live progress while a question runs (Spec 06). static/progress.js copies this section into the
+   main landmark; without the script it is never shown. #}
+<template id="progress-template">
+<section class="progress reading" aria-labelledby="progress-h" data-waiting="Waiting" data-now="Now" data-done="Done" data-skipped="Not needed" data-opening="Opening the answer">
+  <h1 id="progress-h" tabindex="-1">Finding excerpts for your question</h1>
+  <p class="progress-question" data-question hidden></p>
+  <ol class="steps">
+    <li data-stage="reading"><span data-name>Reading the question</span>: <span class="state" data-state>Waiting</span></li>
+    <li data-stage="searching"><span data-name>Searching the talks</span>: <span class="state" data-state>Waiting</span> <span class="counts"><span data-count="searched" data-one="passage searched" data-many="passages searched" hidden></span> <span data-count="candidates" data-one="candidate" data-many="candidates" hidden></span></span></li>
+    <li data-stage="weighing"><span data-name>Weighing excerpts</span>: <span class="state" data-state>Waiting</span> <span class="counts"><span data-count="shortlisted" data-one="shortlisted" data-many="shortlisted" hidden></span></span></li>
+    <li data-stage="choosing"><span data-name>Choosing excerpts</span>: <span class="state" data-state>Waiting</span> <span class="counts"><span data-count="selected" data-one="selected" data-many="selected" hidden></span></span></li>
+    <li data-stage="writing"><span data-name>Writing the summary</span>: <span class="state" data-state>Waiting</span></li>
+  </ol>
+  <p class="help">An answer usually takes 10 to 15 seconds.</p>
+  <p class="visually-hidden" role="status" data-live></p>
+  <div data-failed hidden>
+    <p class="error">The progress display stopped. Your question may still be answered.</p>
+    <form method="post"><button type="submit">Try again</button></form>
+  </div>
+</section>
+</template>

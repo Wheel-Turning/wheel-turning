@@ -120,3 +120,10 @@ footer.site .last { margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid v
 .dana .split { padding-left: 1.25rem; }
 .dana .split li { margin: 0.4rem 0; }
 .dana .outlay { font-weight: 600; }
+/* Live progress while a question runs (Spec 06). Nothing here moves. */
+.progress-question { font-family: var(--serif); font-size: 1.25rem; }
+.steps { padding-left: 1.5rem; }
+.steps li { margin: 0.75rem 0; }
+.steps .state { font-weight: 600; }
+.steps .counts { display: block; color: var(--muted); font-size: 0.95rem; }
+.to-top a { display: inline-flex; align-items: center; min-height: 44px; }

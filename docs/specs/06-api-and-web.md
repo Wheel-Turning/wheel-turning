@@ -52,6 +52,7 @@ The answer page renders `AnswerView` from Spec 05 in this order. Templates live 
 7. A References list in MLA style (Spec 05, Answer assembly, rule 5), closed by default, with the texts' confidence badges in words and the word "unresolved" shown as is.
 8. The dana panel. The donor enters a gift total and an optional site amount in dollars and presses "Show split". The htmx fragment lists each eligible sangha with its amount and a link to open that sangha's giving page, then the site line on its own row, then total outlay. It states that no money passes through this site and that each link opens the sangha's own page. With no eligible recipient it says so plainly. Without JavaScript the form posts and the page reloads with the split shown.
 9. A "Flag this query" button that states, before and after pressing, that a flagged query can be read by the founder.
+10. A "Return to the top" link closing the answer, which leads to the top of the page (`#top`, the `body`), so the next Tab reaches the skip link and the header's question field. Owner's decision of October 12, 2026 (Spec 00, post-beta item 16).
 
 Rendering rules:
 
@@ -61,7 +62,20 @@ Rendering rules:
 - Durations and offsets render as `h:mm:ss`.
 - Error pages are plain and friendly and never show stack traces or database errors.
 - The layout is single column, mobile first, with visible focus outlines, semantic headings, and text contrast of at least WCAG AA. All controls work from the keyboard.
-- A loading indicator shows while `/ask` runs, since a query takes several seconds.
+- A question shows its live progress while it runs (Live progress while a question runs, below), since a query takes 10 to 15 seconds.
+
+## Live progress while a question runs
+
+Owner's decision of October 12, 2026: moved before beta from Spec 00's post-beta candidates (item 3). The display reports what the query path does and changes nothing it computes or stores.
+
+1. Every form that asks a question (the home box, the header field, the menu panel, the examples, "Search the talks anyway" and the acute notice's "Show teachings on facing difficult feelings") carries `data-progress`. The script `static/progress.js` takes the submit and posts the same form with `Accept: text/event-stream`. Without the script the form posts as before: the browser waits and `POST /ask` answers `303` to the permalink.
+2. With that header, `POST /ask` and `POST /ask/curated` answer `200` with `text/event-stream` and `Cache-Control: no-store`, and run exactly the path of a plain post: the same checks, rate limit, triage gate and stored rows. The question runs to the end even if the reader leaves, as a plain post's would. The stream carries server-sent events:
+   - `stage`, `{"stage": key}`, as each stage starts: `reading` (Reading the question: the sensitivity check, alias detection and the embedding), `searching` (Searching the talks: full-text, vector and question search and fusion), `weighing` (Weighing excerpts: the reranker), `choosing` (Choosing excerpts: selection, reading the passages and cutting their excerpts) and `writing` (Writing the summary), which is sent only when synthesis runs.
+   - `count`, `{"name": name, "value": n}`: `searched` (passages searched: the servable passages in the search's scope, the named teacher's own in named mode), `candidates` (the fused list read back), `shortlisted` (candidates at or above the relevance threshold) and `selected` (passages chosen). Each count is sent before the stage that follows it starts.
+   - One closing event: `done`, `{"url": "/a/<id>"}`, or `page`, `{"html": ...}`, which carries the whole page a plain post would have shown: a sensitive notice, the outside-these-talks page, the friendly `429`, the short-question message or an error page.
+3. The passages-searched count is read through `servable_passage`, alongside the query path so it never delays it, and cached for five minutes per scope. It is the only query the display adds, and only a streamed ask makes it.
+4. The script replaces the main content with a progress section: an `h1`, "Finding excerpts for your question", which takes focus; the question as asked; and an ordered list of the five stages, each with its state in words (Waiting, Now, Done, or Not needed for a summary that does not run) and its counts in words beside it ("14,203 passages searched", "120 candidates", "34 shortlisted", "8 selected"). The current stage carries `aria-current="step"`. Nothing moves: no spinner and no animation, with or without reduced motion. The copy lives in a `<template>` in the base template, not in the script.
+5. A polite live region announces each stage once, as it starts, with the counts the stage before it produced, for example "Weighing excerpts. 14,203 passages searched, 120 candidates." On `done` it announces "Opening the answer" and the script loads the permalink. On `page` the script writes the returned page into the document. If the stream breaks, the section says so in words and offers "Try again", which posts the form without the script.
 
 ## Accessibility standard
 
@@ -108,7 +122,18 @@ How the requirement areas of the draft shape the interface:
 - Help and feedback. About, Rights and removal and Accessibility are linked in the same order in the footer of every page. Feedback exists at every excerpt (Good, Not faithful, Not relevant, Report this excerpt), on every query (Flag this query) and for accessibility itself.
 - User control. The site respects `prefers-reduced-motion`, forced colors, user text spacing and user stylesheets. Changes that htmx makes without a page load are announced: the dana split and feedback status appear in a polite live region and focus moves to the new heading when the content is a result the user asked for. Links to source media say what they open, for example "Listen at 12:34 (opens the source video in a new tab)".
 
-Testing has two parts. Every pull request runs `axe-core` with the WCAG 2.2 AA rule sets, an HTML validator, and the contrast, target size, link name and language tests through Playwright at 360, 768 and 1280 pixels on home, answer, text unit, rights, about and accessibility. Every release also gets a manual pass: keyboard only, NVDA with Firefox on Windows, VoiceOver with Safari on iOS and macOS, TalkBack with Chrome on Android, 200 percent text, 400 percent zoom, forced colors, a text spacing override, reduced motion and no JavaScript. Results go in the register. The owner develops on Windows, so a tester with an iPhone or a Mac does the VoiceOver passes, and the register records who ran each pass.
+Testing has two parts. Every pull request runs the checks in Accessibility checks in CI, below. Every release also gets a manual pass: keyboard only, NVDA with Firefox on Windows, VoiceOver with Safari on iOS and macOS, TalkBack with Chrome on Android, 200 percent text, 400 percent zoom, forced colors, a text spacing override, reduced motion and no JavaScript. Results go in the register. The owner develops on Windows, so a tester with an iPhone or a Mac does the VoiceOver passes, and the register records who ran each pass.
+
+### Accessibility checks in CI
+
+Owner's decision of October 12, 2026: the automated checks of Spec 00's post-beta item 15 run before beta. They need a browser, and `cargo test` makes no network calls and runs no browser (rule 9), so they are their own CI job, `a11y`, required by `ci ok`:
+
+1. The job starts a Postgres service, migrates it, and runs `cargo run -p wt-api --example a11y_fixture`, which seeds synthetic teachers, talks and passages, starts the app with the fake embedder and a fake language model, asks one question to make an answer with a verified theme, and writes the paths the browser visits to a JSON file. Nothing leaves the runner except the job's own package and browser downloads.
+2. Playwright with Chromium and `@axe-core/playwright`, pinned in `tests/a11y/package-lock.json`, visits home, answer, talk card, transcript, rights, about and accessibility, and the progress section while a question runs, at 360, 768 and 1280 pixels wide. The text unit page joins the list when its route exists.
+3. On every page and width: `axe-core` with the WCAG 2.0, 2.1 and 2.2 A and AA tags reports no violation, which covers contrast, link and control names, language and landmarks; every control and every link that is not inside a sentence has a target of at least 44 by 44 pixels (the site's rule, stricter than criterion 2.5.8, which exempts inline links); at 320 by 256 pixels, which is 1280 at 400 percent zoom, the page does not scroll sideways, and a wide table may scroll inside its own container; and every status and confidence badge (`.badge`) reads as one of its words (resolved, probable, unresolved, verified, unverified).
+4. A failure prints each violation with its rule, page, width and element, and fails the job.
+
+The HTML validator that the testing paragraph above calls for is not in the job yet. The manual passes are not automated and stay with the first cohort's screen-reader and keyboard-only testers.
 
 Migration `0017_accessibility_report.sql`:
 
