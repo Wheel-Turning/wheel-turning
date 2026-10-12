@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Nightly off-site backup of the owner's local stack, until the database moves to RDS
-# (docs/runbook.md, procedure 9). Run from Git Bash in the main checkout:
+# (docs/runbook.md, procedure 10). Run from Git Bash; it always backs up the main checkout's data:
 #
-#   WT_BACKUP_BUCKET=<bucket> scripts/ops/backup-local.sh
+#   scripts/ops/backup-local.sh        (bucket from WT_BACKUP_BUCKET or the main checkout's .env)
 #
 # What it copies to s3://$WT_BACKUP_BUCKET:
 #   db/wt-<UTC stamp>.dump   a pg_dump of the real-data database (custom format, compressed)
@@ -16,11 +16,16 @@
 # list, read, write and delete current objects, but not delete old versions.
 set -euo pipefail
 
+# The real data lives in the main checkout, whichever worktree this copy of the script is in.
+ROOT=${WT_ROOT:-$(git -C "$(dirname "$0")" worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')}
+cd "$ROOT"
+# The bucket name may come from .env; nothing else is read from it.
+if [ -z "${WT_BACKUP_BUCKET:-}" ] && [ -f .env ]; then
+  WT_BACKUP_BUCKET=$(grep -E '^WT_BACKUP_BUCKET=' .env | cut -d= -f2- | tr -d '\r')
+fi
 BUCKET=${WT_BACKUP_BUCKET:?set WT_BACKUP_BUCKET to the backup bucket name}
 PROFILE=${WT_BACKUP_PROFILE:-wt-backup}
 CONTAINER=${WT_BACKUP_CONTAINER:-wt-m3-ssz}
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-cd "$ROOT"
 OUT=data/backups
 mkdir -p "$OUT"
 LOG="$OUT/backup.log"
