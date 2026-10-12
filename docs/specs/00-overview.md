@@ -144,6 +144,38 @@ Items that are decided but deliberately not built or enabled in v1.
 3. Email alerts for new Rights and removal requests from a domain address, which replace the AWS notification stopgap.
 4. Public per-teacher status on the rights page, if teachers ask for it. The page lists sources only for now.
 
+## Post-beta candidates
+
+Owner's notes of October 12, 2026, refined in discussion. None is built before beta testing; the order follows user interviews after beta. An item marked "PRD change" reverses a current PRD rule and needs that change written before it is built.
+
+Answers and search
+1. Query variations. The triage call (Spec 05, Sensitive questions) also returns two or three rephrasings of the question, each searched as another fused list; the page and the log show only the original. Kept only if the evaluation set shows better relevance.
+2. Lower latency. Make vector search use the HNSW index through the serving view's filters, run stages in parallel, cache repeated questions, and consider a GPU-hosted reranker. The index fix may move before beta.
+3. Live progress while a question runs. Real stage counts (passages searched, candidates, shortlisted, selected) and plain stage names (reading the question, writing variations, searching the talks, weighing excerpts, writing the summary), streamed with server-sent events. Each stage is announced once to screen readers, nothing animates under reduced motion, and without JavaScript the page waits as now.
+4. A fuller summary, in the manner of Consensus (PRD change). A synthesized answer with inline citations, author and date, linking to each talk, so a reader gets the idea without reading every excerpt. Shape, from a Consensus research answer read on October 12, 2026: a one-sentence headline answer first; a short framing paragraph; sections for where the teachers converge, where they differ, and points to keep in mind (few talks on the topic, one sangha dominating, context a quote leaves out); and a closing sum-up. Every citation marker points to a verbatim quotation the code takes from the cited excerpt, as Consensus ties each marker to a quoted line of its paper, so a reader can check each claim at once. Consensus's evidence-strength meter does not carry over to teachings; the answer states instead how many teachers and talks it draws on. It must not put words in a teacher's mouth: each sentence cites the excerpts that support it and passes the verifier, describes what is said in a talk ("in a 2011 talk, Weitsman says...") rather than what a teacher believes, and the verbatim excerpts stay below. Consensus also reports its funnel (papers retrieved, eligible, included), which item 3 adopts.
+5. Follow-up questions and threads. A box at the bottom of an answer asks a follow-up in the same thread; the follow-up is rewritten into a standalone question with the thread's context. Threads keep the tester's privacy mode, and a back-to-this-question link sits on each answer.
+6. One row of links under each excerpt (Listen, Read, Cite, Give, Report), with Cite opening that excerpt's MLA citation and a copy button, beside the References list.
+
+Rights and removal
+7. Verified removal requests (PRD change). A request names the requester, an email at their organization, the organization (a sangha or publisher) and the request type, and the requester confirms the email through a link before the request is acted on, so a malicious request cannot take material down unchecked. Needs domain email (items 1 to 3 above).
+8. Rights-holder likelihood. After email confirmation, signals (an email domain matching the sangha's site, a name matching a registered teacher or a ledger contact, an earlier permission) route a request: a strong match is acted on at once, a weak one goes to the owner. A low score never refuses a request on its own.
+
+Discovery
+9. Search engines and answer engines. Not for the private demo. For a public launch: the About, teacher and sangha pages and talk pages a teacher approves are indexable; excerpts and answers stay out of indexes unless a teacher opts in.
+10. Corpus search for researchers, rights holders and teachers. Talks only, with filters for teacher, sangha, date, duration, series and works cited, respecting display levels, so a teacher or rights holder can see everything of theirs that is here.
+11. CSV export of a talk search: citation fields, internal talk ids and source links, never transcript text, rate limited, with Spec 03's rule on ShareAlike sources.
+
+Accounts and support (PRD change)
+12. Accounts through federated sign-in only (Google and Apple first, others if interviews ask), with saved threads in a left-hand pane, an explicitly opted-in newsletter, and management of recurring support to the site. Needs a privacy policy and real account deletion. The invite links can stay for beta.
+13. Support for the site. Money given to the site goes through a hosted payment page (a processor's checkout link), never through code in this repository, which keeps CLAUDE.md rule 7 intact. It is called support, not donations, until a nonprofit or fiscal sponsor exists, and the page says gifts are not tax-deductible until then. Gifts to sanghas stay outbound links as now.
+14. A "Keep the site running" page linked from the header: the site's support links first; a suggested amount with an expandable explanation of how it is calculated (fixed costs for hosting and development allocated per question on a rolling monthly volume, plus the cost of the reader's own use); the site's monthly operating cost, the cost of the reader's use, a sustaining level for growth, total support received and the current deficit; a plain statement that the site is free and nothing is expected; and below, a search for any sangha's giving links. Needs monthly cost data from AWS billing and model spend.
+
+Accessibility
+15. Close every remaining accessibility item: automated axe and contrast checks in CI and the manual passes in Spec 06. The first cohort's screen-reader and keyboard-only testers are a beta requirement already.
+
+Small
+16. Return to the top of the page from each answer.
+
 ## Decisions recorded October 3, 2026
 
 - Naming: the repository is `Wheel-Turning/wheel-turning`, the command is `wt` and variables start with `WT_`. The first Claude Code pass renames the earlier `dg` names, and the Platform spec records it.
