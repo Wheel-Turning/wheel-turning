@@ -143,6 +143,7 @@ Items that are decided but deliberately not built or enabled in v1.
 2. Domain-owned mailboxes at wheelturning.org, for example rights@ and hello@, so letters, replies and alerts use the project's own address. Until then, alerts reach the owner's personal address through an AWS notification.
 3. Email alerts for new Rights and removal requests from a domain address, which replace the AWS notification stopgap.
 4. Public per-teacher status on the rights page, if teachers ask for it. The page lists sources only for now.
+5. Resume the paused downstream queue (owner's decision of October 12, 2026). The worker was stopped so the alpha has the CPU while beta work lands, leaving 1,904 `index`, 431 `resolve` and 33 `extract` jobs queued, mostly San Francisco Zen Center talks from the October 10 transcription run. The 29 talks among them that were already served were moved from `ready` back to `resolving`, so nothing half-indexed is searchable; their index jobs set them `ready` again. To resume, run `wt worker --kinds classify,correct,extract,resolve,index,questions` with a CLI built from current main, at idle priority while testers use the site (about 4 to 7 hours of CPU). 17 of the extract jobs fail on a truncated transcript file and need re-transcription, not a retry.
 
 ## Post-beta candidates
 
