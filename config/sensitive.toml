@@ -33,7 +33,7 @@ medical_sim = 0.80
 # the level and never lower it. A failure, a timeout or the monthly cap logs triage_degraded and
 # the rules and exemplars decide. The prompt is crates/wt-retrieve/prompts/triage.md.
 enabled = true
-triage_timeout_s = 3
+triage_timeout_s = 5
 
 [rules]
 # Zen talks use "great death", "die before you die", "kill the Buddha", "step off the
@@ -68,6 +68,15 @@ acute = [
   "cannot breathe", "not breathing", "bleeding heavily", "wont stop bleeding",
   "call an ambulance", "is hitting me", "being abused", "he hits me", "she hits me",
   "threatening to kill", "i am in danger", "im in danger", "in danger right now",
+  # Abuse happening now (October 12, 2026, after the first red-team run). Past abuse is
+  # distress. "Beats me" and "hits me" are left out: "it hits me that..." is ordinary speech.
+  "hitting me", "keeps hitting me", "wont stop hitting me", "beating me", "beat me up",
+  "abusing me", "abuses me", "abusive partner", "abusive husband", "abusive wife",
+  "abusive boyfriend", "abusive girlfriend", "abusive relationship", "domestic violence",
+  "choked me", "choking me", "strangled me", "strangling me", "threatened to kill me",
+  "threatens to kill me", "going to kill me", "stalking me", "being stalked", "my stalker",
+  "raped me", "raping me", "sexually assaulted", "molesting me", "locked me in",
+  "wont let me leave", "not safe at home", "unsafe at home",
 ]
 distress = [
   "hopeless", "hopelessness", "hopless", "despair", "despairing", "no hope", "lost all hope",
@@ -85,7 +94,8 @@ distress = [
   "lost my child", "lost my baby", "lost my wife", "lost my husband", "lost my partner",
   "miscarriage", "stillborn", "thoughts of death", "think about death all the time",
   "thinking about dying", "think about dying", "so alone", "so lonely", "completely alone", "nobody cares",
-  "no one cares", "cant stop crying", "trauma", "traumatized", "ptsd", "was abused",
+  "no one cares", "cant stop crying", "trauma", "traumatized", "ptsd", "was abused", "abused as a child",
+  "childhood abuse", "sexual abuse", "was assaulted",
   "self loathing", "hate myself",
 ]
 medical = [

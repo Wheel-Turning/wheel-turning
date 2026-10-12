@@ -144,7 +144,7 @@ impl Default for TriageSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            triage_timeout_s: 3,
+            triage_timeout_s: 5,
         }
     }
 }
