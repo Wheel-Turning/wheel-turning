@@ -86,7 +86,7 @@ The default `Diarizer` calls the Python sidecar in `sidecars/diarize/`, a small 
 The segmenter in `wt-segment` turns words and turns into labeled spans. It is deterministic given its inputs and the classifier's outputs.
 
 1. Align. Each word takes the speaker of the turn it overlaps most. Words with no overlapping turn take the nearest turn within 500 ms and otherwise are dropped.
-2. Teacher speaker. Over the talk, the teacher is the speaker with the largest share of speaking time outside chanting. All other speakers are treated as students. If a second speaker holds at least `multi_speaker_share` (default 0.35) of speaking time, the talk goes to `needs_review` with reason `multi_speaker` and the job stops. The segmenter never guesses between two possible teachers.
+2. Teacher speaker. Over the talk, the teacher is the speaker with the largest share of speaking time outside chanting. All other speakers are treated as students. If a second speaker holds at least `multi_speaker_share` (default 0.35) of speaking time, the talk goes to `needs_review` with reason `multi_speaker` and the job stops. The segmenter never guesses between two possible teachers. After beta, Speaker introductions below proposes who each speaker is, for a person to confirm.
 3. Sitting. A stretch with no words of at least `sitting_silence_s` (default 120) is labeled `sitting`.
 4. Window classification. Remaining time is cut into windows of 60 seconds, and each window gets a label from `talk`, `chant`, `announcement` or `other`. Rules run first. Very low words per minute with high repetition or a high share of glossary chant phrases marks `chant`. For windows the rules leave ambiguous, `LlmClient` returns a label as JSON with a one-sentence reason that is stored in the job log. A majority filter smooths labels so no span is shorter than `min_span_s` (default 20) unless it is at a talk boundary.
 5. Question and answer. After the first `talk` span, any run of non-teacher speech is a student turn and is labeled `qa_student` in memory. A teacher turn that follows a student turn is labeled `qa_teacher`. Student turns are removed from the word list before anything is persisted.
@@ -102,6 +102,33 @@ Decisions of October 5, 2026, made while building the segmenter:
 - Step 5 counts non-teacher speech as a student turn only inside a `talk` or `other` stretch after the first talk begins. Non-teacher speech before the first talk, or during chant or announcements, is simply dropped. A teacher answer, `qa_teacher`, lasts until the next student turn or the end of its stretch, and the teacher's words in an `other` stretch that answer a student are `qa_teacher` too. Student turns are kept in memory as time ranges for the sample report and never appear in the persisted `spans`.
 
 `wt segment sample --count 10 --out report.html` picks ten cleared talks, runs steps 1 to 5 without persisting, and writes an HTML timeline per talk showing labeled spans with the first words of each. It is the tool for the PRD's ten-video segmentation check on talks that have passed the gate.
+
+## Speaker introductions
+
+Planned after beta; not built (owner's decision of October 12, 2026). Nothing here changes the pipeline until this note is removed, and no session builds it before beta testing ends.
+
+Talks with several speakers, and talks whose metadata names nobody, often say who is speaking: "my name is", "tonight's speaker is", "please welcome". This step reads those introductions to propose which registered teacher each diarized voice is, so co-taught talks, panels and unnamed talks can be credited instead of held. On October 12, 2026 it would apply to 44 talks held as `multi_speaker` and 266 held as `speaker_unresolved`.
+
+1. Where it runs. After diarization and alignment (Diarization and segmentation, rule 1) and before the teacher is chosen (rule 2), on the words with their speaker labels, in memory. It runs for a talk held as `multi_speaker`, for a talk at `speaker_unresolved` once it has been transcribed, and for any talk with a second speaker over `intro_min_share` (default 0.10) of speaking time.
+2. What it looks for. Within the first `intro_window_s` (default 300) seconds of each speaker's first long turn, and in the turn just before it:
+   - self-introductions, in the speaker's own words: "my name is", "I'm", "I am", "this is", followed within six words by a name;
+   - introductions by another speaker: "please welcome", "our speaker tonight is", "today's talk is by", "I'd like to introduce", "thank you" or "thanks" followed by a name and then a change of speaker.
+
+   The phrase list lives in `[intros]` of `config/pipeline.toml`.
+3. Names. A candidate name counts only when the registry's alias matcher (Spec 03, rule 6) finds a registered teacher in it. Any other name is ignored and never stored, logged or written to a report, because it is usually a student's or a guest's. This is how student names stay out of every store, as Student questions requires.
+4. Binding. A self-introduction binds the name to the speaker who said it. A host's introduction binds it to the next speaker whose turn lasts at least `intro_min_turn_s` (default 60). A voice bound to two different teachers, or a teacher bound to two voices, is a conflict and is never resolved by guessing.
+5. Proposals, not assignments. The step writes no speaker. It records each binding as a proposal: talk, diarized label, teacher, the kind of introduction, the time, and the matched sentence with every name except the teacher's replaced by "[name]". The proposal is strong when a self-introduction names exactly one registered teacher, there is no conflict, and the talk's metadata names that teacher or names nobody; otherwise it is weak. Both kinds go to the speaker review sheet (`wt talk speaker-review --out <csv>`), which adds a `proposed` column and the evidence sentence beside the existing columns. Nothing changes until a person applies a decision with `wt talk assign-speaker`, or with its per-voice form for a talk with several teachers (rule 6). The talk stays held meanwhile.
+6. Several teachers in one talk. When a person confirms two or more teachers for one talk, each diarized voice keeps its own teacher: segments carry `speaker_teacher_id`, passages take their segment's teacher, and `servable_passage` attributes each passage to its own teacher and that teacher's rights basis, consent and display level. A voice nobody confirmed is a student, as today. Until then a talk keeps one teacher, so this needs a migration and changes to `servable_passage`, the answer groups and the dana split. The split uses each passage's sangha, which the teacher's talk already gives.
+7. No voiceprints. Speaker embeddings that could recognize a teacher's voice across talks are not computed, stored or compared. They would catch talks with no introduction, but they are biometric data, which some laws regulate and which this project's rule that nothing derived from audio outlives the transcript forbids. Revisit only with counsel's advice and the teacher's consent.
+8. Audio. Held talks kept no audio, so running the step on them means fetching and diarizing them again: `wt pipeline speaker-intros [--talk <id>] [--reason multi_speaker|speaker_unresolved] [--dry-run]` queues `audio` jobs with intros on, and the dry run prints the count and an estimated GPU time. Talks already ready are not rerun.
+
+Acceptance criteria (for when it is built):
+
+- [ ] On synthetic word timelines, a self-introduction naming a registered teacher yields a strong proposal for that speaker; a host introduction followed by a 60-second turn yields a proposal for the next speaker; a name not in the registry yields nothing, and that name appears in no proposal, log line or report.
+- [ ] Two teachers bound to one voice, or one teacher bound to two voices, yields conflicting weak proposals and no assignment.
+- [ ] The step never writes `teacher_id` or `speaker_teacher_id`; only `wt talk assign-speaker` does, and a talk stays held until then.
+- [ ] A confirmed two-teacher talk serves each passage under its own teacher, with that teacher's rights basis and display level, and an opt-out by one teacher removes only that teacher's passages.
+- [ ] No speaker embedding is stored anywhere, checked by a schema and object-store scan.
 
 ## Aligned source transcripts
 
