@@ -55,6 +55,11 @@ enum Command {
         #[command(subcommand)]
         command: TesterCommand,
     },
+    /// Accessibility problem reports from `/accessibility` (Spec 06, Accessibility standard).
+    Accessibility {
+        #[command(subcommand)]
+        command: AccessibilityCommand,
+    },
     /// Remove a teacher's or a talk's text from every store (Spec 07). Prints the counts as
     /// JSON. A real run needs --yes.
     Takedown(TakedownArgs),
@@ -1156,6 +1161,46 @@ enum ConsentCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum AccessibilityCommand {
+    /// Read and handle reports.
+    Reports {
+        #[command(subcommand)]
+        command: ReportsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ReportsCommand {
+    /// Open and in-progress reports, or all with --all, oldest first.
+    List {
+        /// Every report, handled ones too.
+        #[arg(long)]
+        all: bool,
+    },
+    /// One report.
+    Show {
+        /// The report.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+    },
+    /// Records how a report is handled. Replies are sent by hand until domain email exists.
+    Set {
+        /// The report.
+        #[arg(long)]
+        id: sqlx::types::Uuid,
+        /// open, fixing, fixed or declined.
+        #[arg(long)]
+        status: String,
+        /// Who is handling it.
+        #[arg(long)]
+        by: String,
+        /// What was done, kept with the report.
+        #[arg(long)]
+        note: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum TesterCommand {
     /// Create a tester and print their invite link once. Only the token's SHA-256 is stored.
     Invite {
@@ -1480,6 +1525,40 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 TesterCommand::Revoke { label } => {
                     let n = wt_db::tester::revoke(&pool, &label).await?;
                     commands::print_json(&serde_json::json!({ "revoked": n }))?;
+                }
+            }
+        }
+        Command::Accessibility {
+            command: AccessibilityCommand::Reports { command },
+        } => {
+            use wt_db::public_forms as forms;
+            let pool = pool().await?;
+            match command {
+                ReportsCommand::List { all } => {
+                    commands::print_json(&forms::reports(&pool, all).await?)?;
+                }
+                ReportsCommand::Show { id } => {
+                    let report = forms::report(&pool, id)
+                        .await?
+                        .with_context(|| format!("no report {id}"))?;
+                    commands::print_json(&report)?;
+                }
+                ReportsCommand::Set {
+                    id,
+                    status,
+                    by,
+                    note,
+                } => {
+                    anyhow::ensure!(
+                        forms::REPORT_STATUSES.contains(&status.as_str()),
+                        "status is one of {}",
+                        forms::REPORT_STATUSES.join(", ")
+                    );
+                    anyhow::ensure!(
+                        forms::set_report(&pool, id, &status, &by, note.as_deref()).await?,
+                        "no report {id}"
+                    );
+                    commands::print_json(&serde_json::json!({ "report": id, "status": status }))?;
                 }
             }
         }

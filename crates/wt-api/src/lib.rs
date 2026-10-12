@@ -1,11 +1,16 @@
 //! The Axum web app: routes, templates and invite auth (Spec 06).
 //!
-//! Every route but `/healthz`, `/robots.txt`, `/static/*` and `/join/{token}` needs a session,
+//! Every route but `/healthz`, `/robots.txt`, `/static/*`, `/favicon.ico`, `/join/{token}`,
+//! `/rights`, `/rights/request`, `/accessibility` and `/accessibility/report` needs a session,
 //! and answers the same generic 404 without one. Passage text reaches the templates only from
 //! `servable_passage`, and the templates escape it. Model text reaches only the "How approaches
 //! differ" section, as verified themes whose passages the code, not the model, names.
 
+pub mod accessibility;
 pub mod ask;
+pub mod chrome;
+pub mod limits;
+pub mod rights;
 pub mod session;
 pub mod site;
 pub mod view;
@@ -14,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use askama::Template;
-use axum::extract::{FromRequestParts, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -29,6 +34,8 @@ use wt_extract::{LlmClient, UnavailableLlm};
 use wt_ml::{Embedder, FakeEmbedder, Reranker};
 use wt_retrieve::{RetrievalConfig, query};
 
+use chrome::{Chrome, Current};
+use limits::Limiter;
 use session::Keys;
 
 /// Everything the routes share besides the pool: models, settings and the signing key.
@@ -48,16 +55,49 @@ pub struct Site {
     pub keys: Keys,
     /// Marks the cookie `Secure`; everywhere but `dev`.
     pub secure_cookies: bool,
+    /// The in-memory rate limits.
+    pub limits: Limits,
+    /// `WT_OWNER_NAME`: who runs the site, for About. Without it About says "an individual".
+    pub owner_name: Option<String>,
+    /// `WT_TRUST_FORWARDED_FOR`: behind the load balancer, the client address is the last
+    /// entry of `X-Forwarded-For`. Off, the connection's peer address is used.
+    pub trust_forwarded_for: bool,
 }
+
+/// The rate limits (Spec 06): asks per tester, and the public forms per address.
+#[derive(Debug)]
+pub struct Limits {
+    /// `ask_rate_per_hour` asks per tester.
+    pub ask: Limiter,
+    /// `/rights/request` and `/accessibility/report`: 5 an hour per address, together.
+    pub public_forms: Limiter,
+}
+
+impl Limits {
+    /// Limits with `ask_per_hour` asks per tester.
+    pub fn new(ask_per_hour: u32) -> Self {
+        Self {
+            ask: Limiter::new(ask_per_hour),
+            public_forms: Limiter::new(PUBLIC_FORMS_PER_HOUR),
+        }
+    }
+}
+
+/// Spec 08: the rights form takes 5 requests an hour from one address.
+pub const PUBLIC_FORMS_PER_HOUR: u32 = 5;
 
 impl Site {
     /// A site with a fake embedder, no reranker, no language model and a fixed key, for tests.
     pub fn with_fakes(embedder_model: &str) -> Self {
+        let retrieval = RetrievalConfig::default();
         Self {
+            limits: Limits::new(retrieval.answer.ask_rate_per_hour),
+            owner_name: None,
+            trust_forwarded_for: false,
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
             llm: Arc::new(UnavailableLlm),
-            retrieval: RetrievalConfig::default(),
+            retrieval,
             common_words: String::new(),
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
@@ -90,7 +130,14 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/robots.txt", get(robots))
         .route("/static/app.css", get(stylesheet))
+        .route("/static/menu.js", get(chrome::menu_js))
+        .route("/static/brand/favicon.svg", get(chrome::favicon_svg))
+        .route("/favicon.ico", get(chrome::favicon_ico))
         .route("/join/{token}", get(join))
+        .route("/rights", get(rights::rights_page))
+        .route("/rights/request", post(rights::request))
+        .route("/accessibility", get(accessibility::statement))
+        .route("/accessibility/report", post(accessibility::report))
         .route("/", get(home))
         .route("/about", get(about))
         .route("/ask", post(ask))
@@ -173,11 +220,12 @@ async fn stylesheet() -> impl IntoResponse {
 #[derive(Template)]
 #[template(path = "error.html")]
 struct ErrorPage<'a> {
+    chrome: Chrome,
     title: &'a str,
     message: &'a str,
 }
 
-fn page(status: StatusCode, t: &impl Template) -> Response {
+pub(crate) fn page(status: StatusCode, t: &impl Template) -> Response {
     match t.render() {
         Ok(html) => (status, Html(html)).into_response(),
         Err(e) => {
@@ -192,7 +240,65 @@ fn page(status: StatusCode, t: &impl Template) -> Response {
 }
 
 fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
-    page(status, &ErrorPage { title, message })
+    page(
+        status,
+        &ErrorPage {
+            chrome: Chrome::bare(),
+            title,
+            message,
+        },
+    )
+}
+
+/// The friendly 429 (Spec 09, Messages): what happened and when to try again, with
+/// `Retry-After`.
+pub(crate) fn too_many(wait: Duration, what: &str) -> Response {
+    let minutes = limits::minutes(wait);
+    let unit = if minutes == 1 { "minute" } else { "minutes" };
+    let mut response = error_page(
+        StatusCode::TOO_MANY_REQUESTS,
+        "Please wait a little",
+        &format!("{what} Please try again in {minutes} {unit}."),
+    );
+    if let Ok(v) = HeaderValue::from_str(&(minutes * 60).to_string()) {
+        response.headers_mut().insert(header::RETRY_AFTER, v);
+    }
+    response
+}
+
+/// The address a public form's rate limit counts against: the last `X-Forwarded-For` entry
+/// when the site sits behind the load balancer, which appends the client it saw, otherwise the
+/// connection's peer.
+pub struct ClientAddress(pub String);
+
+impl FromRequestParts<AppState> for ClientAddress {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let forwarded = if state.site.trust_forwarded_for {
+            parts
+                .headers
+                .get_all("x-forwarded-for")
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .flat_map(|v| v.split(','))
+                .map(str::trim)
+                .rfind(|v| !v.is_empty())
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip().to_string());
+        Ok(Self(
+            forwarded.or(peer).unwrap_or_else(|| "unknown".to_owned()),
+        ))
+    }
 }
 
 /// The generic 404, also what a request without a session gets.
@@ -209,7 +315,7 @@ async fn not_found() -> Response {
 }
 
 /// Spec 09's server error. The cause goes to the log, never to the page.
-fn server_error(what: &str, e: &dyn std::fmt::Display) -> Response {
+pub(crate) fn server_error(what: &str, e: &dyn std::fmt::Display) -> Response {
     tracing::error!(error = %e, "{what}");
     error_page(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -312,6 +418,7 @@ const EXAMPLES: [&str; 3] = [
 #[derive(Template)]
 #[template(path = "home.html")]
 struct HomePage {
+    chrome: Chrome,
     csrf: String,
     question: String,
     error: Option<String>,
@@ -322,6 +429,7 @@ async fn home(State(state): State<AppState>, s: Session) -> Response {
     page(
         StatusCode::OK,
         &HomePage {
+            chrome: Chrome::new("/", Current::Ask, Some(s.csrf(&state.site.keys))),
             csrf: s.csrf(&state.site.keys),
             question: String::new(),
             error: None,
@@ -332,10 +440,19 @@ async fn home(State(state): State<AppState>, s: Session) -> Response {
 
 #[derive(Template)]
 #[template(path = "about.html")]
-struct AboutPage;
+struct AboutPage<'a> {
+    chrome: Chrome,
+    owner: Option<&'a str>,
+}
 
-async fn about(_s: Session) -> Response {
-    page(StatusCode::OK, &AboutPage)
+async fn about(State(state): State<AppState>, s: Session) -> Response {
+    page(
+        StatusCode::OK,
+        &AboutPage {
+            chrome: Chrome::new("/about", Current::About, Some(s.csrf(&state.site.keys))),
+            owner: state.site.owner_name.as_deref(),
+        },
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -351,10 +468,14 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
     if !s.csrf_ok(&site.keys, &form.csrf) {
         return csrf_refused();
     }
+    if let Err(wait) = site.limits.ask.check(&s.tester.to_string()) {
+        return too_many(wait, "You have asked a lot of questions this hour.");
+    }
     let Ok(text) = query::normalize(&form.q) else {
         return page(
             StatusCode::BAD_REQUEST,
             &HomePage {
+                chrome: Chrome::new("/", Current::Ask, Some(s.csrf(&site.keys))),
                 csrf: s.csrf(&site.keys),
                 question: form.q,
                 error: Some("Please write between 3 and 500 characters.".to_owned()),
@@ -373,6 +494,7 @@ async fn ask(State(state): State<AppState>, s: Session, Form(form): Form<AskForm
 #[derive(Template)]
 #[template(path = "answer.html")]
 struct AnswerPage {
+    chrome: Chrome,
     query: String,
     question_label: &'static str,
     view: view::AnswerView,
@@ -431,6 +553,11 @@ async fn answer_page(
     page(
         StatusCode::OK,
         &AnswerPage {
+            chrome: Chrome::new(
+                format!("/a/{answer}"),
+                Current::Other,
+                Some(s.csrf(&state.site.keys)),
+            ),
             query: stored.query_text,
             question_label: view::QUESTION_LABEL,
             view,
@@ -494,6 +621,7 @@ async fn give(
 #[derive(Template)]
 #[template(path = "talk.html")]
 struct TalkPage {
+    chrome: Chrome,
     title: String,
     teacher: String,
     sangha: String,
@@ -505,7 +633,7 @@ struct TalkPage {
 
 async fn talk_page(
     State(state): State<AppState>,
-    _s: Session,
+    s: Session,
     Path(talk): Path<String>,
 ) -> Response {
     let Some(talk) = parse::<TalkId>(&talk) else {
@@ -519,6 +647,11 @@ async fn talk_page(
     page(
         StatusCode::OK,
         &TalkPage {
+            chrome: Chrome::new(
+                format!("/talk/{talk}"),
+                Current::Other,
+                Some(s.csrf(&state.site.keys)),
+            ),
             title: card.title.clone(),
             teacher: card.teacher_name.clone(),
             sangha: card.sangha_name.clone(),
@@ -545,6 +678,8 @@ struct Row {
 #[derive(Template)]
 #[template(path = "transcript.html")]
 struct TranscriptPage {
+    chrome: Chrome,
+    talk_id: TalkId,
     title: String,
     teacher: String,
     sangha: String,
@@ -562,7 +697,7 @@ const GAP_MS: i32 = 5_000;
 /// `full` only.
 async fn transcript_page(
     State(state): State<AppState>,
-    _s: Session,
+    s: Session,
     Path(talk): Path<String>,
 ) -> Response {
     let Some(talk) = parse::<TalkId>(&talk) else {
@@ -601,6 +736,12 @@ async fn transcript_page(
     page(
         StatusCode::OK,
         &TranscriptPage {
+            chrome: Chrome::new(
+                format!("/talk/{talk}/transcript"),
+                Current::Other,
+                Some(s.csrf(&state.site.keys)),
+            ),
+            talk_id: talk,
             title: card.title.clone(),
             teacher: card.teacher_name.clone(),
             sangha: card.sangha_name.clone(),

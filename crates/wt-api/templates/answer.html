@@ -28,6 +28,7 @@
       <a href="{{ p.source.href }}" target="_blank" rel="noopener noreferrer">{{ p.source.label }}</a>{% if let Some(s) = p.source.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
       {% if let Some(t) = p.transcript_href %} · <a href="{{ t }}">Read in the transcript</a>{% endif %}
       {% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}
+      · <a href="/rights?excerpt={{ p.id }}#request">Report this excerpt</a>
     </p>
     <p class="credit">{{ p.credit }}</p>
     <form method="post" action="/a/{{ answer_id }}/feedback" class="feedback">

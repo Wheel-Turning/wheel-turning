@@ -259,19 +259,19 @@ The owner role can still read every table, as the logging list says, so this sec
 
 ## Acceptance criteria
 
-- [ ] `/healthz` returns success only when the database answers.
-- [ ] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs.
-- [ ] A state-changing request without a valid CSRF token is rejected.
-- [ ] `POST /ask` persists an answer, responds `303` to the permalink, and the permalink is readable only by the tester who asked.
+- [x] `/healthz` returns success only when the database answers. (`wt-api/tests/healthz.rs`.)
+- [x] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs. (`wt-api/tests/pages.rs`; the server has no request logger, and `/join` logs nothing.)
+- [x] A state-changing request without a valid CSRF token is rejected. (`wt-api/tests/pages.rs`.)
+- [x] `POST /ask` persists an answer, responds `303` to the permalink, and the permalink is readable only by the tester who asked. (`wt-api/tests/pages.rs`.)
 - [ ] Snapshot tests with `insta` cover the answer page for standard, named, thin coverage, none found, and multi-named cases.
-- [ ] A passage whose text contains `<script>` renders escaped, and no model text appears outside the synthesis section.
+- [x] A passage whose text contains `<script>` renders escaped, and no model text appears outside the synthesis section. (`wt-api/tests/pages.rs`.)
 - [ ] `/give` logs a click and redirects only to the registry URL. A tampered `amount_cents`, an unverified sangha and an unlisted sangha are each rejected.
 - [ ] The dana fragment equals the output of the `wt-dana` function for the same inputs, and the no-JavaScript path shows the same split.
 - [ ] `flag_query` sets the flag, and the flagged query is readable only through `flagged_queries()`.
 - [ ] `wt report` commands run as `dg_analyst` and cannot read unflagged query text.
 - [ ] A failed log insert produces an error page and no answer.
-- [ ] The rate limit returns `429` after `ask_rate_per_hour` asks in an hour.
-- [ ] Security headers and `robots` rules are present on every response.
+- [x] The rate limit returns `429` after `ask_rate_per_hour` asks in an hour. (`wt-api/tests/site.rs`; `ask_rate_per_hour` is in `[answer]` of `config/retrieval.toml`.)
+- [x] Security headers and `robots` rules are present on every response. (`wt-api/tests/pages.rs` and `tests/site.rs`; the headers are set by one layer over the whole router.)
 - [ ] A manual keyboard-only pass completes ask, feedback, dana split and flag with no mouse.
 
 Acceptance criteria for texts, rights and design:
@@ -280,32 +280,32 @@ Acceptance criteria for texts, rights and design:
 - [ ] The answer page shows the "From the texts" section with a credit line, source link and report link on each unit and no give link. Text hits are absent from the teacher count and the dana split.
 - [ ] `GET /text/{unit_id}` shows at most two neighbors on each side and returns `404` for a unit that is not in `servable_text_unit`.
 - [ ] Snapshot tests cover the credit line for permission, license and mandate, for talks and texts, and assert that permission and licensed are absent on a mandate.
-- [ ] "Report this excerpt" opens `/rights?excerpt=<id>` with the excerpt prefilled for both talk passages and text units, and the form stores a request.
-- [ ] `GET /rights` lists each source from `v_source_rights` with its plain-language status (used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request) and uses no permission language for a mandate. (Moved from Spec 08, decision of October 5, 2026.)
+- [ ] "Report this excerpt" opens `/rights?excerpt=<id>` with the excerpt prefilled for both talk passages and text units, and the form stores a request. (Talk passages and the form: `wt-api/tests/site.rs` and `tests/pages.rs`. Text units wait for the answer page's "From the texts" section; the form already records a reported unit's id.)
+- [x] `GET /rights` lists each source from `v_source_rights` with its plain-language status (used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request) and uses no permission language for a mandate. (Moved from Spec 08, decision of October 5, 2026. `wt-api/tests/site.rs`; a source switched off for any other reason reads "Not shown at present.", and a mandate with no request sent yet reads "Permission not yet requested.")
 - [ ] A rendered mandated talk passage reads "Talk by" the teacher and sangha with the source link and the report link, and the words permission and licensed are absent; after a grant, a passage or text unit reads "Used with permission of" the grantor. (Moved from Spec 03, Mandated talks, and Spec 08, Rights lifecycle, decision of October 5, 2026.)
-- [ ] At 360px there is no horizontal scroll and the Menu button shows a text label. The panel opens from the button, closes from the Close button, the backdrop and Esc, and returns focus to the button. From 900px the links show inline with no Menu button.
-- [ ] The "Skip to main content" link is the first tab stop, and a test asserts that the viewport tag contains neither `user-scalable=no` nor `maximum-scale`.
+- [ ] At 360px there is no horizontal scroll and the Menu button shows a text label. (Checked by hand in a browser on October 11, 2026, at 375px: no sideways scroll, the panel opens, Esc closes it and focus returns to Menu. Waits for a browser in CI.) The panel opens from the button, closes from the Close button, the backdrop and Esc, and returns focus to the button. From 900px the links show inline with no Menu button.
+- [x] The "Skip to main content" link is the first tab stop, and a test asserts that the viewport tag contains neither `user-scalable=no` nor `maximum-scale`. (`wt-api/tests/site.rs` and `tests/static_checks.rs`.)
 - [ ] Header links, buttons and feedback buttons have targets of at least 44px.
 - [ ] An automated accessibility run passes WCAG AA on home, answer, text unit, rights and about at 360px and at 1280px.
 - [ ] Every page works without JavaScript: the menu opens through `<details>`, a question posts, and the dana split uses its fallback.
-- [ ] No template or stylesheet references an external host or font, checked by a grep test.
-- [ ] The footer appears on every page, and its last line contains no copyright claim over excerpts.
-- [ ] With `prefers-reduced-motion`, the menu does not animate.
+- [x] No template or stylesheet references an external host or font, checked by a grep test. (`wt-api/tests/static_checks.rs`.)
+- [x] The footer appears on every page, and its last line contains no copyright claim over excerpts. (`wt-api/tests/site.rs`.)
+- [x] With `prefers-reduced-motion`, the menu does not animate. (`wt-api/tests/static_checks.rs` checks the stylesheet rule.)
 
 Acceptance criteria for the accessibility standard and the logo:
 
-- [ ] `docs/accessibility/wcag3-register.md` exists, names the draft of September 10, 2026 or a later published one, lists every applicable requirement with status and evidence, and the release gate passes only when its draft version matches the latest published one or records why not.
-- [ ] A test computes the WCAG 2.2 ratio for every pair in the measured contrast table from the stylesheet tokens and fails below the thresholds, and a test fails if bright gold appears on a light surface.
-- [ ] Where WCAG 3.0 and WCAG 2.2 differ, the stricter outcome is applied and the difference is recorded in the register.
-- [ ] `GET /accessibility` and `POST /accessibility/report` work with no session, the report form stores a row, and the statement lists exactly the statuses in the register.
-- [ ] Every page has one `h1`, a unique title, the header, navigation, main and footer landmarks, and `lang="en"`. Pali, Sanskrit and Japanese terms carry a `lang` attribute where the source gives one, and diacritics are preserved in rendered text.
+- [x] `docs/accessibility/wcag3-register.md` exists, names the draft of September 10, 2026 or a later published one, lists every applicable requirement with status and evidence, and the release gate passes only when its draft version matches the latest published one or records why not. (`wt-api` unit tests check the lines and the date; checking W3C for a newer draft is a manual release step written into the register, since tests make no network calls.)
+- [x] A test computes the WCAG 2.2 ratio for every pair in the measured contrast table from the stylesheet tokens and fails below the thresholds, and a test fails if bright gold appears on a light surface. (`wt-api/tests/static_checks.rs`.)
+- [x] Where WCAG 3.0 and WCAG 2.2 differ, the stricter outcome is applied and the difference is recorded in the register. (Each row whose value the draft leaves open names the WCAG 2.2 criterion applied.)
+- [x] `GET /accessibility` and `POST /accessibility/report` work with no session, the report form stores a row, and the statement lists exactly the statuses in the register. (`wt-api/tests/site.rs`; the statement is built from the register at compile time.)
+- [ ] Every page has one `h1`, a unique title, the header, navigation, main and footer landmarks, and `lang="en"`. (Done for home, About, Rights, Accessibility and the error page in `wt-api/tests/site.rs`; Pali, Sanskrit and Japanese `lang` attributes are not yet set.) Pali, Sanskrit and Japanese terms carry a `lang` attribute where the source gives one, and diacritics are preserved in rendered text.
 - [ ] Status and confidence badges carry words, and a grayscale screenshot test shows no information lost.
 - [ ] At 320 CSS pixels and at 400 percent zoom, no page needs two-dimensional scrolling. With 200 percent text and a text spacing override, no content or function is lost.
 - [ ] Dynamic updates are announced: the dana split and feedback status appear in a polite live region, and focus moves to the result heading when the user asked for the result.
 - [ ] The dana panel preselects nothing and states, before any link opens, that no money passes through the site.
 - [ ] Source links name what they open, for example "Listen at 12:34 (opens the source video in a new tab)".
 - [ ] The manual pass for the release is recorded: keyboard only, NVDA with Firefox, VoiceOver on iOS and macOS, TalkBack with Chrome, forced colors, reduced motion and no JavaScript.
-- [ ] The header mark is inline, hidden from assistive technology, named by the adjacent text, stays visible in forced colors mode, and the footer mark follows `--on-dark`.
+- [x] The header mark is inline, hidden from assistive technology, named by the adjacent text, stays visible in forced colors mode, and the footer mark follows `--on-dark`. (`wt-api/tests/site.rs` for the markup; the mark draws in `currentColor`, which forced colors map to the text color. The source files are `docs/brand/`, since `brand/source/` and `Logo.zip` are not in the repository.)
 - [ ] `GET /favicon.ico` works with no session, the head carries the SVG, ICO and 180px icon links, and the served SVG files carry no `<metadata>` element while the originals in `brand/source/` are unchanged.
 - [ ] The first tester cohort includes at least two people who use a screen reader and one who navigates by keyboard only, and each of their findings is fixed or recorded in the register before any wider launch.
 

@@ -2,6 +2,7 @@ target/
 .git/
 .github/
 docs/
+!docs/accessibility/
 infra/
 data/
 models/

@@ -25,6 +25,7 @@ named_per_talk_cap = 2
 
 [answer]
 link_lead_in_ms = 2000
+ask_rate_per_hour = 30     # per tester, in-memory token bucket (Spec 06)
 
 [synthesis]
 max_themes = 4

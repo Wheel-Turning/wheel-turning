@@ -6,7 +6,7 @@
 <p>{{ teacher }} <span class="muted">· {{ sangha }}</span></p>
 <p class="meta">{{ meta }}</p>
 <p class="credit">{{ credit }}</p>
-<p><a href="{{ source_href }}" target="_blank" rel="noopener noreferrer">Open the source (opens in a new tab)</a></p>
+<p><a href="{{ source_href }}" target="_blank" rel="noopener noreferrer">Open the source (opens in a new tab)</a> · <a href="/rights?talk={{ talk_id }}#request">Report this transcript</a></p>
 <p class="muted">This text was transcribed by machine and may contain errors. Only the teacher's words are shown as spoken; students' questions appear lightly edited by machine, as context.</p>
 {% for r in rows %}
 {% if let Some(q) = r.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>

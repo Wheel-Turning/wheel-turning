@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Rights and removal · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<h1>Rights and removal</h1>
+<p class="summary">If you hold rights in any talk or text shown here, you can have it removed. Tell us and we will remove it, without argument.</p>
+
+<h2>What we add</h2>
+<p>We add a talk or text only where, in our judgement, the rights holder's terms allow it. Some terms allow it explicitly, such as a license or written permission. Others allow it implicitly, such as material shared freely so that anyone can hear or read it. Either way, we ask the rights holder for permission.</p>
+<ul>
+  <li>Where the rights are unclear, we ask first and add nothing until the rights holder says yes. This is called opting in.</li>
+  <li>Where the terms are more permissive, we add the material, ask for permission, and remove it at once if the rights holder says no. This is called opting out. Foundational texts are in this group: their teachings have been passed on freely for hundreds of years, some for thousands, and the project exists to make them easier to find.</li>
+</ul>
+<p>Our judgement that terms allow something is our own decision, not the rights holder's permission, and we never describe it as permission.</p>
+
+<h2>How it works</h2>
+<ol>
+  <li>Within one business day of your request, the material you name stops appearing. We do this before checking who you are.</li>
+  <li>Then we delete the text and our stored copies, and we block the same material from being added again, even from a different web address.</li>
+  <li>If it turns out you do not hold the rights, we may restore it, and we will tell you first.</li>
+  <li>If you would rather give permission or set limits, such as leaving out certain talks or topics, tell us that instead. We will record it and follow it.</li>
+</ol>
+
+<h2 id="request">Ask for removal</h2>
+{% if sent %}<p class="status" role="status" tabindex="-1" id="sent">Thank you. We received your request. What you named stops appearing within one business day.</p>{% endif %}
+{% if let Some(e) = error_summary %}<p class="error" role="alert">{{ e }}</p>{% endif %}
+<form method="post" action="/rights/request" novalidate>
+  {% if let Some(x) = excerpt %}<input type="hidden" name="excerpt" value="{{ x }}">{% endif %}
+  <div class="field">
+    <label for="r-name">Name (optional)</label>
+    <input id="r-name" name="name" type="text" maxlength="200" autocomplete="name" value="{{ form.name }}">
+  </div>
+  <div class="field">
+    <label for="r-email">Email (optional)</label>
+    <input id="r-email" name="email" type="email" maxlength="320" autocomplete="email" aria-describedby="r-email-help" value="{{ form.email }}">
+    <p id="r-email-help" class="help">We can only reply if you give a way to reach you.</p>
+  </div>
+  <div class="field">
+    <label for="r-target">What should be removed?</label>
+    <input id="r-target" name="target" type="text" required maxlength="1000" aria-describedby="r-target-help{% if target_error.is_some() %} r-target-error{% endif %}"{% if target_error.is_some() %} aria-invalid="true"{% endif %} value="{{ form.target }}">
+    <p id="r-target-help" class="help">A web address, a title, or the code shown next to an excerpt.</p>
+    {% if let Some(e) = target_error %}<p id="r-target-error" class="error">{{ e }}</p>{% endif %}
+  </div>
+  <div class="field">
+    <label for="r-message">Message (optional)</label>
+    <textarea id="r-message" name="message" rows="4" maxlength="4000">{{ form.message }}</textarea>
+  </div>
+  <div class="hp" aria-hidden="true">
+    <label for="r-website">Leave this empty</label>
+    <input id="r-website" name="website" type="text" tabindex="-1" autocomplete="off">
+  </div>
+  <button type="submit">Send request</button>
+  <p class="help">The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.</p>
+</form>
+
+<h2>Student voices</h2>
+<p>Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. If you recognize your own question and want it removed, use the form above.</p>
+
+<h2 id="sources">Sources and their status</h2>
+{% if sources.is_empty() %}
+<p>No sources are listed yet.</p>
+{% else %}
+<ul class="sources">
+  {% for s in sources %}<li><strong>{{ s.name }}</strong> <span class="muted">({{ s.kind }})</span>: {{ s.status }}</li>{% endfor %}
+</ul>
+{% endif %}
+</div>
+{% endblock %}

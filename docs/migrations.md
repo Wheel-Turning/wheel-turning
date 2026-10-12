@@ -41,6 +41,7 @@ Migrations live in `migrations/` as sqlx files named `NNNN_description.sql`, are
 | 0027 | `0027_work_level_citations.sql` | Work-level citations (#74) | Each work's work-level locator `'*'`, kept by a trigger on `work`, and `work_name` as a citation method (Spec 08, Work-level citations) | None new |
 | 0028 | `0028_talk_speaker_assigned_by.sql` | Speaker by hand | `talk.speaker_assigned_by`: who assigned the speaker by hand, so classification leaves it alone (Spec 03, Assigning a speaker by hand) | None new: `wt_pipeline` already updates `talk` |
 | 0029 | `0029_student_questions.sql` | Student questions | `student_question` with its HNSW index; view `servable_student_question` with `servable_passage`'s talk, teacher, sangha and rights conditions (Spec 04, Student questions) | select, insert, delete on `student_question` to `wt_pipeline`; select on `servable_student_question` to `wt_pipeline` and `wt_web` |
+| 0030 | `0030_accessibility_report_and_source_status.sql` | Rights and accessibility pages | `accessibility_report` (Spec 06, Accessibility standard); `v_source_rights` gains, at the end, `kind`, `license_name`, `license_url`, `permission_recorded_on`, `license_recorded_on` and `removal_requested`, so `/rights` can state each status with its date | insert on `accessibility_report` to `wt_web`, select and update to `wt_pipeline`; the view keeps its grants |
 
 0001 to 0008 predate rule 2: Spec 02 put every grant in 0008, after the roles exist. They are applied and stay as they are. From 0009 on, rule 2 applies.
 
@@ -53,7 +54,6 @@ These come from the October 3 to 5 specs. Each gets its number at merge.
 | Spec | Spec's number | Description | Notes |
 |---|---|---|---|
 | 08 | 0014 | rights ledger | Landed whole in 0015 |
-| 06 | 0017 | `accessibility_report` table | New table |
 | 06 | 0019 | privacy modes: `tester.privacy_mode`, `privacy_chosen`, nullable `query_log.query_text`, `query_log.privacy_mode`, `text_expires_at` and its index | Alters tables from 0005 |
 | 02 | 0021 | donation links: `sangha.donation_kind`, `donation_note`, `donation_checked_at`, `donation_checked_by` and the `donation_verified_needs_page` check | Alters `sangha` from 0002 |
 | 05 | 0022 | `query_log.sensitive_category` | Alters `query_log` from 0005. Storing an acute question without its text also needs 0019, which makes `query_text` nullable, so it merges after 0019 |

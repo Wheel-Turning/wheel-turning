@@ -76,7 +76,15 @@ pub fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
             Arc::new(UnavailableLlm)
         }
     };
+    let owner_name = std::env::var("WT_OWNER_NAME")
+        .ok()
+        .map(|n| n.trim().to_owned())
+        .filter(|n| !n.is_empty());
+    let trust_forwarded_for = std::env::var("WT_TRUST_FORWARDED_FOR").is_ok_and(|v| v == "true");
     Ok(Site {
+        limits: crate::Limits::new(retrieval.answer.ask_rate_per_hour),
+        owner_name,
+        trust_forwarded_for,
         embedder: Arc::new(embedder),
         reranker,
         llm,

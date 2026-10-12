@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Accessibility · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+<h1>Accessibility</h1>
+<p class="summary">Wheel Turning aims to conform to WCAG 3.0, the draft accessibility guidelines from the W3C. Because WCAG 3.0 is still a draft, we also meet WCAG 2.2 level AA wherever the draft is undecided.</p>
+
+<h2>Standard and date</h2>
+<p>Evaluated against the <a href="{{ draft_url }}">WCAG 3.0 Working Draft of {{ draft }}</a>. Last evaluated on {{ last_evaluated }}.</p>
+<p>The tests we plan for every release use a keyboard alone, NVDA with Firefox, VoiceOver on iOS and macOS, TalkBack with Chrome, 200 percent text, 400 percent zoom, forced colors and reduced motion. Those tests have not been run yet. Until they are, the requirements that depend on them are listed as partly met or not met.</p>
+
+<h2>Requirements</h2>
+<p>Each requirement from the draft that applies to this site, with its status.</p>
+{% for g in groups %}
+<h3 id="status-{{ loop.index }}">{{ g.heading }} ({{ g.rows.len() }})</h3>
+{% if g.rows.is_empty() %}<p>None.</p>{% else %}
+<ul class="register-list" data-status="{{ g.status }}">
+  {% for r in g.rows %}<li>{{ r.id }} {{ r.name }} <span class="muted">({{ r.kind }})</span></li>{% endfor %}
+</ul>
+{% endif %}
+{% endfor %}
+
+<h2>Known gaps</h2>
+{% if gaps.is_empty() %}<p>There are no known gaps.</p>{% else %}
+<ul>
+  {% for r in gaps %}<li><strong>{{ r.name }}</strong> ({{ r.status }}): {{ r.how }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+<h2 id="report">Tell us about a problem</h2>
+{% if sent %}<p class="status" role="status" id="sent">Thank you. We received your report. We read every report. Replies may take a few days.</p>{% endif %}
+{% if description_error.is_some() %}<p class="error" role="alert">Please fix the field marked below.</p>{% endif %}
+<form method="post" action="/accessibility/report" novalidate>
+  <div class="field">
+    <label for="a-page">The page address</label>
+    <input id="a-page" name="page" type="text" maxlength="500" value="{{ form.page }}">
+  </div>
+  <div class="field">
+    <label for="a-description">What happened</label>
+    <textarea id="a-description" name="description" rows="5" required minlength="5" maxlength="4000" aria-describedby="a-description-help{% if description_error.is_some() %} a-description-error{% endif %}"{% if description_error.is_some() %} aria-invalid="true"{% endif %}>{{ form.description }}</textarea>
+    <p id="a-description-help" class="help">Between 5 and 4000 characters.</p>
+    {% if let Some(e) = description_error %}<p id="a-description-error" class="error">{{ e }}</p>{% endif %}
+  </div>
+  <div class="field">
+    <label for="a-at">The assistive technology you use (optional)</label>
+    <input id="a-at" name="assistive_tech" type="text" maxlength="500" value="{{ form.assistive_tech }}">
+  </div>
+  <div class="field">
+    <label for="a-contact">How to reach you (optional)</label>
+    <input id="a-contact" name="contact" type="text" maxlength="500" value="{{ form.contact }}">
+  </div>
+  <div class="hp" aria-hidden="true">
+    <label for="a-website">Leave this empty</label>
+    <input id="a-website" name="website" type="text" tabindex="-1" autocomplete="off">
+  </div>
+  <button type="submit">Send report</button>
+  <p class="help">We read every report. Replies may take a few days.</p>
+</form>
+</div>
+{% endblock %}
