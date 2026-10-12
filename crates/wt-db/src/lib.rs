@@ -21,6 +21,7 @@ pub mod job;
 pub mod license;
 pub mod llm;
 pub mod locator;
+pub mod privacy;
 pub mod public_forms;
 pub mod questions;
 pub mod reference;

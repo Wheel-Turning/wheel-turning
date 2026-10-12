@@ -14,6 +14,10 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = wt_db::lazy_pool(&config.database_url)?;
     let site = wt_api::site::load(&config, &pool).context("loading the site")?;
+    tokio::spawn(wt_api::privacy::purge_loop(
+        pool.clone(),
+        site.privacy.retention_days,
+    ));
     let app = router(AppState {
         pool,
         site: Arc::new(site),

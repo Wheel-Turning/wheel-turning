@@ -55,6 +55,10 @@ pub struct NewAnswer<'a> {
     pub latency_ms: i32,
     /// Themes dropped by the filters or the verifier.
     pub themes_dropped: i32,
+    /// `share` or `count_only` (Spec 06, Privacy modes).
+    pub privacy_mode: &'a str,
+    /// When the purge removes the text and the answer.
+    pub text_expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Spec 06, Logging, rule 1: the query log, the answer and its passages in one transaction, so
@@ -66,8 +70,8 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
-                                theme_count, themes_dropped)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id",
+                                theme_count, themes_dropped, privacy_mode, text_expires_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id",
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -78,7 +82,9 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.thin_coverage,
         a.latency_ms,
         themes,
-        a.themes_dropped
+        a.themes_dropped,
+        a.privacy_mode,
+        a.text_expires_at
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -132,7 +138,7 @@ pub async fn load(
     .await?;
     Ok(row.and_then(|r| {
         Some(Stored {
-            query_text: r.query_text,
+            query_text: r.query_text.unwrap_or_default(),
             payload: serde_json::from_value(r.payload).ok()?,
             created_at: r.created_at,
         })

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select privacy_mode as mode, privacy_chosen as chosen from tester where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tester",
+            "name": "privacy_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "chosen",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tester",
+            "name": "privacy_chosen"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "128209fdd85e61525bde79e835b9ce4f695c4e31401c396f72619743017dc082"
+}

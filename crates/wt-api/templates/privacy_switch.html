@@ -1,0 +1,11 @@
+<form method="post" action="/about/privacy" class="switch">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="back" value="{{ switch.back }}">
+  <div class="check">
+    <input id="keep-{{ switch.back }}" name="keep" type="checkbox" value="1"{% if switch.keep %} checked{% endif %} aria-describedby="keep-{{ switch.back }}-help">
+    <label for="keep-{{ switch.back }}">Keep my questions to help improve Wheel Turning.</label>
+  </div>
+  <p id="keep-{{ switch.back }}-help" class="help">{{ switch.help }}</p>
+  <button type="submit" class="secondary">Save this choice</button>
+  {% if saved %}<p class="status" role="status">Saved. This applies to your next question.</p>{% endif %}
+</form>

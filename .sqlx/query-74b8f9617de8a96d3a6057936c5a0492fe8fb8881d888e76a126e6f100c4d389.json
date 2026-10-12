@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select purge_expired_queries(make_interval(days => $1)) as \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "74b8f9617de8a96d3a6057936c5a0492fe8fb8881d888e76a126e6f100c4d389"
+}
