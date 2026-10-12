@@ -21,8 +21,17 @@ pub struct Tester {
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// Records a tester with the SHA-256 of their token.
+/// The reserved label evaluation runs ask as (Spec 07). Its answers stay out of tester
+/// analytics, so no person may be invited under it.
+pub const EVAL_LABEL: &str = "eval";
+
+/// Records a tester with the SHA-256 of their token. The label `eval` is reserved.
 pub async fn invite(pool: &PgPool, label: &str, token_hash: &[u8]) -> Result<TesterId, DbError> {
+    if label.trim().eq_ignore_ascii_case(EVAL_LABEL) {
+        return Err(DbError::Refused(format!(
+            "the tester label {EVAL_LABEL:?} is reserved for evaluation runs"
+        )));
+    }
     let id = sqlx::query_scalar!(
         "insert into tester (label, token_hash) values ($1, $2) returning id",
         label,

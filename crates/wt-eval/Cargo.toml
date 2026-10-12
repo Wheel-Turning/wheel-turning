@@ -11,3 +11,22 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+toml = "1"
+tracing.workspace = true
+uuid.workspace = true
+wt-api.workspace = true
+wt-core.workspace = true
+wt-db.workspace = true
+wt-retrieve.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+wt-db = { workspace = true, features = ["test-support"] }
+wt-extract.workspace = true
+wt-ml.workspace = true
+wt-registry.workspace = true

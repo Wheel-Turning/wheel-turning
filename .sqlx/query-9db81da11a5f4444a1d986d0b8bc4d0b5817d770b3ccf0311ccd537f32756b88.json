@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select q.id as question_id, q.ordinal, q.text, q.tags, r.answer_id, a.payload,\n                  r.timings, r.outcome, l.thin_coverage, te.display_name as \"named_teacher?\"\n           from eval_result r\n           join eval_question q on q.id = r.question_id\n           join answer a on a.id = r.answer_id\n           join query_log l on l.id = a.query_log_id\n           left join teacher te on te.id = l.named_teacher_id\n           where r.run_id = $1\n           order by q.ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "eval_question",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ordinal",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "eval_question",
+            "name": "ordinal"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "eval_question",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "eval_question",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "answer_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "eval_result",
+            "name": "answer_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "answer",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "timings",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "eval_result",
+            "name": "timings"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "outcome",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "eval_result",
+            "name": "outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "thin_coverage",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "query_log",
+            "name": "thin_coverage"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "named_teacher?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9db81da11a5f4444a1d986d0b8bc4d0b5817d770b3ccf0311ccd537f32756b88"
+}

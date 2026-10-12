@@ -434,12 +434,15 @@ create table eval_run (
   set_id uuid not null references eval_set(id),
   build text not null,
   config jsonb not null,
-  started_at timestamptz not null default now()
+  started_at timestamptz not null default now(),
+  finished_at timestamptz                -- null for a run that stopped partway (0033)
 );
 create table eval_result (
   run_id uuid not null references eval_run(id) on delete cascade,
   question_id uuid not null references eval_question(id),
   answer_id uuid not null references answer(id) on delete cascade,
+  timings jsonb not null default '{}',   -- milliseconds per stage (0033)
+  outcome jsonb not null default '{}',   -- mode, counts, notice, failures (0033)
   primary key (run_id, question_id)
 );
 create table eval_rating (

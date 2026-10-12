@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from claim_audit where run_id = $1 and reviewer = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f2f45f39c6ad3132affcc4b220945f05f253b3315a0e61098ab4e295e0e8685a"
+}

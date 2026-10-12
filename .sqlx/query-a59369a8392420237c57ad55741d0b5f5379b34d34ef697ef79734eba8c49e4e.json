@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update eval_run set finished_at = now() where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a59369a8392420237c57ad55741d0b5f5379b34d34ef697ef79734eba8c49e4e"
+}

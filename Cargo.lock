@@ -4539,11 +4539,13 @@ dependencies = [
  "wt-asr",
  "wt-core",
  "wt-db",
+ "wt-eval",
  "wt-extract",
  "wt-index",
  "wt-ingest",
  "wt-ml",
  "wt-registry",
+ "wt-retrieve",
  "wt-segment",
 ]
 
@@ -4594,6 +4596,24 @@ dependencies = [
 [[package]]
 name = "wt-eval"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+ "wt-api",
+ "wt-core",
+ "wt-db",
+ "wt-extract",
+ "wt-ml",
+ "wt-registry",
+ "wt-retrieve",
+]
 
 [[package]]
 name = "wt-extract"
