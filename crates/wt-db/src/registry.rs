@@ -472,3 +472,80 @@ pub async fn teacher_names(conn: &mut sqlx::PgConnection) -> Result<Vec<String>,
     .await?;
     Ok(names)
 }
+
+/// What `wt teacher cite` changed for one teacher.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CitationChange {
+    /// The teacher's display name.
+    pub teacher: String,
+    /// The citation name now stored.
+    pub citation_name: Option<String>,
+    /// The sort key now stored.
+    pub citation_sort: Option<String>,
+    /// Whether anything changed; rerunning with the same values changes nothing.
+    pub changed: bool,
+}
+
+/// Sets how References enter and sort a teacher (Spec 05, Answer assembly, rule 5), with a
+/// `correction_log` row per field that changes. An empty value clears the field, so the
+/// teacher is entered by display name again.
+pub async fn set_citation(
+    conn: &mut PgConnection,
+    teacher: &str,
+    citation_name: Option<&str>,
+    citation_sort: Option<&str>,
+    actor: &str,
+    reason: &str,
+) -> Result<CitationChange, RegistryDbError> {
+    let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
+    let (id, name) = find_teacher(&mut tx, teacher).await?;
+    let row = sqlx::query!(
+        "select citation_name, citation_sort from teacher where id = $1 for update",
+        id.as_uuid()
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let clean = |v: Option<&str>| {
+        v.map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let (new_name, new_sort) = (clean(citation_name), clean(citation_sort));
+    let mut changed = false;
+    for (field, old, new) in [
+        ("citation_name", &row.citation_name, &new_name),
+        ("citation_sort", &row.citation_sort, &new_sort),
+    ] {
+        if old != new {
+            log_change(
+                &mut tx,
+                "teacher",
+                id.as_uuid(),
+                field,
+                old.as_ref().map(|v| serde_json::json!(v)),
+                new.as_ref().map(|v| serde_json::json!(v)),
+                actor,
+                reason,
+            )
+            .await?;
+            changed = true;
+        }
+    }
+    if changed {
+        sqlx::query!(
+            "update teacher set citation_name = $2, citation_sort = $3 where id = $1",
+            id.as_uuid(),
+            new_name,
+            new_sort
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(CitationChange {
+        teacher: name,
+        citation_name: new_name,
+        citation_sort: new_sort,
+        changed,
+    })
+}

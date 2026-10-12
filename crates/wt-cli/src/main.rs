@@ -780,6 +780,27 @@ enum TeacherCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Set how the References list names and sorts a teacher (Spec 05, Answer assembly, rule
+    /// 5), with a correction_log row. An empty value clears it, so the teacher is entered by
+    /// display name. With --sheet, applies a reviewed CSV with the columns teacher,
+    /// citation_name and citation_sort, all rows or none.
+    Cite {
+        /// Display name or alias.
+        #[arg(long, required_unless_present = "sheet", conflicts_with = "sheet")]
+        teacher: Option<String>,
+        /// The name as References enter it, such as "Suzuki, Shunryu" or "Katagiri Roshi".
+        #[arg(long, requires = "teacher")]
+        citation_name: Option<String>,
+        /// The key References sort it by, such as "Suzuki Shunryu".
+        #[arg(long, requires = "teacher")]
+        sort: Option<String>,
+        /// A reviewed sheet instead of one teacher.
+        #[arg(long)]
+        sheet: Option<PathBuf>,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
 }
 
 fn parse_display_level(value: &str) -> Result<wt_db::display::DisplayLevel, String> {
@@ -2666,6 +2687,37 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             commands::print_json(&change)?;
+        }
+        Command::Teacher {
+            command:
+                TeacherCommand::Cite {
+                    teacher,
+                    citation_name,
+                    sort,
+                    sheet,
+                    by,
+                },
+        } => {
+            let pool = pool().await?;
+            let changes = match (teacher, sheet) {
+                (_, Some(sheet)) => commands::teacher_cite_sheet(&pool, &sheet, &by).await?,
+                (Some(teacher), None) => {
+                    let mut conn = pool.acquire().await?;
+                    vec![
+                        wt_db::registry::set_citation(
+                            &mut conn,
+                            &teacher,
+                            citation_name.as_deref(),
+                            sort.as_deref(),
+                            &by,
+                            "wt teacher cite",
+                        )
+                        .await?,
+                    ]
+                }
+                (None, None) => anyhow::bail!("give --teacher or --sheet"),
+            };
+            commands::print_json(&changes)?;
         }
         Command::Exclusion { command } => match command {
             ExclusionCommand::List => rights::exclusions(&pool().await?).await?,

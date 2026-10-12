@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select citation_name, citation_sort from teacher where id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "citation_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "citation_name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "citation_sort",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "citation_sort"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "ed4a34960b067bc90a0e0a1e255d5431a659311cf0b2dc773aeece38245c8fcb"
+}

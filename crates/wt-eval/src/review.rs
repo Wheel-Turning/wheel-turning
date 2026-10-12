@@ -213,22 +213,30 @@ fn passage(h: &mut String, qid: &str, n: usize, p: &Served, context: &Context, l
         esc(&when),
         esc(&p.text)
     );
-    let link = wt_api::view::source_link(&p.talk, p.start_ms, lead_in_ms);
-    if link.href.starts_with("https://") {
+    let links = wt_api::view::source_links(&p.talk, &p.text, p.start_ms, p.ordinal, lead_in_ms);
+    let shown: Vec<&wt_api::view::Link> = links
+        .read
+        .iter()
+        .filter(|l| l.external)
+        .chain(links.listen.iter())
+        .filter(|l| l.href.starts_with("https://"))
+        .collect();
+    h.push_str("<p class='src'>");
+    for (i, link) in shown.iter().enumerate() {
+        if i > 0 {
+            h.push_str(" · ");
+        }
         let _ = write!(
             h,
-            "<p class='src'><a href='{}' target='_blank' rel='noopener noreferrer'>{}</a>",
+            "<a href='{}' target='_blank' rel='noopener noreferrer'>{}</a>",
             esc(&link.href),
             esc(&link.label)
         );
-        if let Some(at) = &link.starts_at {
-            let _ = write!(h, " {}", esc(at));
-        }
-        h.push_str("</p>");
-    } else {
-        let at = link.starts_at.as_deref().unwrap_or(&link.label);
-        let _ = write!(h, "<p class='src'>{}</p>", esc(at));
     }
+    if let Some(at) = &links.starts_at {
+        let _ = write!(h, " {}", esc(at));
+    }
+    h.push_str("</p>");
     if let Some((before, after)) = context.get(&p.id)
         && (before.is_some() || after.is_some())
     {
