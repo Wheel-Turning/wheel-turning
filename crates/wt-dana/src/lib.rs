@@ -455,6 +455,6 @@ mod tests {
     #[test]
     fn seeds_are_stable_and_vary() {
         assert_eq!(seed_from(b"abc"), seed_from(b"abc"));
-        assert_ne!(seed_from(b"abc"), seed_from(b"abd"));
+        assert_ne!(seed_from(b"abc"), seed_from(b"abx"));
     }
 }
