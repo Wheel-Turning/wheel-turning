@@ -97,6 +97,13 @@ module "service" {
   web_cpu                = var.web_cpu
   web_memory             = var.web_memory
 
+  llm = {
+    model           = var.llm_model
+    workspace_id    = var.anthropic_workspace_id
+    real_data_ok    = var.llm_real_data_ok
+    monthly_cap_usd = var.llm_monthly_cap_usd
+  }
+
   web_exec_role_arn   = module.iam.web_exec_role_arn
   admin_exec_role_arn = module.iam.admin_exec_role_arn
   web_task_role_arn   = module.iam.web_task_role_arn

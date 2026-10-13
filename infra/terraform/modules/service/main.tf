@@ -1,8 +1,10 @@
 # Spec 01 service: ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate,
 # HTTPS listener. Health check on /healthz, HTTP redirects to HTTPS.
 #
-# Two task definitions run the same image:
-# - web: the always-on service, connecting as wt_web_login
+# Three task definitions run the same image:
+# - web: the always-on service, connecting as wt_web_login. Its models container copies the ONNX
+#   models from the models bucket into a task volume first (Spec 01: models are not baked into
+#   the image), and wt-api starts only after that copy succeeds.
 # - migrate: a one-off task for `wt db migrate`, connecting as wt_owner_login
 # - admin: a one-off task connecting as the RDS master user, used only to bootstrap migrations
 #   and create login roles (`wt db create-login`)
@@ -58,6 +60,40 @@ variable "web_cpu" {
 variable "web_memory" {
   type    = number
   default = 1024
+}
+
+variable "models" {
+  description = "Model directory names inside the models bucket, copied into /models at task start."
+  type = object({
+    embed  = string
+    rerank = string
+  })
+  default = {
+    embed  = "bge-m3-int8"
+    rerank = "bge-reranker-v2-m3-int8"
+  }
+}
+
+variable "models_image" {
+  description = "Image that copies the models from S3. Public, pinned."
+  type        = string
+  default     = "public.ecr.aws/aws-cli/aws-cli:2.31.0"
+}
+
+variable "llm" {
+  description = "Language model settings for synthesis, verification and triage (Specs 04 and 05). The API key comes from Secrets Manager."
+  type = object({
+    model           = string
+    workspace_id    = string
+    real_data_ok    = bool
+    monthly_cap_usd = number
+  })
+}
+
+variable "health_check_grace_seconds" {
+  description = "Time a new task has to copy and load the models before load balancer checks count."
+  type        = number
+  default     = 300
 }
 
 variable "web_port" {
@@ -177,29 +213,68 @@ resource "aws_ecs_task_definition" "web" {
     cpu_architecture        = "X86_64"
   }
 
-  container_definitions = jsonencode([{
-    name         = "web"
-    image        = "${aws_ecr_repository.this.repository_url}:${coalesce(local.web_tag, "none")}"
-    essential    = true
-    command      = ["wt-api"]
-    portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
-    environment = concat(local.common_env, local.db_env, [
-      { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
-      { name = "WT_DB_USER", value = "wt_web_login" },
-    ])
-    secrets = [
-      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
-      { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
-    ]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = var.log_group_names["web"]
-        awslogs-region        = local.region
-        awslogs-stream-prefix = "web"
+  # Task storage shared by the two containers; gone when the task stops.
+  volume {
+    name = "models"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "models"
+      image     = var.models_image
+      essential = false
+      command = [
+        "s3", "sync", "s3://${var.bucket_names["models"]}/", "/models/", "--only-show-errors",
+        "--exclude", "*",
+        "--include", "${var.models.embed}/*",
+        "--include", "${var.models.rerank}/*",
+      ]
+      mountPoints = [{ sourceVolume = "models", containerPath = "/models" }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_names["web"]
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "models"
+        }
       }
-    }
-  }])
+    },
+    {
+      name         = "web"
+      image        = "${aws_ecr_repository.this.repository_url}:${coalesce(local.web_tag, "none")}"
+      essential    = true
+      command      = ["wt-api"]
+      portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
+      dependsOn    = [{ containerName = "models", condition = "SUCCESS" }]
+      mountPoints  = [{ sourceVolume = "models", containerPath = "/models", readOnly = true }]
+      environment = concat(local.common_env, local.db_env, [
+        { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
+        { name = "WT_DB_USER", value = "wt_web_login" },
+        { name = "WT_MODEL_DIR", value = "/models" },
+        { name = "WT_EMBED_MODEL", value = var.models.embed },
+        { name = "WT_RERANK_MODEL", value = var.models.rerank },
+        { name = "WT_LLM_MODEL", value = var.llm.model },
+        { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
+        { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
+        { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
+        # The load balancer is the only way in, so its X-Forwarded-For names the client.
+        { name = "WT_TRUST_FORWARDED_FOR", value = "true" },
+      ])
+      secrets = [
+        { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
+        { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+        { name = "ANTHROPIC_API_KEY", valueFrom = var.secret_arns["anthropic_api_key"] },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_names["web"]
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "web"
+        }
+      }
+    },
+  ])
 }
 
 resource "aws_ecs_task_definition" "migrate" {
@@ -372,7 +447,7 @@ resource "aws_ecs_service" "web" {
 
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
-  health_check_grace_period_seconds  = 30
+  health_check_grace_period_seconds  = var.health_check_grace_seconds
 
   deployment_circuit_breaker {
     enable   = true
