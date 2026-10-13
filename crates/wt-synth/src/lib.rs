@@ -187,6 +187,8 @@ pub enum DropReason {
     WrongYear,
     /// States what a teacher believes rather than what a talk says.
     BeliefWord,
+    /// Speaks to the reader ("you", "your"), as advice in the site's voice.
+    AddressesReader,
     /// Too few content words found in the cited excerpts.
     Ungrounded,
     /// The verifier did not mark it supported.
@@ -209,6 +211,7 @@ impl DropReason {
             DropReason::Misattributed => "misattributed",
             DropReason::WrongYear => "wrong_year",
             DropReason::BeliefWord => "belief_word",
+            DropReason::AddressesReader => "addresses_reader",
             DropReason::Ungrounded => "ungrounded",
             DropReason::Unsupported => "unsupported",
         }
@@ -461,7 +464,7 @@ fn by_part(d: SummaryDraft, settings: &Settings) -> (Vec<Placed>, Vec<Placed>) {
     (kept, over)
 }
 
-/// Filters 1 to 8, in order. Survivors go to the verifier.
+/// Filters 1 to 9, in order. Survivors go to the verifier.
 fn filter_draft(
     drafted: SummaryDraft,
     input: &SummaryInput,
@@ -554,6 +557,14 @@ fn filter_draft(
         }
         if let Some(w) = filter::belief_word(text) {
             reject(DropReason::BeliefWord, Some(w.to_owned()), candidate.text);
+            continue;
+        }
+        if let Some(w) = filter::addresses_reader(text) {
+            reject(
+                DropReason::AddressesReader,
+                Some(w.to_owned()),
+                candidate.text,
+            );
             continue;
         }
         let texts: Vec<String> = cited.iter().map(|&i| input.excerpts[i].text()).collect();

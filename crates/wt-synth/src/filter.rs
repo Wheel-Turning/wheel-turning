@@ -383,6 +383,15 @@ pub fn grounding_ratio(description: &str, passages: &[&str], names: &[String]) -
     found as f32 / theme.len() as f32
 }
 
+/// Filter 7, second half: a word that speaks to the reader, which makes a sentence advice in
+/// the site's own voice rather than a report of what a talk says.
+pub fn addresses_reader(sentence: &str) -> Option<&'static str> {
+    const READER: &[&str] = &["you", "your", "yours", "yourself", "yourselves"];
+    words(sentence)
+        .iter()
+        .find_map(|w| READER.iter().find(|r| **r == w.as_str()).copied())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,6 +503,20 @@ mod tests {
         );
         assert_eq!(belief_word("A 2011 talk says posture matters."), None);
         assert_eq!(belief_word("She holds the bowl."), None);
+    }
+
+    #[test]
+    fn a_sentence_that_speaks_to_the_reader_is_found() {
+        assert_eq!(
+            addresses_reader("Return to your breath when anger comes."),
+            Some("your")
+        );
+        assert_eq!(addresses_reader("You need not battle anger."), Some("you"));
+        assert_eq!(
+            addresses_reader("Two talks describe returning to the breath."),
+            None
+        );
+        assert_eq!(addresses_reader("A talk on youth and practice."), None);
     }
 
     #[test]
