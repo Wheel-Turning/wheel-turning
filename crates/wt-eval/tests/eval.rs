@@ -130,13 +130,14 @@ async fn passage(pool: &PgPool, teacher: &str, video_id: &str, text: &str) {
     .unwrap();
 }
 
-/// A site whose model drafts one theme per standard answer and gives each verifier verdict.
+/// A site whose model drafts a one-sentence summary per standard answer and gives each verifier verdict.
 fn site(standard_answers: usize) -> Site {
     let mut replies = Vec::new();
     for _ in 0..standard_answers {
-        replies.push(Ok(
-            json!({ "themes": [{ "description": THEME, "passage_refs": ["P1", "P2"] }] }),
-        ));
+        replies.push(Ok(json!({ "headline": { "text": THEME, "cites": [
+                { "excerpt": "E1", "start": 1, "end": 1 },
+                { "excerpt": "E2", "start": 1, "end": 1 }
+            ] }, "sum_up": null })));
         replies.push(Ok(json!({ "supported": true, "unsupported_part": null })));
     }
     Site {
@@ -222,7 +223,14 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
         assert!(r.timings.total_ms >= r.timings.synth_ms, "{:?}", r.timings);
         assert!(r.outcome.is_some());
     }
-    assert_eq!(results[0].payload.themes.len(), 1);
+    assert_eq!(
+        results[0]
+            .payload
+            .summary
+            .as_ref()
+            .map_or(0, |s| s.sentences.len()),
+        1
+    );
     assert_eq!(results[1].named_teacher.as_deref(), Some("Ada Fixture"));
 
     // Every answer was asked as the reserved, revoked tester, and analytics leave them out.
@@ -443,7 +451,12 @@ async fn a_twenty_answer_claim_audit_imports_and_the_report_counts_each_verdict(
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            assert_eq!(r.payload.themes.len(), 1, "{}", r.label());
+            assert_eq!(
+                r.payload.summary.as_ref().map_or(0, |s| s.sentences.len()),
+                1,
+                "{}",
+                r.label()
+            );
             let verdict = match i {
                 0..=13 => "supported",
                 14..=17 => "drifting",
