@@ -1,0 +1,138 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select c.passage_id as \"passage_id!\", c.span_start, c.span_end,\n                  c.confidence::text as \"confidence!\", w.id as \"work_id!\",\n                  w.title as \"work_title!\", w.author, w.translator, c.locator as \"locator!\",\n                  c.label as \"label!\", coalesce(c.locator_url, w.link_out_url) as link_out_url\n           from servable_citation c\n           join work w on w.id = c.work_id\n           where c.passage_id = any($1) and c.confidence::text in ('resolved', 'probable')\n           order by c.passage_id, c.span_start nulls last, c.citation_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_citation",
+            "name": "passage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "span_start",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_citation",
+            "name": "span_start"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "span_end",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_citation",
+            "name": "span_end"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "confidence!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "work_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "work_title!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "author",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "translator",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "work",
+            "name": "translator"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "locator!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_citation",
+            "name": "locator"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "label!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_citation",
+            "name": "label"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "link_out_url",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      null,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "ef61058c60d19838cbedde45f4879841b1408c5e4b9093f8f4890e7091f98f90"
+}

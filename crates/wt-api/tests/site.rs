@@ -333,7 +333,12 @@ async fn icons_and_the_menu_script_need_no_session() {
 /// `lang="en"`, the skip link first, the inline mark hidden, and the footer links in order.
 fn check_structure(path: &str, body: &str) -> String {
     assert!(body.contains("<html lang=\"en\">"), "{path}");
-    assert_eq!(body.matches("<h1").count(), 1, "{path}: one h1");
+    // The progress section's copy sits in an inert <template> and is never rendered with the page.
+    let shown = match (body.find("<template"), body.find("</template>")) {
+        (Some(a), Some(b)) => format!("{}{}", &body[..a], &body[b..]),
+        _ => body.to_owned(),
+    };
+    assert_eq!(shown.matches("<h1").count(), 1, "{path}: one h1");
     for landmark in [
         "<header class=\"site\">",
         "<nav aria-label=\"Main\"",

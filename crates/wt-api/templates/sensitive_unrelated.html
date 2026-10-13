@@ -8,12 +8,12 @@
 </section>
 <p class="muted">Your question</p>
 <p class="question">{{ question }}</p>
-<form method="post" action="/ask">
+<form method="post" action="/ask" data-progress>
 <input type="hidden" name="csrf" value="{{ csrf }}">
 <input type="hidden" name="q" value="{{ question }}">
 <input type="hidden" name="anyway" value="1">
 <button type="submit">Search the talks anyway</button>
 </form>
-<p><a href="/">Ask something else</a></p>
+<p class="links"><a href="/">Ask something else</a></p>
 </div>
 {% endblock %}

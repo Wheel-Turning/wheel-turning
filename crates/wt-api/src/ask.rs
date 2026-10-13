@@ -11,10 +11,11 @@ use tokio::task::JoinHandle;
 use wt_core::ids::{AnswerId, TesterId};
 use wt_db::answer::Payload;
 use wt_extract::DataClass;
-use wt_retrieve::{Level, Mode, NamedDetector, Notice, Relevance, Triaged, retrieve_embedded};
+use wt_retrieve::{Level, Mode, NamedDetector, Notice, Relevance, Triaged, retrieve_reporting};
 use wt_synth::{Synthesis, SynthesisInput};
 
 use crate::Site;
+use crate::progress::{Count, Sink, Stage};
 
 /// Milliseconds per stage of one answer. A stage a run's build did not have reads as zero.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -145,7 +146,17 @@ pub async fn answer(
     tester: TesterId,
     text: &str,
 ) -> Result<Asked, AskError> {
-    match answer_framed(pool, site, tester, text, Framing::default(), None).await? {
+    match answer_framed(
+        pool,
+        site,
+        tester,
+        text,
+        Framing::default(),
+        None,
+        &Sink::silent(),
+    )
+    .await?
+    {
         Gated::Answered(asked) => Ok(*asked),
         Gated::Stopped { stop, .. } => Err(AskError::Stopped(stop)),
     }
@@ -167,7 +178,8 @@ fn stop(framing: &Framing, triaged: &Triaged) -> Option<Stop> {
 /// `Sec-GPC: 1`. `gate` is the triage gate's call, started alongside embedding and search
 /// (Spec 05, Sensitive questions, layer 3): its verdict raises the level before synthesis, and a
 /// verdict that stops the question discards whatever retrieval found and stores counts only,
-/// or for `unrelated` a log row without an answer.
+/// or for `unrelated` a log row without an answer. Each stage is reported to `progress` as it
+/// starts (Spec 06, Live progress while a question runs).
 pub async fn answer_framed(
     pool: &PgPool,
     site: &Site,
@@ -175,6 +187,7 @@ pub async fn answer_framed(
     text: &str,
     framing: Framing,
     gate: Option<JoinHandle<Triaged>>,
+    progress: &Sink,
 ) -> Result<Gated, AskError> {
     let started = Instant::now();
     let mut timings = StageTimings::default();
@@ -187,6 +200,11 @@ pub async fn answer_framed(
     let detector = NamedDetector::new(aliases, &site.common_words).map_err(AskError::Detector)?;
     let parsed = detector.parse(text);
     timings.parse_ms = millis(stage);
+    let scope = match parsed.mode {
+        Mode::NamedTeacher(t) => Some(t),
+        Mode::Standard => None,
+    };
+    progress.searched(pool, &site.scope_sizes, scope);
 
     // A named teacher is left out of the search text, so the check's vector no longer fits.
     let vector = framing
@@ -194,13 +212,14 @@ pub async fn answer_framed(
         .clone()
         .filter(|_| parsed.search_text == text);
     let retrieval = async {
-        let found = retrieve_embedded(
+        let found = retrieve_reporting(
             pool,
             site.embedder.as_ref(),
             vector,
             site.reranker.as_deref(),
             &parsed,
             &site.retrieval,
+            progress,
         )
         .await?;
         let stage = Instant::now();
@@ -245,6 +264,7 @@ pub async fn answer_framed(
         .map_err(AskError::Passages)?;
     let excerpts = crate::excerpt::choose(site, text, &served, &windows).await;
     timings.excerpt_ms = millis(stage);
+    progress.count(Count::Selected, ids.len());
 
     // Spec 05: synthesis runs in standard mode only, over the excerpts as the page shows them,
     // and not for a sensitive question, whose page omits the summary line. Any failure leaves
@@ -252,6 +272,7 @@ pub async fn answer_framed(
     let stage = Instant::now();
     let synthesis = match found.mode {
         Mode::Standard if level.shows_summary() && !framing.curated => {
+            progress.stage(Stage::Writing);
             let input = SynthesisInput {
                 query: text.to_owned(),
                 passages: served

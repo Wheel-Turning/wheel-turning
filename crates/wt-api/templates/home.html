@@ -3,7 +3,7 @@
 {% block content %}
 <div class="reading">
 <h1 class="tagline">What have Zen teachers said about the question you are living with?</h1>
-<form method="post" action="/ask" class="ask">
+<form method="post" action="/ask" class="ask" data-progress>
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="q">Your question</label>
   <textarea id="q" name="q" rows="4" required minlength="3" maxlength="500" aria-describedby="q-help{% if error.is_some() %} q-error{% endif %}">{{ question }}</textarea>
@@ -20,7 +20,7 @@
 </section>
 <h2>Examples</h2>
 <ul class="examples">
-  {% for ex in examples %}<li><form method="post" action="/ask"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ ex }}"><button type="submit" class="link">{{ ex }}</button></form></li>{% endfor %}
+  {% for ex in examples %}<li><form method="post" action="/ask" data-progress><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ ex }}"><button type="submit" class="link">{{ ex }}</button></form></li>{% endfor %}
 </ul>
 </div>
 {% endblock %}

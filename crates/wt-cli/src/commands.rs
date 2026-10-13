@@ -449,3 +449,47 @@ pub async fn audit(
         ExitCode::SUCCESS
     })
 }
+
+/// One row of a reviewed citation-name sheet.
+#[derive(Debug, serde::Deserialize)]
+struct CiteRow {
+    teacher: String,
+    #[serde(default)]
+    citation_name: String,
+    #[serde(default)]
+    citation_sort: String,
+}
+
+/// `wt teacher cite --sheet` (Spec 05, Answer assembly, rule 5): every row in one transaction,
+/// so an unknown teacher leaves the sheet unapplied.
+pub async fn teacher_cite_sheet(
+    pool: &PgPool,
+    sheet: &Path,
+    by: &str,
+) -> anyhow::Result<Vec<registry::CitationChange>> {
+    let text =
+        std::fs::read_to_string(sheet).with_context(|| format!("reading {}", sheet.display()))?;
+    let rows = csv::Reader::from_reader(text.trim_start_matches('\u{feff}').as_bytes())
+        .deserialize()
+        .collect::<Result<Vec<CiteRow>, _>>()
+        .with_context(|| format!("parsing {}", sheet.display()))?;
+    let reason = format!("wt teacher cite --sheet {}", sheet.display());
+    let mut tx = pool.begin().await?;
+    let mut changes = Vec::with_capacity(rows.len());
+    for row in rows {
+        changes.push(
+            registry::set_citation(
+                &mut tx,
+                &row.teacher,
+                Some(&row.citation_name),
+                Some(&row.citation_sort),
+                by,
+                &reason,
+            )
+            .await
+            .with_context(|| format!("row for {:?}", row.teacher))?,
+        );
+    }
+    tx.commit().await?;
+    Ok(changes)
+}

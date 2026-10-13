@@ -9,6 +9,7 @@
 pub mod config;
 pub mod excerpt;
 pub mod fuse;
+pub mod progress;
 pub mod query;
 pub mod search;
 pub mod select;
@@ -22,6 +23,7 @@ use wt_core::ids::{PassageId, TeacherId};
 use wt_ml::{Embedder, MlError, Reranker};
 
 pub use config::{ExcerptConfig, RetrievalConfig};
+pub use progress::{Progress, Silent, Step};
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
 pub use sensitive::triage::{Relevance, Triage, Triaged};
@@ -114,6 +116,20 @@ pub async fn retrieve_embedded(
     query: &ParsedQuery,
     cfg: &RetrievalConfig,
 ) -> Result<Retrieved, RetrieveError> {
+    retrieve_reporting(pool, embedder, vector, reranker, query, cfg, &Silent).await
+}
+
+/// [`retrieve_embedded`] that tells `progress` as each stage starts, for the live progress
+/// display (Spec 06). What it computes is the same.
+pub async fn retrieve_reporting(
+    pool: &PgPool,
+    embedder: &dyn Embedder,
+    vector: Option<Vec<f32>>,
+    reranker: Option<&dyn Reranker>,
+    query: &ParsedQuery,
+    cfg: &RetrievalConfig,
+    progress: &dyn Progress,
+) -> Result<Retrieved, RetrieveError> {
     let named = match query.mode {
         Mode::NamedTeacher(t) => Some(t),
         Mode::Standard => None,
@@ -133,6 +149,7 @@ pub async fn retrieve_embedded(
     };
     timings.embed_ms = millis(started.elapsed());
 
+    progress.step(Step::Searching);
     // The three lists are independent, so each runs on its own connection at the same time.
     // Candidates load afterwards; a passage that stopped serving in between is simply absent.
     let started = Instant::now();
@@ -172,6 +189,9 @@ pub async fn retrieve_embedded(
     let found = search::candidates(&mut *pool.acquire().await?, &ids).await?;
     timings.search_ms = millis(started.elapsed());
 
+    progress.step(Step::Weighing {
+        candidates: found.len(),
+    });
     let started = Instant::now();
     let fused_score: HashMap<PassageId, f32> = fused.iter().copied().collect();
     let (scored, rerank_degraded) =
@@ -193,6 +213,9 @@ pub async fn retrieve_embedded(
             })
         })
         .collect();
+    progress.step(Step::Choosing {
+        shortlisted: inputs.len(),
+    });
     let chosen = match named {
         Some(t) => select::named(&only(inputs, t), &cfg.selection),
         None => select::standard(&inputs, &cfg.selection),
