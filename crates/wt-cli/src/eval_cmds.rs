@@ -74,6 +74,18 @@ pub(crate) enum EvalCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Score where the inappropriate-question gates send each question of a gate file, such
+    /// as eval/gate_questions_v1.toml: the rules, the embedding check and the triage gate, as
+    /// the answer page applies them. Retrieves nothing and stores nothing but the spend
+    /// ledger's count of the gate's calls.
+    Gate {
+        /// The gate question file.
+        #[arg(long)]
+        file: PathBuf,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Per-question changes between two runs.
     Compare {
         /// The earlier run.
@@ -176,6 +188,37 @@ pub(crate) async fn eval(
                 print_json(&report)?;
             } else {
                 print!("{}", wt_eval::report::render(&report));
+            }
+        }
+        EvalCommand::Gate { file, json } => {
+            let text = std::fs::read_to_string(&file)
+                .with_context(|| format!("reading {}", file.display()))?;
+            let questions = wt_eval::gate::parse(&text)?;
+            let site = wt_api::site::load(config, pool)
+                .await
+                .context("loading the models and config/ files the server uses")?;
+            // The gate as deployed, with the questions marked synthetic, as for the red team.
+            let gate = wt_retrieve::sensitive::triage::LlmTriage::synthetic(site.llm.clone());
+            let results = wt_eval::gate::run(
+                &site.sensitivity,
+                site.embedder.as_ref(),
+                Some(&gate),
+                questions,
+                |r| {
+                    eprintln!(
+                        "{} {} {}",
+                        r.label(),
+                        if r.route_ok() { "ok  " } else { "MISS" },
+                        r.observed.route.as_str()
+                    );
+                },
+            )
+            .await?;
+            let report = wt_eval::gate::report(&results);
+            if json {
+                print_json(&report)?;
+            } else {
+                print!("{}", wt_eval::gate::render(&report));
             }
         }
         EvalCommand::Compare { a, b, json } => {

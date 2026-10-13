@@ -1,17 +1,19 @@
-# Practitioner question set, version 1 (Spec 07, Evaluation harness): 50 questions.
+# Practitioner question set (Spec 07, Evaluation harness): 50 questions.
 #
 # Questions 1 to 20 are the Gate A set (eval/gate_a_questions.toml), unchanged and in the same
 # order, so their results compare across the notebook and `wt eval`.
 #
-# Questions 21 to 50 are DRAFTS written on October 11, 2026 to the PRD's coverage list: more
+# Questions 21 to 50 were written on October 11, 2026 to the PRD's coverage list: more
 # multi-voice topics, single-teacher topics, grief, practice questions, the named-teacher query
 # for Norman Fischer that tests thin coverage, and questions that should surface texts, with a
-# named-author query for Dogen. Each carries the tag "draft". The owner must approve or replace
-# them before their results count: `wt eval report` reports draft questions apart and leaves them
-# out of every verdict. To approve, remove the "draft" tag and load the file as a new version
-# (`--version 2`), since a loaded set never changes.
+# named-author query for Dogen. They were loaded as drafts in practitioner@1, where the report
+# showed them apart and left them out of every verdict.
 #
-# Load:  wt eval load --file eval/questions_v1.toml --name practitioner --version 1
+# APPROVED by the owner on October 13, 2026: questions 21 to 50 lost their "draft" tag, unchanged
+# otherwise, and the file loads as practitioner@2, since a loaded set never changes. All 50
+# count toward the verdicts from version 2 on. Version 1 is this file at commit 70b2b45.
+#
+# Load:  wt eval load --file eval/questions_v1.toml --name practitioner --version 2
 
 # Compassion
 [[question]]
@@ -106,130 +108,130 @@ tags = ["grief", "impermanence"]
 
 [[question]]
 text = "Is being kind to myself just a way of being selfish?"
-tags = ["multi_voice", "compassion", "draft"]
+tags = ["multi_voice", "compassion"]
 
 [[question]]
 text = "The news makes me so angry I can't sleep. How do teachers talk about anger at the world?"
-tags = ["multi_voice", "anger", "draft"]
+tags = ["multi_voice", "anger"]
 
 [[question]]
 text = "The Heart Sutra says there is no attainment. Then why am I practicing?"
-tags = ["multi_voice", "heart_sutra", "draft"]
+tags = ["multi_voice", "heart_sutra"]
 
 [[question]]
 text = "How do I keep the precept of not killing when I eat meat and swat mosquitoes?"
-tags = ["multi_voice", "precepts", "draft"]
+tags = ["multi_voice", "precepts"]
 
 [[question]]
 text = "What does making amends look like in Zen, beyond chanting the verse?"
-tags = ["multi_voice", "repentance", "draft"]
+tags = ["multi_voice", "repentance"]
 
 [[question]]
 text = "I feel lonely even when I sit with the sangha. Is that normal?"
-tags = ["multi_voice", "sangha", "draft"]
+tags = ["multi_voice", "sangha"]
 
 [[question]]
 text = "How do I practice with prejudice I find in myself?"
-tags = ["multi_voice", "discrimination", "draft"]
+tags = ["multi_voice", "discrimination"]
 
 # Single-teacher topics
 
 [[question]]
 text = "Why do we chant, and does it matter if I don't understand the words?"
-tags = ["single_teacher", "chanting", "draft"]
+tags = ["single_teacher", "chanting"]
 
 [[question]]
 text = "The bodhisattva vows say to save all beings. How can I take a vow I can't keep?"
-tags = ["single_teacher", "vows", "draft"]
+tags = ["single_teacher", "vows"]
 
 [[question]]
 text = "What is a koan, and how am I supposed to work with one?"
-tags = ["single_teacher", "koans", "draft"]
+tags = ["single_teacher", "koans"]
 
 [[question]]
 text = "What does it mean to take refuge in Buddha, Dharma and Sangha?"
-tags = ["single_teacher", "refuge", "draft"]
+tags = ["single_teacher", "refuge"]
 
 [[question]]
 text = "Why do we bow so much? It feels like worship."
-tags = ["single_teacher", "forms", "draft"]
+tags = ["single_teacher", "forms"]
 
 # Grief
 
 [[question]]
 text = "My dog died and people say it shouldn't hurt this much. How do teachers talk about that kind of loss?"
-tags = ["grief", "draft"]
+tags = ["grief"]
 
 [[question]]
 text = "A close friend is dying. How can I be with her without falling apart?"
-tags = ["grief", "death", "draft"]
+tags = ["grief", "death"]
 
 [[question]]
 text = "I am afraid of dying. What does Zen say about facing my own death?"
-tags = ["grief", "death", "draft"]
+tags = ["grief", "death"]
 
 # Practice questions
 
 [[question]]
 text = "I keep falling asleep when I sit. What should I do?"
-tags = ["practice", "zazen", "draft"]
+tags = ["practice", "zazen"]
 
 [[question]]
 text = "How long should a beginner sit each day?"
-tags = ["practice", "zazen", "draft"]
+tags = ["practice", "zazen"]
 
 [[question]]
 text = "My mind won't stop planning and rehearsing during zazen. Is that a problem?"
-tags = ["practice", "zazen", "draft"]
+tags = ["practice", "zazen"]
 
 [[question]]
 text = "Is it all right to practice with another Buddhist tradition at the same time?"
-tags = ["practice", "sangha", "draft"]
+tags = ["practice", "sangha"]
 
 [[question]]
 text = "How do I bring practice into a stressful job?"
-tags = ["practice", "daily_life", "draft"]
+tags = ["practice", "daily_life"]
 
 [[question]]
 text = "What is the difference between practice and trying to improve myself?"
-tags = ["practice", "daily_life", "draft"]
+tags = ["practice", "daily_life"]
 
 [[question]]
 text = "How do I know whether my practice is working?"
-tags = ["practice", "draft"]
+tags = ["practice"]
 
 # Named teacher: filters to one teacher; Norman Fischer tests thin coverage (PRD)
 
 [[question]]
 text = "What has Norman Fischer said about grief?"
-tags = ["named_teacher", "grief", "draft"]
+tags = ["named_teacher", "grief"]
 
 [[question]]
 text = "What does Kanshin say about working with the body in zazen?"
-tags = ["named_teacher", "zazen", "draft"]
+tags = ["named_teacher", "zazen"]
 
 [[question]]
 text = "How does Tim Burnett talk about difficult emotions?"
-tags = ["named_teacher", "emotions", "draft"]
+tags = ["named_teacher", "emotions"]
 
 # Texts and a named author: these should surface the texts section (PRD)
 
 [[question]]
 text = "What did Dogen mean by \"to study the self is to forget the self\"?"
-tags = ["named_author", "texts", "draft"]
+tags = ["named_author", "texts"]
 
 [[question]]
 text = "What does the Genjokoan say about delusion and enlightenment?"
-tags = ["texts", "genjokoan", "draft"]
+tags = ["texts", "genjokoan"]
 
 [[question]]
 text = "How do teachers explain Dogen's being-time, Uji?"
-tags = ["texts", "uji", "draft"]
+tags = ["texts", "uji"]
 
 [[question]]
 text = "What does the Platform Sutra say about sudden awakening?"
-tags = ["texts", "draft"]
+tags = ["texts"]
 
 [[question]]
 text = "What does the Dhammapada say about hatred?"
-tags = ["texts", "anger", "draft"]
+tags = ["texts", "anger"]
