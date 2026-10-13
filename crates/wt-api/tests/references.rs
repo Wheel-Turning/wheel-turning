@@ -235,6 +235,7 @@ async fn page(fx: &Fx) -> String {
                 notice: None,
                 notice_count: None,
                 themes: Vec::new(),
+                summary: None,
                 passage_ids: vec![fx.ada, fx.ben],
                 rerank_degraded: false,
                 curated: false,

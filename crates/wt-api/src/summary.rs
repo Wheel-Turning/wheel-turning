@@ -248,6 +248,11 @@ mod tests {
                 rights_basis: None,
                 display_notice: None,
                 display_level: "full".into(),
+                transcript_from_source: false,
+                transcript_url: None,
+                transcript_origin: Some("asr".into()),
+                citation_name: None,
+                citation_sort: None,
             },
         }
     }
