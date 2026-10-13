@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select exists (select 1 from query_log\n                          where purged_answer_id = $1 and tester_id = $2) as \"e!\"",
+  "query": "select answer_shows_passage($1, $2) as \"shown!\"",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "e!",
+        "name": "shown!",
         "type_info": "Bool",
         "origin": "Expression"
       }
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "5ec173e9811deab92a9f54cf919dabffe2d7356035d222b0463bdb6fd6d4166d"
+  "hash": "652cf2db377ef811ea2addd456e4ba1304a89c7c634f0bfcad4ea1539c14ed3e"
 }

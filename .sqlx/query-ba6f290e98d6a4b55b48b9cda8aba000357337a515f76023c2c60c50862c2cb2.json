@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select query_text, sensitive_category as \"sensitive_category!\",\n                  payload as \"payload!\", created_at as \"created_at!\"\n           from tester_answer($1, $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "query_text",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "sensitive_category!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload!",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "ba6f290e98d6a4b55b48b9cda8aba000357337a515f76023c2c60c50862c2cb2"
+}

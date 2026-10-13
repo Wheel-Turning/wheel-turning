@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into dana_event (answer_id, sangha_id, kind)\n         select $1, null, 'link_click' where tester_answer_query($1, $2) is not null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4c576327d9d61b9e457348ad36a88af89180af3dd2271eacd51e465e31ebbb16"
+}

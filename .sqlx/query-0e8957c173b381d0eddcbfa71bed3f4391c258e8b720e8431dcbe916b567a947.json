@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select tester_answer_query($1, $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tester_answer_query",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0e8957c173b381d0eddcbfa71bed3f4391c258e8b720e8431dcbe916b567a947"
+}

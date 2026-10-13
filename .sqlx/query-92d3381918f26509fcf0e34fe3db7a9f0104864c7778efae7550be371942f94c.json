@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select exists (select 1 from answer a join query_log q on q.id = a.query_log_id\n                          where a.id = $1 and q.tester_id = $2) as \"theirs!\"",
+  "query": "select tester_answer_query($1, $2) is not null as \"theirs!\"",
   "describe": {
     "columns": [
       {
@@ -20,5 +20,5 @@
       null
     ]
   },
-  "hash": "ccc909f92472483f4ba9c791f3275568eeccfb33c087760140776c6c39a19217"
+  "hash": "92d3381918f26509fcf0e34fe3db7a9f0104864c7778efae7550be371942f94c"
 }
