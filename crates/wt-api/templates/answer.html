@@ -23,11 +23,12 @@
   {% for p in g.passages %}
   <article class="passage" id="p{{ p.number }}">
     {% if let Some(q) = p.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>{% endif %}
-    <blockquote>{{ p.text }}</blockquote>
-    <p class="meta">{{ p.meta }}</p>
+    <blockquote>{% for r in p.runs %}{{ r.text }}{% if let Some(m) = r.marker %}<sup><a class="fn" href="#ref-{{ m.reference }}" aria-label="Footnote {{ m.number }}, reference {{ m.reference }}">{{ m.number }}</a></sup>{% endif %}{% endfor %}</blockquote>
+    <p class="meta"><a href="#ref-{{ p.reference }}">{{ p.meta }}</a></p>
     <p class="links">
-      <a href="{{ p.source.href }}" target="_blank" rel="noopener noreferrer">{{ p.source.label }}</a>{% if let Some(s) = p.source.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
-      {% if let Some(t) = p.transcript_href %} · <a href="{{ t }}">Read in the transcript</a>{% endif %}
+      {% let first = p.links.read_first() %}{% if first %}{% if let Some(l) = p.links.read %}<a href="{{ l.href }}" target="_blank" rel="noopener noreferrer">{{ l.label }}</a> · {% endif %}{% endif %}
+      {% if let Some(l) = p.links.listen %}<a href="{{ l.href }}" target="_blank" rel="noopener noreferrer">{{ l.label }}</a>{% endif %}{% if let Some(s) = p.links.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
+      {% if !first %}{% if let Some(l) = p.links.read %} · <a href="{{ l.href }}">{{ l.label }}</a>{% endif %}{% endif %}
       {% if giving %}{% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}{% endif %}
       · <a href="/rights?excerpt={{ p.id }}#request">Report this excerpt</a>
     </p>
@@ -45,13 +46,14 @@
 </section>
 {% endfor %}
 {% if view.withdrawn > 0 %}<p class="muted">{{ view.withdrawn }} excerpt(s) were removed at the rights holder's request.</p>{% endif %}
-{% if !view.talks.is_empty() %}
-<section aria-labelledby="talks-h">
-  <h2 id="talks-h">Talks cited</h2>
-  <ul class="dated">
-    {% for t in view.talks %}<li>{% if let Some(d) = t.date %}<span class="date">{{ d }}</span>{% endif %}<a href="{{ t.href }}">{{ t.title }}</a> <span class="muted">· {{ t.teacher }}</span></li>{% endfor %}
-  </ul>
-</section>
+{% if !view.references.is_empty() %}
+<details class="references" id="references">
+  <summary><h2>References ({{ view.references.len() }})</h2></summary>
+  <ol class="references-list">
+    {% for r in view.references %}<li id="ref-{{ r.number }}">{{ r.before }}<i>{{ r.italic }}</i>{{ r.after }}{% if let Some(c) = r.confidence %} <span class="muted">(citation {{ c }})</span>{% endif %}</li>{% endfor %}
+  </ol>
+</details>
+<script src="/static/references.js" defer></script>
 {% endif %}
 {% if giving %}
 <section class="dana" id="dana" aria-labelledby="dana-h">

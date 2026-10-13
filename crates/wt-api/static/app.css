@@ -87,6 +87,8 @@ button.link { background: none; border: none; color: var(--ink); text-decoration
 blockquote { margin: 0; padding: 0 0 0 1rem; border-left: 3px solid var(--ink); font-family: var(--serif); font-size: 1.125rem; line-height: 1.65; }
 .meta { color: var(--muted); font-size: 0.95rem; margin: 0.5rem 0 0; }
 .links { margin: 0.25rem 0; }
+.references summary h2 { display: inline; }
+.references-list li { margin-bottom: 0.75rem; }
 .credit { font-size: 0.95rem; margin: 0.25rem 0; }
 .feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .dated li { margin-bottom: 0.75rem; }

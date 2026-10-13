@@ -171,6 +171,7 @@ pub fn router(state: AppState) -> Router {
         .route("/static/brand/favicon.svg", get(chrome::favicon_svg))
         .route("/favicon.ico", get(chrome::favicon_ico))
         .route("/static/dana.js", get(dana_script))
+        .route("/static/references.js", get(references_script))
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
@@ -261,6 +262,13 @@ async fn dana_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../static/dana.js"),
+    )
+}
+
+async fn references_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/references.js"),
     )
 }
 
@@ -877,13 +885,19 @@ async fn load_answer(
         Err(e) => return Err(Box::new(server_error("loading excerpts", &e))),
     };
     let excerpts = excerpt::rebuild(&stored.payload.spans, &served, &rows);
+    let cited = match wt_db::answer::cited_works(&state.pool, &covered).await {
+        Ok(c) => c,
+        Err(e) => return Err(Box::new(server_error("loading citations", &e))),
+    };
     let mut view = view::assemble(
         answer,
         &stored.payload,
         &served,
         &excerpts,
+        &cited,
         named.as_deref(),
         state.site.retrieval.answer.link_lead_in_ms,
+        stored.created_at.date_naive(),
     );
     match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
         Ok(q) => view::attach_questions(&mut view, &q),
