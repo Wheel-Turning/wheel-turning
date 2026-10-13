@@ -87,6 +87,10 @@ resource "aws_db_instance" "this" {
   final_snapshot_identifier  = var.skip_final_snapshot ? null : "${var.name}-final"
 
   performance_insights_enabled = false
+
+  # A size change applies at once instead of in the next maintenance window; it restarts the
+  # instance, a few minutes without the database.
+  apply_immediately = true
 }
 
 output "address" {
