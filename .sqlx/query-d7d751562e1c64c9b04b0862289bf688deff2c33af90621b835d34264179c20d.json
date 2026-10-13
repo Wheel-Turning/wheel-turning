@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sv.platform::text as \"platform!\", sv.external_id, sv.raw->>'source' as \"source\",\n                  sv.raw->'storage' as storage\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where t.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "source",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "storage",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "d7d751562e1c64c9b04b0862289bf688deff2c33af90621b835d34264179c20d"
+}

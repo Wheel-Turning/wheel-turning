@@ -49,6 +49,19 @@ pub fn vimeo_media(
     })
 }
 
+/// Route (c) of Spec 03 for the media fetcher: the root of every storage source in
+/// `sources.toml`, relative to the directory `wt` runs in.
+pub fn storage_media(config_dir: &Path) -> anyhow::Result<wt_ingest::media::StorageMedia> {
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let roots = sources
+        .sources
+        .iter()
+        .filter(|s| s.platform == SourcePlatform::Storage)
+        .filter_map(|s| Some((s.name.clone(), std::path::PathBuf::from(s.root.as_deref()?))))
+        .collect();
+    Ok(wt_ingest::media::StorageMedia { roots })
+}
+
 /// The active exclusions, which every request is checked against (Spec 08).
 pub async fn load_exclusions(pool: &PgPool) -> anyhow::Result<Exclusions> {
     let mut conn = pool.acquire().await?;
@@ -164,6 +177,17 @@ pub async fn discover(
                     continue;
                 }
                 Box::new(adapter)
+            }
+            // Storage files never create talks: match-storage pairs them with listed talks.
+            SourcePlatform::Storage => {
+                if only.is_some() {
+                    bail!(
+                        "source {} is storage: run `wt ingest match-storage --source {}`",
+                        source.name,
+                        source.name
+                    );
+                }
+                continue;
             }
             other => {
                 if only.is_some() {
@@ -545,5 +569,103 @@ pub async fn completeness(
             "vimeo_missing_from_feed": f.vimeo_missing_from_feed.len(),
             "episodes_unmatched": f.episodes_unmatched.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
         })),
+    }))
+}
+
+/// `wt ingest match-storage` (Spec 03, the storage adapter): lists the storage source's files,
+/// proposes a Vimeo talk for each, and writes the review table to `<out>/<source>.csv` and
+/// `.html`. With `apply`, records every proposed match; with `sheet`, records the rows the
+/// reviewer marked `yes`. The sheet is read before the table is written again, so the reviewed
+/// file can be the one in `out`. Prints counts as JSON.
+pub async fn match_storage(
+    pool: &PgPool,
+    config_dir: &Path,
+    source: &str,
+    out: &Path,
+    apply: bool,
+    sheet: Option<&Path>,
+) -> anyhow::Result<()> {
+    use wt_ingest::storage::{self, Ffprobe};
+    use wt_ingest::storagematch;
+
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let source = sources.get(source)?;
+    if source.platform != SourcePlatform::Storage {
+        bail!(
+            "source {} is {}; match-storage reads a storage source",
+            source.name,
+            source.platform
+        );
+    }
+    let root = std::path::PathBuf::from(source.root.as_deref().unwrap_or_default());
+    if !root.is_dir() {
+        bail!(
+            "no folder at {} (the root of {} in sources.toml): put the files there first, as \
+             docs/runbook.md says under \"When SSZ's files arrive\"",
+            root.display(),
+            source.name
+        );
+    }
+    let vimeo: Vec<String> = sources
+        .sources
+        .iter()
+        .filter(|s| {
+            s.platform == SourcePlatform::Vimeo && s.default_sangha == source.default_sangha
+        })
+        .map(|s| s.name.clone())
+        .collect();
+    if vimeo.is_empty() {
+        bail!(
+            "no Vimeo source of {} to match {} to",
+            source.default_sangha,
+            source.name
+        );
+    }
+    let cfg = ClassifyConfig::load(
+        &config_dir.join("pipeline.toml"),
+        &config_dir.join("series.toml"),
+    )?;
+    let reviewed = match sheet {
+        Some(path) => Some(storagematch::read_sheet(
+            &std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?,
+        )?),
+        None => None,
+    };
+    let files = storage::list(&root, &source.storage_extensions(), &Ffprobe::default())?;
+    let mut conn = pool.acquire().await?;
+    let mut review = storagematch::review(&mut conn, &cfg, &source.name, &vimeo, &files).await?;
+    let applied = if apply || reviewed.is_some() {
+        let rows = storagematch::confirmed(&review, reviewed.as_deref());
+        let applied = storagematch::apply(
+            &mut conn,
+            &source.name,
+            &vimeo,
+            &files,
+            &rows,
+            "wt ingest match-storage",
+        )
+        .await?;
+        review = storagematch::review(&mut conn, &cfg, &source.name, &vimeo, &files).await?;
+        Some(applied)
+    } else {
+        None
+    };
+    let generated = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+    let csv = storagematch::write_review(out, &review, &generated)
+        .with_context(|| format!("writing the review table to {}", out.display()))?;
+    print_json(&serde_json::json!({
+        "source": source.name,
+        "root": root.display().to_string(),
+        "files": review.files,
+        "rows": review.counts,
+        "review_csv": csv.display().to_string(),
+        "review_html": csv.with_extension("html").display().to_string(),
+        "applied": applied,
+        "next": if applied.is_some() {
+            "wt pipeline retry-held --reason no_media, then wt pipeline advance"
+        } else {
+            "review the table, then run again with --apply or --sheet <reviewed csv>"
+        },
     }))
 }

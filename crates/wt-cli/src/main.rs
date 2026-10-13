@@ -1107,6 +1107,29 @@ enum IngestCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Pair the files under a storage source's root (Spec 03, the storage adapter) with the
+    /// Vimeo talks of its sangha by Vimeo id, normalized title, recording date and length, and
+    /// write the review table, <out>/<source>.csv and .html: proposed matches, conflicts,
+    /// unmatched files and unmatched talks. Changes nothing unless --apply records every
+    /// proposed match, or --sheet records the rows marked yes in a reviewed copy of the CSV.
+    /// Reads each file's header with ffprobe and no audio. Prints counts as JSON.
+    MatchStorage {
+        /// The storage source in sources.toml.
+        #[arg(long, default_value = "ssz-storage")]
+        source: String,
+        /// Where to write the review table.
+        #[arg(long, default_value = "data/storage-match")]
+        out: PathBuf,
+        /// Record every proposed match.
+        #[arg(long, conflicts_with = "sheet")]
+        apply: bool,
+        /// A reviewed review table: record its rows marked yes.
+        #[arg(long)]
+        sheet: Option<PathBuf>,
+        /// The directory holding sources.toml, pipeline.toml and series.toml.
+        #[arg(long, default_value = "config")]
+        config_dir: PathBuf,
+    },
     /// Write the review page: duplicate clusters, exclusions, review holds, series coverage,
     /// videos by month and donation-looking links. Reads only; it changes nothing.
     Report {
@@ -1890,6 +1913,26 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Ingest {
             command: IngestCommand::Report { out, config_dir },
         } => ingest::report(&pool().await?, &config_dir, &out).await?,
+        Command::Ingest {
+            command:
+                IngestCommand::MatchStorage {
+                    source,
+                    out,
+                    apply,
+                    sheet,
+                    config_dir,
+                },
+        } => {
+            ingest::match_storage(
+                &pool().await?,
+                &config_dir,
+                &source,
+                &out,
+                apply,
+                sheet.as_deref(),
+            )
+            .await?;
+        }
         Command::Ingest {
             command:
                 IngestCommand::Completeness {

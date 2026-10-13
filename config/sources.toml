@@ -26,6 +26,20 @@ link_style = "none"
 role = "audio_only"
 feed_url = "https://feeds.feedburner.com/SeattleSotoZen"
 
+# Files SSZ gives the owner directly: a folder, a drive download or a bulk export (Spec 03, the
+# storage adapter; route c). Put them under `root`, which is inside the gitignored data/ folder
+# and relative to the directory `wt` runs in. `wt ingest match-storage` pairs them with the Vimeo
+# talks above and records each match on the talk; the audio job copies a matched file into
+# scratch only when the Vimeo API offers none. The pipeline never deletes or changes these
+# files: the owner deletes them after the run (docs/runbook.md, When SSZ's files arrive).
+[[source]]
+name = "ssz-storage"
+platform = "storage"
+default_sangha = "Seattle Soto Zen"
+role = "audio_only"
+root = "data/storage/ssz"
+extensions = ["mp4", "m4v", "mov", "m4a", "mp3", "wav"]
+
 # EngageWisdom collections (Spec 03, EngageWisdom sources; owner's decision of October 7, 2026).
 # Each talk page holds its transcript and audio; discovery waits robots.txt's 10-second crawl
 # delay between pages. All four are used on the owner's mandate: the keys are created with

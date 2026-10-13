@@ -291,6 +291,7 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
         MediaRoute::Vimeo {
             source: "fixture-vimeo".into(),
             video_id: "700000003".into(),
+            storage: None,
         }
     );
     drop(conn);

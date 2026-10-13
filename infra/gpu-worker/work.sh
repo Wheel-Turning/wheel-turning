@@ -2,7 +2,9 @@
 # Runs on the GPU machine, started by run.sh: the diarization sidecar, then WORKERS audio workers
 # that drain the queue. The database is the PC's, reached through run.sh's reverse tunnel on
 # localhost:55433. Transcripts land in ~/wt/data/objects, which run.sh copies back. Audio stays
-# in the scratch directory, which the pipeline empties and this script removes (rule 6).
+# in the scratch directory, which the pipeline empties and this script removes (rule 6), and in
+# the copy of the owner's storage files run.sh sends to ~/wt/data/storage, which this script
+# removes too.
 set -uo pipefail
 WORKERS=${1:-3}
 REPO=$HOME/wt
@@ -25,7 +27,7 @@ unset ANTHROPIC_API_KEY WT_ENV WT_DB_HOST
 # shellcheck disable=SC2329 # run by the trap
 cleanup() {
   [ -n "${SIDECAR:-}" ] && kill "$SIDECAR" 2> /dev/null
-  rm -rf "$SCRATCH" "$TOKEN"
+  rm -rf "$SCRATCH" "$TOKEN" "$REPO/data/storage"
 }
 trap cleanup EXIT
 

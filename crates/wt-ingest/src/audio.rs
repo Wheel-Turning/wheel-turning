@@ -893,7 +893,16 @@ pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId
                         .as_bytes()
                 )
             ),
-            feed::MediaRoute::Vimeo { source, video_id } => format!("vimeo:{source}:{video_id}"),
+            // A storage file matched later is new input, keyed by its fingerprint.
+            feed::MediaRoute::Vimeo {
+                source,
+                video_id,
+                storage,
+            } => match storage {
+                None => format!("vimeo:{source}:{video_id}"),
+                Some(file) => format!("vimeo:{source}:{video_id}:storage:{}", file.fingerprint),
+            },
+            feed::MediaRoute::Storage { file } => format!("storage:{}", file.fingerprint),
             feed::MediaRoute::None => "none".to_owned(),
         };
         let key = sha256_hex(route.as_bytes());

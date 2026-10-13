@@ -18,6 +18,8 @@ pub mod review;
 pub mod robots;
 pub mod rss;
 pub mod source;
+pub mod storage;
+pub mod storagematch;
 pub mod text_transcript;
 pub mod textjobs;
 pub mod texts;

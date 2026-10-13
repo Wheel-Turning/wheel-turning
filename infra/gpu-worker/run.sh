@@ -38,6 +38,13 @@ if [ "$code" = 3 ]; then
 elif [ "$code" != 0 ]; then
   exit "$code"
 fi
+# Route (c): the files a sangha gave the owner, under data/storage, so the machine's workers can
+# copy matched ones into scratch (Spec 03, the storage adapter). work.sh removes the machine's copy
+# when it exits; the originals on the PC are the owner's, deleted by the owner after the run.
+if [ -d "$MAIN/data/storage" ] && [ -n "$(ls -A "$MAIN/data/storage")" ]; then
+  step "copy the storage files ($(du -sh "$MAIN/data/storage" | cut -f1))"
+  tar -C "$MAIN" -cf - data/storage | "${SSH[@]}" "$HOST" 'mkdir -p ~/wt && tar -x -C ~/wt'
+fi
 step "token"
 grep '^HF_TOKEN=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n' |
   "${SSH[@]}" "$HOST" 'umask 077 && cat > ~/.wt-hf-token'

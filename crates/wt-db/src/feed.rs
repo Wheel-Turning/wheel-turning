@@ -9,6 +9,7 @@ use wt_core::ids::{SourceVideoId, TalkId};
 
 use crate::correction::log_change;
 use crate::ingest::IngestDbError;
+use crate::storage::StorageRef;
 
 /// A feed episode, ready to store.
 #[derive(Debug, Clone, PartialEq)]
@@ -220,15 +221,23 @@ pub enum MediaRoute {
         url: String,
     },
     /// A Vimeo talk with no matched enclosure: its file is read through the Vimeo API with
-    /// the token its source names (Spec 03, Seattle Soto Zen sources, item 2b). Whether a token
-    /// and a file exist is known only to the fetcher.
+    /// the token its source names (Spec 03, Seattle Soto Zen sources, item 2b), and failing
+    /// that, from the storage file matched to it (item 2c). Whether a token and a file exist is
+    /// known only to the fetcher.
     Vimeo {
         /// The source the talk was discovered through, such as `ssz-vimeo`.
         source: String,
         /// The Vimeo video id.
         video_id: String,
+        /// The storage file `wt ingest match-storage` matched to the video, if any.
+        storage: Option<StorageRef>,
     },
-    /// No route is known. The storage adapter (route c) is not built.
+    /// A talk of another platform whose only media is a matched storage file (route c).
+    Storage {
+        /// The file.
+        file: StorageRef,
+    },
+    /// No route is known.
     None,
 }
 
@@ -272,23 +281,27 @@ pub async fn media_route(
             episode: SourceVideoId::from(r.id),
         });
     }
-    let vimeo = sqlx::query!(
-        r#"select sv.external_id, sv.raw->>'source' as "source"
+    let own = sqlx::query!(
+        r#"select sv.platform::text as "platform!", sv.external_id, sv.raw->>'source' as "source",
+                  sv.raw->'storage' as storage
            from talk t join source_video sv on sv.id = t.source_video_id
-           where t.id = $1 and sv.platform = 'vimeo'"#,
+           where t.id = $1"#,
         talk.as_uuid()
     )
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(match vimeo {
-        Some(v) => match v.source {
-            Some(source) => MediaRoute::Vimeo {
-                source,
-                video_id: v.external_id,
-            },
-            None => MediaRoute::None,
+    let Some(own) = own else {
+        return Ok(MediaRoute::None);
+    };
+    let storage = StorageRef::from_raw(own.storage);
+    Ok(match (own.platform.as_str(), own.source, storage) {
+        ("vimeo", Some(source), storage) => MediaRoute::Vimeo {
+            source,
+            video_id: own.external_id,
+            storage,
         },
-        None => MediaRoute::None,
+        (_, _, Some(file)) => MediaRoute::Storage { file },
+        _ => MediaRoute::None,
     })
 }
 
