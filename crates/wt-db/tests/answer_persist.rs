@@ -31,6 +31,7 @@ async fn a_passage_replaced_before_the_save_is_left_out_of_the_answer() {
         notice: None,
         notice_count: None,
         themes: Vec::new(),
+        summary: None,
         passage_ids: vec![gone, kept],
         rerank_degraded: false,
         curated: false,

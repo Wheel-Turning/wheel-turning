@@ -1,10 +1,12 @@
-//! Synthesis, the synthesis validator and the verifier (Spec 05, Synthesis and verifier).
+//! The summary, its deterministic filters and the verifier (Spec 05, Summary and verifier).
 //!
-//! [`synthesize`] drafts at most `max_themes` one-line themes about how the selected passages
-//! approach a question, runs the deterministic filters in the spec's order, and sends each
-//! surviving theme to the verifier in parallel. The model returns refs and JSON only; the code
-//! maps refs back to passage ids. A failed or slow call removes the synthesis line and nothing
-//! else, so the caller always renders the passages. Every drop is logged with its reason.
+//! [`summarize`] asks the model for a summary in the manner of a Consensus research answer:
+//! a headline, framing, where the talks agree and differ, points to keep in mind and a sum-up.
+//! The model returns excerpt labels and sentence numbers as JSON, never quoted text (CLAUDE.md
+//! rule 5); the code turns each citation into a quotation span sliced from the cited excerpt,
+//! runs the filters in the spec's order, and sends each surviving sentence to the verifier in
+//! parallel. A failed or slow call removes the summary and nothing else, so the caller always
+//! renders the excerpts. Every drop is logged with its reason.
 
 pub mod excerpt;
 pub mod filter;
@@ -15,57 +17,132 @@ use std::time::Duration;
 use futures_util::future::join_all;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use wt_core::answer::StoredTheme;
+use wt_core::answer::{StoredCite, StoredSentence, StoredSummary, SummaryPart};
 use wt_core::config::LlmStage;
-use wt_core::ids::PassageId;
+use wt_core::excerpt::{Chooser, Window};
+use wt_core::ids::{PassageId, TeacherId};
 use wt_extract::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 
 /// The generation prompt.
-pub const SYNTHESIZE_PROMPT: &str = include_str!("../prompts/synthesize.md");
+pub const SUMMARIZE_PROMPT: &str = include_str!("../prompts/summarize.md");
 /// The verifier prompt.
 pub const VERIFY_PROMPT: &str = include_str!("../prompts/verify.md");
 
-/// What the generation call sees: the question and the selected passages in score order. The
-/// model knows them as `P1..Pn` by position.
+/// One excerpt as the summary sees it: the window it was cut from, its words in that window,
+/// and whose talk it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SynthesisInput {
-    /// The question as used for retrieval.
-    pub query: String,
-    /// The passages, best first, with their verbatim text.
-    pub passages: Vec<(PassageId, String)>,
+pub struct SummaryExcerpt {
+    /// The selected passage the excerpt stands for.
+    pub passage_id: PassageId,
+    /// The teacher who gave the talk.
+    pub teacher_id: TeacherId,
+    /// The teacher's display name, as the header gives it.
+    pub teacher: String,
+    /// The talk's year, when dated.
+    pub year: Option<i32>,
+    /// The window the excerpt was cut from.
+    pub window: Window,
+    /// The excerpt's window-wide words, `start..end`.
+    pub range: (usize, usize),
 }
 
-/// One theme as the model drafts it.
+impl SummaryExcerpt {
+    /// The excerpt's whole sentences as window-wide word ranges, or the excerpt as one sentence
+    /// when the window holds none inside it.
+    pub fn sentences(&self) -> Vec<(usize, usize)> {
+        let (start, end) = self.range;
+        let inside: Vec<(usize, usize)> = self
+            .window
+            .sentences()
+            .into_iter()
+            .filter(|&(s, e)| s >= start && e <= end)
+            .collect();
+        if inside.is_empty() && end > start {
+            vec![(start, end)]
+        } else {
+            inside
+        }
+    }
+
+    /// The excerpt's verbatim text.
+    pub fn text(&self) -> String {
+        self.window.text(self.range.0, self.range.1)
+    }
+
+    fn header(&self, label: &str) -> String {
+        match self.year {
+            Some(y) => format!("{label}: {}, talk from {y}", self.teacher),
+            None => format!("{label}: {}, undated talk", self.teacher),
+        }
+    }
+}
+
+/// What the generation call sees: the question and the answer's excerpts in score order. The
+/// model knows them as `E1..En` by position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryInput {
+    /// The question as asked.
+    pub query: String,
+    /// The excerpts, best first.
+    pub excerpts: Vec<SummaryExcerpt>,
+}
+
+/// One citation as the model gives it: an excerpt label and a run of its sentences.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
-pub struct ThemeDraft {
-    /// One sentence of at most 30 words.
-    pub description: String,
-    /// The passage labels that support it, such as `P2`.
-    pub passage_refs: Vec<String>,
+pub struct Cite {
+    /// The excerpt label, such as `E2`.
+    pub excerpt: String,
+    /// The first sentence of the run, numbered from 1.
+    pub start: i64,
+    /// The last sentence of the run.
+    pub end: i64,
+}
+
+/// One drafted sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+pub struct DraftSentence {
+    /// The sentence, at most 40 words.
+    pub text: String,
+    /// The excerpts that support it.
+    pub cites: Vec<Cite>,
 }
 
 /// The generation call's reply.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
-pub struct SynthesisOutput {
-    /// At most four themes.
-    pub themes: Vec<ThemeDraft>,
+pub struct SummaryDraft {
+    /// One sentence that answers the question as the excerpts do.
+    pub headline: Option<DraftSentence>,
+    /// One or two sentences on what the excerpts address.
+    pub framing: Vec<DraftSentence>,
+    /// Where talks by different teachers say alike.
+    pub agree: Vec<DraftSentence>,
+    /// Where they put the weight differently.
+    pub differ: Vec<DraftSentence>,
+    /// Context a quoted line leaves out.
+    pub keep_in_mind: Vec<DraftSentence>,
+    /// One closing sentence.
+    pub sum_up: Option<DraftSentence>,
 }
 
-/// The verifier's reply about one theme.
+/// The verifier's reply about one sentence.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 pub struct VerifierOutput {
-    /// Every assertion is stated or directly entailed by a cited passage.
+    /// Every assertion is stated or directly entailed by a cited excerpt.
     pub supported: bool,
-    /// When unsupported, the part the passages do not support.
+    /// When unsupported, the part the excerpts do not support.
     pub unsupported_part: Option<String>,
 }
 
 /// `[synthesis]` in `config/retrieval.toml`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Settings {
-    /// Themes kept from one reply.
+    /// Sentences kept in each of the agree and differ sections.
     pub max_themes: usize,
-    /// The least share of a theme's content words found in its cited passages.
+    /// The most words in one sentence.
+    pub max_words: usize,
+    /// The most words in one quotation.
+    pub quote_max_words: usize,
+    /// The least share of a sentence's content words found in its cited excerpts.
     pub min_grounding_ratio: f32,
     /// The limit on each generation and verifier call.
     pub timeout: Duration,
@@ -74,33 +151,43 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            max_themes: 4,
+            max_themes: 3,
+            max_words: 40,
+            quote_max_words: 60,
             min_grounding_ratio: 0.4,
             timeout: Duration::from_secs(20),
         }
     }
 }
 
-/// Why a theme was dropped. The filters run in the order of the variants up to `Ungrounded`.
+/// Why a sentence was dropped. The filters run in the order of the variants up to `Ungrounded`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropReason {
-    /// Beyond `max_themes`.
-    OverMaxThemes,
-    /// A cited ref is not among the offered passages.
+    /// Beyond its section's limit.
+    OverLimit,
+    /// No citation at all.
+    NoCitation,
+    /// A citation names no offered excerpt or a run outside it.
     UnknownRef,
-    /// Fewer than two distinct passages cited.
-    TooFewPassages,
+    /// A cited run is longer than `quote_max_words`.
+    QuoteTooLong,
+    /// A sentence of agreement or difference cites one teacher only.
+    OneTeacher,
     /// More than one sentence, or none.
     NotOneSentence,
-    /// More than 30 words.
+    /// More than `max_words` words.
     TooLong,
     /// A quotation mark.
     QuotationMark,
-    /// A teacher alias from the registry.
-    TeacherAlias,
-    /// A passage label such as P3, which would not match the page's numbering.
+    /// An excerpt label such as E3, which would not match the page's numbering.
     PassageLabel,
-    /// Too few content words found in the cited passages.
+    /// A teacher named who gave none of the cited excerpts.
+    Misattributed,
+    /// A year that no cited talk is from.
+    WrongYear,
+    /// States what a teacher believes rather than what a talk says.
+    BeliefWord,
+    /// Too few content words found in the cited excerpts.
     Ungrounded,
     /// The verifier did not mark it supported.
     Unsupported,
@@ -110,34 +197,40 @@ impl DropReason {
     /// The reason as logged.
     pub fn as_str(self) -> &'static str {
         match self {
-            DropReason::OverMaxThemes => "over_max_themes",
+            DropReason::OverLimit => "over_limit",
+            DropReason::NoCitation => "no_citation",
             DropReason::UnknownRef => "unknown_ref",
-            DropReason::TooFewPassages => "too_few_passages",
+            DropReason::QuoteTooLong => "quote_too_long",
+            DropReason::OneTeacher => "one_teacher",
             DropReason::NotOneSentence => "not_one_sentence",
             DropReason::TooLong => "too_long",
             DropReason::QuotationMark => "quotation_mark",
-            DropReason::TeacherAlias => "teacher_alias",
             DropReason::PassageLabel => "passage_label",
+            DropReason::Misattributed => "misattributed",
+            DropReason::WrongYear => "wrong_year",
+            DropReason::BeliefWord => "belief_word",
             DropReason::Ungrounded => "ungrounded",
             DropReason::Unsupported => "unsupported",
         }
     }
 }
 
-/// A dropped theme, as the integrity audit reads it from the log.
+/// A dropped sentence, as the integrity audit reads it from the log.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dropped {
+    /// Its section.
+    pub part: SummaryPart,
     /// Why.
     pub reason: DropReason,
     /// The drafted sentence.
-    pub description: String,
-    /// The refs it cited, as drafted.
+    pub text: String,
+    /// The excerpt labels it cited, as drafted.
     pub refs: Vec<String>,
-    /// The alias found, the grounding ratio, or the verifier's unsupported part.
+    /// The name or year found, the grounding ratio, or the verifier's unsupported part.
     pub detail: Option<String>,
 }
 
-/// Why the synthesis line is missing altogether.
+/// Why the summary is missing altogether.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failure {
     /// The month's language-model cap is reached (Spec 04, `cap_reached`).
@@ -161,51 +254,73 @@ impl Failure {
     }
 }
 
-/// The result of one synthesis.
+/// The result of one summary.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Synthesis {
-    /// Verified themes with the passage ids the code mapped from their refs.
-    pub themes: Vec<StoredTheme>,
-    /// Every theme dropped, with its reason.
+    /// The verified summary, with excerpt ids and quotation spans the code mapped from the
+    /// model's labels and sentence numbers. `None` when the headline did not survive.
+    pub summary: Option<StoredSummary>,
+    /// Every sentence dropped, with its reason.
     pub dropped: Vec<Dropped>,
-    /// Set when a call failed; `themes` is then empty.
+    /// Set when a call failed; `summary` is then `None`.
     pub failure: Option<Failure>,
     /// Model calls made.
     pub calls: usize,
 }
 
-/// A theme that passed the deterministic filters, waiting on the verifier.
-struct Candidate {
-    draft: ThemeDraft,
-    /// Distinct offered positions it cites, in citing order.
-    cited: Vec<usize>,
+impl Synthesis {
+    /// Sentences shown.
+    pub fn shown(&self) -> usize {
+        self.summary.as_ref().map_or(0, |s| s.sentences.len())
+    }
 }
 
-/// Drafts, filters and verifies themes for one standard-mode answer. Named mode must not call
-/// this (Spec 05). `aliases` is every teacher alias and display name in the registry.
-pub async fn synthesize(
+/// A sentence that passed the deterministic filters, waiting on the verifier.
+struct Candidate {
+    part: SummaryPart,
+    text: String,
+    refs: Vec<String>,
+    /// Distinct citations: excerpt position and window-wide words of the quotation.
+    cites: Vec<(usize, usize, usize)>,
+}
+
+impl Candidate {
+    /// Distinct cited excerpt positions, in citing order.
+    fn excerpts(&self) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        for &(i, _, _) in &self.cites {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+        out
+    }
+}
+
+/// Drafts, filters and verifies the summary for one standard-mode answer. Named mode must not
+/// call this (Spec 05). `aliases` is every teacher alias and display name in the registry.
+pub async fn summarize(
     llm: &dyn LlmClient,
-    input: &SynthesisInput,
-    aliases: &[String],
+    input: &SummaryInput,
+    aliases: &[(TeacherId, String)],
     settings: &Settings,
     class: DataClass,
 ) -> Synthesis {
     let mut out = Synthesis::default();
-    if input.passages.len() < 2 {
-        // No theme can cite two passages, so no call is worth making.
+    if input.excerpts.is_empty() {
         return out;
     }
 
     out.calls += 1;
     let request = LlmRequest {
         stage: LlmStage::Synth,
-        system: SYNTHESIZE_PROMPT.to_owned(),
+        system: SUMMARIZE_PROMPT.to_owned(),
         user: generation_message(input),
-        max_tokens: 1500,
+        max_tokens: 2000,
     };
     let drafted = match tokio::time::timeout(
         settings.timeout,
-        complete_json::<SynthesisOutput>(llm, &request, class),
+        complete_json::<SummaryDraft>(llm, &request, class),
     )
     .await
     {
@@ -214,7 +329,8 @@ pub async fn synthesize(
         Err(_) => return timed_out(out, "synth", settings.timeout),
     };
 
-    let candidates = filter_drafts(drafted, input, aliases, settings, &mut out.dropped);
+    let names = filter::name_words(aliases);
+    let candidates = filter_draft(drafted, input, &names, settings, &mut out.dropped);
 
     out.calls += candidates.len();
     let verdicts = join_all(
@@ -228,26 +344,40 @@ pub async fn synthesize(
         match verdict {
             Ok(v) if v.supported => kept.push(candidate),
             Ok(v) => out.dropped.push(Dropped {
+                part: candidate.part,
                 reason: DropReason::Unsupported,
-                description: candidate.draft.description,
-                refs: candidate.draft.passage_refs,
+                text: candidate.text,
+                refs: candidate.refs,
                 detail: v.unsupported_part,
             }),
             Err(failure) => {
                 out.failure = Some(failure);
-                out.themes.clear();
                 log(&out);
                 return out;
             }
         }
     }
-    out.themes = kept
-        .into_iter()
-        .map(|c| StoredTheme {
-            description: c.draft.description.trim().to_owned(),
-            passage_ids: c.cited.iter().map(|&i| input.passages[i].0).collect(),
-        })
-        .collect();
+    let summary = StoredSummary {
+        sentences: kept
+            .into_iter()
+            .map(|c| StoredSentence {
+                part: c.part,
+                text: c.text.trim().to_owned(),
+                cites: c
+                    .cites
+                    .iter()
+                    .map(|&(i, s, e)| {
+                        let x = &input.excerpts[i];
+                        StoredCite {
+                            passage_id: x.passage_id,
+                            quote: x.window.span(s, e, Chooser::Model),
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    out.summary = summary.has_headline().then_some(summary);
     log(&out);
     out
 }
@@ -273,115 +403,229 @@ fn timed_out(mut out: Synthesis, stage: &'static str, after: Duration) -> Synthe
     out
 }
 
-/// The label of the passage at `index`.
+/// The label of the excerpt at `index`.
 fn label(index: usize) -> String {
-    format!("P{}", index + 1)
+    format!("E{}", index + 1)
 }
 
-/// The offered position a ref names: `P3`, `p3` or `3`.
+/// The offered position a label names: `E3`, `e3` or `3`.
 fn position(r: &str, offered: usize) -> Option<usize> {
     let r = r.trim();
     let digits = r
-        .strip_prefix('P')
-        .or_else(|| r.strip_prefix('p'))
+        .strip_prefix('E')
+        .or_else(|| r.strip_prefix('e'))
         .unwrap_or(r);
     let n: usize = digits.parse().ok()?;
     (1..=offered).contains(&n).then(|| n - 1)
 }
 
-fn generation_message(input: &SynthesisInput) -> String {
-    let mut text = format!("Question: {}\n\nPassages:\n", input.query);
-    for (i, (_, passage)) in input.passages.iter().enumerate() {
-        text.push_str(&format!("\n{}: {}\n", label(i), passage));
+fn generation_message(input: &SummaryInput) -> String {
+    let mut text = format!("Question: {}\n\nExcerpts:\n", input.query);
+    for (i, x) in input.excerpts.iter().enumerate() {
+        text.push_str(&format!("\n{}\n", x.header(&label(i))));
+        for (n, (s, e)) in x.sentences().into_iter().enumerate() {
+            text.push_str(&format!(
+                "[{}] ({} words) {}\n",
+                n + 1,
+                e - s,
+                x.window.text(s, e)
+            ));
+        }
     }
     text
 }
 
-/// Filters 1 to 6, in order. Survivors go to the verifier.
-fn filter_drafts(
-    drafted: SynthesisOutput,
-    input: &SynthesisInput,
-    aliases: &[String],
+/// A drafted sentence with its section.
+type Placed = (SummaryPart, DraftSentence);
+
+/// The draft's sentences in page order, each with its section, and those over a section's
+/// limit.
+fn by_part(d: SummaryDraft, settings: &Settings) -> (Vec<Placed>, Vec<Placed>) {
+    let mut kept = Vec::new();
+    let mut over = Vec::new();
+    let mut take = |part: SummaryPart, list: Vec<DraftSentence>, limit: usize| {
+        for (n, s) in list.into_iter().enumerate() {
+            if n < limit {
+                kept.push((part, s));
+            } else {
+                over.push((part, s));
+            }
+        }
+    };
+    take(SummaryPart::Headline, d.headline.into_iter().collect(), 1);
+    take(SummaryPart::Framing, d.framing, 2);
+    take(SummaryPart::Agree, d.agree, settings.max_themes);
+    take(SummaryPart::Differ, d.differ, settings.max_themes);
+    take(SummaryPart::KeepInMind, d.keep_in_mind, 2);
+    take(SummaryPart::SumUp, d.sum_up.into_iter().collect(), 1);
+    (kept, over)
+}
+
+/// Filters 1 to 8, in order. Survivors go to the verifier.
+fn filter_draft(
+    drafted: SummaryDraft,
+    input: &SummaryInput,
+    names: &[(TeacherId, String)],
     settings: &Settings,
     dropped: &mut Vec<Dropped>,
 ) -> Vec<Candidate> {
+    let (sentences, over) = by_part(drafted, settings);
+    let refs_of = |d: &DraftSentence| -> Vec<String> {
+        d.cites
+            .iter()
+            .map(|c| format!("{}[{}-{}]", c.excerpt, c.start, c.end))
+            .collect()
+    };
+    for (part, d) in over {
+        dropped.push(Dropped {
+            part,
+            reason: DropReason::OverLimit,
+            refs: refs_of(&d),
+            text: d.text,
+            detail: None,
+        });
+    }
     let mut candidates = Vec::new();
-    for (n, draft) in drafted.themes.into_iter().enumerate() {
-        let mut reject = |reason: DropReason, detail: Option<String>, draft: ThemeDraft| {
+    for (part, d) in sentences {
+        let refs = refs_of(&d);
+        let mut reject = |reason: DropReason, detail: Option<String>, text: String| {
             dropped.push(Dropped {
+                part,
                 reason,
-                description: draft.description,
-                refs: draft.passage_refs,
+                text,
+                refs: refs.clone(),
                 detail,
             });
         };
-        if n >= settings.max_themes {
-            reject(DropReason::OverMaxThemes, None, draft);
-            continue;
-        }
-        let positions: Vec<Option<usize>> = draft
-            .passage_refs
-            .iter()
-            .map(|r| position(r, input.passages.len()))
-            .collect();
-        if positions.iter().any(Option::is_none) {
-            reject(DropReason::UnknownRef, None, draft);
-            continue;
-        }
-        let mut cited: Vec<usize> = Vec::new();
-        for p in positions.into_iter().flatten() {
-            if !cited.contains(&p) {
-                cited.push(p);
+        let cites = match citations(&d, input, settings) {
+            Ok(c) => c,
+            Err(reason) => {
+                reject(reason, None, d.text);
+                continue;
             }
-        }
-        if cited.len() < 2 {
-            reject(DropReason::TooFewPassages, None, draft);
+        };
+        let candidate = Candidate {
+            part,
+            text: d.text,
+            refs: refs.clone(),
+            cites,
+        };
+        let cited = candidate.excerpts();
+        let teachers: Vec<TeacherId> = {
+            let mut t: Vec<TeacherId> = Vec::new();
+            for &i in &cited {
+                if !t.contains(&input.excerpts[i].teacher_id) {
+                    t.push(input.excerpts[i].teacher_id);
+                }
+            }
+            t
+        };
+        let text = candidate.text.as_str();
+        if matches!(part, SummaryPart::Agree | SummaryPart::Differ) && teachers.len() < 2 {
+            reject(DropReason::OneTeacher, None, candidate.text);
             continue;
         }
-        if let Some(reason) = filter::one_sentence(&draft.description) {
-            reject(reason, None, draft);
+        if let Some(reason) = filter::one_sentence(text, settings.max_words) {
+            reject(reason, None, candidate.text);
             continue;
         }
-        if filter::has_quotation_mark(&draft.description) {
-            reject(DropReason::QuotationMark, None, draft);
+        if filter::has_quotation_mark(text) {
+            reject(DropReason::QuotationMark, None, candidate.text);
             continue;
         }
-        if filter::has_passage_label(&draft.description) {
-            reject(DropReason::PassageLabel, None, draft);
+        if filter::has_passage_label(text) {
+            reject(DropReason::PassageLabel, None, candidate.text);
             continue;
         }
-        if let Some(alias) = filter::alias_in(&draft.description, aliases) {
-            reject(DropReason::TeacherAlias, Some(alias.to_owned()), draft);
+        if let Some(name) = filter::misattributed(text, names, &teachers) {
+            reject(DropReason::Misattributed, Some(name), candidate.text);
             continue;
         }
-        let texts: Vec<&str> = cited
+        let cited_years: Vec<i32> = cited
             .iter()
-            .map(|&i| input.passages[i].1.as_str())
+            .filter_map(|&i| input.excerpts[i].year)
             .collect();
-        let ratio = filter::grounding_ratio(&draft.description, &texts);
-        if ratio < settings.min_grounding_ratio {
-            reject(DropReason::Ungrounded, Some(format!("{ratio:.2}")), draft);
+        if let Some(y) = filter::years(text)
+            .into_iter()
+            .find(|y| !cited_years.contains(y))
+        {
+            reject(DropReason::WrongYear, Some(y.to_string()), candidate.text);
             continue;
         }
-        candidates.push(Candidate { draft, cited });
+        if let Some(w) = filter::belief_word(text) {
+            reject(DropReason::BeliefWord, Some(w.to_owned()), candidate.text);
+            continue;
+        }
+        let texts: Vec<String> = cited.iter().map(|&i| input.excerpts[i].text()).collect();
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let name_list: Vec<String> = names.iter().map(|(_, n)| n.clone()).collect();
+        let ratio = filter::grounding_ratio(text, &texts, &name_list);
+        if ratio < settings.min_grounding_ratio {
+            reject(
+                DropReason::Ungrounded,
+                Some(format!("{ratio:.2}")),
+                candidate.text,
+            );
+            continue;
+        }
+        candidates.push(candidate);
     }
     candidates
 }
 
-/// One verifier call: the theme and its cited passages only.
+/// Filter 2: each citation as an excerpt position and the quotation's window-wide words,
+/// duplicates collapsed. A citation naming no offered excerpt or sentence drops the sentence;
+/// one longer than `quote_max_words` is left out, and drops the sentence only when no other
+/// citation remains.
+fn citations(
+    d: &DraftSentence,
+    input: &SummaryInput,
+    settings: &Settings,
+) -> Result<Vec<(usize, usize, usize)>, DropReason> {
+    if d.cites.is_empty() {
+        return Err(DropReason::NoCitation);
+    }
+    let mut out: Vec<(usize, usize, usize)> = Vec::new();
+    let mut too_long = false;
+    for c in &d.cites {
+        let i = position(&c.excerpt, input.excerpts.len()).ok_or(DropReason::UnknownRef)?;
+        let sentences = input.excerpts[i].sentences();
+        let first = usize::try_from(c.start).ok().filter(|&n| n >= 1);
+        let last = usize::try_from(c.end).ok();
+        let (Some(first), Some(last)) = (first, last) else {
+            return Err(DropReason::UnknownRef);
+        };
+        if last < first || last > sentences.len() {
+            return Err(DropReason::UnknownRef);
+        }
+        let (s, e) = (sentences[first - 1].0, sentences[last - 1].1);
+        // An over-long run is left out on its own; the sentence keeps its other citations.
+        if e - s > settings.quote_max_words {
+            too_long = true;
+            continue;
+        }
+        if !out.contains(&(i, s, e)) {
+            out.push((i, s, e));
+        }
+    }
+    if out.is_empty() && too_long {
+        return Err(DropReason::QuoteTooLong);
+    }
+    Ok(out)
+}
+
+/// One verifier call: the sentence and its cited excerpts only, with their headers.
 async fn verify(
     llm: &dyn LlmClient,
     candidate: &Candidate,
-    input: &SynthesisInput,
+    input: &SummaryInput,
     settings: &Settings,
     class: DataClass,
 ) -> Result<VerifierOutput, Failure> {
-    let mut user = format!(
-        "Sentence: {}\n\nCited passages:\n",
-        candidate.draft.description.trim()
-    );
-    for &i in &candidate.cited {
-        user.push_str(&format!("\n{}: {}\n", label(i), input.passages[i].1));
+    let mut user = format!("Sentence: {}\n\nCited excerpts:\n", candidate.text.trim());
+    for i in candidate.excerpts() {
+        let x = &input.excerpts[i];
+        user.push_str(&format!("\n{}\n{}\n", x.header(&label(i)), x.text()));
     }
     let request = LlmRequest {
         stage: LlmStage::Verify,
@@ -413,11 +657,12 @@ fn log(out: &Synthesis) {
     for d in &out.dropped {
         tracing::info!(
             target: "wt_synth",
+            part = ?d.part,
             reason = d.reason.as_str(),
             refs = ?d.refs,
             detail = d.detail.as_deref().unwrap_or(""),
-            description = %d.description,
-            "synthesis theme dropped"
+            text = %d.text,
+            "summary sentence dropped"
         );
     }
     let mut by_reason: BTreeMap<&str, usize> = BTreeMap::new();
@@ -430,20 +675,21 @@ fn log(out: &Synthesis) {
             outcome = "synthesis_failed",
             stage,
             error = %error,
-            "synthesis line omitted"
+            "summary omitted"
         ),
         Some(Failure::CapReached) => tracing::warn!(
             target: "wt_synth",
             outcome = "cap_reached",
-            "synthesis line omitted"
+            "summary omitted"
         ),
         None => tracing::info!(
             target: "wt_synth",
-            themes = out.themes.len(),
+            sentences = out.shown(),
+            headline = out.summary.is_some(),
             dropped = out.dropped.len(),
             drops = ?by_reason,
             calls = out.calls,
-            "synthesis done"
+            "summary done"
         ),
     }
 }

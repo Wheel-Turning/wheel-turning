@@ -134,7 +134,8 @@ pub async fn import(
             )));
         }
         // The claim text comes from the stored answer, never from the file.
-        let theme = a.payload.themes.get(c.theme).ok_or_else(|| {
+        let lines = wt_core::answer::claims(&a.payload.themes, a.payload.summary.as_ref());
+        let theme = lines.get(c.theme).ok_or_else(|| {
             bad(format!(
                 "{} has no summary line {}",
                 c.question_id,

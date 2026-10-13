@@ -357,7 +357,7 @@ async fn a_distress_answer_has_the_banner_and_no_summary_line_or_giving_panel() 
         page.body.contains("<blockquote>"),
         "the answer itself is shown"
     );
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert!(!page.body.contains("Give to"), "{}", page.body);
     assert!(
         llm.seen.lock().unwrap().is_empty(),
@@ -381,7 +381,7 @@ async fn a_medical_answer_has_its_banner_and_keeps_the_giving_panel() {
     let banner = main.find("It is not medical advice.").unwrap();
     assert!(banner < main.find("Your question").unwrap());
     assert!(main.contains("<a href=\"tel:911\">call 911</a>"));
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert!(page.body.contains("Give to North Fixture Zendo"));
     assert!(llm.seen.lock().unwrap().is_empty());
     assert!(page.body.contains("id=\"dana\""), "the dana panel stays");
@@ -412,7 +412,7 @@ async fn the_curated_query_runs_with_the_notice_on_top_and_neither_summary_nor_g
         .unwrap();
     assert!(notice < main.find("Your question").unwrap(), "on top");
     assert!(main.contains("<a href=\"tel:988\">call 988</a>"));
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert!(!page.body.contains("Give to"));
     assert!(llm.seen.lock().unwrap().is_empty());
 

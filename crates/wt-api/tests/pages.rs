@@ -1,6 +1,6 @@
 //! Spec 06 acceptance for the pages the alpha uses: invite access, the session gate, CSRF,
 //! asking, the owner-only permalink, escaping, feedback and the security headers; and Spec 05's
-//! M6 items for the synthesis line. Synthetic teachers and passages only.
+//! M6 items for the summary. Synthetic teachers and passages only.
 #![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use std::sync::Arc;
@@ -39,7 +39,8 @@ const ANGER: &str = "When anger arises, turn toward the anger and breathe with i
                      <script>alert(1)</script> The bell rang twice before the service.";
 const BO_ANGER: &str = "Anger is only energy. Sit with the anger, turn toward it, and breathe \
                         until it softens on its own.";
-const THEME: &str = "Both passages turn toward anger and breathe with it.";
+const HEADLINE: &str = "Two talks say to turn toward anger and breathe with it.";
+const AGREE: &str = "Talks by two teachers describe turning toward anger and breathing with it.";
 
 struct Fx {
     _db: TestDb,
@@ -364,10 +365,18 @@ async fn a_short_question_is_refused_with_the_message() {
     );
 }
 
-// ---- synthesis (Spec 05, M6) ----------------------------------------------------------------
+// ---- the summary (Spec 05, M6) --------------------------------------------------------------
 
-fn theme_reply() -> serde_json::Value {
-    serde_json::json!({ "themes": [{ "description": THEME, "passage_refs": ["P1", "P2"] }] })
+fn summary_reply() -> serde_json::Value {
+    let cite = |e: &str| serde_json::json!({ "excerpt": e, "start": 1, "end": 1 });
+    serde_json::json!({
+        "headline": { "text": HEADLINE, "cites": [cite("E1"), cite("E2")] },
+        "framing": [],
+        "agree": [{ "text": AGREE, "cites": [cite("E1"), cite("E2")] }],
+        "differ": [],
+        "keep_in_mind": [],
+        "sum_up": null
+    })
 }
 
 fn verdict(supported: bool) -> serde_json::Value {
@@ -407,67 +416,129 @@ async fn theme_counts(pool: &PgPool) -> (i32, i32) {
         .unwrap()
 }
 
+/// The summary section of a page.
+fn summary_of(body: &str) -> &str {
+    let start = body.find("<section id=\"summary\"").unwrap();
+    let section = &body[start..];
+    &section[..section.find("</section>").unwrap()]
+}
+
 #[tokio::test]
-async fn a_verified_theme_renders_with_chips_and_is_stored_with_passage_ids() {
-    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(true))]));
+async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
+    let llm = Arc::new(FakeLlm::new(vec![
+        Ok(summary_reply()),
+        Ok(verdict(true)),
+        Ok(verdict(true)),
+    ]));
     let fx = start_with(site_with(llm.clone()), true).await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(page.body.contains("How approaches differ"), "{}", page.body);
+    let section = summary_of(&page.body);
     assert_eq!(
-        page.body.matches(THEME).count(),
+        page.body.matches(HEADLINE).count(),
         1,
         "model text appears once"
     );
-    let start = page.body.find("How approaches differ").unwrap();
-    let section = &page.body[start..];
-    let section = &section[..section.find("</section>").unwrap()];
-    assert!(section.contains(THEME), "and only in the section");
     assert!(
-        section.contains("href=\"#p1\"") && section.contains("href=\"#p2\""),
+        section.contains(HEADLINE) && section.contains(AGREE),
         "{section}"
     );
-    assert!(page.body.contains("id=\"p1\"") && page.body.contains("id=\"p2\""));
     assert!(
-        start < page.body.find("<blockquote>").unwrap(),
-        "above the passages"
+        section.contains("<h3>Where the talks agree</h3>"),
+        "{section}"
+    );
+    assert!(
+        !section.contains("Where they differ"),
+        "an empty section is left out"
+    );
+    assert!(
+        section.contains("id=\"fb-summary\"") && section.contains("Feedback on this summary"),
+        "the summary's feedback control sits inside its container"
+    );
+    // Each marker points to a quoted line the code took verbatim from the excerpt.
+    assert!(section.contains("href=\"#sq-1\"") && section.contains("href=\"#sq-2\""));
+    assert!(
+        section.contains("<q>When anger arises, turn toward the anger and breathe with it.</q>"),
+        "{section}"
+    );
+    assert!(
+        section.contains("<q>Anger is only energy.</q>"),
+        "{section}"
+    );
+    assert!(section.contains("href=\"#p1\"") && section.contains("href=\"#p2\""));
+    assert!(
+        section.contains("Drawn from 2 talks by 2 teachers."),
+        "{section}"
+    );
+    assert!(
+        section.contains("Only 2 talks in this collection matched this question closely."),
+        "{section}"
+    );
+    assert!(
+        !section.contains("excerpts come from teachers at"),
+        "the one-sangha note needs three excerpts"
+    );
+    assert!(
+        page.body.find("id=\"summary\"").unwrap() < page.body.find("<blockquote>").unwrap(),
+        "above the excerpts"
+    );
+    assert_eq!(
+        page.body.matches("<blockquote>").count(),
+        2,
+        "the excerpts stay"
     );
 
-    assert_eq!(theme_counts(&fx.pool).await, (1, 0));
+    assert_eq!(theme_counts(&fx.pool).await, (2, 0));
     let stored: serde_json::Value = sqlx::query_scalar("select payload from answer")
         .fetch_one(&fx.pool)
         .await
         .unwrap();
-    assert_eq!(stored["themes"][0]["description"], THEME);
-    assert_eq!(
-        stored["themes"][0]["passage_ids"], stored["passage_ids"],
-        "the code maps P1 and P2 to the offered ids"
+    let sentences = &stored["summary"]["sentences"];
+    assert_eq!(sentences[0]["part"], "headline");
+    assert_eq!(sentences[0]["text"], HEADLINE);
+    let cited: Vec<&serde_json::Value> = sentences[0]["cites"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["passage_id"])
+        .collect();
+    let ids: Vec<&serde_json::Value> = stored["passage_ids"].as_array().unwrap().iter().collect();
+    assert_eq!(cited, ids, "the code maps E1 and E2 to the offered ids");
+    let raw = stored.to_string();
+    assert!(
+        !raw.contains("anger arises") && !raw.contains("only energy"),
+        "spans, never passage text: {raw}"
     );
 
     let seen = llm.seen.lock().unwrap();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 3, "one generation and two verifier calls");
     assert!(seen.iter().all(|(_, class)| *class == DataClass::Real));
 }
 
 #[tokio::test]
-async fn a_rejected_theme_leaves_no_section_and_counts_the_drop() {
-    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(false))]));
+async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
+    let llm = Arc::new(FakeLlm::new(vec![
+        Ok(summary_reply()),
+        Ok(verdict(false)),
+        Ok(verdict(true)),
+    ]));
     let fx = start_with(site_with(llm), true).await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(!page.body.contains("How approaches differ"));
-    assert!(!page.body.contains(THEME));
+    assert!(!page.body.contains("id=\"summary\""));
+    assert!(!page.body.contains(HEADLINE) && !page.body.contains(AGREE));
+    assert_eq!(page.body.matches("<blockquote>").count(), 2);
     assert_eq!(theme_counts(&fx.pool).await, (0, 1));
 }
 
 #[tokio::test]
-async fn a_failed_verifier_leaves_a_fully_rendered_answer_without_the_line() {
+async fn a_failed_verifier_leaves_a_fully_rendered_answer_without_the_summary() {
     // The generation call succeeds and the verifier has no reply left, so it fails.
-    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply())]));
+    let llm = Arc::new(FakeLlm::new(vec![Ok(summary_reply())]));
     let fx = start_with(site_with(llm), true).await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert!(page.body.contains("Ada Fixture") && page.body.contains("Bo Fixture"));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
 }
@@ -484,28 +555,28 @@ impl LlmClient for Stalled {
         _: DataClass,
     ) -> Result<serde_json::Value, LlmError> {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-        Ok(theme_reply())
+        Ok(summary_reply())
     }
 }
 
 #[tokio::test]
-async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_line() {
+async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_summary() {
     let mut site = site_with(Arc::new(Stalled));
     site.retrieval.synthesis.synthesis_timeout_s = 1;
     let fx = start_with(site, true).await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
 }
 
 #[tokio::test]
-async fn named_mode_makes_no_synthesis_call() {
-    let llm = Arc::new(FakeLlm::new(vec![Ok(theme_reply()), Ok(verdict(true))]));
+async fn named_mode_makes_no_summary_call() {
+    let llm = Arc::new(FakeLlm::new(vec![Ok(summary_reply()), Ok(verdict(true))]));
     let fx = start_with(site_with(llm.clone()), true).await;
     let page = ask(&fx, "What does Ada Fixture say about anger?").await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(!page.body.contains("How approaches differ"));
+    assert!(!page.body.contains("id=\"summary\""));
     assert!(
         llm.seen.lock().unwrap().is_empty(),
         "no model call in named mode"

@@ -1,0 +1,18 @@
+  {% let st = self.summary_status() %}
+  <details class="fb" id="fb-summary"{% if st.is_some() %} open{% endif %}>
+    <summary>Feedback on this summary</summary>
+    <form method="post" action="/a/{{ answer_id }}/feedback" data-feedback>
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="target" value="summary">
+      <fieldset>
+        <legend>What do you think of this summary? Choose any that apply.</legend>
+        {% for (k, label) in summary_reasons %}<div class="check"><input type="checkbox" id="fs-{{ k }}" name="reason" value="{{ k }}"><label for="fs-{{ k }}">{{ label }}</label></div>
+        {% endfor %}
+      </fieldset>
+      <label for="fs-note">Anything else? (optional)</label>
+      <textarea id="fs-note" name="note" rows="2" maxlength="1000" aria-describedby="fs-note-help"></textarea>
+      <p id="fs-note-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
+      <button type="submit" class="secondary">Send feedback</button>
+      <p class="fb-status{% if let Some(f) = st %}{% if f.error %} error{% endif %}{% endif %}" role="status" aria-live="polite">{% if let Some(f) = st %}{{ f.message }}{% endif %}</p>
+    </form>
+  </details>

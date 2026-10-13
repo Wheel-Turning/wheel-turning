@@ -22,7 +22,7 @@ File: `copy/about.md`. The page opens with a two-sentence summary, then short se
 
 **What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows them grouped by teacher, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
 
-**How answers are chosen.** Excerpts are ranked by how well they match your question and by nothing else. Who gave the talk, which sangha it came from, and whether a sangha has a giving page do not change the order. A sangha is a community that practices together. When the answer includes a short summary line, each part of it is backed by at least two excerpts and is checked against them before you see it.
+**How answers are chosen.** Excerpts are ranked by how well they match your question and by nothing else. Who gave the talk, which sangha it came from, and whether a sangha has a giving page do not change the order. A sangha is a community that practices together. When an answer opens with a summary, a language model writes it from the excerpts below it, and each sentence is checked against the excerpts it cites before you see it. Each number in the summary leads to the exact words it rests on, and the excerpts themselves are always shown in full.
 
 **Where the material comes from.** Talks come from sangha archives and recordings. Texts come from published editions. The project uses these sources on its own decision, then asks each teacher, sangha and publisher for permission and records the answer. Each excerpt carries a credit line that says exactly what is true: used with permission, used under a named license, or simply where it came from. The page never says a source gave permission unless it did. See every source and its status
 
@@ -114,6 +114,19 @@ On the home page and under About, in the section Your questions.
 - Server error: Something went wrong on our side. Your question was not saved. Please try again.
 - Excerpt withdrawn: This excerpt was removed at the rights holder's request.
 - Question not kept: This question was not kept.
+
+## Summary
+
+Owner's decision of October 12, 2026 (Spec 05, Summary and verifier).
+
+- Section heading: Summary
+- Section headings inside it: Where the talks agree; Where they differ; Points to keep in mind; In sum
+- Few talks note: Only \[n] talk(s) in this collection matched this question closely.
+- One sangha note: \[k] of the \[n] excerpts come from teachers at \[sangha].
+- Drawn-from line: Drawn from \[n] talk(s) by \[k] teacher(s). Each sentence is checked against the excerpts it cites; the excerpts are below.
+- Quoted lines heading: Quoted lines
+- A quoted line: “\[quotation]” \[teacher], “\[talk title]”, \[date]. Excerpt \[n]
+- Marker label for screen readers: Quoted line \[n]
 
 ## References and source links
 
@@ -309,5 +322,5 @@ File: `copy/sensitive.md`. The tone is plain and kind and makes no claims it can
 
 Add to the Your questions section of `copy/about.md`:
 
-- To write the short summary line and to check for sensitive topics, the text of your question may be sent to a language model provider. The provider does not train on it and deletes it within 30 days. \[Check before launch that this still matches the provider's terms.\]
-- If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.
+- To write the summary and to check for sensitive topics, the text of your question may be sent to a language model provider. The provider does not train on it and deletes it within 30 days. \[Check before launch that this still matches the provider's terms.\]
+- If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary and the giving panel, and does not save the text of the most serious questions.

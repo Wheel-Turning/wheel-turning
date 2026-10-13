@@ -260,8 +260,10 @@ pub struct AnswerView {
     pub result_line: String,
     /// The notice banner, from Spec 09's messages.
     pub notice: Option<String>,
-    /// Verified themes; the section is left out when empty.
+    /// Verified themes of an answer stored before the summary; left out when empty.
     pub themes: Vec<ThemeLine>,
+    /// The summary block (Spec 05, Summary and verifier), set by [`crate::summary::build`].
+    pub summary: Option<crate::summary::SummaryView>,
     /// Teacher groups, ordered by their best passage.
     pub groups: Vec<Group>,
     /// Passages that no longer serve.
@@ -433,6 +435,7 @@ pub fn assemble(
         result_line,
         notice,
         themes,
+        summary: None,
         groups,
         withdrawn: payload.passage_ids.len().saturating_sub(served.len()),
         references: references.into_iter().map(|(_, e)| e).collect(),

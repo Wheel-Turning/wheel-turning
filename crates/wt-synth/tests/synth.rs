@@ -1,51 +1,98 @@
-//! Spec 05, M6 acceptance: the filters, the verifier and failures, with scripted models.
+//! Spec 05, M6 acceptance for the summary: the filters, quotations taken by code, the verifier
+//! and failures, with scripted models and synthetic excerpts.
 #![allow(clippy::unwrap_used, missing_docs)]
 
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use wt_core::answer::SummaryPart;
 use wt_core::config::LlmStage;
-use wt_core::ids::PassageId;
+use wt_core::excerpt::{Excerpt, Window, WindowPassage};
+use wt_core::ids::{PassageId, TeacherId};
 use wt_extract::{DataClass, FakeLlm, LlmClient, LlmError, LlmRequest};
-use wt_synth::{DropReason, Failure, Settings, SynthesisInput, synthesize};
+use wt_synth::{DropReason, Failure, Settings, SummaryExcerpt, SummaryInput, Synthesis, summarize};
 
 fn pid(n: u128) -> PassageId {
     PassageId::from_uuid(uuid::Uuid::from_u128(n))
 }
 
-fn input() -> SynthesisInput {
-    SynthesisInput {
+fn tid(n: u128) -> TeacherId {
+    TeacherId::from_uuid(uuid::Uuid::from_u128(100 + n))
+}
+
+fn row(n: u128, text: &str) -> WindowPassage {
+    WindowPassage {
+        id: pid(n),
+        text: text.into(),
+        ordinal: 0,
+        start_ms: 0,
+        sentence_starts: Vec::new(),
+        sentence_start_ms: Vec::new(),
+    }
+}
+
+const ADA: &str = "When judging thoughts arise in sitting, notice them gently. \
+                   Then return to the breath and the posture.";
+const BO: &str = "Judging is just more thinking. \
+                  Label it thinking and come back to posture and breath.";
+const CY: &str = "Self criticism can become the very object of practice. \
+                  Meet it with kindness when it comes.";
+
+fn excerpt(n: u128, teacher: &str, year: Option<i32>, text: &str) -> SummaryExcerpt {
+    let window = Window::alone(row(n, text));
+    let len = window.len();
+    SummaryExcerpt {
+        passage_id: pid(n),
+        teacher_id: tid(n),
+        teacher: teacher.into(),
+        year,
+        window,
+        range: (0, len),
+    }
+}
+
+fn input() -> SummaryInput {
+    SummaryInput {
         query: "I keep judging myself during zazen.".into(),
-        passages: vec![
-            (
-                pid(1),
-                "When judging thoughts arise in sitting, notice them gently and return to the breath."
-                    .into(),
-            ),
-            (
-                pid(2),
-                "Judging is just more thinking; label it thinking and come back to posture and breath."
-                    .into(),
-            ),
-            (
-                pid(3),
-                "Self criticism can become the very object of practice, met with kindness."
-                    .into(),
-            ),
+        excerpts: vec![
+            excerpt(1, "Ada Fixture", Some(2011), ADA),
+            excerpt(2, "Bo Lindqvist", Some(2015), BO),
+            excerpt(3, "Cy Moreau", None, CY),
         ],
     }
 }
 
-const GOOD: &str =
-    "Both passages treat judging thoughts as thinking to notice before returning to breath.";
-
-fn aliases() -> Vec<String> {
-    vec!["Ada Fixture".into(), "Kosho".into()]
+fn aliases() -> Vec<(TeacherId, String)> {
+    vec![
+        (tid(1), "Ada Fixture".into()),
+        (tid(2), "Bo Lindqvist".into()),
+        (tid(3), "Cy Moreau Roshi".into()),
+    ]
 }
 
-fn draft(themes: Vec<(&str, Vec<&str>)>) -> Value {
-    json!({ "themes": themes.into_iter().map(|(d, r)| json!({"description": d, "passage_refs": r})).collect::<Vec<_>>() })
+fn s(text: &str, cites: &[(&str, i64, i64)]) -> Value {
+    json!({
+        "text": text,
+        "cites": cites.iter().map(|(e, a, b)| json!({"excerpt": e, "start": a, "end": b})).collect::<Vec<_>>()
+    })
+}
+
+const HEADLINE: &str =
+    "Talks treat judging thoughts as thinking to notice, then return to breath and posture.";
+const AGREE: &str = "In a 2011 talk, Ada Fixture says to notice judging thoughts and return to the breath, and a 2015 talk describes coming back to posture and breath.";
+const DIFFER: &str = "One talk labels judging as thinking, while another makes self criticism the object of practice, met with kindness.";
+const SUM_UP: &str = "The talks turn from judging thoughts back to breath, posture or kindness.";
+
+fn good_draft() -> Value {
+    json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [],
+        "agree": [s(AGREE, &[("E1", 1, 2), ("E2", 2, 2)])],
+        "differ": [s(DIFFER, &[("E2", 1, 2), ("E3", 1, 2)])],
+        "keep_in_mind": [],
+        "sum_up": s(SUM_UP, &[("E1", 2, 2), ("E3", 2, 2)]),
+    })
 }
 
 fn yes() -> Result<Value, String> {
@@ -56,15 +103,12 @@ fn no(part: &str) -> Result<Value, String> {
     Ok(json!({"supported": false, "unsupported_part": part}))
 }
 
-async fn run(llm: &dyn LlmClient) -> wt_synth::Synthesis {
-    synthesize(
-        llm,
-        &input(),
-        &aliases(),
-        &Settings::default(),
-        DataClass::Real,
-    )
-    .await
+async fn run_with(llm: &dyn LlmClient, settings: &Settings) -> Synthesis {
+    summarize(llm, &input(), &aliases(), settings, DataClass::Real).await
+}
+
+async fn run(llm: &dyn LlmClient) -> Synthesis {
+    run_with(llm, &Settings::default()).await
 }
 
 fn stages(llm: &FakeLlm) -> Vec<LlmStage> {
@@ -76,142 +120,205 @@ fn stages(llm: &FakeLlm) -> Vec<LlmStage> {
         .collect()
 }
 
+fn reasons(out: &Synthesis) -> Vec<DropReason> {
+    out.dropped.iter().map(|d| d.reason).collect()
+}
+
 #[tokio::test]
-async fn a_good_theme_passes_every_filter_and_maps_refs_to_ids() {
-    let llm = FakeLlm::new(vec![Ok(draft(vec![(GOOD, vec!["P1", "p2", "P1"])])), yes()]);
+async fn a_good_summary_passes_and_each_citation_becomes_a_verbatim_quotation() {
+    let llm = FakeLlm::new(vec![Ok(good_draft()), yes(), yes(), yes(), yes()]);
     let out = run(&llm).await;
     assert_eq!(out.failure, None);
     assert!(out.dropped.is_empty(), "{:?}", out.dropped);
-    assert_eq!(out.themes.len(), 1);
-    assert_eq!(out.themes[0].description, GOOD);
+    let summary = out.summary.unwrap();
+    let parts: Vec<SummaryPart> = summary.sentences.iter().map(|s| s.part).collect();
     assert_eq!(
-        out.themes[0].passage_ids,
-        vec![pid(1), pid(2)],
-        "duplicates collapse"
+        parts,
+        vec![
+            SummaryPart::Headline,
+            SummaryPart::Agree,
+            SummaryPart::Differ,
+            SummaryPart::SumUp
+        ]
     );
-    assert_eq!(stages(&llm), vec![LlmStage::Synth, LlmStage::Verify]);
+    assert_eq!(summary.sentences[0].text, HEADLINE);
+    let headline = &summary.sentences[0];
+    assert_eq!(headline.passage_ids(), vec![pid(1), pid(2)]);
+    // The code slices the cited sentences from the excerpt; the model sent no words of them.
+    let rows = [row(1, ADA), row(2, BO), row(3, CY)];
+    let quote = |c: &wt_core::answer::StoredCite| Excerpt::rebuild(&c.quote, &rows).unwrap().text;
+    assert_eq!(
+        quote(&headline.cites[0]),
+        "Then return to the breath and the posture."
+    );
+    assert_eq!(
+        quote(&headline.cites[1]),
+        "Label it thinking and come back to posture and breath."
+    );
+    assert_eq!(quote(&summary.sentences[1].cites[0]), ADA);
+
+    // One generation call, then one verifier call per sentence, all with real-data rules.
+    assert_eq!(
+        stages(&llm),
+        vec![
+            LlmStage::Synth,
+            LlmStage::Verify,
+            LlmStage::Verify,
+            LlmStage::Verify,
+            LlmStage::Verify
+        ]
+    );
     let seen = llm.seen.lock().unwrap();
     assert!(seen.iter().all(|(_, c)| *c == DataClass::Real));
-    let verify = &seen[1].0.user;
+    let generation = &seen[0].0.user;
     assert!(
-        verify.contains("P1:") && verify.contains("P2:") && !verify.contains("P3:"),
-        "the verifier sees only the cited passages"
+        generation.contains("E1: Ada Fixture, talk from 2011"),
+        "{generation}"
     );
-}
-
-/// Each deterministic filter drops its fixture before any verifier call; the good theme in the
-/// same reply passes them all.
-#[tokio::test]
-async fn each_filter_drops_its_fixture() {
-    let long = "judging thoughts breath ".repeat(11);
-    let cases: Vec<(&str, Vec<&str>, DropReason)> = vec![
-        (
-            "Both passages treat judging thoughts as thinking to notice.",
-            vec!["P1", "P4"],
-            DropReason::UnknownRef,
-        ),
-        (
-            "One passage treats judging thoughts as thinking to notice before breath.",
-            vec!["P1", "P1"],
-            DropReason::TooFewPassages,
-        ),
-        (
-            "Both notice judging thoughts. Both return to breath.",
-            vec!["P1", "P2"],
-            DropReason::NotOneSentence,
-        ),
-        (&long, vec!["P1", "P2"], DropReason::TooLong),
-        (
-            "Both call judging \"just more thinking\" to notice.",
-            vec!["P1", "P2"],
-            DropReason::QuotationMark,
-        ),
-        (
-            "Kosho and others treat judging thoughts as thinking to notice.",
-            vec!["P1", "P2"],
-            DropReason::TeacherAlias,
-        ),
-        (
-            "P1 and P2 both treat judging thoughts as thinking to notice.",
-            vec!["P1", "P2"],
-            DropReason::PassageLabel,
-        ),
-        (
-            "Both recommend therapy, journaling and medication for anxiety disorders.",
-            vec!["P1", "P2"],
-            DropReason::Ungrounded,
-        ),
-    ];
-    for (description, refs, reason) in cases {
-        let llm = FakeLlm::new(vec![
-            Ok(draft(vec![
-                (description, refs.clone()),
-                (GOOD, vec!["P1", "P2"]),
-            ])),
-            yes(),
-        ]);
-        let out = run(&llm).await;
-        assert_eq!(out.dropped.len(), 1, "{description}: {:?}", out.dropped);
-        assert_eq!(out.dropped[0].reason, reason, "{description}");
-        assert_eq!(out.themes.len(), 1, "{description}: the good theme passes");
-        assert_eq!(
-            stages(&llm),
-            vec![LlmStage::Synth, LlmStage::Verify],
-            "{description}: dropped before the verifier"
-        );
-    }
+    assert!(
+        generation.contains("E3: Cy Moreau, undated talk"),
+        "{generation}"
+    );
+    assert!(generation.contains("[2] (8 words) Then return to the breath and the posture."));
+    // The verifier sees only the sentence's own excerpts.
+    let verify_headline = &seen[1].0.user;
+    assert!(verify_headline.contains(HEADLINE));
+    assert!(verify_headline.contains("E2: Bo Lindqvist") && !verify_headline.contains("E3"));
 }
 
 #[tokio::test]
-async fn themes_beyond_max_themes_are_dropped() {
-    let five = vec![(GOOD, vec!["P1", "P2"]); 5];
-    let llm = FakeLlm::new(vec![Ok(draft(five)), yes(), yes(), yes(), yes()]);
-    let out = run(&llm).await;
-    assert_eq!(out.themes.len(), 4);
-    assert_eq!(out.dropped.len(), 1);
-    assert_eq!(out.dropped[0].reason, DropReason::OverMaxThemes);
-}
-
-#[tokio::test]
-async fn a_reply_off_the_schema_fails_without_a_line() {
-    let llm = FakeLlm::new(vec![
-        Ok(json!({"lines": []})),
-        Ok(json!({"themes": "none"})),
-    ]);
-    let out = run(&llm).await;
-    assert!(out.themes.is_empty());
+async fn each_filter_drops_its_fixture_before_the_verifier() {
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [
+            s("The talks call it \"just thinking\" and return to breath.", &[("E2", 1, 1)]),
+            s("E2 labels judging thoughts as thinking.", &[("E2", 1, 2)]),
+        ],
+        "agree": [
+            s("Two talks say to notice judging thoughts and return to the breath.", &[("E1", 1, 2)]),
+            s("Talks say judging thoughts return to breath.", &[("E9", 1, 1), ("E2", 1, 1)]),
+            s("Talks say judging thoughts return to breath.", &[]),
+        ],
+        "differ": [
+            s("In a 2019 talk, Ada Fixture says to notice judging thoughts, unlike labeling them thinking.", &[("E1", 1, 1), ("E2", 1, 1)]),
+            s("Ada Fixture believes judging thoughts pass, while another talk labels judging as thinking.", &[("E1", 1, 1), ("E2", 1, 1)]),
+            s("Therapy and medication cure anxiety disorders, unlike journaling.", &[("E1", 1, 1), ("E3", 1, 1)]),
+            s("Talks differ. One stresses breath.", &[("E1", 1, 2), ("E2", 1, 2)]),
+        ],
+        "keep_in_mind": [
+            s("Lindqvist says to notice judging thoughts gently in sitting.", &[("E1", 1, 1)]),
+        ],
+        "sum_up": null,
+    });
+    let settings = Settings {
+        max_themes: 4,
+        ..Settings::default()
+    };
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = run_with(&llm, &settings).await;
     assert_eq!(
-        out.failure.as_ref().map(Failure::as_str),
-        Some("synthesis_failed")
+        reasons(&out),
+        vec![
+            DropReason::QuotationMark,
+            DropReason::PassageLabel,
+            DropReason::OneTeacher,
+            DropReason::UnknownRef,
+            DropReason::NoCitation,
+            DropReason::WrongYear,
+            DropReason::BeliefWord,
+            DropReason::Ungrounded,
+            DropReason::NotOneSentence,
+            DropReason::Misattributed,
+        ]
+    );
+    assert_eq!(out.dropped[5].detail.as_deref(), Some("2019"));
+    assert_eq!(out.dropped[9].detail.as_deref(), Some("Lindqvist"));
+    // Only the headline reached the verifier.
+    assert_eq!(stages(&llm), vec![LlmStage::Synth, LlmStage::Verify]);
+    assert_eq!(out.summary.unwrap().sentences.len(), 1);
+}
+
+#[tokio::test]
+async fn limits_on_sections_and_quotations_drop_the_excess() {
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 1, 2)]),
+        "framing": [],
+        "agree": [
+            s(AGREE, &[("E1", 2, 2), ("E2", 2, 2)]),
+            s(AGREE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        ],
+        "differ": [],
+        "keep_in_mind": [],
+        "sum_up": null,
+    });
+    let settings = Settings {
+        max_themes: 1,
+        quote_max_words: 10,
+        ..Settings::default()
+    };
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = run_with(&llm, &settings).await;
+    // The headline quotes the whole 17-word excerpt; the second agree sentence is over the limit.
+    assert_eq!(
+        reasons(&out),
+        vec![DropReason::OverLimit, DropReason::QuoteTooLong]
+    );
+    assert!(out.summary.is_none(), "no headline, no summary");
+}
+
+#[tokio::test]
+async fn an_over_long_citation_is_left_out_while_another_remains() {
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 1, 2), ("E2", 2, 2)]),
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+    });
+    let settings = Settings {
+        quote_max_words: 10,
+        ..Settings::default()
+    };
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = run_with(&llm, &settings).await;
+    assert!(out.dropped.is_empty(), "{:?}", out.dropped);
+    let headline = &out.summary.unwrap().sentences[0];
+    assert_eq!(
+        headline.passage_ids(),
+        vec![pid(2)],
+        "only the short quotation stays"
     );
 }
 
 #[tokio::test]
-async fn a_verifier_that_rejects_a_theme_drops_it_with_the_reason() {
-    let other = "Both passages treat judging as the object of practice met with kindness.";
-    let llm = FakeLlm::new(vec![
-        Ok(draft(vec![
-            (GOOD, vec!["P1", "P2"]),
-            (other, vec!["P2", "P3"]),
-        ])),
-        yes(),
-        no("met with kindness"),
-    ]);
+async fn a_rejected_headline_leaves_no_summary() {
+    let llm = FakeLlm::new(vec![Ok(good_draft()), no("posture"), yes(), yes(), yes()]);
     let out = run(&llm).await;
+    assert!(out.summary.is_none());
     assert_eq!(out.failure, None);
-    assert_eq!(out.themes.len(), 1);
-    assert_eq!(out.themes[0].description, GOOD);
-    assert_eq!(out.dropped.len(), 1);
     assert_eq!(out.dropped[0].reason, DropReason::Unsupported);
-    assert_eq!(out.dropped[0].reason.as_str(), "unsupported");
-    assert_eq!(out.dropped[0].detail.as_deref(), Some("met with kindness"));
+    assert_eq!(out.dropped[0].part, SummaryPart::Headline);
+    assert_eq!(out.dropped[0].detail.as_deref(), Some("posture"));
 }
 
 #[tokio::test]
-async fn a_verifier_failure_removes_the_whole_line() {
-    let llm = FakeLlm::new(vec![Ok(draft(vec![(GOOD, vec!["P1", "P2"])]))]);
+async fn a_rejected_section_sentence_is_dropped_and_the_rest_stays() {
+    let llm = FakeLlm::new(vec![Ok(good_draft()), yes(), yes(), no("kindness"), yes()]);
     let out = run(&llm).await;
-    assert!(out.themes.is_empty());
+    let summary = out.summary.unwrap();
+    assert_eq!(summary.sentences.len(), 3);
+    assert!(
+        summary
+            .sentences
+            .iter()
+            .all(|s| s.part != SummaryPart::Differ)
+    );
+    assert_eq!(out.dropped.len(), 1);
+}
+
+#[tokio::test]
+async fn a_verifier_failure_omits_the_summary() {
+    // The generation reply parses, then the verifier has no reply left, so it fails.
+    let llm = FakeLlm::new(vec![Ok(good_draft())]);
+    let out = run(&llm).await;
+    assert!(out.summary.is_none());
     assert!(matches!(
         out.failure,
         Some(Failure::Failed {
@@ -219,26 +326,32 @@ async fn a_verifier_failure_removes_the_whole_line() {
             ..
         })
     ));
+    assert_eq!(
+        out.failure.as_ref().map(Failure::as_str),
+        Some("synthesis_failed")
+    );
 }
 
 #[tokio::test]
-async fn fewer_than_two_passages_makes_no_call() {
+async fn no_excerpts_make_no_call() {
     let llm = FakeLlm::new(vec![]);
-    let mut one = input();
-    one.passages.truncate(1);
-    let out = synthesize(
+    let empty = SummaryInput {
+        query: "q".into(),
+        excerpts: Vec::new(),
+    };
+    let out = summarize(
         &llm,
-        &one,
+        &empty,
         &aliases(),
         &Settings::default(),
         DataClass::Real,
     )
     .await;
-    assert_eq!(out, wt_synth::Synthesis::default());
+    assert_eq!(out, Synthesis::default());
     assert!(llm.seen.lock().unwrap().is_empty());
 }
 
-/// A model that answers after a delay, or refuses at the cap.
+/// A model that answers late, or refuses at the cap.
 struct Slow {
     delay: Duration,
     cap: bool,
@@ -259,12 +372,12 @@ impl LlmClient for Slow {
             });
         }
         tokio::time::sleep(self.delay).await;
-        Ok(draft(vec![(GOOD, vec!["P1", "P2"])]))
+        Ok(good_draft())
     }
 }
 
 #[tokio::test]
-async fn a_generation_timeout_omits_the_line() {
+async fn a_generation_timeout_omits_the_summary() {
     let settings = Settings {
         timeout: Duration::from_millis(20),
         ..Settings::default()
@@ -273,8 +386,8 @@ async fn a_generation_timeout_omits_the_line() {
         delay: Duration::from_secs(5),
         cap: false,
     };
-    let out = synthesize(&slow, &input(), &aliases(), &settings, DataClass::Real).await;
-    assert!(out.themes.is_empty());
+    let out = run_with(&slow, &settings).await;
+    assert!(out.summary.is_none());
     assert!(matches!(
         out.failure,
         Some(Failure::Failed { stage: "synth", .. })
@@ -288,12 +401,8 @@ async fn a_refusal_at_the_cap_is_logged_as_cap_reached() {
         cap: true,
     };
     let out = run(&capped).await;
-    assert!(out.themes.is_empty());
+    assert!(out.summary.is_none());
     assert_eq!(out.failure, Some(Failure::CapReached));
-    assert_eq!(
-        out.failure.as_ref().map(Failure::as_str),
-        Some("cap_reached")
-    );
 }
 
 /// Collects formatted log lines.
@@ -326,21 +435,20 @@ async fn every_drop_and_its_reason_land_in_the_log() {
         tracing::callsite::rebuild_interest_cache();
         captured
     });
-    let llm = FakeLlm::new(vec![
-        Ok(draft(vec![
-            (GOOD, vec!["P1", "P2"]),
-            (
-                "Kosho treats judging thoughts as thinking.",
-                vec!["P1", "P2"],
-            ),
-        ])),
-        no("before returning to breath"),
-    ]);
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [],
+        "agree": [],
+        "differ": [],
+        "keep_in_mind": [s("Moreau says to notice judging thoughts.", &[("E1", 1, 1)])],
+        "sum_up": null,
+    });
+    let llm = FakeLlm::new(vec![Ok(draft), no("before returning to breath")]);
     let out = run(&llm).await;
-    assert!(out.themes.is_empty());
+    assert!(out.summary.is_none());
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
-    assert!(log.contains("synthesis theme dropped"), "{log}");
-    assert!(log.contains("reason=\"teacher_alias\""), "{log}");
+    assert!(log.contains("summary sentence dropped"), "{log}");
+    assert!(log.contains("reason=\"misattributed\""), "{log}");
     assert!(log.contains("reason=\"unsupported\""), "{log}");
     assert!(log.contains("before returning to breath"), "{log}");
 }

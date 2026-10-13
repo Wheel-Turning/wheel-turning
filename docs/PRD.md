@@ -18,8 +18,8 @@ Western Zen dharma talks number in the tens of thousands, and almost nothing in 
 
 Wheel Turning lets a practitioner describe what is happening in their practice and see how teachers have actually addressed it, with every passage traceable to its talk or text, its teacher or author, its sangha and a way to give. The purpose is to carry teachings further. As Red Pine puts it in his commentary on the Platform Sutra, a teaching exists to be transmitted from one mind to another, as one candle lights another. The product is free and noncommercial, any gift goes directly to the sanghas whose teaching was received, and the founder intends to form a nonprofit.
 
-1. Passages, not paraphrase. The unit of result is a short verbatim excerpt with a link to its exact source moment or page, and, unless its teacher limits it, a link into the full transcript of the talk at that passage. A synthesis line may summarize differences in approach, but every claim in it links to a passage, and nothing is stated that no teacher said.
-2. Teachers are never spoken for. Different approaches stay visibly different. Blending voices into one answer would erase what makes the corpus worth searching.
+1. Passages, not paraphrase. The unit of result is a short verbatim excerpt with a link to its exact source moment or page, and, unless its teacher limits it, a link into the full transcript of the talk at that passage. A summary may say what the talks say and how they agree and differ, but every sentence in it cites the excerpts that support it, each citation shows a verbatim line the code takes from the cited excerpt, and nothing is stated that no teacher said (owner's decision of October 12, 2026, replacing the one-line synthesis).
+2. Teachers are never spoken for. Different approaches stay visibly different. Blending voices into one answer would erase what makes the corpus worth searching, so the summary reports what is said in a given talk ("in a 2011 talk, Weitsman says ..."), never what a teacher believes, and keeps agreement and difference in separate sections.
 3. Dana follows citation. Each passage carries its sangha's own donation link, and the sanghas cited in an answer share equally in any gift made from it.
 4. Relevance alone ranks. No payment, partnership, claimed profile, upload volume or rights basis (consent, license, permission or mandate) changes where a passage appears.
 5. Text only. The product stores transcripts, texts and metadata, never audio or video, and plays from the source. Student audio is never stored. A student's question is kept only as a lightly edited text, with names and identifying details removed, attributed to "Student", shown as context for the teacher's answer and searchable (owner's decision of October 10, 2026).
@@ -91,11 +91,11 @@ Three kinds of material feed it:
 
 ## Answer experience
 
-A question returns passages grouped by teacher, under a thin synthesis of how approaches differ, with footnotes that resolve to talks and to texts, and a separate section of excerpts from the texts.
+A question returns passages grouped by teacher, under a short cited summary in the manner of a Consensus research answer, with footnotes that resolve to talks and to texts, and a separate section of excerpts from the texts.
 
 1. The student or teacher asks a question in situational language, such as "I keep judging myself during zazen."
-2. The page shows a short synthesis line, then the verbatim passages below it, each with teacher, sangha, links to the source, a link to that sangha's dana page and a "Report this excerpt" link. When the source publishes its own transcript, the passage links to that transcript and the project shows no transcript of its own; when the project made the transcript, the passage links to the recording at that moment and to the project's transcript (owner's decision of October 12, 2026). A collapsible References list in MLA style closes the page.
-3. Themes in the synthesis are one-line descriptions of a difference in approach, and a theme renders only when at least two passages support it. A theme with one passage appears as that passage.
+2. The page shows the summary, then the verbatim passages below it, each with teacher, sangha, links to the source, a link to that sangha's dana page and a "Report this excerpt" link. When the source publishes its own transcript, the passage links to that transcript and the project shows no transcript of its own; when the project made the transcript, the passage links to the recording at that moment and to the project's transcript (owner's decision of October 12, 2026). A collapsible References list in MLA style closes the page.
+3. The summary (owner's decision of October 12, 2026, moving Spec 00's post-beta item 4 before beta). It opens with a one-sentence headline answer, then a short framing paragraph, then sections for where the talks agree, where they differ, and points to keep in mind (few talks on the topic, one sangha dominating the excerpts, context a quote leaves out), and closes with a one-sentence sum-up. Each sentence cites the excerpts that support it and passes the verifier; a sentence of agreement or difference cites excerpts from at least two teachers. Every citation marker points to a verbatim quotation that the code, never the model, takes from the cited excerpt, so a reader can check each claim at once. Instead of an evidence-strength meter, the summary states how many talks and teachers it draws on. The verbatim excerpts stay below it, and when no headline survives the checks the page shows the excerpts without a summary.
 4. A "From the texts" section follows the teacher groups. Each excerpt shows the work, locator, author, translator, edition, page when known, a source link and a credit line. Texts never count as teachers, never enter the dana split and are not passed to synthesis.
 5. Citations inside passages become footnotes. When a cited text is loaded, the footnote opens that passage in the text. Two lists close the page: the talks cited and the external texts referenced, with unresolved citations shown as unresolved.
 6. A dana panel offers a gift to the site and an equal split across every sangha cited in the answer.
@@ -107,7 +107,7 @@ The credit line follows the rights basis and never claims more than it has. Wher
 - Default answers draw on at least three distinct teachers when each clears a relevance threshold. The system never pads to reach three. Fewer teachers means the answer says how many it found.
 - In v1 the three-teacher rule is relaxed and displayed, because about three in four SSZ talks come from one teacher. The share of answers with one or two teachers is itself a measurement.
 - Retrieval diversifies across speakers, so the most prolific teacher does not fill the answer.
-- When a query names a teacher, as in "what has Norman Fischer said about grief," retrieval filters to that teacher and the three-teacher rule is suspended. If the corpus holds little or nothing from them, the system says so and does not substitute someone else. The synthesis line is minimal or absent in this mode, and the dana split collapses to that teacher's sangha.
+- When a query names a teacher, as in "what has Norman Fischer said about grief," retrieval filters to that teacher and the three-teacher rule is suspended. If the corpus holds little or nothing from them, the system says so and does not substitute someone else. No summary is written in this mode, and the dana split collapses to that teacher's sangha.
 - When a query names the author of a loaded text, such as Dogen, the Texts section filters to that author's works and talks retrieve normally with the name removed, so teachers' commentary on that author still appears.
 
 **Sensitive questions.** A question that shows crisis or a health emergency gets a pointer to help before anything else. The most serious cases get a notice instead of results, with no summary line and no giving panel, and their text is never stored. Milder distress and medical questions run normally with a short notice above the answer, and distress answers have no summary line and no giving panel. The site says plainly that it shows what teachers have said and is not counseling or medical advice.
@@ -224,7 +224,7 @@ Because money follows citation, every ranking choice moves dana between sanghas,
 - Seattle Soto Zen and Everyday Zen are one seed partner among many in the data model and carry no special weight.
 - Claiming a profile unlocks corrections, context and archive upload, and nothing else.
 - A soft preference for at least two sanghas per answer may be tested because v1 data is concentrated. If it ever overrides relevance, the answer discloses it.
-- Synthesis constraints: every claim links to a passage, themes need two supporting passages, and nothing appears that no passage supports.
+- Summary constraints: every sentence cites the excerpts that support it and passes the verifier, a claim of agreement or difference cites at least two teachers, every citation shows a verbatim quotation taken by code, and nothing appears that no excerpt supports.
 - Texts appear in their own labeled section, never count toward the three teachers, and sit outside the dana split. They are searched separately and never change which talks are returned or in what order.
 - Lineage data and reference assets never enter ranking.
 - Partner-submitted material gets a review step, to catch archives tuned to common queries.
@@ -258,7 +258,7 @@ Risks are ordered by how much they can sink the product and how cheaply they can
 | --- | --- |
 | Retrieval on practitioner-style questions does not return faithful passages | Test first, in a notebook over cleaned transcripts, before building any interface |
 | Segmentation fails to separate talk from chanting, sitting and Q&A | Sample ten videos before assuming SSZ files are already trimmed, then test the classifier |
-| Synthesis drifts from what teachers said | Have a knowledgeable reviewer mark 20 answers claim by claim as supported, drifting or invented, and keep the synthesis line thin |
+| Synthesis drifts from what teachers said | Have a knowledgeable reviewer mark 20 answers claim by claim as supported, drifting or invented, and keep every summary sentence tied to a quoted line a reader can check |
 | A teacher or rights holder objects to use without permission | Leaving takes one message. Suspension within one business day, then permanent takedown and exclusion. Notices sent by hand. One setting returns talks to consent-first. Counsel review before any wider launch |
 | A notice-first approach offends a teacher or sangha | Ask Kanshin first, honor requests without argument, and keep consent-first one setting away |
 | A mandated document carries another party's copyright notice that gets overlooked | The notice scan flags it on arrival, a source can hold or block noticed documents, and any one document can be quarantined |
@@ -271,7 +271,8 @@ Risks are ordered by how much they can sink the product and how cheaply they can
 | Transcription mangles core vocabulary | Glossary prompt and correction pass, plus the teacher alias registry, before indexing |
 | Citation resolution is hard and low in priority | Ship a hand-listed set and show everything else as unresolved |
 | Founder sits on both sides of the ranking rule | Relevance-only rule and no special weight for SSZ or Everyday Zen, written into the spec |
-| A named-teacher answer reads as that teacher's position | Verbatim passages carry the answer, and synthesis is minimal or absent in this mode |
+| A named-teacher answer reads as that teacher's position | Verbatim passages carry the answer, and no summary is written in this mode |
+| A fuller summary reads as teachers' beliefs or blends their voices | Sentences report what is said in a dated talk, agreement and difference stay in separate sections, every marker shows a quoted line, and the verifier checks each sentence against its cited excerpts |
 | Fetching media or captions at scale conflicts with platform terms | Official APIs for metadata, third-party fetching off by default, media from SSZ storage or the owner's authorized route, polite fetching, and counsel review |
 | Warm relationships make an honest no hard to give | Make declining a one-line reply and ask reviewers for unflattering critique |
 

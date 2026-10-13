@@ -151,7 +151,8 @@ pub fn render(
             };
             passage(&mut h, &qid, n, p, context, lead_in_ms);
         }
-        for (t, theme) in a.payload.themes.iter().enumerate() {
+        let claims = wt_core::answer::claims(&a.payload.themes, a.payload.summary.as_ref());
+        for (t, theme) in claims.iter().enumerate() {
             let cites: Vec<String> = theme
                 .passage_ids
                 .iter()

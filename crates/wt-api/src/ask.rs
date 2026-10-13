@@ -12,7 +12,7 @@ use wt_core::ids::{AnswerId, TesterId};
 use wt_db::answer::Payload;
 use wt_extract::DataClass;
 use wt_retrieve::{Level, Mode, NamedDetector, Notice, Relevance, Triaged, retrieve_reporting};
-use wt_synth::{Synthesis, SynthesisInput};
+use wt_synth::{SummaryExcerpt, SummaryInput, Synthesis};
 
 use crate::Site;
 use crate::progress::{Count, Sink, Stage};
@@ -36,7 +36,7 @@ pub struct StageTimings {
     /// Reading each passage's window and cutting its excerpt (Spec 05, Answer assembly,
     /// rule 8).
     pub excerpt_ms: u64,
-    /// Theme generation and verification; zero in named mode.
+    /// Summary generation and verification; zero in named mode.
     pub synth_ms: u64,
     /// Writing the query log and answer.
     pub persist_ms: u64,
@@ -55,11 +55,11 @@ pub struct Asked {
     pub teacher_count: usize,
     /// Passages chosen.
     pub passage_count: usize,
-    /// Themes that survived the filters and verifier.
+    /// Summary sentences that survived the filters and verifier.
     pub theme_count: usize,
-    /// Themes dropped, with reasons in the log.
+    /// Summary sentences dropped, with reasons in the log.
     pub themes_dropped: usize,
-    /// Set when synthesis failed or timed out.
+    /// Set when the summary failed or timed out.
     pub synthesis_failed: bool,
     /// The reranker was missing, failed or timed out.
     pub rerank_degraded: bool,
@@ -196,7 +196,7 @@ pub async fn answer_framed(
     let aliases = wt_db::answer::aliases(pool)
         .await
         .map_err(AskError::Aliases)?;
-    let alias_names: Vec<String> = aliases.iter().map(|(_, a)| a.clone()).collect();
+    let alias_pairs = aliases.clone();
     let detector = NamedDetector::new(aliases, &site.common_words).map_err(AskError::Detector)?;
     let parsed = detector.parse(text);
     timings.parse_ms = millis(stage);
@@ -266,27 +266,21 @@ pub async fn answer_framed(
     timings.excerpt_ms = millis(stage);
     progress.count(Count::Selected, ids.len());
 
-    // Spec 05: synthesis runs in standard mode only, over the excerpts as the page shows them,
-    // and not for a sensitive question, whose page omits the summary line. Any failure leaves
-    // the answer without the line and nothing else.
+    // Spec 05: the summary runs in standard mode only, over the excerpts as the page shows
+    // them, and not for a sensitive question, whose page omits it. Any failure leaves the
+    // answer without the summary and nothing else.
     let stage = Instant::now();
     let synthesis = match found.mode {
         Mode::Standard if level.shows_summary() && !framing.curated => {
             progress.stage(Stage::Writing);
-            let input = SynthesisInput {
+            let input = SummaryInput {
                 query: text.to_owned(),
-                passages: served
-                    .iter()
-                    .map(|p| {
-                        let text = excerpts.get(&p.id).map_or(&p.text, |e| &e.text);
-                        (p.id, text.clone())
-                    })
-                    .collect(),
+                excerpts: summary_excerpts(&served, &windows, &excerpts),
             };
-            wt_synth::synthesize(
+            wt_synth::summarize(
                 site.llm.as_ref(),
                 &input,
-                &alias_names,
+                &alias_pairs,
                 &site.synthesis(),
                 DataClass::Real,
             )
@@ -313,14 +307,15 @@ pub async fn answer_framed(
         Mode::Standard => ("standard", None),
         Mode::NamedTeacher(t) => ("named_teacher", Some(t)),
     };
-    let theme_count = synthesis.themes.len();
+    let theme_count = synthesis.shown();
     let passage_count = ids.len();
     let payload = Payload {
         mode: mode.to_owned(),
         named_teacher_id: named,
         notice: notice.map(str::to_owned),
         notice_count,
-        themes: synthesis.themes,
+        themes: Vec::new(),
+        summary: synthesis.summary,
         passage_ids: ids,
         rerank_degraded: found.rerank_degraded,
         curated: framing.curated,
@@ -372,6 +367,54 @@ pub async fn answer_framed(
         level,
         triaged,
     })))
+}
+
+/// Each served passage's excerpt as the summary sees it: the window it was cut from and its
+/// words there, with the teacher and the talk's year. A passage without a window, or whose
+/// span no longer fits it, is offered whole.
+fn summary_excerpts(
+    served: &[wt_db::answer::Served],
+    windows: &[wt_core::excerpt::Window],
+    excerpts: &std::collections::BTreeMap<wt_core::ids::PassageId, wt_core::excerpt::Excerpt>,
+) -> Vec<SummaryExcerpt> {
+    use chrono::Datelike;
+    use wt_core::excerpt::{Window, WindowPassage};
+    served
+        .iter()
+        .map(|p| {
+            let found = windows
+                .iter()
+                .find(|w| w.passages.get(w.selected).is_some_and(|s| s.id == p.id));
+            let span = excerpts.get(&p.id).and_then(|e| e.span.as_ref());
+            let (window, range) = match (found, span) {
+                (Some(w), Some(span)) => match w.locate(span) {
+                    Some(range) => (w.clone(), range),
+                    None => (w.clone(), w.selected_range()),
+                },
+                (Some(w), None) => (w.clone(), w.selected_range()),
+                (None, _) => {
+                    let w = Window::alone(WindowPassage {
+                        id: p.id,
+                        text: p.text.clone(),
+                        ordinal: p.ordinal,
+                        start_ms: p.start_ms,
+                        sentence_starts: Vec::new(),
+                        sentence_start_ms: Vec::new(),
+                    });
+                    let range = (0, w.len());
+                    (w, range)
+                }
+            };
+            SummaryExcerpt {
+                passage_id: p.id,
+                teacher_id: p.talk.teacher_id,
+                teacher: p.talk.teacher_name.clone(),
+                year: p.talk.date.map(|d| d.year()),
+                window,
+                range,
+            }
+        })
+        .collect()
 }
 
 /// The question's text as the tester's privacy mode keeps it, and that mode.
