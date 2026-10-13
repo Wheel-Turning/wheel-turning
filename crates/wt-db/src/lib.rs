@@ -30,6 +30,7 @@ pub mod reference;
 pub mod registry;
 pub mod report;
 pub mod rights;
+pub mod storage;
 pub mod takedown;
 pub mod talk;
 #[cfg(feature = "test-support")]

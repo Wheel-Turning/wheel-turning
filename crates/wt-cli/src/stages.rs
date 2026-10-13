@@ -160,7 +160,8 @@ impl Stages {
                 Some(SidecarDiarizer::new(&config.diarize_url)?),
                 Some(
                     MediaFetcher::new(exclusions, config.allow_third_party_fetch)?
-                        .with_vimeo(crate::ingest::vimeo_media(config, config_dir)?),
+                        .with_vimeo(crate::ingest::vimeo_media(config, config_dir)?)
+                        .with_storage(crate::ingest::storage_media(config_dir)?),
                 ),
             )
         } else if kinds.contains(&JobKind::Questions) {

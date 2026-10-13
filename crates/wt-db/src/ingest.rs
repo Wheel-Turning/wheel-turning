@@ -23,6 +23,9 @@ pub enum IngestDbError {
     /// No talk with that id.
     #[error("talk {0} does not exist")]
     NotFound(TalkId),
+    /// No video with that id in the sources asked about.
+    #[error("no Vimeo video {0} in the matched sources")]
+    UnknownVideo(String),
     /// Enqueueing the classify job failed.
     #[error(transparent)]
     Job(#[from] JobError),
@@ -125,7 +128,10 @@ pub async fn record_video(
            on conflict (platform, external_id) do update
              set url = excluded.url, channel_ref = excluded.channel_ref, title = excluded.title,
                  description = excluded.description, published_at = excluded.published_at,
-                 duration_s = excluded.duration_s, raw = excluded.raw
+                 duration_s = excluded.duration_s,
+                 -- A storage match is the owner's, not the platform's: rediscovery keeps it.
+                 raw = excluded.raw || jsonb_strip_nulls(
+                         jsonb_build_object('storage', source_video.raw->'storage'))
            returning id, (xmax = 0) as "inserted!""#,
         v.platform,
         v.external_id,

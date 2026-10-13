@@ -61,6 +61,17 @@ pub enum ConfigError {
         /// What is wrong.
         reason: &'static str,
     },
+    /// A storage source's `root` is missing or not a local directory, or a `root` is set on a
+    /// source that is not storage.
+    #[error("{origin}: source {source_name:?}: {reason}")]
+    StorageRoot {
+        /// The file or fixture name.
+        origin: String,
+        /// The source.
+        source_name: String,
+        /// What is wrong.
+        reason: &'static str,
+    },
 }
 
 fn read(path: &Path) -> Result<String, ConfigError> {
@@ -132,12 +143,38 @@ pub struct SourceConfig {
     /// only talks, such as `dharma_talk`.
     #[serde(default)]
     pub default_talk_type: Option<String>,
+    /// A storage source: the local directory holding the files the owner received, such as
+    /// `data/storage/ssz`, relative to the directory `wt` runs in (Spec 03, the storage
+    /// adapter). The files are the owner's: the pipeline copies one into scratch to fetch it and
+    /// never deletes or changes them.
+    #[serde(default)]
+    pub root: Option<String>,
+    /// A storage source: the file extensions it lists, lower case and without the dot.
+    #[serde(default)]
+    pub extensions: Option<Vec<String>>,
 }
+
+/// The extensions a storage source lists when it names none: common audio and video files.
+pub const DEFAULT_STORAGE_EXTENSIONS: &[&str] = &["mp4", "m4a", "mp3", "wav", "mov", "m4v"];
 
 impl SourceConfig {
     /// Whether this source only attaches audio to talks another source lists.
     pub fn is_audio_only(&self) -> bool {
         self.role.as_deref() == Some("audio_only")
+    }
+
+    /// A storage source's extensions, lower case.
+    pub fn storage_extensions(&self) -> Vec<String> {
+        match &self.extensions {
+            Some(list) => list
+                .iter()
+                .map(|e| e.trim_start_matches('.').to_ascii_lowercase())
+                .collect(),
+            None => DEFAULT_STORAGE_EXTENSIONS
+                .iter()
+                .map(|e| (*e).to_owned())
+                .collect(),
+        }
     }
 }
 
@@ -181,6 +218,22 @@ impl SourcesFile {
                         reason,
                     });
                 }
+            }
+            let root_problem = match (s.platform, s.root.as_deref()) {
+                (SourcePlatform::Storage, None) => Some("a storage source needs a root"),
+                (SourcePlatform::Storage, Some(root)) if root.contains("://") => {
+                    Some("only a local directory is supported as a storage root")
+                }
+                (SourcePlatform::Storage, Some(_)) => None,
+                (_, Some(_)) => Some("root is for storage sources"),
+                (_, None) => None,
+            };
+            if let Some(reason) = root_problem {
+                return Err(ConfigError::StorageRoot {
+                    origin: origin.to_owned(),
+                    source_name: s.name.clone(),
+                    reason,
+                });
             }
         }
         Ok(file)
@@ -701,6 +754,34 @@ mod tests {
         assert!(matches!(
             SourcesFile::parse(rss, "fixture"),
             Err(ConfigError::TokenEnv { .. })
+        ));
+    }
+
+    #[test]
+    fn a_storage_source_needs_a_local_root() {
+        let storage = |root: &str| {
+            format!(
+                "[[source]]\nname = \"s\"\nplatform = \"storage\"\ndefault_sangha = \"S\"\n\
+                 role = \"audio_only\"\n{root}"
+            )
+        };
+        let file = SourcesFile::parse(&storage("root = \"data/storage/s\"\n"), "fixture").unwrap();
+        let s = file.get("s").unwrap();
+        assert_eq!(s.root.as_deref(), Some("data/storage/s"));
+        assert!(s.storage_extensions().contains(&"mp4".to_owned()));
+        for bad in ["", "root = \"s3://bucket/ssz/\"\n"] {
+            assert!(
+                matches!(
+                    SourcesFile::parse(&storage(bad), "fixture"),
+                    Err(ConfigError::StorageRoot { .. })
+                ),
+                "{bad:?} accepted"
+            );
+        }
+        let rooted_vimeo = format!("{}root = \"data\"\n", vimeo("WT_SSZ_VIMEO_ACCESS_TOKEN"));
+        assert!(matches!(
+            SourcesFile::parse(&rooted_vimeo, "fixture"),
+            Err(ConfigError::StorageRoot { .. })
         ));
     }
 }

@@ -86,6 +86,13 @@ fn the_ssz_vimeo_source_credits_a_sangha_in_the_registry() {
         sources.get("ssz-podcast").unwrap().role.as_deref(),
         Some("audio_only")
     );
+    let storage = sources.get("ssz-storage").unwrap();
+    assert_eq!(storage.platform, SourcePlatform::Storage);
+    assert!(storage.is_audio_only());
+    assert!(
+        storage.root.as_deref().unwrap().starts_with("data/"),
+        "the files live in the gitignored data folder"
+    );
 
     let registry = RegistryFile::load(&config("registry.toml")).unwrap();
     for s in &sources.sources {

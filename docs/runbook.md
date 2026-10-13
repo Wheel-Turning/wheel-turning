@@ -203,3 +203,59 @@ copies it off the machine (owner's decision of October 12, 2026).
 5. Disk. Each worktree keeps its own `target/` of 20 to 120 GB. `scripts/dev/clean-idle-targets.sh`
    clears every worktree's `target/` that has not been built for 12 hours, never the main
    checkout's; a scheduled task runs it daily, and `--dry-run` shows what it would clear.
+
+## 11. When SSZ's files arrive
+
+SSZ's Vimeo plan gives the API no file links, so SSZ's talks get their audio from files SSZ hands
+the owner: a folder, a drive download or a bulk export (Spec 03, the storage adapter, route c).
+The files are the owner's copy. The pipeline reads them and never deletes or changes them; the
+owner deletes them after the run (step 5).
+
+1. Put the files in `data/storage/ssz/` in the main checkout (the `root` of `ssz-storage` in
+   `config/sources.toml`; `data/` is gitignored and the nightly backup does not copy this folder).
+   Subfolders are fine. Keep the names SSZ gave them: a name holding the Vimeo id, the talk's
+   title or its date is what the matcher reads. `ffprobe` (part of ffmpeg) must be on the path.
+2. Match them to the Vimeo talks:
+
+   ```bash
+   wt ingest match-storage
+   ```
+
+   It changes nothing and writes `data/storage-match/ssz-storage.html` and `.csv`: proposed
+   matches (marked `yes`), conflicts where several files chose one talk, files with no talk, and
+   talks with no file, with each talk's state. Read the page. In the CSV, clear `accept` on a wrong
+   proposal, and for a conflict or an unmatched file type the talk's `vimeo_id` and `yes`. Then
+   record the reviewed rows, or every proposal if all are right:
+
+   ```bash
+   wt ingest match-storage --sheet data/storage-match/ssz-storage.csv
+   ```
+
+   ```bash
+   wt ingest match-storage --apply
+   ```
+
+   Running it again shows the recorded matches as `matched` and records nothing twice. A sheet
+   naming a file that has since moved or changed is refused whole; run step 2 again.
+3. Send the held talks back and queue the rest, against the database the run writes to:
+
+   ```bash
+   wt pipeline retry-held --reason no_media
+   ```
+
+   ```bash
+   wt pipeline advance
+   ```
+
+   Every talk held as `no_media` is retried, not only matched ones: an unmatched talk is held
+   again at once, after one Vimeo API call when the token is set.
+4. Transcribe. On the GPU machine (`infra/gpu-worker/run.sh ubuntu@<address> 3 <hours>`), run.sh
+   copies `data/storage` to the machine first and prints its size, so allow for the upload; the
+   machine's copy is removed when its workers stop. Or run the audio worker on the PC as in
+   procedure 1. A matched talk is tried on the Vimeo API first and copies its file into scratch
+   only when the API offers none; scratch is deleted after every job. A file missing from the
+   folder, or changed since it was matched, holds its talk as `no_media` again: put it back or
+   repeat step 2, then step 3.
+5. Afterwards: `wt audit` must show no `audio_residue`. Once the SSZ talks you expected are past
+   `transcribing`, delete the files: `rm -rf data/storage/ssz`. The review table in
+   `data/storage-match/` holds titles and file names only.

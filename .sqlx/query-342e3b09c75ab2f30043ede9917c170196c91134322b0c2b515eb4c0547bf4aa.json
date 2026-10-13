@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update source_video set raw = raw - 'storage'\n           where id <> $1 and raw->'storage'->>'source' = $2 and raw->'storage'->>'key' = $3\n           returning id, raw->'storage' as storage",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "storage",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "342e3b09c75ab2f30043ede9917c170196c91134322b0c2b515eb4c0547bf4aa"
+}

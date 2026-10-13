@@ -10,6 +10,11 @@
 //! talk's source (decision of October 13, 2026). The file links the API returns are signed and
 //! work without the token, so neither a link nor the token is ever logged, stored or put in an
 //! error: errors name the video id.
+//!
+//! Route (c), a file the owner received from the sangha, is copied from the storage source's
+//! root into the talk's scratch directory, where it is deleted with the scratch on every
+//! outcome. The original is the owner's and is never deleted or changed here (Spec 03, the
+//! storage adapter; CLAUDE.md rule 6).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -21,6 +26,7 @@ use wt_core::Secret;
 use wt_core::gate::{Consented, Talk};
 use wt_core::scratch::ScratchDir;
 use wt_db::feed::MediaRoute;
+use wt_db::storage::StorageRef;
 
 use crate::http::{self, Exclusions, parse_url};
 use crate::source::IngestError;
@@ -51,6 +57,16 @@ pub enum MediaSource {
         source: String,
         /// The Vimeo video id.
         video_id: String,
+        /// The storage file to read when the API offers no file (route c).
+        storage: Option<StorageRef>,
+    },
+    /// A file under a storage source's root, matched by `wt ingest match-storage` (Spec 03,
+    /// item 2c).
+    Storage {
+        /// The file.
+        file: StorageRef,
+        /// The talk's own page, checked against the exclusions before the file is read.
+        page: Option<String>,
     },
     /// A third-party download tool. Off unless `WT_ALLOW_THIRD_PARTY_FETCH` is set, and even
     /// then not built until counsel and SSZ agree (Spec 03, item 2d).
@@ -68,9 +84,18 @@ impl MediaSource {
             MediaRoute::FeedEnclosure { url, .. } | MediaRoute::Direct { url } => {
                 Some(MediaSource::Enclosure { url: url.clone() })
             }
-            MediaRoute::Vimeo { source, video_id } => Some(MediaSource::Vimeo {
+            MediaRoute::Vimeo {
+                source,
+                video_id,
+                storage,
+            } => Some(MediaSource::Vimeo {
                 source: source.clone(),
                 video_id: video_id.clone(),
+                storage: storage.clone(),
+            }),
+            MediaRoute::Storage { file } => Some(MediaSource::Storage {
+                file: file.clone(),
+                page: None,
             }),
             MediaRoute::None => None,
         }
@@ -86,6 +111,13 @@ pub struct VimeoMedia {
     pub tokens: BTreeMap<String, Secret>,
 }
 
+/// Route (c): each storage source's root by source name, from `sources.toml`.
+#[derive(Debug, Clone, Default)]
+pub struct StorageMedia {
+    /// The local directory each storage source lists.
+    pub roots: BTreeMap<String, PathBuf>,
+}
+
 /// What a fetch needs besides the talk.
 #[derive(Debug, Clone)]
 pub struct MediaFetcher {
@@ -93,6 +125,7 @@ pub struct MediaFetcher {
     exclusions: Exclusions,
     allow_third_party: bool,
     vimeo: Option<VimeoMedia>,
+    storage: StorageMedia,
 }
 
 impl MediaFetcher {
@@ -104,7 +137,14 @@ impl MediaFetcher {
             exclusions,
             allow_third_party,
             vimeo: None,
+            storage: StorageMedia::default(),
         })
+    }
+
+    /// Adds route (c): talks matched to a storage file copy it from its source's root.
+    pub fn with_storage(mut self, storage: StorageMedia) -> Self {
+        self.storage = storage;
+        self
     }
 
     /// Adds route (b): Vimeo talks of a source with a token fetch their file through the API.
@@ -114,12 +154,36 @@ impl MediaFetcher {
     }
 
     /// The source for a stored route that this fetcher can try. A Vimeo talk whose source has
-    /// no token has none, so the `audio` job holds it as `no_media` without fetching.
+    /// no token and no storage file it can read has none, so the `audio` job holds it as
+    /// `no_media` without fetching; with no token and a storage file, the file is the source.
     pub fn source_for(&self, route: &MediaRoute) -> Option<MediaSource> {
-        MediaSource::from_route(route).filter(|source| match source {
-            MediaSource::Vimeo { source, .. } => self.vimeo_token(source).is_some(),
-            _ => true,
-        })
+        match MediaSource::from_route(route)? {
+            MediaSource::Vimeo {
+                source,
+                video_id,
+                storage,
+            } => {
+                let storage = storage.filter(|f| self.storage.roots.contains_key(&f.source));
+                if self.vimeo_token(&source).is_some() {
+                    Some(MediaSource::Vimeo {
+                        source,
+                        video_id,
+                        storage,
+                    })
+                } else {
+                    storage.map(|file| MediaSource::Storage {
+                        file,
+                        page: Some(format!("https://vimeo.com/{video_id}")),
+                    })
+                }
+            }
+            MediaSource::Storage { file, page } => self
+                .storage
+                .roots
+                .contains_key(&file.source)
+                .then_some(MediaSource::Storage { file, page }),
+            other => Some(other),
+        }
     }
 
     fn vimeo_token(&self, source: &str) -> Option<(&Url, &Secret)> {
@@ -147,10 +211,82 @@ impl MediaFetcher {
                 let response = http::get_ok(&self.client, &target).await?;
                 self.download(talk, url, response, scratch).await
             }
-            MediaSource::Vimeo { source, video_id } => {
-                self.fetch_vimeo(talk, source, video_id, scratch).await
+            MediaSource::Vimeo {
+                source,
+                video_id,
+                storage,
+            } => match (
+                self.fetch_vimeo(talk, source, video_id, scratch).await,
+                storage,
+            ) {
+                // Route (b) offers no file: route (c), when the talk has a storage file.
+                (Err(IngestError::MediaNotAvailable), Some(file)) => {
+                    self.fetch_storage(talk, file, scratch).await
+                }
+                (result, _) => result,
+            },
+            MediaSource::Storage { file, page } => {
+                if let Some(page) = page {
+                    self.exclusions.clear(&parse_url(page)?)?;
+                }
+                self.fetch_storage(talk, file, scratch).await
             }
         }
+    }
+
+    /// Route (c). Copies the matched file from its source's root into the talk's scratch
+    /// directory. The original stays where the owner put it. A file the root no longer holds, or
+    /// one whose size changed since it was matched, is `MediaNotAvailable`, so the talk waits as
+    /// `no_media` for the files to be put back or matched again; the log says which.
+    async fn fetch_storage(
+        &self,
+        talk: &Talk<Consented>,
+        file: &StorageRef,
+        scratch: &ScratchDir,
+    ) -> Result<PathBuf, IngestError> {
+        let label = format!("storage file {}:{}", file.source, file.key);
+        let Some(root) = self.storage.roots.get(&file.source) else {
+            return Err(IngestError::MediaNotAvailable);
+        };
+        let original = match crate::storage::resolve(root, &file.key) {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!(talk = %talk.id, file = %label, error = %e,
+                               "the matched storage file is missing or outside its root");
+                return Err(IngestError::MediaNotAvailable);
+            }
+        };
+        let bytes = std::fs::metadata(&original)
+            .map(|m| m.len())
+            .map_err(|e| storage_error(&label, &e))?;
+        if bytes != file.bytes {
+            tracing::warn!(talk = %talk.id, file = %label, matched = file.bytes, now = bytes,
+                           "the storage file changed since it was matched; run match-storage again");
+            return Err(IngestError::MediaNotAvailable);
+        }
+        check_space(scratch.path(), bytes)?;
+        let path = scratch
+            .file("source.media")
+            .map_err(|e| scratch_error(&label, e))?;
+        let mut copy = scratch
+            .create_file("source.media")
+            .map_err(|e| scratch_error(&label, e))?;
+        let from = original.clone();
+        let copied = tokio::task::spawn_blocking(move || {
+            let mut reader = std::fs::File::open(&from)?;
+            let n = std::io::copy(&mut reader, &mut copy)?;
+            copy.flush()?;
+            Ok::<u64, std::io::Error>(n)
+        })
+        .await
+        .map_err(|e| IngestError::Http {
+            url: label.clone(),
+            message: format!("copying into scratch: {e}"),
+        })?
+        .map_err(|e| storage_error(&label, &e))?;
+        tracing::info!(talk = %talk.id, file = %label, bytes = copied,
+                       "storage file copied into scratch");
+        Ok(path)
     }
 
     /// Route (b). Reads the video's file links with its source's token, streams the smallest
@@ -440,6 +576,13 @@ impl TextTrack {
                 .name
                 .as_deref()
                 .is_some_and(|n| n.to_ascii_lowercase().contains("auto-generated"))
+    }
+}
+
+fn storage_error(label: &str, e: &std::io::Error) -> IngestError {
+    IngestError::Http {
+        url: label.to_owned(),
+        message: format!("reading the storage file: {e}"),
     }
 }
 

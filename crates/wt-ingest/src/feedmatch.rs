@@ -119,17 +119,23 @@ pub fn max_gap_s(cfg: &ClassifyConfig, duration_s: i32) -> i32 {
     s.feed_match_duration_tolerance_s.max(pct)
 }
 
-fn qualifies(cfg: &ClassifyConfig, episode: &Side, talk: &Side) -> bool {
+/// Whether two lengths are within the larger of `feed_match_duration_tolerance_s` and the
+/// percentage of the longer one.
+pub fn lengths_fit(cfg: &ClassifyConfig, a: i32, b: i32) -> bool {
     let s = &cfg.settings;
+    let tolerance = f64::from(s.feed_match_duration_tolerance_s)
+        .max(f64::from(a.max(b)) * f64::from(s.feed_match_duration_tolerance_pct) / 100.0);
+    f64::from((a - b).abs()) <= tolerance
+}
+
+fn qualifies(cfg: &ClassifyConfig, episode: &Side, talk: &Side) -> bool {
     let (Some(de), Some(dt)) = (episode.date, talk.date) else {
         return false;
     };
     let (Some(le), Some(lt)) = (episode.duration_s, talk.duration_s) else {
         return false;
     };
-    let tolerance = f64::from(s.feed_match_duration_tolerance_s)
-        .max(f64::from(le.max(lt)) * f64::from(s.feed_match_duration_tolerance_pct) / 100.0);
-    (de - dt).num_days().abs() <= s.feed_match_days && f64::from((le - lt).abs()) <= tolerance
+    (de - dt).num_days().abs() <= cfg.settings.feed_match_days && lengths_fit(cfg, le, lt)
 }
 
 /// Chooses the talk an episode belongs to, if the rule allows exactly one.

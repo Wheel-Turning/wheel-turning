@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, raw->'storage' as storage from source_video\n           where platform = 'vimeo' and external_id = $1 and raw->>'source' = any($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "storage",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "27617bf79e06d7eab1c32620302ad7a50daee097044c173114589352f4594c3e"
+}

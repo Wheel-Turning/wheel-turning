@@ -433,6 +433,7 @@ async fn retry_held_moves_a_no_media_talk_onto_the_vimeo_route() {
         wt_db::feed::MediaRoute::Vimeo {
             source: SOURCE.into(),
             video_id: VIDEO.into(),
+            storage: None,
         }
     );
 }
