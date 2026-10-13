@@ -219,7 +219,16 @@ pub enum MediaRoute {
         /// The file's address.
         url: String,
     },
-    /// No route is known yet. Vimeo downloads and the storage adapter arrive with M4.
+    /// A Vimeo talk with no matched enclosure: its file is read through the Vimeo API with
+    /// the token its source names (Spec 03, Seattle Soto Zen sources, item 2b). Whether a token
+    /// and a file exist is known only to the fetcher.
+    Vimeo {
+        /// The source the talk was discovered through, such as `ssz-vimeo`.
+        source: String,
+        /// The Vimeo video id.
+        video_id: String,
+    },
+    /// No route is known. The storage adapter (route c) is not built.
     None,
 }
 
@@ -254,12 +263,28 @@ pub async fn media_route(
             return Ok(MediaRoute::Direct { url });
         }
     }
-    Ok(match row {
-        Some(r) => match r.url {
-            Some(url) => MediaRoute::FeedEnclosure {
-                url,
-                mime_type: r.mime_type,
-                episode: SourceVideoId::from(r.id),
+    if let Some(r) = row
+        && let Some(url) = r.url
+    {
+        return Ok(MediaRoute::FeedEnclosure {
+            url,
+            mime_type: r.mime_type,
+            episode: SourceVideoId::from(r.id),
+        });
+    }
+    let vimeo = sqlx::query!(
+        r#"select sv.external_id, sv.raw->>'source' as "source"
+           from talk t join source_video sv on sv.id = t.source_video_id
+           where t.id = $1 and sv.platform = 'vimeo'"#,
+        talk.as_uuid()
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match vimeo {
+        Some(v) => match v.source {
+            Some(source) => MediaRoute::Vimeo {
+                source,
+                video_id: v.external_id,
             },
             None => MediaRoute::None,
         },

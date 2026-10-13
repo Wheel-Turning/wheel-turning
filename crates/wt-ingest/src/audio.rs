@@ -271,7 +271,16 @@ async fn steps(
         TalkRepo::advance(c, talk, PipelineState::Fetching).await?;
     }
     let scratch = ScratchDir::create(deps.scratch_root, talk.id)?;
-    let fetched = deps.fetcher.fetch(talk, source, &scratch).await?;
+    // A route that turns out to offer no file, such as a Vimeo video the plan cannot read,
+    // holds the talk as having no media, as a talk with no route is.
+    let fetched = match deps.fetcher.fetch(talk, source, &scratch).await {
+        Ok(path) => path,
+        Err(IngestError::MediaNotAvailable) => {
+            scratch.finish()?;
+            return Ok(Steps::Held("no_media".to_owned()));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let wav = deps.converter.to_wav(&scratch, &fetched)?;
 
     if let Some(c) = conn.as_deref_mut() {
@@ -458,7 +467,7 @@ pub async fn sample(
         Err(gate) => return Ok(SampleOutcome::NotCleared(gate)),
     };
     let route = feed::media_route(conn, talk_id).await?;
-    let Some(source) = MediaSource::from_route(&route) else {
+    let Some(source) = deps.fetcher.source_for(&route) else {
         return Ok(SampleOutcome::NoMedia);
     };
     let text = feed::source_transcript(conn, talk_id).await?;
@@ -490,7 +499,7 @@ pub async fn run(
     let text = feed::source_transcript(conn, talk_id).await?;
     // Without audio, the source's own text is the transcript, and a labeled text whose
     // recording does not align is used alone too (Spec 04, Text-only source transcripts).
-    let done = match (MediaSource::from_route(&route), text.as_deref()) {
+    let done = match (deps.fetcher.source_for(&route), text.as_deref()) {
         (None, None) => {
             transcript::hold_for_review(conn, talk_id, "no_media", deps.actor).await?;
             return Ok(AudioOutcome::NoMedia);
@@ -662,7 +671,7 @@ pub async fn backfill_questions(
     };
     let route = feed::media_route(conn, talk_id).await?;
     let text = feed::source_transcript(conn, talk_id).await?;
-    let done = match (MediaSource::from_route(&route), text.as_deref()) {
+    let done = match (deps.fetcher.source_for(&route), text.as_deref()) {
         (None, None) => return Ok(QuestionsOutcome::NoMedia),
         (None, Some(text)) => text_steps(conn, &talk, text, false, deps, false).await?,
         // A transcript made from the source's text alone, after its recording failed to align,
@@ -884,6 +893,7 @@ pub async fn advance_cleared(conn: &mut sqlx::PgConnection) -> Result<Vec<TalkId
                         .as_bytes()
                 )
             ),
+            feed::MediaRoute::Vimeo { source, video_id } => format!("vimeo:{source}:{video_id}"),
             feed::MediaRoute::None => "none".to_owned(),
         };
         let key = sha256_hex(route.as_bytes());
@@ -988,10 +998,14 @@ pub async fn fetch_wav(
         Err(gate) => return Ok(Err(gate)),
     };
     let route = feed::media_route(conn, talk_id).await?;
-    let Some(source) = MediaSource::from_route(&route) else {
+    let Some(source) = fetcher.source_for(&route) else {
         return Ok(Ok(None));
     };
-    let fetched = fetcher.fetch(&talk, &source, scratch).await?;
+    let fetched = match fetcher.fetch(&talk, &source, scratch).await {
+        Ok(path) => path,
+        Err(IngestError::MediaNotAvailable) => return Ok(Ok(None)),
+        Err(e) => return Err(e.into()),
+    };
     Ok(Ok(Some(converter.to_wav(scratch, &fetched)?)))
 }
 

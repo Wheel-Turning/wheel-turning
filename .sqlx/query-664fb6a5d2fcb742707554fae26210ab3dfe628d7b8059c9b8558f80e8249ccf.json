@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sv.external_id, sv.raw->>'source' as \"source\"\n           from talk t join source_video sv on sv.id = t.source_video_id\n           where t.id = $1 and sv.platform = 'vimeo'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "external_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "source_video",
+            "name": "external_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "source",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "664fb6a5d2fcb742707554fae26210ab3dfe628d7b8059c9b8558f80e8249ccf"
+}

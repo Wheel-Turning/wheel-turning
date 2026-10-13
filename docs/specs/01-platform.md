@@ -74,7 +74,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_LLM_REAL_DATA_OK` | `false` | Must be `true` before any call carries real transcript text. The owner sets it; the provider's standard commercial terms apply (Spec 04) |
 | `YOUTUBE_API_KEY` | none | Key for the YouTube Data API, secret |
 | `YOUTUBE_OAUTH_REFRESH_TOKEN` | none | OAuth refresh token for caption download in owner\_api mode, secret, kept in Secrets Manager. See Spec 03. |
-| `WT_VIMEO_ACCESS_TOKEN` | none | Vimeo API token, secret. Unset means discovery reads the public talks page. See Spec 03. |
+| `WT_<SANGHA>_VIMEO_ACCESS_TOKEN` | none | A Vimeo account's API token, secret, one variable per sangha's account, named by the source's `token_env` in `config/sources.toml`; SSZ's is `WT_SSZ_VIMEO_ACCESS_TOKEN` (owner's decision of October 13, 2026, replacing the single `WT_VIMEO_ACCESS_TOKEN`, which nothing reads any more). Unset means discovery reads the public talks page and the source's talks have no Vimeo media route. See Spec 03. |
 | `WT_ALLOW_THIRD_PARTY_FETCH` | `false` | Enables the `yt-dlp` fetch mode. See Spec 03. |
 | `WT_DIARIZE_URL` | `http://127.0.0.1:8090` | Base URL of the diarization sidecar |
 | `HF_TOKEN` | none | Hugging Face access token for the pyannote model, secret. Read by the diarization sidecar, not by the loader. See Spec 04. |

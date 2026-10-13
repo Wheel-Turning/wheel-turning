@@ -158,10 +158,10 @@ impl Stages {
             (
                 Some(WhisperCli::new(binary, model, &sections.asr)),
                 Some(SidecarDiarizer::new(&config.diarize_url)?),
-                Some(MediaFetcher::new(
-                    exclusions,
-                    config.allow_third_party_fetch,
-                )?),
+                Some(
+                    MediaFetcher::new(exclusions, config.allow_third_party_fetch)?
+                        .with_vimeo(crate::ingest::vimeo_media(config, config_dir)?),
+                ),
             )
         } else if kinds.contains(&JobKind::Questions) {
             // Text-only talks never fetch; the fetcher only completes the audio steps' parts.

@@ -283,11 +283,15 @@ async fn feed_episodes_attach_audio_to_vimeo_talks_and_create_none() {
         }
         other => panic!("expected the enclosure, got {other:?}"),
     }
+    // An unmatched talk falls to route (b), its own Vimeo file, read with its source's token.
     assert_eq!(
         feed::media_route(&mut conn, talk_of(&fx.pool, "700000003").await)
             .await
             .unwrap(),
-        MediaRoute::None
+        MediaRoute::Vimeo {
+            source: "fixture-vimeo".into(),
+            video_id: "700000003".into(),
+        }
     );
     drop(conn);
 
