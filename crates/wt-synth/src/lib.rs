@@ -313,27 +313,53 @@ pub async fn summarize(
     if input.excerpts.is_empty() {
         return out;
     }
+
+    out.calls += 1;
+    let request = LlmRequest {
+        stage: LlmStage::Synth,
+        system: SUMMARIZE_PROMPT.to_owned(),
+        user: generation_message(input),
+        max_tokens: 2000,
+    };
+    let drafted = match tokio::time::timeout(
+        settings.timeout,
+        complete_json::<SummaryDraft>(llm, &request, class),
+    )
+    .await
+    {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return fail(out, "synth", e),
+        Err(_) => return timed_out(out, "synth", settings.timeout),
+    };
+
     let names = filter::name_words(aliases);
-    // The two halves are independent: each drafts its parts and verifies them as soon as its
-    // draft returns, so the stage takes as long as the slower half (Spec 05, latency).
-    let (frame, body) = tokio::join!(
-        half(llm, input, &names, settings, class, Half::Frame),
-        half(llm, input, &names, settings, class, Half::Body),
-    );
+    let candidates = filter_draft(drafted, input, &names, settings, &mut out.dropped);
+
+    out.calls += candidates.len();
+    let verdicts = join_all(
+        candidates
+            .iter()
+            .map(|c| verify(llm, c, input, settings, class)),
+    )
+    .await;
     let mut kept = Vec::new();
-    for h in [frame, body] {
-        out.calls += h.calls;
-        out.dropped.extend(h.dropped);
-        if out.failure.is_none() {
-            out.failure = h.failure;
+    for (candidate, verdict) in candidates.into_iter().zip(verdicts) {
+        match verdict {
+            Ok(v) if v.supported => kept.push(candidate),
+            Ok(v) => out.dropped.push(Dropped {
+                part: candidate.part,
+                reason: DropReason::Unsupported,
+                text: candidate.text,
+                refs: candidate.refs,
+                detail: v.unsupported_part,
+            }),
+            Err(failure) => {
+                out.failure = Some(failure);
+                log(&out);
+                return out;
+            }
         }
-        kept.extend(h.kept);
     }
-    if out.failure.is_some() {
-        log(&out);
-        return out;
-    }
-    kept.sort_by_key(|c| c.part);
     let summary = StoredSummary {
         sentences: kept
             .into_iter()
@@ -359,137 +385,25 @@ pub async fn summarize(
     out
 }
 
-/// Which parts one generation call writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Half {
-    /// The headline, the framing and the sum-up.
-    Frame,
-    /// Where the talks agree and differ, and points to keep in mind.
-    Body,
-}
-
-impl Half {
-    fn instruction(self) -> &'static str {
-        match self {
-            Half::Frame => {
-                "In this reply write only `headline`, `framing` and `sum_up`. Leave `agree`, \
-                 `differ` and `keep_in_mind` empty; another call writes them."
-            }
-            Half::Body => {
-                "In this reply write only `agree`, `differ` and `keep_in_mind`. Leave `framing` \
-                 empty and `headline` and `sum_up` null; another call writes them."
-            }
-        }
-    }
-
-    fn owns(self, part: SummaryPart) -> bool {
-        let frame = matches!(
-            part,
-            SummaryPart::Headline | SummaryPart::Framing | SummaryPart::SumUp
-        );
-        frame == (self == Half::Frame)
-    }
-}
-
-/// What one half produced.
-#[derive(Default)]
-struct HalfOut {
-    kept: Vec<Candidate>,
-    dropped: Vec<Dropped>,
-    failure: Option<Failure>,
-    calls: usize,
-}
-
-/// One half: its generation call, the filters on the parts it owns, and their verifier calls
-/// in parallel. Parts it does not own are ignored.
-async fn half(
-    llm: &dyn LlmClient,
-    input: &SummaryInput,
-    names: &[(TeacherId, String)],
-    settings: &Settings,
-    class: DataClass,
-    which: Half,
-) -> HalfOut {
-    let mut out = HalfOut {
-        calls: 1,
-        ..HalfOut::default()
-    };
-    let request = LlmRequest {
-        stage: LlmStage::Synth,
-        system: SUMMARIZE_PROMPT.to_owned(),
-        user: format!("{}\n{}", generation_message(input), which.instruction()),
-        max_tokens: 1500,
-    };
-    let mut drafted = match tokio::time::timeout(
-        settings.timeout,
-        complete_json::<SummaryDraft>(llm, &request, class),
-    )
-    .await
-    {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => {
-            out.failure = Some(failure_of("synth", e));
-            return out;
-        }
-        Err(_) => {
-            out.failure = Some(timeout_failure("synth", settings.timeout));
-            return out;
-        }
-    };
-    if which == Half::Frame {
-        drafted.agree.clear();
-        drafted.differ.clear();
-        drafted.keep_in_mind.clear();
-    } else {
-        drafted.headline = None;
-        drafted.framing.clear();
-        drafted.sum_up = None;
-    }
-    let candidates = filter_draft(drafted, input, names, settings, &mut out.dropped);
-    debug_assert!(candidates.iter().all(|c| which.owns(c.part)));
-
-    out.calls += candidates.len();
-    let verdicts = join_all(
-        candidates
-            .iter()
-            .map(|c| verify(llm, c, input, settings, class)),
-    )
-    .await;
-    for (candidate, verdict) in candidates.into_iter().zip(verdicts) {
-        match verdict {
-            Ok(v) if v.supported => out.kept.push(candidate),
-            Ok(v) => out.dropped.push(Dropped {
-                part: candidate.part,
-                reason: DropReason::Unsupported,
-                text: candidate.text,
-                refs: candidate.refs,
-                detail: v.unsupported_part,
-            }),
-            Err(failure) => {
-                out.failure = Some(failure);
-                out.kept.clear();
-                return out;
-            }
-        }
-    }
-    out
-}
-
-fn failure_of(stage: &'static str, e: LlmError) -> Failure {
-    match e {
+fn fail(mut out: Synthesis, stage: &'static str, e: LlmError) -> Synthesis {
+    out.failure = Some(match e {
         LlmError::CapReached { .. } => Failure::CapReached,
         other => Failure::Failed {
             stage,
             error: other.to_string(),
         },
-    }
+    });
+    log(&out);
+    out
 }
 
-fn timeout_failure(stage: &'static str, after: Duration) -> Failure {
-    Failure::Failed {
+fn timed_out(mut out: Synthesis, stage: &'static str, after: Duration) -> Synthesis {
+    out.failure = Some(Failure::Failed {
         stage,
         error: format!("no reply within {} s", after.as_secs_f32()),
-    }
+    });
+    log(&out);
+    out
 }
 
 /// The label of the excerpt at `index`.
