@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select day as \"day!\", target as \"target!\", kind as \"kind!\",\n                  privacy_mode as \"privacy_mode!\", rows as \"rows!\", submissions as \"submissions!\"\n           from v_feedback_counts where day >= date_trunc('day', $1::timestamptz)\n           order by day, target, kind, privacy_mode",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "target!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "target"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "privacy_mode!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "privacy_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "rows!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "rows"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "submissions!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "v_feedback_counts",
+            "name": "submissions"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "0f1ad7f2d4b127ab2c5eb758c85e8578ecada40fe5acb7f46ec7f19887b497fc"
+}

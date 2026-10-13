@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update talk set transcript_from_source = $2 in ('aligned', 'text') where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b624abc01d59340ff19001457d881d194e0219e19feb4b95c6d9257b9766ff37"
+}

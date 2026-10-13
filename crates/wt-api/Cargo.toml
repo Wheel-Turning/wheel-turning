@@ -40,5 +40,6 @@ wt-synth.workspace = true
 wt-db = { workspace = true, features = ["test-support"] }
 wt-registry.workspace = true
 http-body-util.workspace = true
+insta = "1"
 tower.workspace = true
 tracing-subscriber.workspace = true

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ query }} · Wheel Turning{% endblock %}
+{% block sticky %}<div class="sticky-q" aria-hidden="true" hidden data-sticky-q><div class="wrap"><p>{{ query }}</p></div></div>{% endblock %}
 {% block content %}
 <div class="reading">
 {% include "sensitive_banner.html" %}
@@ -15,6 +16,24 @@
   <ul>
     {% for t in view.themes %}<li>{{ t.description }}{% for n in t.chips %} <a class="chip" href="#p{{ n }}" aria-label="Excerpt {{ n }}">{{ n }}</a>{% endfor %}</li>{% endfor %}
   </ul>
+  {% let st = self.summary_status() %}
+  <details class="fb" id="fb-summary"{% if st.is_some() %} open{% endif %}>
+    <summary>Feedback on this summary</summary>
+    <form method="post" action="/a/{{ answer_id }}/feedback" data-feedback>
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="target" value="summary">
+      <fieldset>
+        <legend>What do you think of this summary? Choose any that apply.</legend>
+        {% for (k, label) in summary_reasons %}<div class="check"><input type="checkbox" id="fs-{{ k }}" name="reason" value="{{ k }}"><label for="fs-{{ k }}">{{ label }}</label></div>
+        {% endfor %}
+      </fieldset>
+      <label for="fs-note">Anything else? (optional)</label>
+      <textarea id="fs-note" name="note" rows="2" maxlength="1000" aria-describedby="fs-note-help"></textarea>
+      <p id="fs-note-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
+      <button type="submit" class="secondary">Send feedback</button>
+      <p class="fb-status{% if let Some(f) = st %}{% if f.error %} error{% endif %}{% endif %}" role="status" aria-live="polite">{% if let Some(f) = st %}{{ f.message }}{% endif %}</p>
+    </form>
+  </details>
 </section>
 {% endif %}
 {% for g in view.groups %}
@@ -23,35 +42,57 @@
   {% for p in g.passages %}
   <article class="passage" id="p{{ p.number }}">
     {% if let Some(q) = p.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>{% endif %}
-    <blockquote>{{ p.text }}</blockquote>
-    <p class="meta">{{ p.meta }}</p>
-    <p class="links">
-      <a href="{{ p.source.href }}" target="_blank" rel="noopener noreferrer">{{ p.source.label }}</a>{% if let Some(s) = p.source.starts_at %} <span class="muted">({{ s }})</span>{% endif %}
-      {% if let Some(t) = p.transcript_href %} · <a href="{{ t }}">Read in the transcript</a>{% endif %}
-      {% if giving %}{% if let Some(gv) = p.give_href %} · <a href="{{ gv }}">Give to {{ g.sangha }}</a>{% endif %}{% endif %}
-      · <a href="/rights?excerpt={{ p.id }}#request">Report this excerpt</a>
-    </p>
+    <blockquote>{% for r in p.runs %}{{ r.text }}{% if let Some(m) = r.marker %}<sup><a class="fn" href="#ref-{{ m.reference }}" aria-label="Footnote {{ m.number }}, reference {{ m.reference }}">{{ m.number }}</a></sup>{% endif %}{% endfor %}</blockquote>
+    <p class="meta"><a href="#ref-{{ p.reference }}">{{ p.meta }}</a></p>
+    <ul class="excerpt-links">
+      {% if let Some(l) = p.links.listen %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Listen</a></li>{% endif %}
+      {% if let Some(s) = p.links.starts_at %}<li class="muted small">{{ s }}</li>{% endif %}
+      {% if let Some(l) = p.links.read %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Read</a></li>{% endif %}
+      <li class="cite"><details>
+        <summary aria-label="Cite this excerpt">Cite</summary>
+        <div class="cite-body">
+          <p class="mla" id="cite-p{{ p.number }}">{% for r in view.references %}{% if r.number == p.reference %}{{ r.before }}<i>{{ r.italic }}</i>{{ r.after }}{% endif %}{% endfor %}</p>
+          <button type="button" class="small" data-copy="cite-p{{ p.number }}" hidden>Copy citation</button>
+          <span class="copy-status small" role="status" aria-live="polite"></span>
+        </div>
+      </details></li>
+      {% if giving %}{% if let Some(gv) = p.give_href %}<li><a href="{{ gv }}" aria-label="Give to {{ g.sangha }}">Give</a></li>{% endif %}{% endif %}
+      <li><a href="/rights?excerpt={{ p.id }}#request" aria-label="Report this excerpt">Report</a></li>
+    </ul>
     <p class="credit">{{ p.credit }}</p>
-    <form method="post" action="/a/{{ answer_id }}/feedback" class="feedback">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="hidden" name="passage" value="{{ p.id }}">
-      <span class="muted small">Excerpt {{ p.number }}:</span>
-      <button type="submit" name="kind" value="good" class="small">Good</button>
-      <button type="submit" name="kind" value="not_faithful" class="small">Not faithful</button>
-      <button type="submit" name="kind" value="not_relevant" class="small">Not relevant</button>
-    </form>
+    {% let st = self.excerpt_status(p.number) %}
+    <details class="fb" id="fb-p{{ p.number }}"{% if st.is_some() %} open{% endif %}>
+      <summary>Feedback on excerpt {{ p.number }}</summary>
+      <form method="post" action="/a/{{ answer_id }}/feedback" data-feedback>
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="target" value="excerpt">
+        <input type="hidden" name="passage" value="{{ p.id }}">
+        <input type="hidden" name="n" value="{{ p.number }}">
+        <fieldset>
+          <legend>What do you think of this excerpt? Choose any that apply.</legend>
+          {% for (k, label) in excerpt_reasons %}<div class="check"><input type="checkbox" id="f{{ p.number }}-{{ k }}" name="reason" value="{{ k }}"><label for="f{{ p.number }}-{{ k }}">{{ label }}</label></div>
+          {% endfor %}
+        </fieldset>
+        <label for="f{{ p.number }}-note">Anything else? (optional)</label>
+        <textarea id="f{{ p.number }}-note" name="note" rows="2" maxlength="1000" aria-describedby="f{{ p.number }}-help"></textarea>
+        <p id="f{{ p.number }}-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
+        <button type="submit" class="secondary">Send feedback</button>
+        <p class="fb-status{% if let Some(f) = st %}{% if f.error %} error{% endif %}{% endif %}" role="status" aria-live="polite">{% if let Some(f) = st %}{{ f.message }}{% endif %}</p>
+      </form>
+    </details>
   </article>
   {% endfor %}
 </section>
 {% endfor %}
 {% if view.withdrawn > 0 %}<p class="muted">{{ view.withdrawn }} excerpt(s) were removed at the rights holder's request.</p>{% endif %}
-{% if !view.talks.is_empty() %}
-<section aria-labelledby="talks-h">
-  <h2 id="talks-h">Talks cited</h2>
-  <ul class="dated">
-    {% for t in view.talks %}<li>{% if let Some(d) = t.date %}<span class="date">{{ d }}</span>{% endif %}<a href="{{ t.href }}">{{ t.title }}</a> <span class="muted">· {{ t.teacher }}</span></li>{% endfor %}
-  </ul>
-</section>
+{% if !view.references.is_empty() %}
+<details class="references" id="references">
+  <summary><h2>References ({{ view.references.len() }})</h2></summary>
+  <ol class="references-list">
+    {% for r in view.references %}<li id="ref-{{ r.number }}">{{ r.before }}<i>{{ r.italic }}</i>{{ r.after }}{% if let Some(c) = r.confidence %} <span class="muted">(citation {{ c }})</span>{% endif %}</li>{% endfor %}
+  </ol>
+</details>
+<script src="/static/references.js" defer></script>
 {% endif %}
 {% if giving %}
 <section class="dana" id="dana" aria-labelledby="dana-h">
@@ -72,6 +113,7 @@
 </section>
 {% endif %}
 <script src="/static/dana.js" defer></script>
+<script src="/static/answer.js" defer></script>
 <section aria-labelledby="flag-h" class="flag">
   <h2 id="flag-h">Flag this query</h2>
   <p>A flagged query can be read by the founder, so they can see what went wrong.</p>
@@ -80,6 +122,7 @@
     <button type="submit" name="kind" value="flag_query" class="secondary">Flag this query</button>
   </form>
 </section>
-<p><a href="/">Ask another question</a></p>
+<p class="links"><a href="/">Ask another question</a></p>
+<p class="links"><a href="#top">Return to the top</a></p>
 </div>
 {% endblock %}

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select passage_id as \"passage_id!\", text as \"text!\", ordinal as \"ordinal!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\", talk_id as \"talk_id!\",\n                  talk_title as \"talk_title!\", talk_date, series, part,\n                  platform::text as \"platform!\", external_id as \"external_id!\",\n                  source_url as \"source_url!\", teacher_id as \"teacher_id!\",\n                  teacher_name as \"teacher_name!\", sangha_id as \"sangha_id!\",\n                  sangha_name as \"sangha_name!\", listed as \"listed!\", donation_url,\n                  donation_verified as \"donation_verified!\", rights_basis::text as rights_basis,\n                  display_notice, display_level as \"display_level!\"\n           from servable_passage where talk_id = $1 order by ordinal",
+  "query": "select passage_id as \"passage_id!\", text as \"text!\", ordinal as \"ordinal!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\", talk_id as \"talk_id!\",\n                  talk_title as \"talk_title!\", talk_date, series, part,\n                  platform::text as \"platform!\", external_id as \"external_id!\",\n                  source_url as \"source_url!\", teacher_id as \"teacher_id!\",\n                  teacher_name as \"teacher_name!\", sangha_id as \"sangha_id!\",\n                  sangha_name as \"sangha_name!\", listed as \"listed!\", donation_url,\n                  donation_verified as \"donation_verified!\", rights_basis::text as rights_basis,\n                  display_notice, display_level as \"display_level!\",\n                  transcript_from_source as \"transcript_from_source!\", transcript_url,\n                  transcript_origin, citation_name, citation_sort\n           from servable_passage where passage_id = any($1)",
   "describe": {
     "columns": [
       {
@@ -245,11 +245,66 @@
             "name": "display_level"
           }
         }
+      },
+      {
+        "ordinal": 23,
+        "name": "transcript_from_source!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "transcript_from_source"
+          }
+        }
+      },
+      {
+        "ordinal": 24,
+        "name": "transcript_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "transcript_url"
+          }
+        }
+      },
+      {
+        "ordinal": 25,
+        "name": "transcript_origin",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "transcript_origin"
+          }
+        }
+      },
+      {
+        "ordinal": 26,
+        "name": "citation_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "citation_name"
+          }
+        }
+      },
+      {
+        "ordinal": 27,
+        "name": "citation_sort",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "citation_sort"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -275,8 +330,13 @@
       true,
       null,
       true,
+      true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "9684756e79024edb46e6f6ad87d45bf94c979b11f4e1f199d53c01679cc05880"
+  "hash": "d32c5ff18687c7ce006acb925b3d26e86765e16f8a16c7f3cb93961dc3045554"
 }

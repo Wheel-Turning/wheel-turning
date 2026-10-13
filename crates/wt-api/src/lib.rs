@@ -10,8 +10,10 @@ pub mod accessibility;
 pub mod ask;
 pub mod chrome;
 pub mod excerpt;
+pub mod feedback;
 pub mod limits;
 pub mod privacy;
+pub mod progress;
 pub mod rights;
 pub mod sensitive;
 pub mod session;
@@ -79,6 +81,8 @@ pub struct Site {
     /// `WT_SITE_DANA_URL`: the site's own giving page, for the separate site line. Without it
     /// the panel offers no site line.
     pub site_dana_url: Option<String>,
+    /// Passages-searched counts for the live progress display (Spec 06).
+    pub scope_sizes: Arc<progress::ScopeSizes>,
 }
 
 /// The rate limits (Spec 06): asks per tester, and the public forms per address.
@@ -123,6 +127,7 @@ impl Site {
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
             site_dana_url: None,
+            scope_sizes: Arc::default(),
         }
     }
 
@@ -171,6 +176,9 @@ pub fn router(state: AppState) -> Router {
         .route("/static/brand/favicon.svg", get(chrome::favicon_svg))
         .route("/favicon.ico", get(chrome::favicon_ico))
         .route("/static/dana.js", get(dana_script))
+        .route("/static/references.js", get(references_script))
+        .route("/static/progress.js", get(progress_script))
+        .route("/static/answer.js", get(answer_script))
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
@@ -183,7 +191,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ask", post(ask))
         .route("/ask/curated", post(ask_curated))
         .route("/a/{answer}", get(answer_page))
-        .route("/a/{answer}/feedback", post(feedback))
+        .route("/a/{answer}/feedback", post(feedback::post))
         .route("/a/{answer}/dana", post(dana))
         .route("/give/{answer}/{target}", get(give))
         .route("/talk/{talk}", get(talk_page))
@@ -261,6 +269,27 @@ async fn dana_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../static/dana.js"),
+    )
+}
+
+async fn references_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/references.js"),
+    )
+}
+
+async fn progress_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/progress.js"),
+    )
+}
+
+async fn answer_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/answer.js"),
     )
 }
 
@@ -351,7 +380,7 @@ impl FromRequestParts<AppState> for ClientAddress {
 }
 
 /// The generic 404, also what a request without a session gets.
-fn not_found_page() -> Response {
+pub(crate) fn not_found_page() -> Response {
     error_page(
         StatusCode::NOT_FOUND,
         "Page not found",
@@ -554,12 +583,26 @@ struct AskForm {
 }
 
 /// `POST /ask`: runs the query path, persists the answer and its log row together, and
-/// redirects to the permalink.
+/// redirects to the permalink; or, for the progress script, streams the same run (Spec 06,
+/// Live progress while a question runs).
 async fn ask(
     State(state): State<AppState>,
     s: Session,
     headers: HeaderMap,
     Form(form): Form<AskForm>,
+) -> Response {
+    if !progress::wants_stream(&headers) {
+        return ask_with(&state, &s, &headers, form, &progress::Sink::silent()).await;
+    }
+    progress::stream(move |sink| async move { ask_with(&state, &s, &headers, form, &sink).await })
+}
+
+async fn ask_with(
+    state: &AppState,
+    s: &Session,
+    headers: &HeaderMap,
+    form: AskForm,
+    sink: &progress::Sink,
 ) -> Response {
     let site = &state.site;
     if !s.csrf_ok(&site.keys, &form.csrf) {
@@ -568,12 +611,12 @@ async fn ask(
     if let Err(wait) = site.limits.ask.check(&s.tester.to_string()) {
         // The limit never stands between an acute question and the notice.
         if site.sensitivity.rules_level(&form.q) == Level::Acute {
-            return acute(&state, &s, std::time::Instant::now()).await;
+            return acute(state, s, std::time::Instant::now()).await;
         }
         return too_many(wait, "You have asked a lot of questions this hour.");
     }
     let Ok(text) = query::normalize(&form.q) else {
-        let switch = match privacy::switch(&state.pool, &site.privacy, &s, &headers, "home").await {
+        let switch = match privacy::switch(&state.pool, &site.privacy, s, headers, "home").await {
             Ok(sw) => sw,
             Err(e) => return server_error("loading the privacy choice", &e),
         };
@@ -590,6 +633,7 @@ async fn ask(
             },
         );
     };
+    sink.stage(progress::Stage::Reading);
     // Spec 05: never part of ranking. The triage gate starts first and runs alongside the
     // embedding check and search; an acute rule match needs nothing else.
     let started = std::time::Instant::now();
@@ -626,16 +670,16 @@ async fn ask(
             gate.abort();
         }
         tally(Triaged::not_run(), Level::Acute).await;
-        return acute(&state, &s, started).await;
+        return acute(state, s, started).await;
     }
     let framing = ask::Framing {
         level: sensitive.level,
         vector: sensitive.vector.clone(),
         curated: false,
-        gpc: privacy::gpc(&headers),
+        gpc: privacy::gpc(headers),
         anyway: form.anyway.is_some(),
     };
-    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate).await {
+    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink).await {
         Ok(ask::Gated::Answered(asked)) => {
             tally(asked.triaged, asked.level).await;
             Redirect::to(&format!("/a/{}", asked.answer_id)).into_response()
@@ -647,9 +691,9 @@ async fn ask(
             };
             tally(triaged, level).await;
             match stop {
-                ask::Stop::CountsOnly(Level::Acute) => acute_page(&state, &s),
-                ask::Stop::CountsOnly(_) => out_of_scope_page(&state, &s),
-                ask::Stop::Unrelated => unrelated_page(&state, &s, text),
+                ask::Stop::CountsOnly(Level::Acute) => acute_page(state, s),
+                ask::Stop::CountsOnly(_) => out_of_scope_page(state, s),
+                ask::Stop::Unrelated => unrelated_page(state, s, text),
             }
         }
         Err(e) => server_error("answering", &e),
@@ -681,6 +725,21 @@ async fn ask_curated(
     headers: HeaderMap,
     Form(form): Form<CsrfForm>,
 ) -> Response {
+    if !progress::wants_stream(&headers) {
+        return ask_curated_with(&state, &s, &headers, &form, &progress::Sink::silent()).await;
+    }
+    progress::stream(move |sink| async move {
+        ask_curated_with(&state, &s, &headers, &form, &sink).await
+    })
+}
+
+async fn ask_curated_with(
+    state: &AppState,
+    s: &Session,
+    headers: &HeaderMap,
+    form: &CsrfForm,
+    sink: &progress::Sink,
+) -> Response {
     let site = &state.site;
     if !s.csrf_ok(&site.keys, &form.csrf) {
         return csrf_refused();
@@ -692,11 +751,12 @@ async fn ask_curated(
         level: Level::Distress,
         vector: None,
         curated: true,
-        gpc: privacy::gpc(&headers),
+        gpc: privacy::gpc(headers),
         anyway: false,
     };
     let text = site.sensitivity.curated_query();
-    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None).await)
+    sink.stage(progress::Stage::Reading);
+    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None, sink).await)
 }
 
 #[derive(Template)]
@@ -793,6 +853,12 @@ struct AnswerPage {
     answer_id: AnswerId,
     csrf: String,
     thanks: bool,
+    /// A feedback control's status after a reload without the script.
+    fb: Option<feedback::Status>,
+    /// The reasons each feedback control offers.
+    excerpt_reasons: &'static [(&'static str, &'static str)],
+    /// See `excerpt_reasons`.
+    summary_reasons: &'static [(&'static str, &'static str)],
     /// The split, after "Show the split" without JavaScript.
     dana: Option<view::DanaView>,
     /// What the donor entered, kept in the fields.
@@ -805,6 +871,18 @@ struct AnswerPage {
     site_giving: bool,
 }
 
+impl AnswerPage {
+    /// The status of excerpt `n`'s feedback control, after a reload without the script.
+    fn excerpt_status(&self, n: &usize) -> Option<&feedback::Status> {
+        self.fb.as_ref().filter(|f| f.is_excerpt(n))
+    }
+
+    /// The status of the summary's feedback control.
+    fn summary_status(&self) -> Option<&feedback::Status> {
+        self.fb.as_ref().filter(|f| f.is_summary())
+    }
+}
+
 /// The dana split fragment, as the script swaps it into the live region.
 #[derive(Template)]
 #[template(path = "dana_split.html")]
@@ -815,9 +893,13 @@ struct DanaFragment {
 #[derive(Debug, Deserialize)]
 struct AnswerQuery {
     thanks: Option<u8>,
+    /// Which feedback control a reload without the script returns to.
+    fb: Option<String>,
+    /// How that submission went: `ok`, `empty` or `long`.
+    fbs: Option<String>,
 }
 
-fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
+pub(crate) fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
     raw.parse().ok()
 }
 
@@ -877,13 +959,19 @@ async fn load_answer(
         Err(e) => return Err(Box::new(server_error("loading excerpts", &e))),
     };
     let excerpts = excerpt::rebuild(&stored.payload.spans, &served, &rows);
+    let cited = match wt_db::answer::cited_works(&state.pool, &covered).await {
+        Ok(c) => c,
+        Err(e) => return Err(Box::new(server_error("loading citations", &e))),
+    };
     let mut view = view::assemble(
         answer,
         &stored.payload,
         &served,
         &excerpts,
+        &cited,
         named.as_deref(),
         state.site.retrieval.answer.link_lead_in_ms,
+        stored.created_at.date_naive(),
     );
     match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
         Ok(q) => view::attach_questions(&mut view, &q),
@@ -935,6 +1023,9 @@ async fn answer_page(
             answer_id: answer,
             csrf: s.csrf(&state.site.keys),
             thanks: q.thanks.is_some(),
+            fb: feedback::Status::from_query(q.fb.as_deref(), q.fbs.as_deref()),
+            excerpt_reasons: &feedback::EXCERPT_REASONS,
+            summary_reasons: &feedback::SUMMARY_REASONS,
             dana: None,
             dana_total: String::new(),
             dana_site: String::new(),
@@ -1094,6 +1185,9 @@ async fn dana(
             answer_id: answer,
             csrf: s.csrf(&site.keys),
             thanks: false,
+            fb: None,
+            excerpt_reasons: &feedback::EXCERPT_REASONS,
+            summary_reasons: &feedback::SUMMARY_REASONS,
             dana: Some(view),
             dana_total: form.total,
             dana_site: form.site,
@@ -1101,37 +1195,6 @@ async fn dana(
             site_giving,
         },
     )
-}
-
-#[derive(Debug, Deserialize)]
-struct FeedbackForm {
-    kind: String,
-    csrf: String,
-    passage: Option<String>,
-}
-
-/// `POST /a/{answer}/feedback`: Good, Not faithful, Not relevant, or Flag this query.
-async fn feedback(
-    State(state): State<AppState>,
-    s: Session,
-    Path(answer): Path<String>,
-    Form(form): Form<FeedbackForm>,
-) -> Response {
-    if !s.csrf_ok(&state.site.keys, &form.csrf) {
-        return csrf_refused();
-    }
-    let Some(answer) = parse::<AnswerId>(&answer) else {
-        return not_found_page();
-    };
-    let note = form
-        .passage
-        .as_deref()
-        .filter(|p| parse::<wt_core::ids::PassageId>(p).is_some());
-    match wt_db::answer::feedback(&state.pool, answer, s.tester, &form.kind, note).await {
-        Ok(true) => Redirect::to(&format!("/a/{answer}?thanks=1")).into_response(),
-        Ok(false) => not_found_page(),
-        Err(e) => server_error("recording feedback", &e),
-    }
 }
 
 #[derive(Debug, Deserialize)]

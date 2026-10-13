@@ -1,11 +1,10 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into feedback (answer_id, tester_id, kind, note) values ($1, $2, $3, $4)",
+  "query": "update teacher set citation_name = $2, citation_sort = $3 where id = $1",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
-        "Uuid",
         "Uuid",
         "Text",
         "Text"
@@ -13,5 +12,5 @@
     },
     "nullable": []
   },
-  "hash": "d77b165b6fccbb7fdfd284b4876e8f59161c271536cf9f29adb9d4780fc82b27"
+  "hash": "4a7c544b3c662114b4ea8eabc42d65f884642f53a19647f3d89f4f5f8aeb3fc7"
 }

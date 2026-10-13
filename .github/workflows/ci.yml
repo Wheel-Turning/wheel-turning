@@ -251,10 +251,66 @@ jobs:
           tool: typos@1.50.3
       - run: typos --format brief
 
+  # Spec 06, Accessibility checks in CI. Needs a browser, so it is its own job and not part of
+  # `cargo test`, which makes no network calls: the a11y_fixture example serves synthetic data
+  # from the Postgres service, and Playwright runs axe, target size, reflow and badge checks.
+  a11y:
+    name: accessibility checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: wt
+          POSTGRES_PASSWORD: wt
+          POSTGRES_DB: wt
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wt"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://wt:wt@localhost:5432/wt
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - run: cargo build --locked -p wt-api --example a11y_fixture
+      - name: start the fixture server
+        run: |
+          set -euo pipefail
+          ./target/debug/examples/a11y_fixture "$RUNNER_TEMP/a11y-paths.json" > "$RUNNER_TEMP/a11y-server.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            if [[ -s "$RUNNER_TEMP/a11y-paths.json" ]] && curl -sf http://127.0.0.1:8099/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/a11y-server.log"
+          exit 1
+      - run: npm ci
+        working-directory: tests/a11y
+      - run: npx playwright install --with-deps chromium
+        working-directory: tests/a11y
+      - run: npx playwright test
+        working-directory: tests/a11y
+        env:
+          A11Y_PATHS: ${{ runner.temp }}/a11y-paths.json
+      - name: server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/a11y-server.log"
+
   ci-ok:
     name: ci ok
     if: always()
-    needs: [fmt, clippy, test, sqlx-prepare, deny, machete, terraform, tflint, ruff, gitleaks, workflows, typos]
+    needs: [fmt, clippy, test, sqlx-prepare, deny, machete, terraform, tflint, ruff, gitleaks, workflows, typos, a11y]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

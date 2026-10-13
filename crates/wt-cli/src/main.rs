@@ -780,6 +780,27 @@ enum TeacherCommand {
         #[arg(long, default_value = "config")]
         config_dir: PathBuf,
     },
+    /// Set how the References list names and sorts a teacher (Spec 05, Answer assembly, rule
+    /// 5), with a correction_log row. An empty value clears it, so the teacher is entered by
+    /// display name. With --sheet, applies a reviewed CSV with the columns teacher,
+    /// citation_name and citation_sort, all rows or none.
+    Cite {
+        /// Display name or alias.
+        #[arg(long, required_unless_present = "sheet", conflicts_with = "sheet")]
+        teacher: Option<String>,
+        /// The name as References enter it, such as "Suzuki, Shunryu" or "Katagiri Roshi".
+        #[arg(long, requires = "teacher")]
+        citation_name: Option<String>,
+        /// The key References sort it by, such as "Suzuki Shunryu".
+        #[arg(long, requires = "teacher")]
+        sort: Option<String>,
+        /// A reviewed sheet instead of one teacher.
+        #[arg(long)]
+        sheet: Option<PathBuf>,
+        /// Who is recording it.
+        #[arg(long, visible_alias = "actor")]
+        by: String,
+    },
 }
 
 fn parse_display_level(value: &str) -> Result<wt_db::display::DisplayLevel, String> {
@@ -1204,6 +1225,16 @@ enum ReportCommand {
     Coverage,
     /// Flagged queries, through flagged_queries(): the only questions anyone may read.
     Flagged,
+    /// Feedback submissions and reasons per day, target and mode, from v_feedback_counts.
+    Feedback {
+        /// How far back: a number with d (days) or h (hours), for example 7d.
+        #[arg(long, default_value = "7d", value_parser = parse_since)]
+        since: chrono::Duration,
+        /// Also print each note with its target and reasons, through feedback_notes(), never
+        /// with its question.
+        #[arg(long)]
+        notes: bool,
+    },
 }
 
 /// A pool connected as `wt_analyst` through `DATABASE_URL_ANALYST`, refused when the role can
@@ -1647,6 +1678,18 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
                 ReportCommand::Flagged => {
                     commands::print_json(&wt_db::report::flagged(&pool).await?)?;
+                }
+                ReportCommand::Feedback { since, notes } => {
+                    let from = chrono::Utc::now() - since;
+                    let counts = wt_db::report::feedback(&pool, from).await?;
+                    if notes {
+                        let notes = wt_db::report::feedback_notes(&pool, from).await?;
+                        commands::print_json(
+                            &serde_json::json!({ "counts": counts, "notes": notes }),
+                        )?;
+                    } else {
+                        commands::print_json(&counts)?;
+                    }
                 }
             }
         }
@@ -2666,6 +2709,37 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             commands::print_json(&change)?;
+        }
+        Command::Teacher {
+            command:
+                TeacherCommand::Cite {
+                    teacher,
+                    citation_name,
+                    sort,
+                    sheet,
+                    by,
+                },
+        } => {
+            let pool = pool().await?;
+            let changes = match (teacher, sheet) {
+                (_, Some(sheet)) => commands::teacher_cite_sheet(&pool, &sheet, &by).await?,
+                (Some(teacher), None) => {
+                    let mut conn = pool.acquire().await?;
+                    vec![
+                        wt_db::registry::set_citation(
+                            &mut conn,
+                            &teacher,
+                            citation_name.as_deref(),
+                            sort.as_deref(),
+                            &by,
+                            "wt teacher cite",
+                        )
+                        .await?,
+                    ]
+                }
+                (None, None) => anyhow::bail!("give --teacher or --sheet"),
+            };
+            commands::print_json(&changes)?;
         }
         Command::Exclusion { command } => match command {
             ExclusionCommand::List => rights::exclusions(&pool().await?).await?,

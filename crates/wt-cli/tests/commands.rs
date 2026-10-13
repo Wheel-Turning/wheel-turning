@@ -1880,6 +1880,25 @@ async fn reports_run_as_the_analyst_and_never_show_an_unflagged_question() {
     assert_eq!(flagged.as_array().unwrap().len(), 1);
     assert_eq!(flagged[0]["query_text"], "flagged question");
 
+    // Feedback counts, and notes without their question (Spec 06, `wt report feedback`).
+    sqlx::query(
+        "insert into feedback (answer_id, tester_id, target, kind, note, submission_id)
+         select a.id, q.tester_id, 'summary', k, n, '00000000-0000-0000-0000-0000000000aa'
+         from answer a join query_log q on q.id = a.query_log_id,
+              (values ('unclear', null), ('note', 'the summary lost me')) v(k, n)
+         where q.query_text = 'unflagged secret question'",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let feedback = json(&["report", "feedback", "--since", "1d"]);
+    assert_eq!(feedback.as_array().unwrap().len(), 2, "{feedback}");
+    assert_eq!(feedback[1]["kind"], "unclear");
+    assert_eq!(feedback[1]["submissions"], 1);
+    let notes = json(&["report", "feedback", "--since", "1d", "--notes"]);
+    assert_eq!(notes["notes"][0]["note"], "the summary lost me");
+    assert_eq!(notes["notes"][0]["reasons"][0], "unclear");
+
     // The analyst role cannot read the table itself.
     let pool = wt_db::connect(&wt_core::Secret::new(analyst.clone()))
         .await
@@ -1905,4 +1924,77 @@ async fn reports_run_as_the_analyst_and_never_show_an_unflagged_question() {
     );
     let out = report(&["report", "answers", "--since", "soon"], &analyst);
     assert!(!out.status.success(), "a bad duration is refused");
+}
+
+#[tokio::test]
+async fn teacher_cite_sets_the_references_name_one_by_one_or_from_a_sheet() {
+    let fx = start().await;
+    fx.import_registry();
+    let names = || {
+        sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "select citation_name, citation_sort from teacher where display_name = 'Ada Fixture'",
+        )
+        .fetch_one(&fx.pool)
+    };
+    let out = fx.json(&[
+        "teacher",
+        "cite",
+        "--teacher",
+        "Ada",
+        "--citation-name",
+        "Fixture Roshi",
+        "--sort",
+        "Fixture Roshi",
+        "--by",
+        "test",
+    ]);
+    assert_eq!(out[0]["changed"], true);
+    assert_eq!(
+        names().await.unwrap(),
+        (Some("Fixture Roshi".into()), Some("Fixture Roshi".into()))
+    );
+
+    // A sheet applies every row or none: an unknown teacher leaves Ada as she was.
+    let sheet = std::env::temp_dir().join(format!("wt-cite-{}.csv", Uuid::new_v4()));
+    std::fs::write(
+        &sheet,
+        "teacher,citation_name,citation_sort\nAda Fixture,\"Fixture, Ada\",Fixture Ada\nNobody,X,X\n",
+    )
+    .unwrap();
+    let out = fx.wt(&[
+        "teacher",
+        "cite",
+        "--sheet",
+        sheet.to_str().unwrap(),
+        "--by",
+        "test",
+    ]);
+    assert!(!out.status.success());
+    assert_eq!(names().await.unwrap().0.as_deref(), Some("Fixture Roshi"));
+    std::fs::write(
+        &sheet,
+        "teacher,citation_name,citation_sort\nAda Fixture,\"Fixture, Ada\",\n",
+    )
+    .unwrap();
+    fx.json(&[
+        "teacher",
+        "cite",
+        "--sheet",
+        sheet.to_str().unwrap(),
+        "--by",
+        "test",
+    ]);
+    std::fs::remove_file(sheet).unwrap();
+    assert_eq!(
+        names().await.unwrap(),
+        (Some("Fixture, Ada".into()), None),
+        "an empty sort key clears it"
+    );
+    let logged: i64 = sqlx::query_scalar(
+        "select count(*) from correction_log where entity = 'teacher' and field like 'citation_%'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(logged, 4);
 }

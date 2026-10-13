@@ -7,7 +7,8 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
-html { background: var(--paper); color: var(--ink); }
+html { background: var(--paper); color: var(--ink); scroll-padding-top: 5.5rem; }
+[hidden] { display: none !important; }
 body { margin: 0; font-family: var(--sans); font-size: 1.0625rem; line-height: 1.6; }
 a { color: var(--ink); text-decoration: underline; text-underline-offset: 0.15em; }
 a:visited { color: var(--visited); }
@@ -28,7 +29,7 @@ header.site { position: sticky; top: 0; background: var(--paper); border-bottom:
 .mark { flex: none; color: var(--ink); --logo-accent: var(--gold-deep); }
 .mark .accent { fill: var(--logo-accent); }
 nav ul { list-style: none; display: flex; gap: 1rem; margin: 0; padding: 0; }
-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.25rem; text-decoration: none; }
+nav a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 0.25rem; text-decoration: none; }
 nav a:hover, nav a:focus-visible, nav a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 3px; }
 nav a:visited { color: var(--ink); }
 .header-ask { display: flex; flex: 1; max-width: 26rem; gap: 0.5rem; }
@@ -61,9 +62,9 @@ input[type="text"], input[type="email"], input[type="url"] { width: 100%; min-he
 .register table { border-collapse: collapse; width: 100%; }
 .register th, .register td { text-align: left; vertical-align: top; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--rule); }
 .summary { font-size: 1.125rem; }
-.check { display: flex; align-items: flex-start; gap: 0.5rem; }
+.check { display: flex; align-items: center; gap: 0.5rem; }
 .check input { width: 1.5rem; height: 1.5rem; margin: 0.15rem 0 0; flex: none; }
-.check label { font-weight: 600; margin: 0; }
+.check label { display: flex; align-items: center; min-height: 44px; font-weight: 600; margin: 0; }
 .switch, .delete { margin: 1rem 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
 .button-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1.25rem; border: 2px solid var(--control); border-radius: 0.5rem; text-decoration: none; }
@@ -87,8 +88,41 @@ button.link { background: none; border: none; color: var(--ink); text-decoration
 blockquote { margin: 0; padding: 0 0 0 1rem; border-left: 3px solid var(--ink); font-family: var(--serif); font-size: 1.125rem; line-height: 1.65; }
 .meta { color: var(--muted); font-size: 0.95rem; margin: 0.5rem 0 0; }
 .links { margin: 0.25rem 0; }
+.references summary h2 { display: inline; }
+.references-list li { margin-bottom: 0.75rem; }
+/* Links that stand alone, not inside a sentence, get 44px targets (Spec 06, Input and operation). */
+.links a, .support-links a, .meta a { display: inline-flex; align-items: center; min-height: 44px; }
+.references summary { min-height: 44px; padding: 0.35rem 0; cursor: pointer; }
+/* The excerpt footer: Listen, Read, Cite, Give, Report in one row that wraps (Spec 06, rule 5). */
+.excerpt-links { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 1.25rem; margin: 0.25rem 0 0; padding: 0; }
+.excerpt-links li { display: flex; flex-wrap: wrap; align-items: center; min-height: 44px; }
+.excerpt-links a, .excerpt-links summary { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; }
+.excerpt-links summary { cursor: pointer; text-decoration: underline; text-underline-offset: 0.15em; }
+.excerpt-links summary::-webkit-details-marker { display: none; }
+.excerpt-links summary::after { content: " \25BE"; content: " \25BE" / ""; white-space: pre; }
+.excerpt-links details[open] > summary::after { content: " \25B4"; content: " \25B4" / ""; }
+.excerpt-links li.cite:has(details[open]) { flex-basis: 100%; }
+.cite-body { margin: 0.25rem 0 0.75rem; padding: 0.75rem 1rem; background: var(--band); border-radius: 0.5rem; }
+.mla { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+.copy-status { margin-left: 0.5rem; }
+/* Feedback on an excerpt or the summary: a native disclosure holding one form (rule 6). */
+.fb { margin: 0.5rem 0 0; }
+.fb > summary { display: inline-flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--muted); text-decoration: underline; text-underline-offset: 0.15em; }
+.fb > summary:hover { text-decoration-thickness: 3px; }
+.fb form { margin: 0.25rem 0 0; padding: 1rem; border: 1px solid var(--rule); border-radius: 0.5rem; }
+.fb fieldset { border: 0; margin: 0 0 1rem; padding: 0; min-width: 0; }
+.fb legend { font-weight: 600; margin-bottom: 0.5rem; padding: 0; }
+.fb .check { min-height: 44px; align-items: center; }
+.fb .check input { margin: 0; }
+.fb .check label { font-weight: normal; display: flex; align-items: center; min-height: 44px; }
+.fb textarea { margin-bottom: 0.25rem; }
+.fb .help { margin: 0 0 0.75rem; }
+.fb-status { margin: 0.5rem 0 0; }
+.fb-status:empty { display: none; }
+/* The question again, small, under the sticky header once its heading has scrolled away. */
+.sticky-q { position: absolute; top: 100%; left: 0; right: 0; background: var(--paper); border-bottom: 1px solid var(--rule); }
+.sticky-q p { margin: 0; padding: 0.4rem 0; font-family: var(--serif); font-size: 0.95rem; line-height: 1.4; max-width: 44rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .credit { font-size: 0.95rem; margin: 0.25rem 0; }
-.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .dated li { margin-bottom: 0.75rem; }
 .date { display: block; font-size: 0.9rem; color: var(--muted); }
 .flag { margin-top: 3rem; border-top: 1px solid var(--rule); }
@@ -118,3 +152,9 @@ footer.site .last { margin: 2rem 0 0; padding-top: 1rem; border-top: 1px solid v
 .dana .split { padding-left: 1.25rem; }
 .dana .split li { margin: 0.4rem 0; }
 .dana .outlay { font-weight: 600; }
+/* Live progress while a question runs (Spec 06). Nothing here moves. */
+.progress-question { font-family: var(--serif); font-size: 1.25rem; }
+.steps { padding-left: 1.5rem; }
+.steps li { margin: 0.75rem 0; }
+.steps .state { font-weight: 600; }
+.steps .counts { display: block; color: var(--muted); font-size: 0.95rem; }

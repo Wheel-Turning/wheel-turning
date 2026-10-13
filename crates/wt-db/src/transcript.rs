@@ -52,8 +52,9 @@ pub async fn next_version(conn: &mut PgConnection, talk: TalkId) -> Result<i32, 
 }
 
 /// Stores a transcript and its segments, replacing the talk's earlier segments, and makes the
-/// new transcript current. The caller wraps this in the transaction that also finishes the
-/// job. `question_note` is always null in v1.
+/// new transcript current, recording on the talk whether its text is the source's own. The
+/// caller wraps this in the transaction that also finishes the job. `question_note` is always
+/// null in v1.
 pub async fn store(
     conn: &mut PgConnection,
     talk: TalkId,
@@ -77,6 +78,15 @@ pub async fn store(
         transcript.word_count
     )
     .fetch_one(&mut *conn)
+    .await?;
+    // Spec 05, Answer assembly, rule 2: a transcript of the source's own text makes the talk
+    // link to the source's transcript and serve at `excerpts` at most.
+    sqlx::query!(
+        "update talk set transcript_from_source = $2 in ('aligned', 'text') where id = $1",
+        talk.as_uuid(),
+        transcript.origin
+    )
+    .execute(&mut *conn)
     .await?;
     sqlx::query!("delete from segment where talk_id = $1", talk.as_uuid())
         .execute(&mut *conn)

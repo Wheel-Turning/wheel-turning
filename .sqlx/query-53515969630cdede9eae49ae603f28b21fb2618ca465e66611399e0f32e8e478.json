@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists (select 1 from answer_passage\n                                  where answer_id = $1 and passage_id = $2) as \"shown!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "shown!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "53515969630cdede9eae49ae603f28b21fb2618ca465e66611399e0f32e8e478"
+}

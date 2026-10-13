@@ -308,6 +308,17 @@ pub struct TalkCard {
     pub display_notice: Option<String>,
     /// `full` or `excerpts`: the transcript page exists only at `full`.
     pub display_level: String,
+    /// The current transcript is the source's own text (`aligned` or `text`), so the page
+    /// links to the source's transcript (Spec 05, Answer assembly, rule 2).
+    pub transcript_from_source: bool,
+    /// The source's transcript page, when it is not the talk page.
+    pub transcript_url: Option<String>,
+    /// The current transcript's origin: `asr`, `captions`, `reviewed`, `aligned` or `text`.
+    pub transcript_origin: Option<String>,
+    /// The teacher's name as References enter it, set by the owner (rule 5).
+    pub citation_name: Option<String>,
+    /// The teacher's References sort key.
+    pub citation_sort: Option<String>,
 }
 
 macro_rules! card {
@@ -331,6 +342,11 @@ macro_rules! card {
             rights_basis: $r.rights_basis,
             display_notice: $r.display_notice,
             display_level: $r.display_level,
+            transcript_from_source: $r.transcript_from_source,
+            transcript_url: $r.transcript_url,
+            transcript_origin: $r.transcript_origin,
+            citation_name: $r.citation_name,
+            citation_sort: $r.citation_sort,
         }
     };
 }
@@ -348,7 +364,9 @@ pub async fn passages(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Served>, D
                   teacher_name as "teacher_name!", sangha_id as "sangha_id!",
                   sangha_name as "sangha_name!", listed as "listed!", donation_url,
                   donation_verified as "donation_verified!", rights_basis::text as rights_basis,
-                  display_notice, display_level as "display_level!"
+                  display_notice, display_level as "display_level!",
+                  transcript_from_source as "transcript_from_source!", transcript_url,
+                  transcript_origin, citation_name, citation_sort
            from servable_passage where passage_id = any($1)"#,
         &uuids
     )
@@ -446,7 +464,9 @@ pub async fn talk(pool: &PgPool, talk: TalkId) -> Result<Option<(TalkCard, Vec<S
                   teacher_name as "teacher_name!", sangha_id as "sangha_id!",
                   sangha_name as "sangha_name!", listed as "listed!", donation_url,
                   donation_verified as "donation_verified!", rights_basis::text as rights_basis,
-                  display_notice, display_level as "display_level!"
+                  display_notice, display_level as "display_level!",
+                  transcript_from_source as "transcript_from_source!", transcript_url,
+                  transcript_origin, citation_name, citation_sort
            from servable_passage where talk_id = $1 order by ordinal"#,
         talk.as_uuid()
     )
@@ -469,22 +489,139 @@ pub async fn talk(pool: &PgPool, talk: TalkId) -> Result<Option<(TalkCard, Vec<S
         .map(|card| (card, passages)))
 }
 
-/// Feedback kinds a tester can leave (Spec 06, Logging, rule 4).
-pub const FEEDBACK_KINDS: [&str; 4] = ["good", "not_faithful", "not_relevant", "flag_query"];
+/// Reasons a tester can give about one excerpt (Spec 06, Logging, rule 4).
+pub const EXCERPT_REASONS: [&str; 6] = [
+    "good",
+    "not_relevant",
+    "out_of_context",
+    "not_faithful",
+    "wrong_details",
+    "unclear",
+];
 
-/// Records feedback on an answer the tester asked; `flag_query` also flags the query through
-/// `flag_query()`. `note` holds the passage id for per-passage feedback. Returns false when the
-/// answer is not theirs or the kind is unknown.
-pub async fn feedback(
+/// Reasons a tester can give about the summary (Spec 06, Logging, rule 4).
+pub const SUMMARY_REASONS: [&str; 5] =
+    ["good", "unsupported", "misrepresents", "missing", "unclear"];
+
+/// What a feedback submission is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackTarget {
+    /// One excerpt of the answer.
+    Excerpt(PassageId),
+    /// The synthesis at the top of the answer.
+    Summary,
+}
+
+impl FeedbackTarget {
+    /// The `feedback.target` value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Excerpt(_) => "excerpt",
+            Self::Summary => "summary",
+        }
+    }
+
+    /// The reasons this target accepts.
+    pub fn reasons(self) -> &'static [&'static str] {
+        match self {
+            Self::Excerpt(_) => &EXCERPT_REASONS,
+            Self::Summary => &SUMMARY_REASONS,
+        }
+    }
+}
+
+/// How a feedback submission went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackOutcome {
+    /// Every row was written.
+    Recorded,
+    /// The answer is not the tester's, or the passage is not in it.
+    NotFound,
+    /// No reason and no note, or a reason the target does not take.
+    Refused,
+}
+
+/// Writes one submission: a row per reason and, with a note, a `note` row, all under one
+/// `submission_id`. The caller has already scrubbed the note and checked its length.
+pub async fn submit_feedback(
     pool: &PgPool,
     answer: AnswerId,
     tester: TesterId,
-    kind: &str,
+    target: FeedbackTarget,
+    reasons: &[&str],
     note: Option<&str>,
-) -> Result<bool, DbError> {
-    if !FEEDBACK_KINDS.contains(&kind) {
-        return Ok(false);
+) -> Result<FeedbackOutcome, DbError> {
+    let note = note.map(str::trim).filter(|n| !n.is_empty());
+    if (reasons.is_empty() && note.is_none())
+        || reasons.iter().any(|r| !target.reasons().contains(r))
+    {
+        return Ok(FeedbackOutcome::Refused);
     }
+    let mut tx = pool.begin().await?;
+    let theirs = sqlx::query_scalar!(
+        r#"select exists (select 1 from answer a join query_log q on q.id = a.query_log_id
+                          where a.id = $1 and q.tester_id = $2) as "theirs!""#,
+        answer.as_uuid(),
+        tester.as_uuid()
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if !theirs {
+        return Ok(FeedbackOutcome::NotFound);
+    }
+    let passage = match target {
+        FeedbackTarget::Excerpt(p) => {
+            let shown = sqlx::query_scalar!(
+                r#"select exists (select 1 from answer_passage
+                                  where answer_id = $1 and passage_id = $2) as "shown!""#,
+                answer.as_uuid(),
+                p.as_uuid()
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if !shown {
+                return Ok(FeedbackOutcome::NotFound);
+            }
+            Some(p.as_uuid())
+        }
+        FeedbackTarget::Summary => None,
+    };
+    let mut kinds: Vec<String> = Vec::new();
+    for r in reasons {
+        if !kinds.iter().any(|k| k == r) {
+            kinds.push((*r).to_owned());
+        }
+    }
+    let mut notes: Vec<Option<String>> = vec![None; kinds.len()];
+    if let Some(n) = note {
+        kinds.push("note".to_owned());
+        notes.push(Some(n.to_owned()));
+    }
+    sqlx::query!(
+        "insert into feedback (answer_id, tester_id, target, passage_id, submission_id, kind, note)
+         select $1, $2, $3, $4, s.id, k, n
+         from (select gen_random_uuid() as id) s,
+              unnest($5::text[], $6::text[]) as u(k, n)",
+        answer.as_uuid(),
+        tester.as_uuid(),
+        target.as_str(),
+        passage,
+        &kinds,
+        &notes as &[Option<String>]
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(FeedbackOutcome::Recorded)
+}
+
+/// "Flag this query" on an answer the tester asked: a `flag_query` row, and `flag_query()` sets
+/// the flag on the query. Returns false when the answer is not theirs.
+pub async fn flag_query(
+    pool: &PgPool,
+    answer: AnswerId,
+    tester: TesterId,
+) -> Result<bool, DbError> {
     let mut tx = pool.begin().await?;
     let log = sqlx::query_scalar!(
         "select q.id from answer a join query_log q on q.id = a.query_log_id
@@ -498,21 +635,17 @@ pub async fn feedback(
         return Ok(false);
     };
     sqlx::query!(
-        "insert into feedback (answer_id, tester_id, kind, note) values ($1, $2, $3, $4)",
+        "insert into feedback (answer_id, tester_id, target, kind) values ($1, $2, 'query', 'flag_query')",
         answer.as_uuid(),
-        tester.as_uuid(),
-        kind,
-        note
+        tester.as_uuid()
     )
     .execute(&mut *tx)
     .await?;
-    if kind == "flag_query" {
-        // The function's result is not needed, only its effect.
-        sqlx::query("select flag_query($1)")
-            .bind(log)
-            .execute(&mut *tx)
-            .await?;
-    }
+    // The function's result is not needed, only its effect.
+    sqlx::query("select flag_query($1)")
+        .bind(log)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(true)
 }
@@ -682,4 +815,69 @@ pub async fn give_site(pool: &PgPool, answer: AnswerId, tester: TesterId) -> Res
     .execute(pool)
     .await?;
     Ok(done.rows_affected() == 1)
+}
+
+/// A resolved or probable citation in a serving passage, with what its References entry needs
+/// (Spec 05, Answer assembly, rules 4 and 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CitedWork {
+    /// The citing passage.
+    pub passage_id: PassageId,
+    /// Where the citing words start in the passage text, in characters.
+    pub span_start: Option<i32>,
+    /// Where they end.
+    pub span_end: Option<i32>,
+    /// `resolved` or `probable`.
+    pub confidence: String,
+    /// The work.
+    pub work_id: Uuid,
+    /// Its title.
+    pub work_title: String,
+    /// Its author as stored.
+    pub author: Option<String>,
+    /// Its translator as stored.
+    pub translator: Option<String>,
+    /// The canonical locator; `*` for the work as a whole.
+    pub locator: String,
+    /// The locator as displayed, such as "Genjokoan, paragraph 5".
+    pub label: String,
+    /// The locator's link-out page, else the work's.
+    pub link_out_url: Option<String>,
+}
+
+/// The resolved and probable citations in the given passages, read through
+/// `servable_citation`, in passage order and then by where they start.
+pub async fn cited_works(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<CitedWork>, DbError> {
+    let uuids: Vec<Uuid> = ids.iter().map(|p| p.as_uuid()).collect();
+    let rows = sqlx::query!(
+        r#"select c.passage_id as "passage_id!", c.span_start, c.span_end,
+                  c.confidence::text as "confidence!", w.id as "work_id!",
+                  w.title as "work_title!", w.author, w.translator, c.locator as "locator!",
+                  c.label as "label!", coalesce(c.locator_url, w.link_out_url) as link_out_url
+           from servable_citation c
+           join work w on w.id = c.work_id
+           where c.passage_id = any($1) and c.confidence::text in ('resolved', 'probable')
+           order by c.passage_id, c.span_start nulls last, c.citation_id"#,
+        &uuids
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut out: Vec<CitedWork> = rows
+        .into_iter()
+        .map(|r| CitedWork {
+            passage_id: PassageId::from(r.passage_id),
+            span_start: r.span_start,
+            span_end: r.span_end,
+            confidence: r.confidence,
+            work_id: r.work_id,
+            work_title: r.work_title,
+            author: r.author,
+            translator: r.translator,
+            locator: r.locator,
+            label: r.label,
+            link_out_url: r.link_out_url,
+        })
+        .collect();
+    out.sort_by_key(|c| ids.iter().position(|id| *id == c.passage_id));
+    Ok(out)
 }
