@@ -1,11 +1,14 @@
-# Sources (Spec 03). Vimeo is SSZ's canonical list (Seattle Soto Zen sources). With
-# WT_VIMEO_ACCESS_TOKEN set, discovery lists the account through the API; without it, it reads
-# the talks page, obeying robots.txt, and asks Vimeo's oEmbed endpoint for each video.
+# Sources (Spec 03). Vimeo is SSZ's canonical list (Seattle Soto Zen sources). Each Vimeo source
+# names the variable holding its own account's token in `token_env` (owner's decision of
+# October 13, 2026). With it set, discovery lists the account through the API and talks with no
+# podcast match fetch their file through the API (route b); without it, discovery reads the
+# talks page, obeying robots.txt, and asks Vimeo's oEmbed endpoint for each video.
 
 [[source]]
 name = "ssz-vimeo"
 platform = "vimeo"
 talks_page = "https://seattlesotozen.org/talks-page/"
+token_env = "WT_SSZ_VIMEO_ACCESS_TOKEN"
 default_sangha = "Seattle Soto Zen"
 link_style = "vimeo"
 # SSZ's talks clear on the owner's mandate when their speaker has not answered (Spec 03,

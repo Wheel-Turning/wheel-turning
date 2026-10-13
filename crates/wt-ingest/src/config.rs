@@ -51,6 +51,16 @@ pub enum ConfigError {
     /// No source has that name.
     #[error("no source named {0:?} in config/sources.toml")]
     UnknownSource(String),
+    /// A source's `token_env` is not a Vimeo token variable, or the source is not on Vimeo.
+    #[error("{origin}: source {source_name:?}: {reason}")]
+    TokenEnv {
+        /// The file or fixture name.
+        origin: String,
+        /// The source.
+        source_name: String,
+        /// What is wrong.
+        reason: &'static str,
+    },
 }
 
 fn read(path: &Path) -> Result<String, ConfigError> {
@@ -91,6 +101,12 @@ pub struct SourceConfig {
     /// Vimeo without a token: the public page whose embedded videos are the talk list.
     #[serde(default)]
     pub talks_page: Option<String>,
+    /// A Vimeo source: the environment variable holding the access token of the sangha's own
+    /// Vimeo account, such as `WT_SSZ_VIMEO_ACCESS_TOKEN` (owner's decision of October 13, 2026).
+    /// With the token set, discovery lists the account through the API and media comes from the
+    /// API's file links (Spec 03, Seattle Soto Zen sources, items 1 and 2b).
+    #[serde(default)]
+    pub token_env: Option<String>,
     /// How timestamped links render: `vimeo`, `youtube` or `none`.
     #[serde(default)]
     pub link_style: Option<String>,
@@ -150,6 +166,22 @@ impl SourcesFile {
                     origin.to_owned(),
                 ));
             }
+            if let Some(key) = &s.token_env {
+                let reason = if s.platform != SourcePlatform::Vimeo {
+                    Some("token_env is for Vimeo sources")
+                } else if !is_vimeo_token_key(key) {
+                    Some("token_env must name a variable like WT_<SANGHA>_VIMEO_ACCESS_TOKEN")
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    return Err(ConfigError::TokenEnv {
+                        origin: origin.to_owned(),
+                        source_name: s.name.clone(),
+                        reason,
+                    });
+                }
+            }
         }
         Ok(file)
     }
@@ -161,6 +193,19 @@ impl SourcesFile {
             .find(|s| s.name == name)
             .ok_or_else(|| ConfigError::UnknownSource(name.to_owned()))
     }
+}
+
+/// `WT_<NAME>_VIMEO_ACCESS_TOKEN`, upper case: a source can name only a Vimeo token, never
+/// another key such as `DATABASE_URL`.
+fn is_vimeo_token_key(key: &str) -> bool {
+    key.strip_prefix("WT_")
+        .and_then(|k| k.strip_suffix("_VIMEO_ACCESS_TOKEN"))
+        .is_some_and(|name| {
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
 }
 
 /// A title pattern that holds a video for review, with the reason it records.
@@ -616,5 +661,46 @@ impl ClassifyConfig {
             types,
             series,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vimeo(token_env: &str) -> String {
+        format!(
+            "[[source]]\nname = \"v\"\nplatform = \"vimeo\"\ndefault_sangha = \"S\"\n\
+             token_env = \"{token_env}\"\n"
+        )
+    }
+
+    #[test]
+    fn a_vimeo_source_names_its_own_token_variable() {
+        let file = SourcesFile::parse(&vimeo("WT_SSZ_VIMEO_ACCESS_TOKEN"), "fixture").unwrap();
+        assert_eq!(
+            file.get("v").unwrap().token_env.as_deref(),
+            Some("WT_SSZ_VIMEO_ACCESS_TOKEN")
+        );
+        for bad in [
+            "DATABASE_URL",
+            "WT_VIMEO_ACCESS_TOKEN",
+            "WT_ssz_VIMEO_ACCESS_TOKEN",
+            "WT_SSZ_SESSION_SECRET",
+        ] {
+            assert!(
+                matches!(
+                    SourcesFile::parse(&vimeo(bad), "fixture"),
+                    Err(ConfigError::TokenEnv { .. })
+                ),
+                "{bad} accepted"
+            );
+        }
+        let rss = "[[source]]\nname = \"f\"\nplatform = \"rss\"\ndefault_sangha = \"S\"\n\
+                   token_env = \"WT_SSZ_VIMEO_ACCESS_TOKEN\"\n";
+        assert!(matches!(
+            SourcesFile::parse(rss, "fixture"),
+            Err(ConfigError::TokenEnv { .. })
+        ));
     }
 }

@@ -8,6 +8,7 @@
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Deployment environment, from `WT_ENV`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,8 +125,6 @@ pub struct Config {
     pub alert_topic_arn: Option<String>,
     /// `YOUTUBE_API_KEY`.
     pub youtube_api_key: Option<Secret>,
-    /// `WT_VIMEO_ACCESS_TOKEN`. With it, Vimeo discovery uses the API; without it, the talks page.
-    pub vimeo_access_token: Option<Secret>,
     /// `WT_ALLOW_THIRD_PARTY_FETCH`. Enables the yt-dlp fetch mode.
     pub allow_third_party_fetch: bool,
     /// `WT_DIARIZE_URL`, the base URL of the diarization sidecar.
@@ -138,6 +137,21 @@ pub struct Config {
     pub site_dana_url: Option<String>,
     /// `WT_LOG`, the log filter.
     pub log: String,
+    /// Reads the keys a source names in `config/sources.toml`, such as a Vimeo source's
+    /// `token_env`: see [`Config::source_secret`].
+    source_keys: KeyLookup,
+}
+
+/// The key lookup the configuration was loaded from, kept for keys only a source file names.
+#[derive(Clone)]
+struct KeyLookup(Arc<LookupFn>);
+
+type LookupFn = dyn Fn(&str) -> Option<String> + Send + Sync;
+
+impl fmt::Debug for KeyLookup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("KeyLookup")
+    }
 }
 
 impl Config {
@@ -150,9 +164,10 @@ impl Config {
     /// process environment.
     pub fn from_lookup<F>(lookup: F) -> Result<Self, ConfigError>
     where
-        F: Fn(&str) -> Option<String>,
+        F: Fn(&str) -> Option<String> + Send + Sync + 'static,
     {
-        let get = |key: &str| lookup(key).filter(|value| !value.trim().is_empty());
+        let lookup = KeyLookup(Arc::new(lookup));
+        let get = |key: &str| (lookup.0)(key).filter(|value| !value.trim().is_empty());
 
         let env = match get("WT_ENV") {
             None => Env::Dev,
@@ -239,7 +254,6 @@ impl Config {
             },
             alert_topic_arn: get("WT_ALERT_TOPIC_ARN"),
             youtube_api_key: get("YOUTUBE_API_KEY").map(Secret::new),
-            vimeo_access_token: get("WT_VIMEO_ACCESS_TOKEN").map(Secret::new),
             allow_third_party_fetch: parse_bool(
                 "WT_ALLOW_THIRD_PARTY_FETCH",
                 get("WT_ALLOW_THIRD_PARTY_FETCH"),
@@ -250,7 +264,18 @@ impl Config {
             whisper_cli: get("WT_WHISPER_CLI").map(PathBuf::from),
             site_dana_url: get("WT_SITE_DANA_URL"),
             log,
+            source_keys: lookup.clone(),
         })
+    }
+
+    /// A secret a source names in `config/sources.toml` rather than a fixed key, such as the
+    /// `token_env` of a Vimeo source: each sangha's Vimeo account has its own variable, like
+    /// `WT_SSZ_VIMEO_ACCESS_TOKEN` (owner's decision of October 13, 2026). An empty value counts
+    /// as unset.
+    pub fn source_secret(&self, key: &str) -> Option<Secret> {
+        (self.source_keys.0)(key)
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| Secret::new(value.trim()))
     }
 
     /// The model for a language-model stage: its own setting, or else `WT_LLM_MODEL`. Fails when
@@ -464,7 +489,7 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
-        Config::from_lookup(|key| map.get(key).cloned())
+        Config::from_lookup(move |key| map.get(key).cloned())
     }
 
     fn full_prod() -> Vec<(&'static str, String)> {
@@ -633,6 +658,26 @@ mod tests {
             config.database_url.expose(),
             "postgres://wt:wt@localhost:5432/wt"
         );
+    }
+
+    #[test]
+    fn a_source_secret_is_read_by_the_name_its_source_gives() {
+        let config = load(&[
+            ("DATABASE_URL", "postgres://localhost/wt"),
+            ("WT_SSZ_VIMEO_ACCESS_TOKEN", " vimeo-ssz-1d2e "),
+            ("WT_EMPTY_VIMEO_ACCESS_TOKEN", "  "),
+        ])
+        .unwrap();
+        assert_eq!(
+            config
+                .source_secret("WT_SSZ_VIMEO_ACCESS_TOKEN")
+                .unwrap()
+                .expose(),
+            "vimeo-ssz-1d2e"
+        );
+        assert_eq!(config.source_secret("WT_EMPTY_VIMEO_ACCESS_TOKEN"), None);
+        assert_eq!(config.source_secret("WT_OTHER_VIMEO_ACCESS_TOKEN"), None);
+        assert!(!format!("{config:?}").contains("vimeo-ssz-1d2e"));
     }
 
     #[test]

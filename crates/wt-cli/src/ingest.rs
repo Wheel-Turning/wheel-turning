@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use sqlx::PgPool;
-use wt_core::Config;
+use wt_core::{Config, Secret};
 use wt_db::job::{self, Failure, JobKind};
-use wt_ingest::config::{ClassifyConfig, SourcesFile};
+use wt_ingest::config::{ClassifyConfig, SourceConfig, SourcesFile};
 use wt_ingest::http::Exclusions;
 use wt_ingest::pipeline;
 use wt_ingest::rss::RssAdapter;
@@ -20,6 +20,34 @@ use crate::commands::print_json;
 const IDLE: Duration = Duration::from_secs(5);
 /// How often a worker runs the stale-lock reaper.
 const REAP_EVERY: Duration = Duration::from_secs(60);
+
+/// A Vimeo source's own access token, from the variable its `token_env` names (owner's
+/// decision of October 13, 2026: each sangha's Vimeo account has its own variable).
+pub fn vimeo_token(config: &Config, source: &SourceConfig) -> Option<Secret> {
+    source
+        .token_env
+        .as_deref()
+        .and_then(|key| config.source_secret(key))
+}
+
+/// Route (b) of Spec 03 for the media fetcher: the Vimeo API and the token of every Vimeo
+/// source in `sources.toml` whose variable is set.
+pub fn vimeo_media(
+    config: &Config,
+    config_dir: &Path,
+) -> anyhow::Result<wt_ingest::media::VimeoMedia> {
+    let sources = SourcesFile::load(&config_dir.join("sources.toml"))?;
+    let tokens = sources
+        .sources
+        .iter()
+        .filter(|s| s.platform == SourcePlatform::Vimeo)
+        .filter_map(|s| Some((s.name.clone(), vimeo_token(config, s)?)))
+        .collect();
+    Ok(wt_ingest::media::VimeoMedia {
+        api: VimeoEndpoints::vimeo()?.api,
+        tokens,
+    })
+}
 
 /// The active exclusions, which every request is checked against (Spec 08).
 pub async fn load_exclusions(pool: &PgPool) -> anyhow::Result<Exclusions> {
@@ -54,7 +82,7 @@ pub async fn discover(
         let adapter: Box<dyn SourceAdapter> = match source.platform {
             SourcePlatform::Vimeo => Box::new(VimeoAdapter::new(
                 &source.name,
-                config.vimeo_access_token.clone(),
+                vimeo_token(config, source),
                 source.talks_page.as_deref(),
                 VimeoEndpoints::vimeo()?,
                 exclusions.clone(),
@@ -397,7 +425,7 @@ pub async fn completeness(
     }
     let adapter = VimeoAdapter::new(
         &source.name,
-        config.vimeo_access_token.clone(),
+        vimeo_token(config, source),
         source.talks_page.as_deref(),
         VimeoEndpoints::vimeo()?,
         load_exclusions(pool).await?,
@@ -431,7 +459,13 @@ pub async fn completeness(
         }
         None => (
             None,
-            "nowhere: set WT_VIMEO_ACCESS_TOKEN or pass --vimeo-list".to_owned(),
+            format!(
+                "nowhere: set {} or pass --vimeo-list",
+                source
+                    .token_env
+                    .as_deref()
+                    .unwrap_or("the source's token_env")
+            ),
         ),
     };
     let page_ids = if source.talks_page.is_some() {

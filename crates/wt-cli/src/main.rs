@@ -1089,7 +1089,8 @@ enum IngestCommand {
         config_dir: PathBuf,
     },
     /// Compare the Vimeo account list with the talks page and with what discovery recorded,
-    /// and write the completeness page. Without WT_VIMEO_ACCESS_TOKEN the account list comes
+    /// and write the completeness page. Without the source's Vimeo token (its token_env, such
+    /// as WT_SSZ_VIMEO_ACCESS_TOKEN) the account list comes
     /// from account pages saved in a browser (--vimeo-list); the Vimeo site is never fetched.
     /// Prints counts and the ids on the talks page but not in the account list as JSON.
     Completeness {

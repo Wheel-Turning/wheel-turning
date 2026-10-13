@@ -242,7 +242,7 @@ impl SourceAdapter for VimeoAdapter {
             (None, None) => {
                 return Err(IngestError::Misconfigured {
                     source_name: self.source.clone(),
-                    what: "WT_VIMEO_ACCESS_TOKEN or a talks_page",
+                    what: "a token (its token_env) or a talks_page",
                 });
             }
         };
