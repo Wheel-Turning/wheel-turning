@@ -99,3 +99,40 @@ aliases = ["Myoshin Kate McCandless"]
 display_name = "Norman Fischer"
 sangha = "Everyday Zen Foundation"
 aliases = ["Zoketsu Norman Fischer"]
+
+# Speakers of SSZ talks added at speaker review (owner's decisions of October 12, 2026). Their
+# home sanghas were not checked, so each is listed under the sangha where the talk was given;
+# correct one here when it is known. Only full names are aliases: a bare first name would match
+# other talks.
+[[teacher]]
+display_name = "Sessei Meg Levie"
+sangha = "Seattle Soto Zen"
+aliases = ["Meg Levie"]
+
+[[teacher]]
+display_name = "Koshin Christopher Cain"
+sangha = "Seattle Soto Zen"
+aliases = ["Christopher Cain"]
+
+[[teacher]]
+display_name = "Imanaka Taijo"
+sangha = "Seattle Soto Zen"
+aliases = ["Taijo Imanaka"]
+
+[[teacher]]
+display_name = "Jishi Jeff Bickner"
+sangha = "Seattle Soto Zen"
+aliases = ["Jeff Bickner"]
+
+[[teacher]]
+display_name = "Shinmon Michael Newton"
+sangha = "Seattle Soto Zen"
+aliases = ["Michael Newton"]
+
+[[teacher]]
+display_name = "Thomas Phillips"
+sangha = "Seattle Soto Zen"
+
+[[teacher]]
+display_name = "John Namura"
+sangha = "Seattle Soto Zen"

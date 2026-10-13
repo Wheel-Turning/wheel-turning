@@ -247,7 +247,7 @@ async fn the_committed_seed_imports_and_is_idempotent() {
     let seed = RegistryFile::load(&path).unwrap();
 
     let first = import(&fx.pool, &seed, ACTOR).await.unwrap();
-    assert_eq!(first.teachers, 11);
+    assert_eq!(first.teachers, 18);
     let again = import(&fx.pool, &seed, ACTOR).await.unwrap();
     assert_eq!(again.aliases_added, 0);
 
