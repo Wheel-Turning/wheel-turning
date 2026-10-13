@@ -308,7 +308,7 @@ Roles are created by migration as `NOLOGIN` group roles. An ops command, `wt db 
 | --- | --- | --- |
 | `dg_owner` | Migrations from CI and a developer machine | Owns all objects |
 | `dg_pipeline` | Batch host and CLI | Read and write on source, talk, transcript, segment, passage, citation, job, glossary, registry and log tables. Insert and read on `speaker_consent`. No access to `query_log` text. |
-| `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. |
+| `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. Select on `teacher_alias` and update on `tester.last_seen_at`. A tester's own answer is read only through functions scoped to one answer and one tester, which run as the owner: `tester_answer`, `tester_answer_query`, `answer_shows_passage` and `tester_answer_purged` (decision of October 13, 2026; migration `0040_web_scoped_reads.sql`). No select on `query_log`, `answer` or `answer_passage`, so inserts take ids made by the caller rather than `returning`. |
 | `dg_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`. Nothing else. |
 
 ## Operational tables
@@ -531,6 +531,7 @@ Acceptance criteria, each as a database integration test that connects as the na
 - [x] Inserting a segment of kind `qa_student` fails.
 - [x] `servable_passage` returns no rows for a talk that is not `ready`, whose consent is not `granted`, or whose rights holder is `unknown`.
 - [x] `dg_web` cannot select from `passage`, `talk`, `segment` or `query_log`, cannot update `query_log` directly, and `flag_query()` flags exactly the row it names. (Tested as `wt_web`, its name since `0010`.)
+- [x] Every library function the web service calls runs as `wt_web`, a tester reads only their own answer, and `wt_web` still cannot select from `query_log`, `answer` or `answer_passage`. (`wt-db/tests/web_role.rs`, after the AWS deploy of October 13, 2026 showed the alpha's superuser connection had hidden missing grants.)
 - [x] `dg_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows. (Tested as `wt_analyst`, its name since `0010`.)
 - [x] A vector query on `servable_passage` uses the HNSW index in `EXPLAIN` on a table with 10,000 synthetic rows.
 - [x] `.sqlx` offline query data is committed and `cargo sqlx prepare --check` passes.

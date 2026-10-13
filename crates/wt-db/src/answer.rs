@@ -116,13 +116,16 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         .as_ref()
         .map_or(a.payload.themes.len(), |s| s.sentences.len());
     let themes = i32::try_from(shown).unwrap_or(i32::MAX);
-    let log = sqlx::query_scalar!(
-        "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
+    // The ids are made here: `returning` needs select on the table, which the web role does
+    // not have on query_log or answer (Spec 02).
+    let log = Uuid::new_v4();
+    sqlx::query!(
+        "insert into query_log (id, tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
                                 theme_count, themes_dropped, sensitive_category, privacy_mode,
                                 text_expires_at, relevance, triage_degraded)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-         returning id",
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+        log,
         a.tester.as_uuid(),
         a.query_text,
         a.payload.mode,
@@ -140,16 +143,18 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.relevance,
         a.triage_degraded
     )
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
     let ids: Vec<Uuid> = payload.passage_ids.iter().map(|p| p.as_uuid()).collect();
     let payload = serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null);
-    let answer = sqlx::query_scalar!(
-        "insert into answer (query_log_id, payload) values ($1, $2) returning id",
+    let answer = Uuid::new_v4();
+    sqlx::query!(
+        "insert into answer (id, query_log_id, payload) values ($1, $2, $3)",
+        answer,
         log,
         payload
     )
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await?;
     sqlx::query!(
         "insert into answer_passage (answer_id, passage_id, rank)
@@ -245,9 +250,9 @@ pub async fn load(
     tester: TesterId,
 ) -> Result<Option<Stored>, DbError> {
     let row = sqlx::query!(
-        "select q.query_text, q.sensitive_category, a.payload, a.created_at from answer a
-         join query_log q on q.id = a.query_log_id
-         where a.id = $1 and q.tester_id = $2",
+        r#"select query_text, sensitive_category as "sensitive_category!",
+                  payload as "payload!", created_at as "created_at!"
+           from tester_answer($1, $2)"#,
         answer.as_uuid(),
         tester.as_uuid()
     )
@@ -570,8 +575,7 @@ pub async fn submit_feedback(
     }
     let mut tx = pool.begin().await?;
     let theirs = sqlx::query_scalar!(
-        r#"select exists (select 1 from answer a join query_log q on q.id = a.query_log_id
-                          where a.id = $1 and q.tester_id = $2) as "theirs!""#,
+        r#"select tester_answer_query($1, $2) is not null as "theirs!""#,
         answer.as_uuid(),
         tester.as_uuid()
     )
@@ -583,8 +587,7 @@ pub async fn submit_feedback(
     let passage = match target {
         FeedbackTarget::Excerpt(p) => {
             let shown = sqlx::query_scalar!(
-                r#"select exists (select 1 from answer_passage
-                                  where answer_id = $1 and passage_id = $2) as "shown!""#,
+                r#"select answer_shows_passage($1, $2) as "shown!""#,
                 answer.as_uuid(),
                 p.as_uuid()
             )
@@ -635,12 +638,11 @@ pub async fn flag_query(
 ) -> Result<bool, DbError> {
     let mut tx = pool.begin().await?;
     let log = sqlx::query_scalar!(
-        "select q.id from answer a join query_log q on q.id = a.query_log_id
-         where a.id = $1 and q.tester_id = $2",
+        "select tester_answer_query($1, $2)",
         answer.as_uuid(),
         tester.as_uuid()
     )
-    .fetch_optional(&mut *tx)
+    .fetch_one(&mut *tx)
     .await?;
     let Some(log) = log else {
         return Ok(false);
@@ -697,8 +699,7 @@ pub async fn give(
     let row = sqlx::query!(
         r#"select s.donation_url as "url!", s.donation_url_template from sangha s
            where s.id = $3 and s.listed and s.donation_verified and s.donation_url is not null
-             and exists (select 1 from answer a join query_log q on q.id = a.query_log_id
-                         where a.id = $1 and q.tester_id = $2)"#,
+             and tester_answer_query($1, $2) is not null"#,
         answer.as_uuid(),
         tester.as_uuid(),
         sangha.as_uuid()
@@ -801,8 +802,7 @@ pub async fn dana_event(
     };
     let done = sqlx::query!(
         "insert into dana_event (answer_id, kind, total_cents)
-         select a.id, $3, $4 from answer a join query_log q on q.id = a.query_log_id
-         where a.id = $1 and q.tester_id = $2",
+         select $1, $3, $4 where tester_answer_query($1, $2) is not null",
         answer.as_uuid(),
         tester.as_uuid(),
         kind,
@@ -818,8 +818,7 @@ pub async fn dana_event(
 pub async fn give_site(pool: &PgPool, answer: AnswerId, tester: TesterId) -> Result<bool, DbError> {
     let done = sqlx::query!(
         "insert into dana_event (answer_id, sangha_id, kind)
-         select a.id, null, 'link_click' from answer a join query_log q on q.id = a.query_log_id
-         where a.id = $1 and q.tester_id = $2",
+         select $1, null, 'link_click' where tester_answer_query($1, $2) is not null",
         answer.as_uuid(),
         tester.as_uuid()
     )

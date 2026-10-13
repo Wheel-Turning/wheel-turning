@@ -81,8 +81,7 @@ pub async fn was_purged(
     tester: TesterId,
 ) -> Result<bool, DbError> {
     Ok(sqlx::query_scalar!(
-        r#"select exists (select 1 from query_log
-                          where purged_answer_id = $1 and tester_id = $2) as "e!""#,
+        r#"select tester_answer_purged($1, $2) as "e!""#,
         answer.as_uuid(),
         tester.as_uuid()
     )

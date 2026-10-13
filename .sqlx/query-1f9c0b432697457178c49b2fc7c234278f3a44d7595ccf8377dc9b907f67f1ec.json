@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select s.donation_url as \"url!\", s.donation_url_template from sangha s\n           where s.id = $3 and s.listed and s.donation_verified and s.donation_url is not null\n             and exists (select 1 from answer a join query_log q on q.id = a.query_log_id\n                         where a.id = $1 and q.tester_id = $2)",
+  "query": "select s.donation_url as \"url!\", s.donation_url_template from sangha s\n           where s.id = $3 and s.listed and s.donation_verified and s.donation_url is not null\n             and tester_answer_query($1, $2) is not null",
   "describe": {
     "columns": [
       {
@@ -38,5 +38,5 @@
       true
     ]
   },
-  "hash": "3b02ea12cccf779419c1994eae9c9281f76c090390c2aa6677a64f786090c5b8"
+  "hash": "1f9c0b432697457178c49b2fc7c234278f3a44d7595ccf8377dc9b907f67f1ec"
 }
