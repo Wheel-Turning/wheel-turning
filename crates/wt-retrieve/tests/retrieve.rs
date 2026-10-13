@@ -280,16 +280,17 @@ async fn vector_plan(pool: &PgPool, hnsw: bool) -> String {
     if hnsw {
         search::use_hnsw(&mut tx, 100).await.unwrap();
     }
-    let plan: Vec<String> =
-        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("explain {}", search::VECTOR_SQL)))
-            .bind(search::vector_literal(&FakeEmbedder::vector("anger")))
-            .bind(60_i64)
-            .fetch_all(&mut *tx)
-            .await
-            .unwrap();
+    let plan: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "explain {}",
+        search::VECTOR_SQL
+    )))
+    .bind(search::vector_literal(&FakeEmbedder::vector("anger")))
+    .bind(60_i64)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
     tx.rollback().await.unwrap();
-    plan.join("
-")
+    plan.join("\n")
 }
 
 /// The planner sorts a small corpus rather than use the index, as it sorted the real one
@@ -301,13 +302,11 @@ async fn standard_vector_search_walks_the_hnsw_index() {
     sqlx::raw_sql("analyze").execute(&fx.pool).await.unwrap();
 
     let plain = vector_plan(&fx.pool, false).await;
-    assert!(plain.contains("Sort"), "expected a sort, got:
-{plain}");
+    assert!(plain.contains("Sort"), "expected a sort, got:\n{plain}");
     let plan = vector_plan(&fx.pool, true).await;
     assert!(
         plan.contains("passage_embedding_hnsw") && !plan.contains("Sort"),
-        "expected an index scan on passage_embedding_hnsw, got:
-{plan}"
+        "expected an index scan on passage_embedding_hnsw, got:\n{plan}"
     );
 }
 
