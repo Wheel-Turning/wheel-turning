@@ -5,9 +5,9 @@ variable "region" {
 }
 
 variable "monthly_budget_usd" {
-  description = "Monthly cost budget for the whole account, in US dollars."
+  description = "Monthly cost budget for the whole account, in US dollars. Raised from 75 to 200 on October 13, 2026 for the beta on AWS (about $170 a month)."
   type        = number
-  default     = 75
+  default     = 200
 }
 
 variable "alert_email" {
