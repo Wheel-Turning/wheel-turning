@@ -137,7 +137,7 @@ fn site(standard_answers: usize) -> Site {
         replies.push(Ok(json!({ "headline": { "text": THEME, "cites": [
                 { "excerpt": "E1", "start": 1, "end": 1 },
                 { "excerpt": "E2", "start": 1, "end": 1 }
-            ] }, "sum_up": null })));
+            ] }, "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null })));
         replies.push(Ok(json!({ "supported": true, "unsupported_part": null })));
     }
     Site {

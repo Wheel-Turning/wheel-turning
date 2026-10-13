@@ -267,6 +267,27 @@ async fn limits_on_sections_and_quotations_drop_the_excess() {
 }
 
 #[tokio::test]
+async fn an_over_long_citation_is_left_out_while_another_remains() {
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 1, 2), ("E2", 2, 2)]),
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+    });
+    let settings = Settings {
+        quote_max_words: 10,
+        ..Settings::default()
+    };
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = run_with(&llm, &settings).await;
+    assert!(out.dropped.is_empty(), "{:?}", out.dropped);
+    let headline = &out.summary.unwrap().sentences[0];
+    assert_eq!(
+        headline.passage_ids(),
+        vec![pid(2)],
+        "only the short quotation stays"
+    );
+}
+
+#[tokio::test]
 async fn a_rejected_headline_leaves_no_summary() {
     let llm = FakeLlm::new(vec![Ok(good_draft()), no("posture"), yes(), yes(), yes()]);
     let out = run(&llm).await;
@@ -416,6 +437,9 @@ async fn every_drop_and_its_reason_land_in_the_log() {
     });
     let draft = json!({
         "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [],
+        "agree": [],
+        "differ": [],
         "keep_in_mind": [s("Moreau says to notice judging thoughts.", &[("E1", 1, 1)])],
         "sum_up": null,
     });

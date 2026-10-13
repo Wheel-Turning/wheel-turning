@@ -113,16 +113,12 @@ pub struct SummaryDraft {
     /// One sentence that answers the question as the excerpts do.
     pub headline: Option<DraftSentence>,
     /// One or two sentences on what the excerpts address.
-    #[serde(default)]
     pub framing: Vec<DraftSentence>,
     /// Where talks by different teachers say alike.
-    #[serde(default)]
     pub agree: Vec<DraftSentence>,
     /// Where they put the weight differently.
-    #[serde(default)]
     pub differ: Vec<DraftSentence>,
     /// Context a quoted line leaves out.
-    #[serde(default)]
     pub keep_in_mind: Vec<DraftSentence>,
     /// One closing sentence.
     pub sum_up: Option<DraftSentence>,
@@ -578,7 +574,9 @@ fn filter_draft(
 }
 
 /// Filter 2: each citation as an excerpt position and the quotation's window-wide words,
-/// duplicates collapsed.
+/// duplicates collapsed. A citation naming no offered excerpt or sentence drops the sentence;
+/// one longer than `quote_max_words` is left out, and drops the sentence only when no other
+/// citation remains.
 fn citations(
     d: &DraftSentence,
     input: &SummaryInput,
@@ -588,6 +586,7 @@ fn citations(
         return Err(DropReason::NoCitation);
     }
     let mut out: Vec<(usize, usize, usize)> = Vec::new();
+    let mut too_long = false;
     for c in &d.cites {
         let i = position(&c.excerpt, input.excerpts.len()).ok_or(DropReason::UnknownRef)?;
         let sentences = input.excerpts[i].sentences();
@@ -600,12 +599,17 @@ fn citations(
             return Err(DropReason::UnknownRef);
         }
         let (s, e) = (sentences[first - 1].0, sentences[last - 1].1);
+        // An over-long run is left out on its own; the sentence keeps its other citations.
         if e - s > settings.quote_max_words {
-            return Err(DropReason::QuoteTooLong);
+            too_long = true;
+            continue;
         }
         if !out.contains(&(i, s, e)) {
             out.push((i, s, e));
         }
+    }
+    if out.is_empty() && too_long {
+        return Err(DropReason::QuoteTooLong);
     }
     Ok(out)
 }

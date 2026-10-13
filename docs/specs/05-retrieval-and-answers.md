@@ -95,7 +95,7 @@ The code turns each citation into a quotation: the cited sentences of the excerp
 Deterministic filters run on each sentence in this order, and each drop is counted and logged with its reason:
 
 1. The output matches the schema; sentences beyond a section's limit are dropped.
-2. Every citation names an offered excerpt and a run of its sentences at most `quote_max_words` (60) words long. Duplicate citations are collapsed. A sentence with an invalid citation, or none, is dropped.
+2. Every citation names an offered excerpt and a run of its sentences. Duplicate citations are collapsed. A sentence with an invalid citation, or none, is dropped. A run longer than `quote_max_words` (60) is left out on its own, and the sentence is dropped only when no other citation remains.
 3. A sentence of agreement or difference cites excerpts from at least two distinct teachers.
 4. The text is one sentence of at most `summary_max_words` (40) words.
 5. It contains no quotation mark and no excerpt label such as E3.
