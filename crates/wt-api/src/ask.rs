@@ -174,6 +174,19 @@ fn stop(framing: &Framing, triaged: &Triaged) -> Option<Stop> {
         .then_some(Stop::Unrelated)
 }
 
+/// Where the `/ask` route sends an ordinary question that the rules and the embedding check put
+/// at `level`, given the gate's verdict: `None` answers it at `triaged.raise(level)`. `wt eval
+/// gate` scores routes with this, so the harness and the page cannot drift apart.
+pub fn gated(level: Level, triaged: &Triaged) -> Option<Stop> {
+    stop(
+        &Framing {
+            level,
+            ..Framing::default()
+        },
+        triaged,
+    )
+}
+
 /// [`answer`] for a question the sensitivity check has classified, or a request that may carry
 /// `Sec-GPC: 1`. `gate` is the triage gate's call, started alongside embedding and search
 /// (Spec 05, Sensitive questions, layer 3): its verdict raises the level before synthesis, and a

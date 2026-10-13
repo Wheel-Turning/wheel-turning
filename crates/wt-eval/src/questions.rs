@@ -218,7 +218,11 @@ mod tests {
     #[test]
     fn the_repository_question_files_parse() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval");
-        for name in ["gate_a_questions.toml", "questions_v1.toml"] {
+        for name in [
+            "gate_a_questions.toml",
+            "questions_v1.toml",
+            "teacher_prep_v1.toml",
+        ] {
             let text = std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("{e}"));
             let qs = parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(!qs.is_empty(), "{name}");
@@ -237,8 +241,8 @@ mod tests {
         assert_eq!(v1.len(), 50);
         // The Gate A questions open the set unchanged, so their results compare across both.
         assert_eq!(&v1[..gate.len()], &gate[..]);
-        assert!(v1[..gate.len()].iter().all(|q| !q.is_draft()));
-        assert!(v1[gate.len()..].iter().all(Question::is_draft));
+        // The owner approved questions 21 to 50 on October 13, 2026 (practitioner@2).
+        assert!(v1.iter().all(|q| !q.is_draft()));
         let tagged = |t: &str| v1.iter().filter(|q| q.tags.iter().any(|x| x == t)).count();
         for tag in [
             "multi_voice",
@@ -254,6 +258,19 @@ mod tests {
                 .any(|q| q.tags.iter().any(|t| t == "named_teacher")
                     && q.text.contains("Norman Fischer")),
             "the PRD's thin-coverage query for Norman Fischer"
+        );
+    }
+
+    #[test]
+    fn the_teacher_prep_set_is_all_drafts_until_the_owner_approves_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval");
+        let qs =
+            parse(&std::fs::read_to_string(root.join("teacher_prep_v1.toml")).unwrap_or_default())
+                .unwrap_or_else(|e| panic!("{e}"));
+        assert!((15..=20).contains(&qs.len()), "{}", qs.len());
+        assert!(
+            qs.iter()
+                .all(|q| q.is_draft() && q.tags.iter().any(|t| t == "teacher_prep"))
         );
     }
 }

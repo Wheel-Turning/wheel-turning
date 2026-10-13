@@ -7,6 +7,7 @@
 //! through [`ratings::import`], and [`report::build`] prints the PRD's pass and fail verdicts.
 
 pub mod compare;
+pub mod gate;
 pub mod questions;
 pub mod ratings;
 pub mod report;

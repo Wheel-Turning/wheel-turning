@@ -149,7 +149,7 @@ speech.
 3. Evaluate on the same set as the last accepted run:
 
    ```bash
-   wt eval run --set practitioner@1
+   wt eval run --set practitioner@2
    wt eval report --run <new run id>
    wt eval compare --a <last accepted run> --b <new run id>
    ```
@@ -157,6 +157,9 @@ speech.
    For a change worth a reviewer's time, `wt eval export-review --run <id> --out data/eval/<id>/review.html`,
    send the file privately, then `wt eval import-ratings --run <id> --file ratings.json --reviewer "<name>"`
    and report again.
+
+   After a change to `config/sensitive.toml`, the exemplars or the triage prompt, score the gates:
+   `wt eval gate --file eval/gate_questions_v1.toml`. A missed notice page blocks the change.
 
 ## 8. Before real transcripts reach the language model
 
