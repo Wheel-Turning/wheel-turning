@@ -240,7 +240,7 @@ M6, the summary (owner's decision of October 12, 2026)
 - [x] The page shows the headline, framing, sections, the code's notes for few talks and one sangha, the drawn-from line and the quoted lines in a container with id `summary`, with the excerpts below. (`wt-api/tests/pages.rs`; the notes in `wt-api` `summary` unit tests. The summary's feedback control of Spec 06 sits inside the container.)
 - [x] A verifier that rejects the headline, a generation timeout and a verifier failure each leave a fully rendered answer without a summary; named mode makes no summary call. (`wt-api/tests/pages.rs`, `wt-synth/tests/synth.rs`.)
 - [x] Takedown strips summary sentences that cite a removed passage, and the whole summary when it strips the headline. (`wt-core` `answer` unit tests; takedown calls `AnswerPayload::strip_passages`.)
-- [ ] `wt eval run` on the 20 Gate A questions records summary latency, and the PR reports p50 and p90 and the cost per answer.
+- [x] `wt eval run` on the 20 Gate A questions records summary latency, and the PR reports p50 and p90 and the cost per answer. (Run `a95f32ed`, October 13, 2026, on a migrated copy of the real-data database with the 120 talks behind the answers reindexed: summary p50 9.8 s, p90 11.1 s; $0.0105 per answer for the summary; a summary on 13 of 20 answers, 57 sentences shown and 91 dropped. PR #128.)
 
 M7, dana calculator
 
