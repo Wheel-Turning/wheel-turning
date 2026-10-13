@@ -1,6 +1,6 @@
 [package]
 name = "wt-asr"
-description = "The Transcriber trait, caption parsers and the whisper-rs transcriber."
+description = "The Transcriber trait, caption parsers and the whisper-cli transcriber."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

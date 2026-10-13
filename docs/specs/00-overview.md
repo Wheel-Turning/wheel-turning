@@ -22,7 +22,7 @@ Claude Code builds to these defaults without asking. Each has an escape hatch be
 | Job queue | A Postgres table with `FOR UPDATE SKIP LOCKED` and a small custom worker | No extra infrastructure | `apalis` if the custom worker grows |
 | Embeddings | bge-m3, 1024 dimensions, int8 ONNX through `ort`, run locally | Transcripts do not leave the infrastructure for retrieval | `Embedder` trait allows a hosted API |
 | Reranker | bge-reranker-v2-m3 in ONNX through `ort`, with a smaller model as a latency fallback | A per-passage relevance threshold is needed | `Reranker` trait |
-| Transcription | Existing captions when present, otherwise whisper large-v3 through `whisper-rs` on the owner's Windows PC | Audio is transient and 140 hours is small | `Transcriber` trait |
+| Transcription | Existing captions when present, otherwise whisper large-v3 through whisper.cpp's `whisper-cli`, run as a subprocess (decision of October 5, 2026), on the owner's Windows PC | Audio is transient and 140 hours is small | `Transcriber` trait |
 | Diarization | pyannote in a Python HTTP sidecar behind a `Diarizer` trait | No mature Rust equivalent | sherpa-onnx in process after the ten-video sample decides it |
 | Language model | Claude API through `reqwest`, structured JSON output, temperature 0, model name read from `WT_LLM_MODEL` | Extraction, classification help, synthesis and verification | `LlmClient` trait |
 | Hosting | AWS with Terraform: RDS Postgres, ECS Fargate for the web service, S3, Secrets Manager. Transcription runs on the owner's Windows PC, which reaches RDS through an SSM port forward via an on-demand EC2 batch host. | The builder wants AWS skills and the footprint is small | Any Postgres host works, since nothing else is AWS-specific |
@@ -46,7 +46,7 @@ wheel-turning/
     wt-db/                  sqlx pool, migration runner, repositories, views
     wt-registry/            teachers, aliases, sanghas, glossary, consent records
     wt-ingest/              SourceAdapter trait, YouTube and storage adapters, dedupe
-    wt-asr/                 Transcriber trait, caption parsers, whisper-rs
+    wt-asr/                 Transcriber trait, caption parsers, whisper-cli runner
     wt-segment/             Diarizer client, segment labels, student-speech removal
     wt-extract/             LlmClient, schemas, extraction, citation resolution
     wt-ml/                  Embedder and Reranker traits, ort implementations
