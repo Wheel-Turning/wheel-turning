@@ -451,6 +451,10 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
         !section.contains("Where they differ"),
         "an empty section is left out"
     );
+    assert!(
+        section.contains("id=\"fb-summary\"") && section.contains("Feedback on this summary"),
+        "the summary's feedback control sits inside its container"
+    );
     // Each marker points to a quoted line the code took verbatim from the excerpt.
     assert!(section.contains("href=\"#sq-1\"") && section.contains("href=\"#sq-2\""));
     assert!(

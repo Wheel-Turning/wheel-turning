@@ -13,4 +13,5 @@
   <p class="muted small">{{ s.drawn_from }} Each sentence is checked against the excerpts it cites; the excerpts are below.</p>
   <h3>Quoted lines</h3>
   <ol class="quoted">{% for q in s.quotes %}<li id="sq-{{ q.number }}"><q>{{ q.text }}</q> {{ q.teacher }}, &ldquo;{{ q.title }}&rdquo;{% if let Some(d) = q.date %}, {{ d }}{% endif %}. <a href="#p{{ q.excerpt }}">Excerpt {{ q.excerpt }}</a></li>{% endfor %}</ol>
+  {% include "summary_feedback.html" %}
 </section>
