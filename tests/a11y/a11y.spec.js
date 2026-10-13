@@ -219,7 +219,7 @@ test("an acute question shows the notice with focus on its heading, and axe pass
   const heading = page.getByRole("heading", { level: 1, name: "Please reach out for help now" });
   await expect(heading).toBeFocused();
   await expect(page.locator("#dana")).toHaveCount(0);
-  await expect(page.locator("form.feedback")).toHaveCount(0);
+  await expect(page.locator("form[data-feedback]")).toHaveCount(0);
   await axe(page, "acute 360px");
   await targets(page, "acute 360px");
 });

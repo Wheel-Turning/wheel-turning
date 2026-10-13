@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists (select 1 from answer a join query_log q on q.id = a.query_log_id\n                          where a.id = $1 and q.tester_id = $2) as \"theirs!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "theirs!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ccc909f92472483f4ba9c791f3275568eeccfb33c087760140776c6c39a19217"
+}

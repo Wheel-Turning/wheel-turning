@@ -363,3 +363,81 @@ pub async fn triage(pool: &PgPool, since: DateTime<Utc>) -> Result<TriageReport,
         disagreements,
     })
 }
+
+/// One row of `v_feedback_counts`: feedback per day, target, reason and privacy mode.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FeedbackCounts {
+    /// The day.
+    pub day: DateTime<Utc>,
+    /// `excerpt`, `summary` or `query`.
+    pub target: String,
+    /// The reason, `note` or `flag_query`.
+    pub kind: String,
+    /// `share` or `count_only`.
+    pub privacy_mode: String,
+    /// Rows.
+    pub rows: i64,
+    /// Submissions those rows came in.
+    pub submissions: i64,
+}
+
+/// Feedback counts since `since` (Spec 06, Privacy modes, `wt report feedback`).
+pub async fn feedback(pool: &PgPool, since: DateTime<Utc>) -> Result<Vec<FeedbackCounts>, DbError> {
+    let rows = sqlx::query!(
+        r#"select day as "day!", target as "target!", kind as "kind!",
+                  privacy_mode as "privacy_mode!", rows as "rows!", submissions as "submissions!"
+           from v_feedback_counts where day >= date_trunc('day', $1::timestamptz)
+           order by day, target, kind, privacy_mode"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| FeedbackCounts {
+            day: r.day,
+            target: r.target,
+            kind: r.kind,
+            privacy_mode: r.privacy_mode,
+            rows: r.rows,
+            submissions: r.submissions,
+        })
+        .collect())
+}
+
+/// A tester's note with what it was about, never with the question.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FeedbackNote {
+    /// When it was sent.
+    pub created_at: DateTime<Utc>,
+    /// `excerpt` or `summary`.
+    pub target: String,
+    /// The reasons sent with it.
+    pub reasons: Vec<String>,
+    /// The note, with personal details removed.
+    pub note: String,
+}
+
+/// Notes since `since`, through `feedback_notes()`.
+pub async fn feedback_notes(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> Result<Vec<FeedbackNote>, DbError> {
+    let rows = sqlx::query!(
+        r#"select created_at as "created_at!", target as "target!", reasons as "reasons!",
+                  note as "note!"
+           from feedback_notes($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| FeedbackNote {
+            created_at: r.created_at,
+            target: r.target,
+            reasons: r.reasons,
+            note: r.note,
+        })
+        .collect())
+}

@@ -321,8 +321,8 @@ async fn source_links_follow_who_made_the_transcript() {
     assert!(page.contains("watch?v=vid1&#38;t=123s"), "{page}");
     assert!(page.contains("Listen at 2:05 (opens the source in a new tab)"));
     assert!(page.contains(&format!(
-        "href=\"/talk/{}/transcript#p0\">Read our transcript (made by machine, may contain \
-         errors)</a>",
+        "href=\"/talk/{}/transcript#p0\" aria-label=\"Read our transcript (made by machine, may \
+         contain errors)\">Read</a>",
         fx.ada_talk
     )));
     // Ben's source transcript: the talk page with a text fragment, no player time, and no link
@@ -334,7 +334,7 @@ async fn source_links_follow_who_made_the_transcript() {
         "Read the talk&#39;s transcript at South Fixture Zen Center (opens their page in a new \
          tab)"
     ));
-    assert!(page.contains("(starts at 2:05)"));
+    assert!(page.contains("<li class=\"muted small\">starts at 2:05</li>"));
     assert!(!page.contains(&format!("/talk/{}/transcript", fx.ben_talk)));
 }
 

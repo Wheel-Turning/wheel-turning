@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into feedback (answer_id, tester_id, target, passage_id, submission_id, kind, note)\n         select $1, $2, $3, $4, s.id, k, n\n         from (select gen_random_uuid() as id) s,\n              unnest($5::text[], $6::text[]) as u(k, n)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d8b9dfd443e3c884f9efc1f53128e857179af917a8d601a3ff9a7652953192f"
+}

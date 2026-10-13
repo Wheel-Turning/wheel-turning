@@ -1,0 +1,44 @@
+---
+source: crates/wt-api/tests/pages.rs
+expression: fragment
+---
+<ul class="excerpt-links">
+      <li><a href="https://www.youtube.com/watch?v=vid1&#38;t=63s" target="_blank" rel="noopener noreferrer" aria-label="Listen at 1:05 (opens the source in a new tab)">Listen</a></li>
+      
+      <li><a href="/talk/[id]/transcript#p0" aria-label="Read our transcript (made by machine, may contain errors)">Read</a></li>
+      <li class="cite"><details>
+        <summary aria-label="Cite this excerpt">Cite</summary>
+        <div class="cite-body">
+          <p class="mla" id="cite-p1">Ada Fixture. &#34;On anger.&#34; Dharma talk. <i>YouTube</i>, North Fixture Zendo, example.invalid/vid1. Accessed [accessed].</p>
+          <button type="button" class="small" data-copy="cite-p1" hidden>Copy citation</button>
+          <span class="copy-status small" role="status" aria-live="polite"></span>
+        </div>
+      </details></li>
+      
+      <li><a href="/rights?excerpt=[id]#request" aria-label="Report this excerpt">Report</a></li>
+    </ul>
+    <p class="credit">Talk by Ada Fixture, North Fixture Zendo. Used with permission of Ada Fixture.</p>
+    
+    <details class="fb" id="fb-p1">
+      <summary>Feedback on excerpt 1</summary>
+      <form method="post" action="/a/[id]/feedback" data-feedback>
+        <input type="hidden" name="csrf" value="[csrf]">
+        <input type="hidden" name="target" value="excerpt">
+        <input type="hidden" name="passage" value="[id]">
+        <input type="hidden" name="n" value="1">
+        <fieldset>
+          <legend>What do you think of this excerpt? Choose any that apply.</legend>
+          <div class="check"><input type="checkbox" id="f1-good" name="reason" value="good"><label for="f1-good">Helpful</label></div>
+          <div class="check"><input type="checkbox" id="f1-not_relevant" name="reason" value="not_relevant"><label for="f1-not_relevant">Not relevant to my question</label></div>
+          <div class="check"><input type="checkbox" id="f1-out_of_context" name="reason" value="out_of_context"><label for="f1-out_of_context">Cut off or missing its context</label></div>
+          <div class="check"><input type="checkbox" id="f1-not_faithful" name="reason" value="not_faithful"><label for="f1-not_faithful">Words look wrong (a transcription error)</label></div>
+          <div class="check"><input type="checkbox" id="f1-wrong_details" name="reason" value="wrong_details"><label for="f1-wrong_details">Wrong teacher, talk or date</label></div>
+          <div class="check"><input type="checkbox" id="f1-unclear" name="reason" value="unclear"><label for="f1-unclear">Hard to follow</label></div>
+          
+        </fieldset>
+        <label for="f1-note">Anything else? (optional)</label>
+        <textarea id="f1-note" name="note" rows="2" maxlength="1000" aria-describedby="f1-help"></textarea>
+        <p id="f1-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
+        <button type="submit" class="secondary">Send feedback</button>
+        <p class="fb-status" role="status" aria-live="polite"></p>
+      </form>
