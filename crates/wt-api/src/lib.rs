@@ -12,6 +12,7 @@ pub mod chrome;
 pub mod excerpt;
 pub mod limits;
 pub mod privacy;
+pub mod progress;
 pub mod rights;
 pub mod sensitive;
 pub mod session;
@@ -79,6 +80,8 @@ pub struct Site {
     /// `WT_SITE_DANA_URL`: the site's own giving page, for the separate site line. Without it
     /// the panel offers no site line.
     pub site_dana_url: Option<String>,
+    /// Passages-searched counts for the live progress display (Spec 06).
+    pub scope_sizes: Arc<progress::ScopeSizes>,
 }
 
 /// The rate limits (Spec 06): asks per tester, and the public forms per address.
@@ -123,6 +126,7 @@ impl Site {
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
             site_dana_url: None,
+            scope_sizes: Arc::default(),
         }
     }
 
@@ -172,6 +176,7 @@ pub fn router(state: AppState) -> Router {
         .route("/favicon.ico", get(chrome::favicon_ico))
         .route("/static/dana.js", get(dana_script))
         .route("/static/references.js", get(references_script))
+        .route("/static/progress.js", get(progress_script))
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
@@ -269,6 +274,13 @@ async fn references_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("../static/references.js"),
+    )
+}
+
+async fn progress_script() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../static/progress.js"),
     )
 }
 
@@ -562,12 +574,26 @@ struct AskForm {
 }
 
 /// `POST /ask`: runs the query path, persists the answer and its log row together, and
-/// redirects to the permalink.
+/// redirects to the permalink; or, for the progress script, streams the same run (Spec 06,
+/// Live progress while a question runs).
 async fn ask(
     State(state): State<AppState>,
     s: Session,
     headers: HeaderMap,
     Form(form): Form<AskForm>,
+) -> Response {
+    if !progress::wants_stream(&headers) {
+        return ask_with(&state, &s, &headers, form, &progress::Sink::silent()).await;
+    }
+    progress::stream(move |sink| async move { ask_with(&state, &s, &headers, form, &sink).await })
+}
+
+async fn ask_with(
+    state: &AppState,
+    s: &Session,
+    headers: &HeaderMap,
+    form: AskForm,
+    sink: &progress::Sink,
 ) -> Response {
     let site = &state.site;
     if !s.csrf_ok(&site.keys, &form.csrf) {
@@ -576,12 +602,12 @@ async fn ask(
     if let Err(wait) = site.limits.ask.check(&s.tester.to_string()) {
         // The limit never stands between an acute question and the notice.
         if site.sensitivity.rules_level(&form.q) == Level::Acute {
-            return acute(&state, &s, std::time::Instant::now()).await;
+            return acute(state, s, std::time::Instant::now()).await;
         }
         return too_many(wait, "You have asked a lot of questions this hour.");
     }
     let Ok(text) = query::normalize(&form.q) else {
-        let switch = match privacy::switch(&state.pool, &site.privacy, &s, &headers, "home").await {
+        let switch = match privacy::switch(&state.pool, &site.privacy, s, headers, "home").await {
             Ok(sw) => sw,
             Err(e) => return server_error("loading the privacy choice", &e),
         };
@@ -598,6 +624,7 @@ async fn ask(
             },
         );
     };
+    sink.stage(progress::Stage::Reading);
     // Spec 05: never part of ranking. The triage gate starts first and runs alongside the
     // embedding check and search; an acute rule match needs nothing else.
     let started = std::time::Instant::now();
@@ -634,16 +661,16 @@ async fn ask(
             gate.abort();
         }
         tally(Triaged::not_run(), Level::Acute).await;
-        return acute(&state, &s, started).await;
+        return acute(state, s, started).await;
     }
     let framing = ask::Framing {
         level: sensitive.level,
         vector: sensitive.vector.clone(),
         curated: false,
-        gpc: privacy::gpc(&headers),
+        gpc: privacy::gpc(headers),
         anyway: form.anyway.is_some(),
     };
-    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate).await {
+    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink).await {
         Ok(ask::Gated::Answered(asked)) => {
             tally(asked.triaged, asked.level).await;
             Redirect::to(&format!("/a/{}", asked.answer_id)).into_response()
@@ -655,9 +682,9 @@ async fn ask(
             };
             tally(triaged, level).await;
             match stop {
-                ask::Stop::CountsOnly(Level::Acute) => acute_page(&state, &s),
-                ask::Stop::CountsOnly(_) => out_of_scope_page(&state, &s),
-                ask::Stop::Unrelated => unrelated_page(&state, &s, text),
+                ask::Stop::CountsOnly(Level::Acute) => acute_page(state, s),
+                ask::Stop::CountsOnly(_) => out_of_scope_page(state, s),
+                ask::Stop::Unrelated => unrelated_page(state, s, text),
             }
         }
         Err(e) => server_error("answering", &e),
@@ -689,6 +716,21 @@ async fn ask_curated(
     headers: HeaderMap,
     Form(form): Form<CsrfForm>,
 ) -> Response {
+    if !progress::wants_stream(&headers) {
+        return ask_curated_with(&state, &s, &headers, &form, &progress::Sink::silent()).await;
+    }
+    progress::stream(move |sink| async move {
+        ask_curated_with(&state, &s, &headers, &form, &sink).await
+    })
+}
+
+async fn ask_curated_with(
+    state: &AppState,
+    s: &Session,
+    headers: &HeaderMap,
+    form: &CsrfForm,
+    sink: &progress::Sink,
+) -> Response {
     let site = &state.site;
     if !s.csrf_ok(&site.keys, &form.csrf) {
         return csrf_refused();
@@ -700,11 +742,12 @@ async fn ask_curated(
         level: Level::Distress,
         vector: None,
         curated: true,
-        gpc: privacy::gpc(&headers),
+        gpc: privacy::gpc(headers),
         anyway: false,
     };
     let text = site.sensitivity.curated_query();
-    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None).await)
+    sink.stage(progress::Stage::Reading);
+    answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None, sink).await)
 }
 
 #[derive(Template)]

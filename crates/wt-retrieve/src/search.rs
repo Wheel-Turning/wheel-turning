@@ -2,7 +2,7 @@
 //! `servable_passage`, and the student-question search `servable_student_question`, and nothing
 //! else (CLAUDE.md rule 3).
 
-use sqlx::PgConnection;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 use wt_core::ids::{PassageId, TalkId, TeacherId};
 
@@ -169,6 +169,18 @@ pub struct Candidate {
     pub start_ms: i32,
     /// Its stored embedding.
     pub embedding: Vec<f32>,
+}
+
+/// How many passages a search covers: every servable passage, or the named teacher's. Only the
+/// live progress display reads it (Spec 06, Live progress while a question runs).
+pub async fn scope_size(pool: &PgPool, teacher: Option<TeacherId>) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        r#"select count(*) as "n!" from servable_passage
+           where $1::uuid is null or teacher_id = $1"#,
+        teacher.map(|t| t.as_uuid())
+    )
+    .fetch_one(pool)
+    .await
 }
 
 /// Loads candidates by id. A passage that stopped serving since the search is simply absent.

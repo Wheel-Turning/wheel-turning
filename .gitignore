@@ -24,6 +24,11 @@ tests/deny-fixture/Cargo.lock
 *.webm
 *.mp4
 
+# Accessibility checks (Spec 06): Playwright and its output
+tests/a11y/node_modules/
+tests/a11y/test-results/
+tests/a11y/paths.json
+
 # Python
 __pycache__/
 .venv/

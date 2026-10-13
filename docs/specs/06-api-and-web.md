@@ -6,7 +6,7 @@ Implements the web parts of M5 and M7: the Axum application in `wt-api`, server-
 | --- | --- | --- | --- |
 | `GET /healthz` | None | Liveness and a database check | This spec |
 | `GET /robots.txt` | None | Disallows everything | This spec |
-| `GET /static/*` | None | Stylesheet, vendored htmx, the menu script and `brand/*` | This spec |
+| `GET /static/*` | None | Stylesheet, vendored htmx, the menu, dana and progress scripts and `brand/*` | This spec |
 | `GET /join/{token}` | None | Exchanges an invite token for a session cookie and redirects to `/` | This spec |
 | `GET /rights` | None | The Rights and removal page: the plain promise, the status of every source, and the removal form. An optional `?excerpt=<id>` prefills the form | Spec 08 |
 | `POST /rights/request` | None | Stores a removal or report request. Rate limited to 5 per hour per address, with a honeypot field | Spec 08 |
@@ -52,6 +52,7 @@ The answer page renders `AnswerView` from Spec 05 in this order. Templates live 
 7. A References list in MLA style (Spec 05, Answer assembly, rule 5), closed by default, with the texts' confidence badges in words and the word "unresolved" shown as is.
 8. The dana panel. The donor enters a gift total and an optional site amount in dollars and presses "Show split". The htmx fragment lists each eligible sangha with its amount and a link to open that sangha's giving page, then the site line on its own row, then total outlay. It states that no money passes through this site and that each link opens the sangha's own page. With no eligible recipient it says so plainly. Without JavaScript the form posts and the page reloads with the split shown.
 9. A "Flag this query" button that states, before and after pressing, that a flagged query can be read by the founder.
+10. A "Return to the top" link closing the answer, which leads to the top of the page (`#top`, the `body`), so the next Tab reaches the skip link and the header's question field. Owner's decision of October 12, 2026 (Spec 00, post-beta item 16).
 
 Rendering rules:
 
@@ -61,7 +62,20 @@ Rendering rules:
 - Durations and offsets render as `h:mm:ss`.
 - Error pages are plain and friendly and never show stack traces or database errors.
 - The layout is single column, mobile first, with visible focus outlines, semantic headings, and text contrast of at least WCAG AA. All controls work from the keyboard.
-- A loading indicator shows while `/ask` runs, since a query takes several seconds.
+- A question shows its live progress while it runs (Live progress while a question runs, below), since a query takes 10 to 15 seconds.
+
+## Live progress while a question runs
+
+Owner's decision of October 12, 2026: moved before beta from Spec 00's post-beta candidates (item 3). The display reports what the query path does and changes nothing it computes or stores.
+
+1. Every form that asks a question (the home box, the header field, the menu panel, the examples, "Search the talks anyway" and the acute notice's "Show teachings on facing difficult feelings") carries `data-progress`. The script `static/progress.js` takes the submit and posts the same form with `Accept: text/event-stream`. Without the script the form posts as before: the browser waits and `POST /ask` answers `303` to the permalink.
+2. With that header, `POST /ask` and `POST /ask/curated` answer `200` with `text/event-stream` and `Cache-Control: no-store`, and run exactly the path of a plain post: the same checks, rate limit, triage gate and stored rows. The question runs to the end even if the reader leaves, as a plain post's would. The stream carries server-sent events:
+   - `stage`, `{"stage": key}`, as each stage starts: `reading` (Reading the question: the sensitivity check, alias detection and the embedding), `searching` (Searching the talks: full-text, vector and question search and fusion), `weighing` (Weighing excerpts: the reranker), `choosing` (Choosing excerpts: selection, reading the passages and cutting their excerpts) and `writing` (Writing the summary), which is sent only when synthesis runs.
+   - `count`, `{"name": name, "value": n}`: `searched` (passages searched: the servable passages in the search's scope, the named teacher's own in named mode), `candidates` (the fused list read back), `shortlisted` (candidates at or above the relevance threshold) and `selected` (passages chosen). Each count but `searched` is sent before the stage that follows it starts; `searched` is sent when it is read, which is usually before the search ends.
+   - One closing event: `done`, `{"url": "/a/<id>"}`, or `page`, `{"html": ...}`, which carries the whole page a plain post would have shown: a sensitive notice, the outside-these-talks page, the friendly `429`, the short-question message or an error page.
+3. The passages-searched count is read through `servable_passage`, alongside the query path so it never delays it, and cached for five minutes per scope. It is the only query the display adds, and only a streamed ask makes it.
+4. The script replaces the main content with a progress section: an `h1`, "Finding excerpts for your question", which takes focus; the question as asked; and an ordered list of the five stages, each with its state in words (Waiting, Now, Done, or Not needed for a summary that does not run) and its counts in words beside it ("14,203 passages searched", "120 candidates", "34 shortlisted", "8 selected"). The current stage carries `aria-current="step"`. Nothing moves: no spinner and no animation, with or without reduced motion. The copy lives in a `<template>` in the base template, not in the script.
+5. A polite live region announces each stage once, as it starts, with the counts the stage before it produced, for example "Weighing excerpts. 14,203 passages searched, 120 candidates." On `done` it announces "Opening the answer" and the script loads the permalink. On `page` the script writes the returned page into the document. If the stream breaks, the section says so in words and offers "Try again", which posts the form without the script.
 
 ## Accessibility standard
 
@@ -108,7 +122,18 @@ How the requirement areas of the draft shape the interface:
 - Help and feedback. About, Rights and removal and Accessibility are linked in the same order in the footer of every page. Feedback exists at every excerpt (Good, Not faithful, Not relevant, Report this excerpt), on every query (Flag this query) and for accessibility itself.
 - User control. The site respects `prefers-reduced-motion`, forced colors, user text spacing and user stylesheets. Changes that htmx makes without a page load are announced: the dana split and feedback status appear in a polite live region and focus moves to the new heading when the content is a result the user asked for. Links to source media say what they open, for example "Listen at 12:34 (opens the source video in a new tab)".
 
-Testing has two parts. Every pull request runs `axe-core` with the WCAG 2.2 AA rule sets, an HTML validator, and the contrast, target size, link name and language tests through Playwright at 360, 768 and 1280 pixels on home, answer, text unit, rights, about and accessibility. Every release also gets a manual pass: keyboard only, NVDA with Firefox on Windows, VoiceOver with Safari on iOS and macOS, TalkBack with Chrome on Android, 200 percent text, 400 percent zoom, forced colors, a text spacing override, reduced motion and no JavaScript. Results go in the register. The owner develops on Windows, so a tester with an iPhone or a Mac does the VoiceOver passes, and the register records who ran each pass.
+Testing has two parts. Every pull request runs the checks in Accessibility checks in CI, below. Every release also gets a manual pass: keyboard only, NVDA with Firefox on Windows, VoiceOver with Safari on iOS and macOS, TalkBack with Chrome on Android, 200 percent text, 400 percent zoom, forced colors, a text spacing override, reduced motion and no JavaScript. Results go in the register. The owner develops on Windows, so a tester with an iPhone or a Mac does the VoiceOver passes, and the register records who ran each pass.
+
+### Accessibility checks in CI
+
+Owner's decision of October 12, 2026: the automated checks of Spec 00's post-beta item 15 run before beta. They need a browser, and `cargo test` makes no network calls and runs no browser (rule 9), so they are their own CI job, `a11y`, required by `ci ok`:
+
+1. The job starts a Postgres service, migrates it, and runs `cargo run -p wt-api --example a11y_fixture`, which seeds synthetic teachers, talks and passages, starts the app with the fake embedder and a fake language model, asks one question to make an answer with a verified theme, and writes the paths the browser visits to a JSON file. Nothing leaves the runner except the job's own package and browser downloads.
+2. Playwright with Chromium and `@axe-core/playwright`, pinned in `tests/a11y/package-lock.json`, visits home, answer, talk card, transcript, rights, about and accessibility, and the progress section while a question runs, at 360, 768 and 1280 pixels wide. The text unit page joins the list when its route exists.
+3. On every page and width: `axe-core` with the WCAG 2.0, 2.1 and 2.2 A and AA tags reports no violation, which covers contrast, link and control names, language and landmarks; every control and every link that is not inside a sentence has a target of at least 44 by 44 pixels (the site's rule, stricter than criterion 2.5.8, which exempts inline links); at 320 by 256 pixels, which is 1280 at 400 percent zoom, the page does not scroll sideways, and a wide table may scroll inside its own container; and every status and confidence badge (`.badge`) reads as one of its words (resolved, probable, unresolved, verified, unverified).
+4. A failure prints each violation with its rule, page, width and element, and fails the job.
+
+The HTML validator that the testing paragraph above calls for is not in the job yet. The manual passes are not automated and stay with the first cohort's screen-reader and keyboard-only testers.
 
 Migration `0017_accessibility_report.sql`:
 
@@ -283,11 +308,11 @@ Acceptance criteria for texts, rights and design:
 - [ ] "Report this excerpt" opens `/rights?excerpt=<id>` with the excerpt prefilled for both talk passages and text units, and the form stores a request. (Talk passages and the form: `wt-api/tests/site.rs` and `tests/pages.rs`. Text units wait for the answer page's "From the texts" section; the form already records a reported unit's id.)
 - [x] `GET /rights` lists each source from `v_source_rights` with its plain-language status (used on the project's own decision with permission requested on a date, used with permission recorded on a date, or removed at the rights holder's request) and uses no permission language for a mandate. (Moved from Spec 08, decision of October 5, 2026. `wt-api/tests/site.rs`; a source switched off for any other reason reads "Not shown at present.", and a mandate with no request sent yet reads "Permission not yet requested.")
 - [ ] A rendered mandated talk passage reads "Talk by" the teacher and sangha with the source link and the report link, and the words permission and licensed are absent; after a grant, a passage or text unit reads "Used with permission of" the grantor. (Moved from Spec 03, Mandated talks, and Spec 08, Rights lifecycle, decision of October 5, 2026.)
-- [ ] At 360px there is no horizontal scroll and the Menu button shows a text label. (Checked by hand in a browser on October 11, 2026, at 375px: no sideways scroll, the panel opens, Esc closes it and focus returns to Menu. Waits for a browser in CI.) The panel opens from the button, closes from the Close button, the backdrop and Esc, and returns focus to the button. From 900px the links show inline with no Menu button.
+- [x] At 360px there is no horizontal scroll and the Menu button shows a text label. The panel opens from the button, closes from the Close button, the backdrop and Esc, and returns focus to the button. From 900px the links show inline with no Menu button. (`tests/a11y/a11y.spec.js` in the `a11y` CI job; reflow is checked at 320px, narrower than 360.)
 - [x] The "Skip to main content" link is the first tab stop, and a test asserts that the viewport tag contains neither `user-scalable=no` nor `maximum-scale`. (`wt-api/tests/site.rs` and `tests/static_checks.rs`.)
-- [ ] Header links, buttons and feedback buttons have targets of at least 44px.
-- [ ] An automated accessibility run passes WCAG AA on home, answer, text unit, rights and about at 360px and at 1280px.
-- [ ] Every page works without JavaScript: the menu opens through `<details>`, a question posts, and the dana split uses its fallback.
+- [x] Header links, buttons and feedback buttons have targets of at least 44px. (The `a11y` CI job, `tests/a11y/a11y.spec.js`, checks every control and every link not inside a sentence on every page at 360, 768 and 1280 pixels.)
+- [ ] An automated accessibility run passes WCAG AA on home, answer, text unit, rights and about at 360px and at 1280px. (The `a11y` CI job passes on home, answer, talk card, transcript, rights, about, accessibility, the progress section and the acute notice at 360, 768 and 1280 pixels; the text unit route does not exist yet.)
+- [x] Every page works without JavaScript: the menu opens through `<details>`, a question posts, and the dana split uses its fallback. (`tests/a11y/a11y.spec.js`, in a browser with JavaScript off.)
 - [x] No template or stylesheet references an external host or font, checked by a grep test. (`wt-api/tests/static_checks.rs`.)
 - [x] The footer appears on every page, and its last line contains no copyright claim over excerpts. (`wt-api/tests/site.rs`.)
 - [x] With `prefers-reduced-motion`, the menu does not animate. (`wt-api/tests/static_checks.rs` checks the stylesheet rule.)
@@ -299,8 +324,8 @@ Acceptance criteria for the accessibility standard and the logo:
 - [x] Where WCAG 3.0 and WCAG 2.2 differ, the stricter outcome is applied and the difference is recorded in the register. (Each row whose value the draft leaves open names the WCAG 2.2 criterion applied.)
 - [x] `GET /accessibility` and `POST /accessibility/report` work with no session, the report form stores a row, and the statement lists exactly the statuses in the register. (`wt-api/tests/site.rs`; the statement is built from the register at compile time.)
 - [ ] Every page has one `h1`, a unique title, the header, navigation, main and footer landmarks, and `lang="en"`. (Done for home, About, Rights, Accessibility and the error page in `wt-api/tests/site.rs`; Pali, Sanskrit and Japanese `lang` attributes are not yet set.) Pali, Sanskrit and Japanese terms carry a `lang` attribute where the source gives one, and diacritics are preserved in rendered text.
-- [ ] Status and confidence badges carry words, and a grayscale screenshot test shows no information lost.
-- [ ] At 320 CSS pixels and at 400 percent zoom, no page needs two-dimensional scrolling. With 200 percent text and a text spacing override, no content or function is lost.
+- [ ] Status and confidence badges carry words, and a grayscale screenshot test shows no information lost. (References show a text's confidence in words, as "(citation resolved)", and the `a11y` job checks that any `.badge` reads as one of its words; the grayscale screenshot test is not written.)
+- [ ] At 320 CSS pixels and at 400 percent zoom, no page needs two-dimensional scrolling. With 200 percent text and a text spacing override, no content or function is lost. (The first sentence is checked by the `a11y` job at 320 by 256 pixels on every page; the text size and spacing checks are not automated yet.)
 - [ ] Dynamic updates are announced: the dana split and feedback status appear in a polite live region, and focus moves to the result heading when the user asked for the result.
 - [x] The dana panel preselects nothing and states, before any link opens, that no money passes through the site. (The amount fields start empty, and Spec 09's introduction sits above the form.)
 - [ ] Source links name what they open, for example "Listen at 12:34 (opens the source video in a new tab)".
@@ -308,6 +333,14 @@ Acceptance criteria for the accessibility standard and the logo:
 - [x] The header mark is inline, hidden from assistive technology, named by the adjacent text, stays visible in forced colors mode, and the footer mark follows `--on-dark`. (`wt-api/tests/site.rs` for the markup; the mark draws in `currentColor`, which forced colors map to the text color. The source files are `docs/brand/`, since `brand/source/` and `Logo.zip` are not in the repository.)
 - [ ] `GET /favicon.ico` works with no session, the head carries the SVG, ICO and 180px icon links, and the served SVG files carry no `<metadata>` element while the originals in `brand/source/` are unchanged.
 - [ ] The first tester cohort includes at least two people who use a screen reader and one who navigates by keyboard only, and each of their findings is fixed or recorded in the register before any wider launch.
+
+Acceptance criteria for live progress and the return link (owner's decision of October 12, 2026):
+
+- [x] A streamed ask sends `reading`, `searching`, `weighing`, `choosing` and, when synthesis runs, `writing`, with the candidates, shortlisted and selected counts before the stage each one leads into and the passages-searched count when read, and closes with `done` naming the permalink. (`wt-api/tests/progress.rs`.)
+- [x] A streamed ask stores exactly what a plain post stores, and one that is refused or fails validation closes with `page` carrying the plain post's page and stores nothing. (`wt-api/tests/progress.rs`.)
+- [x] Without the script the form posts and redirects as before. (`wt-api/tests/pages.rs`, and `tests/a11y/a11y.spec.js` with JavaScript off.)
+- [x] The progress section's heading takes focus, each stage is announced once in the polite live region with its counts, states are in words, nothing animates, and axe and the target check pass on it at 360 and 1280 pixels. (`tests/a11y/a11y.spec.js`.)
+- [x] The answer page closes with "Return to the top", which leads to the top of the page, and the next Tab reaches the skip link. (`wt-api/tests/progress.rs` and `tests/a11y/a11y.spec.js`.)
 
 Acceptance criteria for question privacy:
 
@@ -332,7 +365,7 @@ The `out_of_scope` page and the `unrelated` page (Spec 05, Sensitive questions, 
 
 Acceptance criteria:
 
-- [ ] The acute page has the notice as its `h1`, focus lands on it, and axe passes with no giving panel or feedback controls present.
+- [x] The acute page has the notice as its `h1`, focus lands on it, and axe passes with no giving panel or feedback controls present. (`tests/a11y/a11y.spec.js`, reached through the progress stream.)
 - [x] The response carries `Cache-Control: no-store`, and no permalink or `answer` row is created.
 - [x] Banners render inside the main landmark above the question and cannot be dismissed.
 - [x] The `tel:` and `sms:` links and the two web links exist and are named in the page text.

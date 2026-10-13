@@ -1,0 +1,12 @@
+{
+  "name": "wt-a11y",
+  "private": true,
+  "description": "Spec 06, Accessibility checks in CI: axe, target size, reflow and badge checks against the a11y_fixture server.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0"
+  }
+}
