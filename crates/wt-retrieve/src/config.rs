@@ -56,7 +56,7 @@ impl Default for SearchConfig {
             question_top_k: 10,
             rrf_k: 60.0,
             fuse_top_k: 40,
-            hnsw_ef_search: 100,
+            hnsw_ef_search: 1000,
             rerank_min_score: 0.30,
             rerank_timeout_s: 10,
             rerank_sessions: 1,
