@@ -90,7 +90,8 @@ blockquote { margin: 0; padding: 0 0 0 1rem; border-left: 3px solid var(--ink); 
 .references summary h2 { display: inline; }
 .references-list li { margin-bottom: 0.75rem; }
 /* Links that stand alone, not inside a sentence, get 44px targets (Spec 06, Input and operation). */
-.links a, .support-links a { display: inline-flex; align-items: center; min-height: 44px; }
+.links a, .support-links a, .meta a { display: inline-flex; align-items: center; min-height: 44px; }
+.references summary { min-height: 44px; padding: 0.35rem 0; cursor: pointer; }
 .credit { font-size: 0.95rem; margin: 0.25rem 0; }
 .feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .dated li { margin-bottom: 0.75rem; }
