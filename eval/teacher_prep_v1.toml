@@ -1,4 +1,4 @@
-# Teacher-prep question set, version 1 (Spec 07, Evaluation harness): DRAFTS.
+# Teacher-prep question set, version 1 (Spec 07, Evaluation harness): 18 questions.
 #
 # Owner's request of October 13, 2026: questions a Zen teacher might ask while researching their
 # own dharma talk, to test whether the site helps with preparation as well as practice: how
@@ -6,11 +6,12 @@
 # how a teaching was explained to beginners and to long-time students, which texts teachers
 # cite on a topic, and where teachers differ.
 #
-# Claude drafted these on October 13, 2026. Each carries the tags "draft" and "teacher_prep":
-# the owner must approve or replace them before their results count, and `wt eval report`
-# reports draft questions apart and leaves them out of every verdict. To approve, remove the
-# "draft" tag and load the file as a new version (`--version 2`), since a loaded set never
-# changes.
+# Claude drafted these on October 13, 2026, tagged "draft" and "teacher_prep".
+#
+# APPROVED by the owner as written on October 13, 2026: the "draft" tag is gone and the
+# questions are otherwise unchanged, so all 18 count toward the verdicts. No draft version was
+# loaded, so the approved set is teacher_prep@1. `wt eval load` refuses a version already loaded
+# with different questions; if @1 turns out to hold the drafts, load this as --version 2.
 #
 # Load:  wt eval load --file eval/teacher_prep_v1.toml --name teacher_prep --version 1
 
@@ -18,80 +19,80 @@
 
 [[question]]
 text = "How have teachers framed the koan of Joshu's dog, Mu, for a group that has never worked with koans?"
-tags = ["teacher_prep", "koans", "framing", "draft"]
+tags = ["teacher_prep", "koans", "framing"]
 
 [[question]]
 text = "How do teachers present Hyakujo and the fox in a talk about cause and effect?"
-tags = ["teacher_prep", "koans", "framing", "draft"]
+tags = ["teacher_prep", "koans", "framing"]
 
 [[question]]
 text = "How have teachers opened up Dogen's line about the moon reflected in a drop of water?"
-tags = ["teacher_prep", "dogen", "framing", "draft"]
+tags = ["teacher_prep", "dogen", "framing"]
 
 [[question]]
 text = "How do teachers explain Dogen's teaching that practice and enlightenment are one?"
-tags = ["teacher_prep", "dogen", "framing", "draft"]
+tags = ["teacher_prep", "dogen", "framing"]
 
 # Stories and images for a theme
 
 [[question]]
 text = "What stories or images have teachers used to talk about impermanence?"
-tags = ["teacher_prep", "stories", "impermanence", "draft"]
+tags = ["teacher_prep", "stories", "impermanence"]
 
 [[question]]
 text = "What personal stories do teachers tell when they talk about anger in their own practice?"
-tags = ["teacher_prep", "stories", "anger", "draft"]
+tags = ["teacher_prep", "stories", "anger"]
 
 [[question]]
 text = "Which images from nature have teachers used to describe zazen?"
-tags = ["teacher_prep", "stories", "zazen", "draft"]
+tags = ["teacher_prep", "stories", "zazen"]
 
 [[question]]
 text = "How do teachers use the story of the Buddha touching the earth in their talks?"
-tags = ["teacher_prep", "stories", "draft"]
+tags = ["teacher_prep", "stories"]
 
 # Beginners and long-time students
 
 [[question]]
 text = "How do teachers explain emptiness to newcomers, compared with how they discuss it in sesshin?"
-tags = ["teacher_prep", "audience", "heart_sutra", "draft"]
+tags = ["teacher_prep", "audience", "heart_sutra"]
 
 [[question]]
 text = "How do teachers introduce the precepts to people who are thinking about taking them?"
-tags = ["teacher_prep", "audience", "precepts", "draft"]
+tags = ["teacher_prep", "audience", "precepts"]
 
 [[question]]
 text = "What do teachers say to long-time students who feel their practice has gone stale?"
-tags = ["teacher_prep", "audience", "draft"]
+tags = ["teacher_prep", "audience"]
 
 # Which texts teachers cite
 
 [[question]]
 text = "Which texts do teachers cite when they speak about the bodhisattva vows?"
-tags = ["teacher_prep", "texts", "vows", "draft"]
+tags = ["teacher_prep", "texts", "vows"]
 
 [[question]]
 text = "What passages from the Genjokoan do teachers quote most when they talk about daily life?"
-tags = ["teacher_prep", "texts", "genjokoan", "draft"]
+tags = ["teacher_prep", "texts", "genjokoan"]
 
 [[question]]
 text = "Which sutras or poems do teachers bring in for a talk on grief and loss?"
-tags = ["teacher_prep", "texts", "grief", "draft"]
+tags = ["teacher_prep", "texts", "grief"]
 
 [[question]]
 text = "How do teachers use the Sandokai, the identity of relative and absolute, in their talks?"
-tags = ["teacher_prep", "texts", "draft"]
+tags = ["teacher_prep", "texts"]
 
 # Contrasting views
 
 [[question]]
 text = "Where do teachers disagree about whether zazen should have a goal?"
-tags = ["teacher_prep", "contrast", "zazen", "draft"]
+tags = ["teacher_prep", "contrast", "zazen"]
 
 [[question]]
 text = "How do different teachers relate shikantaza and koan practice to each other?"
-tags = ["teacher_prep", "contrast", "koans", "draft"]
+tags = ["teacher_prep", "contrast", "koans"]
 
 [[question]]
 text = "How do teachers differ on whether Zen practice should engage with social action?"
-tags = ["teacher_prep", "contrast", "discrimination", "draft"]
+tags = ["teacher_prep", "contrast", "discrimination"]

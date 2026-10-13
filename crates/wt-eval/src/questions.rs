@@ -262,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn the_teacher_prep_set_is_all_drafts_until_the_owner_approves_it() {
+    fn the_teacher_prep_set_is_approved_and_tagged() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../eval");
         let qs =
             parse(&std::fs::read_to_string(root.join("teacher_prep_v1.toml")).unwrap_or_default())
@@ -270,7 +270,7 @@ mod tests {
         assert!((15..=20).contains(&qs.len()), "{}", qs.len());
         assert!(
             qs.iter()
-                .all(|q| q.is_draft() && q.tags.iter().any(|t| t == "teacher_prep"))
+                .all(|q| !q.is_draft() && q.tags.iter().any(|t| t == "teacher_prep"))
         );
     }
 }
