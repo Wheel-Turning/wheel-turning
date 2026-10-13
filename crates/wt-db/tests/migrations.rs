@@ -107,6 +107,15 @@ async fn migrations_create_the_spec_objects() {
     );
 }
 
+/// Kind, target, passage, note and whether the row is its own submission.
+type FeedbackRow = (
+    String,
+    String,
+    Option<sqlx::types::Uuid>,
+    Option<String>,
+    bool,
+);
+
 /// Migration 0039 (Spec 06, Logging, rule 4, October 12, 2026): earlier feedback rows kept the
 /// passage id in `note`. Each gets a target and its own submission, and the note is cleared.
 #[tokio::test]
@@ -136,13 +145,7 @@ async fn feedback_targets_move_the_passage_id_out_of_the_note() {
     .await
     .unwrap();
     wt_db::migrate(&pool).await.unwrap();
-    let rows: Vec<(
-        String,
-        String,
-        Option<sqlx::types::Uuid>,
-        Option<String>,
-        bool,
-    )> = sqlx::query_as(
+    let rows: Vec<FeedbackRow> = sqlx::query_as(
         "select kind, target, passage_id, note, submission_id = id from feedback order by kind",
     )
     .fetch_all(&pool)

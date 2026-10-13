@@ -288,7 +288,10 @@ async fn asking_stores_the_answer_and_only_its_owner_can_read_it() {
         page.body.contains("/rights?excerpt="),
         "every passage has Report this excerpt"
     );
-    assert!(page.body.contains(">Report this excerpt</a>"));
+    assert!(
+        page.body
+            .contains("aria-label=\"Report this excerpt\">Report</a>")
+    );
 
     let logged: (i64, i64) = sqlx::query_as(
         "select (select count(*) from query_log), (select count(*) from answer_passage)",
