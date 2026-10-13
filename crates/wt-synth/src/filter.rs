@@ -1,15 +1,12 @@
-//! The deterministic filters (Spec 05, Synthesis and verifier), run in the spec's order before
-//! any verifier call. Each returns the reason a theme is dropped, or `None` to keep it.
+//! The deterministic filters (Spec 05, Summary and verifier), run in the spec's order before
+//! any verifier call. Each returns the reason a sentence is dropped, or `None` to keep it.
 
 use std::collections::BTreeSet;
 
 use crate::DropReason;
 
-/// Most words a theme may have.
-pub const MAX_WORDS: usize = 30;
-
-/// Filter 4: one sentence of at most [`MAX_WORDS`] words.
-pub fn one_sentence(description: &str) -> Option<DropReason> {
+/// Filter 4: one sentence of at most `max_words` words.
+pub fn one_sentence(description: &str, max_words: usize) -> Option<DropReason> {
     let text = description.trim();
     if text.is_empty() {
         return Some(DropReason::NotOneSentence);
@@ -27,7 +24,7 @@ pub fn one_sentence(description: &str) -> Option<DropReason> {
             return Some(DropReason::NotOneSentence);
         }
     }
-    if text.split_whitespace().count() > MAX_WORDS {
+    if text.split_whitespace().count() > max_words {
         return Some(DropReason::TooLong);
     }
     None
@@ -51,18 +48,90 @@ pub fn has_quotation_mark(description: &str) -> bool {
     })
 }
 
-/// Filter 5, second half: the first registry alias the description contains, matched without
-/// regard to case on word boundaries.
-pub fn alias_in<'a>(description: &str, aliases: &'a [String]) -> Option<&'a str> {
-    let words = words(description);
-    aliases.iter().map(String::as_str).find(|alias| {
-        let target = words_of(alias);
-        !target.is_empty() && words.windows(target.len()).any(|w| w == target.as_slice())
-    })
+/// Words in a teacher's alias that are titles, not names, so they never count as naming one.
+const TITLE_WORDS: &[&str] = &[
+    "roshi",
+    "sensei",
+    "osho",
+    "reverend",
+    "rev",
+    "sister",
+    "brother",
+    "father",
+    "mother",
+    "teacher",
+    "dharma",
+    "zenji",
+    "sama",
+    "lama",
+    "ajahn",
+    "bhante",
+    "venerable",
+    "zen",
+];
+
+/// The name words of each alias: words of at least four letters that are not titles,
+/// lowercased, paired with whose they are.
+pub fn name_words<T: Copy>(aliases: &[(T, String)]) -> Vec<(T, String)> {
+    let mut out = Vec::new();
+    for (who, alias) in aliases {
+        for w in words(alias) {
+            if w.chars().count() >= 4 && !TITLE_WORDS.contains(&w.as_str()) {
+                out.push((*who, w));
+            }
+        }
+    }
+    out
 }
 
-fn words_of(text: &str) -> Vec<String> {
-    words(text)
+/// Filter 6, names: a capitalized word of the sentence that is a name word of some teacher none
+/// of whose excerpts is cited. Returns the word.
+pub fn misattributed<T: Copy + PartialEq>(
+    sentence: &str,
+    names: &[(T, String)],
+    cited: &[T],
+) -> Option<String> {
+    sentence
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().next().is_some_and(char::is_uppercase))
+        .find_map(|w| {
+            let lower = w.to_lowercase();
+            let owners: Vec<T> = names
+                .iter()
+                .filter(|(_, n)| *n == lower)
+                .map(|(t, _)| *t)
+                .collect();
+            (!owners.is_empty() && !owners.iter().any(|o| cited.contains(o))).then(|| w.to_owned())
+        })
+}
+
+/// The years the sentence names: four-digit numbers from 1900 to 2099.
+pub fn years(sentence: &str) -> Vec<i32> {
+    sentence
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() == 4 && w.chars().all(|c| c.is_ascii_digit()))
+        .filter_map(|w| w.parse().ok())
+        .filter(|y| (1900..=2099).contains(y))
+        .collect()
+}
+
+/// Filter 7: a word or phrase that states what a teacher believes rather than what a talk says.
+pub fn belief_word(sentence: &str) -> Option<&'static str> {
+    let w = words(sentence);
+    let has = |phrase: &[&str]| {
+        w.windows(phrase.len())
+            .any(|win| win.iter().zip(phrase).all(|(a, b)| a == b))
+    };
+    [
+        &["believes"][..],
+        &["believe"],
+        &["thinks"],
+        &["holds", "that"],
+        &["is", "convinced"],
+    ]
+    .into_iter()
+    .find(|p| has(p))
+    .and_then(|p| p.first().copied())
 }
 
 /// Lowercased runs of letters and digits.
@@ -208,7 +277,10 @@ const STOPWORDS: &[&str] = &[
     "you",
     "your",
     "yet",
-    // How a theme refers to the passages and to their relation.
+    // How a sentence refers to the passages, the talks and their relation.
+    "agree",
+    "agrees",
+    "alike",
     "another",
     "approach",
     "approaches",
@@ -220,6 +292,10 @@ const STOPWORDS: &[&str] = &[
     "differences",
     "different",
     "differently",
+    "excerpt",
+    "excerpts",
+    "explain",
+    "explains",
     "emphasis",
     "emphasize",
     "emphasizes",
@@ -230,14 +306,23 @@ const STOPWORDS: &[&str] = &[
     "instead",
     "passage",
     "passages",
+    "point",
+    "points",
     "present",
     "presents",
+    "said",
+    "say",
+    "says",
     "see",
     "sees",
     "share",
     "shared",
     "stress",
     "stresses",
+    "talk",
+    "talks",
+    "teacher",
+    "teachers",
     "treat",
     "treats",
     "view",
@@ -260,15 +345,16 @@ fn stem(word: &str) -> String {
     word.to_owned()
 }
 
-/// Filter 5, a third check: a passage label such as "P3" in the sentence. The page numbers
-/// passages differently from the model's refs, so a label would point to the wrong passage.
+/// Filter 5, a third check: an excerpt label such as "E3" (or "P3") in the sentence. The page
+/// numbers excerpts differently from the model's labels, so a label would point to the wrong one.
 pub fn has_passage_label(description: &str) -> bool {
     words(description).iter().any(|w| is_label(w))
 }
 
-/// A passage label such as `p3`, which is not a content word.
+/// A label such as `e3` or `p3`, which is not a content word.
 fn is_label(word: &str) -> bool {
-    word.strip_prefix('p')
+    word.strip_prefix('e')
+        .or_else(|| word.strip_prefix('p'))
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
@@ -281,10 +367,14 @@ fn content_stems(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Filter 6: the share of the description's distinct content words that appear in the union
-/// of its cited passages. A description with no content words scores 0.
-pub fn grounding_ratio(description: &str, passages: &[&str]) -> f32 {
-    let theme: BTreeSet<String> = content_stems(description).into_iter().collect();
+/// Filter 8: the share of the sentence's distinct content words, other than `names`, that
+/// appear in the union of its cited excerpts. A sentence with no content words scores 0.
+pub fn grounding_ratio(description: &str, passages: &[&str], names: &[String]) -> f32 {
+    let kept: Vec<String> = words(description)
+        .into_iter()
+        .filter(|w| !names.contains(w))
+        .collect();
+    let theme: BTreeSet<String> = content_stems(&kept.join(" ")).into_iter().collect();
     if theme.is_empty() {
         return 0.0;
     }
@@ -297,14 +387,22 @@ pub fn grounding_ratio(description: &str, passages: &[&str]) -> f32 {
 mod tests {
     use super::*;
 
+    const MAX: usize = 40;
+
     #[test]
     fn one_sentence_passes_a_single_short_sentence() {
         assert_eq!(
-            one_sentence("Both passages treat judging thoughts as weather to be watched."),
+            one_sentence(
+                "In a 2011 talk, Ada Fixture says judging thoughts are weather to watch.",
+                MAX
+            ),
             None
         );
         assert_eq!(
-            one_sentence("Breath counting, e.g.counting to ten, steadies attention."),
+            one_sentence(
+                "Breath counting, e.g.counting to ten, steadies attention.",
+                MAX
+            ),
             None
         );
     }
@@ -312,17 +410,17 @@ mod tests {
     #[test]
     fn one_sentence_drops_two_sentences_and_long_ones() {
         assert_eq!(
-            one_sentence("Some passages stress posture. Others stress breath."),
+            one_sentence("Some talks stress posture. Others stress breath.", MAX),
             Some(DropReason::NotOneSentence)
         );
         assert_eq!(
-            one_sentence("Posture matters.\nBreath matters"),
+            one_sentence("Posture matters.\nBreath matters", MAX),
             Some(DropReason::NotOneSentence)
         );
-        let long = vec!["word"; MAX_WORDS + 1].join(" ");
-        assert_eq!(one_sentence(&long), Some(DropReason::TooLong));
-        let exact = vec!["word"; MAX_WORDS].join(" ");
-        assert_eq!(one_sentence(&exact), None);
+        let long = vec!["word"; MAX + 1].join(" ");
+        assert_eq!(one_sentence(&long, MAX), Some(DropReason::TooLong));
+        let exact = vec!["word"; MAX].join(" ");
+        assert_eq!(one_sentence(&exact, MAX), None);
     }
 
     #[test]
@@ -339,13 +437,13 @@ mod tests {
     }
 
     #[test]
-    fn passage_labels_are_found_in_the_sentence() {
+    fn excerpt_labels_are_found_in_the_sentence() {
         assert!(has_passage_label(
-            "P1 and P3 both treat doubt as a doorway."
+            "E1 and E3 both treat doubt as a doorway."
         ));
         assert!(has_passage_label("Unlike p12, others stress breath."));
         assert!(!has_passage_label(
-            "Several passages treat doubt as a doorway."
+            "Several talks treat doubt as a doorway."
         ));
         assert!(!has_passage_label(
             "Practice begins at step 1 with posture."
@@ -353,24 +451,65 @@ mod tests {
     }
 
     #[test]
-    fn aliases_match_whole_words_without_case() {
-        let aliases = vec!["Ada Fixture".to_owned(), "Bo".to_owned()];
-        assert_eq!(
-            alias_in("As ada fixture says, sit.", &aliases),
-            Some("Ada Fixture")
+    fn a_name_counts_only_for_a_cited_teacher() {
+        let names = name_words(&[
+            (1, "Ada Fixture".to_owned()),
+            (2, "Bo Lin Roshi".to_owned()),
+            (3, "Grace Fixture".to_owned()),
+        ]);
+        // Short words and titles are not names.
+        assert!(
+            !names
+                .iter()
+                .any(|(_, w)| w == "ada" || w == "roshi" || w == "bo")
         );
-        assert_eq!(alias_in("Bo and others sit.", &aliases), Some("Bo"));
-        assert_eq!(alias_in("Both passages sit with boredom.", &aliases), None);
+        let s = "In a talk, Fixture says to sit with grace.";
+        assert_eq!(misattributed(s, &names, &[1]), None, "Fixture is Ada's");
+        assert_eq!(misattributed(s, &names, &[2]), Some("Fixture".to_owned()));
+        assert_eq!(
+            misattributed("Grace Fixture describes the bell.", &names, &[1]),
+            Some("Grace".to_owned())
+        );
+        assert_eq!(
+            misattributed("Sitting with grace, the talk ends.", &names, &[2]),
+            None,
+            "a lower-case word is not a name"
+        );
+    }
+
+    #[test]
+    fn years_and_belief_words_are_found() {
+        assert_eq!(
+            years("In a 2011 talk and a 1998 one, 12000 people sat."),
+            vec![2011, 1998]
+        );
+        assert!(years("A talk on posture.").is_empty());
+        assert_eq!(
+            belief_word("Ada Fixture believes posture matters."),
+            Some("believes")
+        );
+        assert_eq!(
+            belief_word("The talk holds that breath is enough."),
+            Some("holds")
+        );
+        assert_eq!(belief_word("A 2011 talk says posture matters."), None);
+        assert_eq!(belief_word("She holds the bowl."), None);
     }
 
     #[test]
     fn grounding_counts_content_words_found_in_the_passages() {
         let passages = ["When judging thoughts arise, notice them and return to the breath."];
+        let none: Vec<String> = Vec::new();
         let grounded = "Both passages treat judging thoughts as something to notice before returning to breath.";
-        assert!(grounding_ratio(grounded, &passages) >= 0.8);
+        assert!(grounding_ratio(grounded, &passages, &none) >= 0.8);
         let drifted =
             "Both passages recommend therapy, journaling and medication for anxiety disorders.";
-        assert!(grounding_ratio(drifted, &passages) < 0.4);
-        assert!(grounding_ratio("P1 and P2.", &passages) == 0.0);
+        assert!(grounding_ratio(drifted, &passages, &none) < 0.4);
+        assert!(grounding_ratio("E1 and P2.", &passages, &none) == 0.0);
+        let named = "In a talk, Fixture says judging thoughts are to notice and return to breath.";
+        let names = vec!["fixture".to_owned()];
+        assert!(
+            grounding_ratio(named, &passages, &names) > grounding_ratio(named, &passages, &none)
+        );
     }
 }

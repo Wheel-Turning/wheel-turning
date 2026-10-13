@@ -18,6 +18,7 @@ pub mod rights;
 pub mod sensitive;
 pub mod session;
 pub mod site;
+pub mod summary;
 pub mod view;
 
 use std::sync::Arc;
@@ -136,6 +137,8 @@ impl Site {
         let c = &self.retrieval.synthesis;
         wt_synth::Settings {
             max_themes: c.max_themes,
+            max_words: c.summary_max_words,
+            quote_max_words: c.quote_max_words,
             min_grounding_ratio: c.min_grounding_ratio,
             timeout: Duration::from_secs(c.synthesis_timeout_s),
         }
@@ -952,6 +955,12 @@ async fn load_answer(
             .iter()
             .flat_map(|s| s.covers.iter().copied()),
     );
+    // And each summary quotation from the rows its span covers.
+    covered.extend(stored.payload.summary.iter().flat_map(|s| {
+        s.sentences
+            .iter()
+            .flat_map(|x| x.cites.iter().flat_map(|c| c.quote.covers.iter().copied()))
+    }));
     covered.sort_unstable();
     covered.dedup();
     let rows = match wt_db::answer::excerpt_rows(&state.pool, &covered).await {
@@ -973,6 +982,11 @@ async fn load_answer(
         state.site.retrieval.answer.link_lead_in_ms,
         stored.created_at.date_naive(),
     );
+    view.summary = stored
+        .payload
+        .summary
+        .as_ref()
+        .and_then(|s| summary::build(s, &view, &served, &rows));
     match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
         Ok(q) => view::attach_questions(&mut view, &q),
         Err(e) => return Err(Box::new(server_error("loading student questions", &e))),

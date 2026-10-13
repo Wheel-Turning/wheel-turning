@@ -123,13 +123,18 @@ impl Default for AnswerConfig {
     }
 }
 
-/// `[synthesis]`: the theme filters and the model-call limit (Spec 05, Synthesis and verifier).
+/// `[synthesis]`: the summary's filters and the model-call limit (Spec 05, Summary and
+/// verifier).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SynthesisConfig {
-    /// Themes kept from one reply.
+    /// Sentences kept in each of the summary's agree and differ sections.
     pub max_themes: usize,
-    /// The least share of a theme's content words found in its cited passages.
+    /// The most words in one summary sentence.
+    pub summary_max_words: usize,
+    /// The most words in one quotation behind a citation marker.
+    pub quote_max_words: usize,
+    /// The least share of a sentence's content words found in its cited excerpts.
     pub min_grounding_ratio: f32,
     /// Seconds before a generation or verifier call is abandoned.
     pub synthesis_timeout_s: u64,
@@ -138,7 +143,9 @@ pub struct SynthesisConfig {
 impl Default for SynthesisConfig {
     fn default() -> Self {
         Self {
-            max_themes: 4,
+            max_themes: 3,
+            summary_max_words: 40,
+            quote_max_words: 60,
             min_grounding_ratio: 0.4,
             synthesis_timeout_s: 20,
         }
@@ -226,7 +233,8 @@ mod tests {
         assert_eq!(c.selection.target_teachers, 3);
         assert_eq!(c.selection.max_sources, 8);
         assert_eq!(c.answer.link_lead_in_ms, 2000);
-        assert_eq!(c.synthesis.max_themes, 4);
+        assert_eq!(c.synthesis.max_themes, 3);
+        assert_eq!(c.synthesis.quote_max_words, 60);
         assert_eq!(c.synthesis.synthesis_timeout_s, 20);
         assert_eq!(c.excerpt.excerpt_min_words, 25);
         assert_eq!(c.excerpt.excerpt_timeout_s, 5);

@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
-use wt_core::answer::StoredTheme;
+use wt_core::answer::{StoredSummary, StoredTheme};
 use wt_core::excerpt::{ExcerptSpan, Window, WindowPassage};
 use wt_core::ids::{AnswerId, PassageId, SanghaId, TalkId, TeacherId, TesterId};
 
@@ -27,9 +27,14 @@ pub struct Payload {
     /// For `thin_coverage` and `named_few`: the count the notice states.
     #[serde(default)]
     pub notice_count: Option<u8>,
-    /// Verified synthesis themes with the passage ids that support them.
+    /// Verified synthesis themes with the passage ids that support them, for answers stored
+    /// before the summary.
     #[serde(default)]
     pub themes: Vec<StoredTheme>,
+    /// The verified summary (Spec 05, Summary and verifier): sentences with the passages and
+    /// quotation spans they cite, never quoted text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<StoredSummary>,
     /// Chosen passages, best first.
     pub passage_ids: Vec<PassageId>,
     /// The reranker was unavailable, so no relevance threshold applied.
@@ -104,7 +109,13 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     let mut payload = a.payload.clone();
     payload.passage_ids.retain(|p| live.contains(&p.as_uuid()));
     let passages = i32::try_from(payload.passage_ids.len()).unwrap_or(i32::MAX);
-    let themes = i32::try_from(a.payload.themes.len()).unwrap_or(i32::MAX);
+    // Spec 05: `theme_count` counts the summary's sentences, or the themes of an older shape.
+    let shown = a
+        .payload
+        .summary
+        .as_ref()
+        .map_or(a.payload.themes.len(), |s| s.sentences.len());
+    let themes = i32::try_from(shown).unwrap_or(i32::MAX);
     let log = sqlx::query_scalar!(
         "insert into query_log (tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,

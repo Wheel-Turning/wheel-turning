@@ -1,0 +1,16 @@
+<section id="summary" class="answer-summary" aria-labelledby="summary-h">
+  <h2 id="summary-h">Summary</h2>
+  <p class="headline">{{ s.headline.text }}{% for n in s.headline.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %}</p>
+  {% if !s.framing.is_empty() %}<p>{% for x in s.framing %}{{ x.text }}{% for n in x.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %} {% endfor %}</p>{% endif %}
+  {% if !s.agree.is_empty() %}<h3>Where the talks agree</h3>
+  <ul>{% for x in s.agree %}<li>{{ x.text }}{% for n in x.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %}</li>{% endfor %}</ul>{% endif %}
+  {% if !s.differ.is_empty() %}<h3>Where they differ</h3>
+  <ul>{% for x in s.differ %}<li>{{ x.text }}{% for n in x.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %}</li>{% endfor %}</ul>{% endif %}
+  {% if s.has_points() %}<h3>Points to keep in mind</h3>
+  <ul>{% for x in s.keep %}<li>{{ x.text }}{% for n in x.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %}</li>{% endfor %}{% for note in s.notes %}<li>{{ note }}</li>{% endfor %}</ul>{% endif %}
+  {% if let Some(x) = s.sum_up %}<h3>In sum</h3>
+  <p>{{ x.text }}{% for n in x.markers %}<a class="cite" href="#sq-{{ n }}" aria-label="Quoted line {{ n }}">[{{ n }}]</a>{% endfor %}</p>{% endif %}
+  <p class="muted small">{{ s.drawn_from }} Each sentence is checked against the excerpts it cites; the excerpts are below.</p>
+  <h3>Quoted lines</h3>
+  <ol class="quoted">{% for q in s.quotes %}<li id="sq-{{ q.number }}"><q>{{ q.text }}</q> {{ q.teacher }}, &ldquo;{{ q.title }}&rdquo;{% if let Some(d) = q.date %}, {{ d }}{% endif %}. <a href="#p{{ q.excerpt }}">Excerpt {{ q.excerpt }}</a></li>{% endfor %}</ol>
+</section>

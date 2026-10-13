@@ -80,6 +80,16 @@ button.link { background: none; border: none; color: var(--ink); text-decoration
 .result { font-weight: 600; }
 .themes ul { padding-left: 1.25rem; }
 .themes li { margin: 0.4rem 0; }
+.answer-summary { margin: 1.5rem 0 2rem; padding: 1rem 1.25rem; background: var(--band); border-radius: 4px; }
+.answer-summary h2 { margin-top: 0; }
+.answer-summary h3 { font-size: 1rem; margin: 1.25rem 0 0.25rem; }
+.answer-summary .headline { font-size: 1.125rem; font-weight: 600; }
+.answer-summary ul { padding-left: 1.25rem; }
+.answer-summary li { margin: 0.4rem 0; }
+.cite { font-size: 0.8em; vertical-align: super; line-height: 0; padding: 0 0.1em; }
+.quoted { font-size: 0.95rem; padding-left: 1.5rem; }
+.quoted li { margin: 0.5rem 0; }
+.quoted q { font-family: var(--serif); }
 .chip { display: inline-block; min-width: 1.4em; padding: 0 0.35em; border: 1px solid var(--ink); border-radius: 0.7em; font-size: 0.8em; line-height: 1.4; text-align: center; text-decoration: none; vertical-align: 0.1em; }
 .notice { background: var(--band); border-left: 3px solid var(--ink); padding: 0.5rem 1rem; margin: 1rem 0; }
 .status { background: var(--band); padding: 0.5rem 1rem; }

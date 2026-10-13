@@ -30,7 +30,9 @@ link_lead_in_ms = 2000
 ask_rate_per_hour = 30     # per tester, in-memory token bucket (Spec 06)
 
 [synthesis]
-max_themes = 4
+max_themes = 3            # sentences in each of the summary's agree and differ sections
+summary_max_words = 40
+quote_max_words = 60       # the quotation behind one citation marker
 min_grounding_ratio = 0.4  # tuned on the claim audit; a coarse guard against drift
 synthesis_timeout_s = 20   # per generation or verifier call
 
