@@ -274,6 +274,72 @@ async fn full_text_vector_and_fused_retrieval_find_the_planted_passages() {
     assert!(!r.rerank_degraded);
 }
 
+/// The plan of the standard-mode vector search, with or without [`search::use_hnsw`].
+async fn vector_plan(pool: &PgPool, hnsw: bool) -> String {
+    let mut tx = pool.begin().await.unwrap();
+    if hnsw {
+        search::use_hnsw(&mut tx, 100).await.unwrap();
+    }
+    let plan: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "explain {}",
+        search::VECTOR_SQL
+    )))
+    .bind(search::vector_literal(&FakeEmbedder::vector("anger")))
+    .bind(60_i64)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
+    plan.join("\n")
+}
+
+/// The planner sorts a small corpus rather than use the index, as it sorted the real one
+/// when the view's filter made it expect few rows; the search's settings walk the index anyway.
+#[tokio::test]
+async fn standard_vector_search_walks_the_hnsw_index() {
+    let fx = start().await;
+    corpus(&fx.pool).await;
+    sqlx::raw_sql("analyze").execute(&fx.pool).await.unwrap();
+
+    let plain = vector_plan(&fx.pool, false).await;
+    assert!(plain.contains("Sort"), "expected a sort, got:\n{plain}");
+    let plan = vector_plan(&fx.pool, true).await;
+    assert!(
+        plan.contains("passage_embedding_hnsw") && !plan.contains("Sort"),
+        "expected an index scan on passage_embedding_hnsw, got:\n{plan}"
+    );
+}
+
+/// Passages that do not serve but lie nearest the query fill the index's first `ef_search`
+/// results; the iterative scan keeps reading until `k` servable passages are found. Twenty, not
+/// more: near-identical vectors beyond the 32 neighbors a node keeps would fill each other's
+/// lists and cut the cluster off from the rest of the graph, which no scan setting can cross.
+#[tokio::test]
+async fn passages_that_do_not_serve_never_starve_the_vector_list() {
+    let fx = start().await;
+    let planted = corpus(&fx.pool).await;
+    let near: Vec<String> = (0..20)
+        .map(|i| format!("How do I work with anger {i}. {FILLER}."))
+        .collect();
+    talk(&fx.pool, "Ed Stand-In", &near).await;
+    sqlx::query("update teacher set display_level = 'excluded' where display_name = 'Ed Stand-In'")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
+    let v = FakeEmbedder::vector("How do I work with anger?");
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let hits = search::vector(&mut conn, &v, None, 3, 5).await.unwrap();
+    assert_eq!(hits.into_iter().collect::<BTreeSet<_>>(), planted);
+
+    // The settings end with the search: the connection sorts again.
+    let enable_sort: String = sqlx::query_scalar("show enable_sort")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    assert_eq!(enable_sort, "on");
+}
+
 #[tokio::test]
 async fn the_threshold_never_pads_and_reports_thin_coverage() {
     let fx = start().await;

@@ -32,7 +32,7 @@ fts_top_k = 60
 vector_top_k = 60
 rrf_k = 60
 fuse_top_k = 40            # candidates sent to the reranker
-hnsw_ef_search = 100
+hnsw_ef_search = 1000     # pgvector's maximum; keeps exact-search recall
 rerank_min_score = 0.30    # sigmoid of the reranker logit; calibrate on the eval set
 rerank_timeout_s = 10
 
@@ -53,7 +53,7 @@ Two input types keep the ranker honest. Everything before selection works on `Ra
 Steps in `wt-retrieve`:
 
 1. Full-text search. Content words from the query, minus stopwords, are joined with OR into a `to_tsquery('english', ...)` expression, since practitioner questions are long and an AND query returns nothing. Rank by `ts_rank_cd`, take `fts_top_k`.
-2. Vector search. Embed the query, run `set local hnsw.ef_search = 100`, and order by cosine distance, taking `vector_top_k`. Both searches read `servable_passage` and nothing else. In named mode both add `teacher_id = $1`.
+2. Vector search. Embed the query, run `set local hnsw.ef_search = 1000` with a strict-order iterative scan, and order by cosine distance, taking `vector_top_k`. The planner misjudges how many passages the view serves, so the search also turns sorting and JIT off for its own transaction to keep the scan on the HNSW index. At 1000 the index keeps recall at the level of an exact search (recall@60 against exact: 0.995 mean, 0.967 worst over the 20 Gate A questions, October 12, 2026) for about 70 to 95 ms; 100 gave 0.88 mean and 0.48 worst. Both searches read `servable_passage` and nothing else. In named mode both add `teacher_id = $1`.
 3. Fusion. Reciprocal rank fusion with score the sum of `1 / (rrf_k + rank)` across the lists: full text, vectors, and a vector search over `servable_student_question` in which each hit stands for the teacher passage that answers it (Spec 04, Student questions, rule 6; owner's decision of October 10, 2026). A question is never a candidate itself. Keep the top `fuse_top_k`.
 4. Rerank. Score each query and passage pair with the cross-encoder, apply a sigmoid, and drop anything below `rerank_min_score`. If the reranker times out, fall back to the fused order with the threshold dropped and record `rerank_degraded` in the log. The same fallback applies while no reranker model is installed (decision of October 9, 2026, for the owner's alpha); fused scores are then scaled to `[0, 1]` so MMR weighs them on the same scale as similarity. If rerank latency is too high on the target host, lower `fuse_top_k` first, then switch to the smaller reranker.
 5. Selection in standard mode. Walk the surviving candidates by score. In a seed round, take the best candidate from each distinct teacher in score order, up to `target_teachers`. Then fill remaining slots by MMR, choosing the candidate that maximizes `mmr_lambda * score - (1 - mmr_lambda) * max_cosine_to_selected`. Skip a candidate that breaks `per_teacher_cap`, would add a ninth distinct talk, or lies within `same_talk_min_gap_s` of an already selected passage in the same talk. Stop at `max_passages`.

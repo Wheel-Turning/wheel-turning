@@ -150,30 +150,43 @@ pub async fn retrieve_reporting(
     timings.embed_ms = millis(started.elapsed());
 
     progress.step(Step::Searching);
+    // The three lists are independent, so each runs on its own connection at the same time.
+    // Candidates load afterwards; a passage that stopped serving in between is simply absent.
     let started = Instant::now();
-    let mut tx = pool.begin().await?;
-    let fts = match search::or_query(&query.search_text) {
-        Some(q) => search::full_text(&mut tx, &q, named, cfg.retrieval.fts_top_k).await?,
-        None => Vec::new(),
-    };
-    let vec_hits = search::vector(
-        &mut tx,
-        &vector,
-        named,
-        cfg.retrieval.vector_top_k,
-        cfg.retrieval.hnsw_ef_search,
-    )
-    .await?;
-    let question_hits =
-        search::question_vector(&mut tx, &vector, named, cfg.retrieval.question_top_k).await?;
+    let tsquery = search::or_query(&query.search_text);
+    let (fts, vec_hits, question_hits) = tokio::try_join!(
+        async {
+            match &tsquery {
+                Some(q) => {
+                    let mut conn = pool.acquire().await?;
+                    search::full_text(&mut conn, q, named, cfg.retrieval.fts_top_k).await
+                }
+                None => Ok(Vec::new()),
+            }
+        },
+        async {
+            let mut conn = pool.acquire().await?;
+            search::vector(
+                &mut conn,
+                &vector,
+                named,
+                cfg.retrieval.vector_top_k,
+                cfg.retrieval.hnsw_ef_search,
+            )
+            .await
+        },
+        async {
+            let mut conn = pool.acquire().await?;
+            search::question_vector(&mut conn, &vector, named, cfg.retrieval.question_top_k).await
+        },
+    )?;
     let fused = fuse::rrf(
         &[&fts, &vec_hits, &question_hits],
         cfg.retrieval.rrf_k,
         cfg.retrieval.fuse_top_k,
     );
     let ids: Vec<PassageId> = fused.iter().map(|(id, _)| *id).collect();
-    let found = search::candidates(&mut tx, &ids).await?;
-    tx.commit().await?;
+    let found = search::candidates(&mut *pool.acquire().await?, &ids).await?;
     timings.search_ms = millis(started.elapsed());
 
     progress.step(Step::Weighing {
