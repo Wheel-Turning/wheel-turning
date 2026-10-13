@@ -126,7 +126,15 @@ fn reasons(out: &Synthesis) -> Vec<DropReason> {
 
 #[tokio::test]
 async fn a_good_summary_passes_and_each_citation_becomes_a_verbatim_quotation() {
-    let llm = FakeLlm::new(vec![Ok(good_draft()), yes(), yes(), yes(), yes()]);
+    // Two generation calls, each followed by its own verifier calls.
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        yes(),
+        yes(),
+        Ok(good_draft()),
+        yes(),
+        yes(),
+    ]);
     let out = run(&llm).await;
     assert_eq!(out.failure, None);
     assert!(out.dropped.is_empty(), "{:?}", out.dropped);
@@ -157,13 +165,15 @@ async fn a_good_summary_passes_and_each_citation_becomes_a_verbatim_quotation() 
     );
     assert_eq!(quote(&summary.sentences[1].cites[0]), ADA);
 
-    // One generation call, then one verifier call per sentence, all with real-data rules.
+    // Two generation calls, each with one verifier call per sentence of its half, all with
+    // real-data rules.
     assert_eq!(
         stages(&llm),
         vec![
             LlmStage::Synth,
             LlmStage::Verify,
             LlmStage::Verify,
+            LlmStage::Synth,
             LlmStage::Verify,
             LlmStage::Verify
         ]
@@ -214,7 +224,7 @@ async fn each_filter_drops_its_fixture_before_the_verifier() {
         max_themes: 4,
         ..Settings::default()
     };
-    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let llm = FakeLlm::new(vec![Ok(draft.clone()), yes(), Ok(draft)]);
     let out = run_with(&llm, &settings).await;
     assert_eq!(
         reasons(&out),
@@ -234,7 +244,10 @@ async fn each_filter_drops_its_fixture_before_the_verifier() {
     assert_eq!(out.dropped[5].detail.as_deref(), Some("2019"));
     assert_eq!(out.dropped[9].detail.as_deref(), Some("Lindqvist"));
     // Only the headline reached the verifier.
-    assert_eq!(stages(&llm), vec![LlmStage::Synth, LlmStage::Verify]);
+    assert_eq!(
+        stages(&llm),
+        vec![LlmStage::Synth, LlmStage::Verify, LlmStage::Synth]
+    );
     assert_eq!(out.summary.unwrap().sentences.len(), 1);
 }
 
@@ -256,12 +269,13 @@ async fn limits_on_sections_and_quotations_drop_the_excess() {
         quote_max_words: 10,
         ..Settings::default()
     };
-    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let llm = FakeLlm::new(vec![Ok(draft.clone()), Ok(draft), yes()]);
     let out = run_with(&llm, &settings).await;
     // The headline quotes the whole 17-word excerpt; the second agree sentence is over the limit.
     assert_eq!(
         reasons(&out),
-        vec![DropReason::OverLimit, DropReason::QuoteTooLong]
+        vec![DropReason::QuoteTooLong, DropReason::OverLimit],
+        "the frame half's drops come first"
     );
     assert!(out.summary.is_none(), "no headline, no summary");
 }
@@ -276,7 +290,7 @@ async fn an_over_long_citation_is_left_out_while_another_remains() {
         quote_max_words: 10,
         ..Settings::default()
     };
-    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let llm = FakeLlm::new(vec![Ok(draft.clone()), yes(), Ok(draft)]);
     let out = run_with(&llm, &settings).await;
     assert!(out.dropped.is_empty(), "{:?}", out.dropped);
     let headline = &out.summary.unwrap().sentences[0];
@@ -289,7 +303,14 @@ async fn an_over_long_citation_is_left_out_while_another_remains() {
 
 #[tokio::test]
 async fn a_rejected_headline_leaves_no_summary() {
-    let llm = FakeLlm::new(vec![Ok(good_draft()), no("posture"), yes(), yes(), yes()]);
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        no("posture"),
+        yes(),
+        Ok(good_draft()),
+        yes(),
+        yes(),
+    ]);
     let out = run(&llm).await;
     assert!(out.summary.is_none());
     assert_eq!(out.failure, None);
@@ -300,7 +321,14 @@ async fn a_rejected_headline_leaves_no_summary() {
 
 #[tokio::test]
 async fn a_rejected_section_sentence_is_dropped_and_the_rest_stays() {
-    let llm = FakeLlm::new(vec![Ok(good_draft()), yes(), yes(), no("kindness"), yes()]);
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        yes(),
+        yes(),
+        Ok(good_draft()),
+        yes(),
+        no("kindness"),
+    ]);
     let out = run(&llm).await;
     let summary = out.summary.unwrap();
     assert_eq!(summary.sentences.len(), 3);
@@ -443,7 +471,11 @@ async fn every_drop_and_its_reason_land_in_the_log() {
         "keep_in_mind": [s("Moreau says to notice judging thoughts.", &[("E1", 1, 1)])],
         "sum_up": null,
     });
-    let llm = FakeLlm::new(vec![Ok(draft), no("before returning to breath")]);
+    let llm = FakeLlm::new(vec![
+        Ok(draft.clone()),
+        no("before returning to breath"),
+        Ok(draft),
+    ]);
     let out = run(&llm).await;
     assert!(out.summary.is_none());
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();

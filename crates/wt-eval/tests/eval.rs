@@ -139,6 +139,11 @@ fn site(standard_answers: usize) -> Site {
                 { "excerpt": "E2", "start": 1, "end": 1 }
             ] }, "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null })));
         replies.push(Ok(json!({ "supported": true, "unsupported_part": null })));
+        // The body half's call: no section sentences.
+        replies.push(Ok(
+            json!({ "headline": null, "framing": [], "agree": [], "differ": [],
+                                "keep_in_mind": [], "sum_up": null }),
+        ));
     }
     Site {
         llm: Arc::new(FakeLlm::new(replies)),

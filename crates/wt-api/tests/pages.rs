@@ -428,6 +428,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     let llm = Arc::new(FakeLlm::new(vec![
         Ok(summary_reply()),
         Ok(verdict(true)),
+        Ok(summary_reply()),
         Ok(verdict(true)),
     ]));
     let fx = start_with(site_with(llm.clone()), true).await;
@@ -511,7 +512,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
 
     let seen = llm.seen.lock().unwrap();
-    assert_eq!(seen.len(), 3, "one generation and two verifier calls");
+    assert_eq!(seen.len(), 4, "two generation calls and two verifier calls");
     assert!(seen.iter().all(|(_, class)| *class == DataClass::Real));
 }
 
@@ -520,6 +521,7 @@ async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
     let llm = Arc::new(FakeLlm::new(vec![
         Ok(summary_reply()),
         Ok(verdict(false)),
+        Ok(summary_reply()),
         Ok(verdict(true)),
     ]));
     let fx = start_with(site_with(llm), true).await;

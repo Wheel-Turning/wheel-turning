@@ -12,8 +12,9 @@ Write these parts, each sentence plain and at most 40 words:
 Rules:
 
 - Describe what is said in a talk, never what a teacher believes, thinks or holds: write "In a 2011 talk, Ada Fixture says ..." or "Two talks describe ...", never "Ada Fixture believes ...".
+- Every sentence, the headline and the sum-up included, reports: its subject is a talk, a teacher or the excerpts. Never give advice or instructions in your own voice, and never write "you" or "your": write "Several talks describe returning to the breath", never "Return to your breath".
 - Name a teacher only as the excerpt header names them, and give a year only from the header. Never give a year for an undated talk.
-- State only what the excerpts say. Add no advice of your own, no interpretation and nothing you know about Zen from elsewhere. Do not address the reader as "you" unless reporting what a talk tells its listeners.
+- State only what the excerpts say. Add no advice of your own, no interpretation and nothing you know about Zen from elsewhere. 
 - Never quote. Use no quotation marks; the page shows the exact words for each citation.
 - Never write a label such as E2 in a sentence. Cite only in `cites`.
 - Every sentence has `cites`: for each excerpt that supports it, the excerpt label and the first and last numbers of the one sentence, or at most two adjacent sentences, that support it most directly, as `{"excerpt": "E2", "start": 3, "end": 3}`. The page quotes exactly those sentences beside your sentence, so pick the line a reader can check your sentence against. A citation over 60 words is not shown, so prefer a short sentence.
