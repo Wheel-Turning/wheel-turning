@@ -267,7 +267,7 @@ async fn run_stage_with(
         ),
         JobKind::Extract => format!(
             "{:?}",
-            textjobs::run_extract(&mut conn, fx.talk, &objects, &g, llm)
+            textjobs::run_extract(&mut conn, fx.talk, &objects, &g, llm, false)
                 .await
                 .unwrap()
         ),

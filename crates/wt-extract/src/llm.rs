@@ -552,7 +552,7 @@ impl LlmClient for ClaudeClient {
 #[derive(Debug, Default)]
 pub struct FakeLlm {
     /// The replies to give, in order.
-    replies: Mutex<Vec<Result<Value, String>>>,
+    replies: Mutex<Vec<Result<Value, LlmError>>>,
     /// Every request seen, with its data class.
     pub seen: Mutex<Vec<(LlmRequest, DataClass)>>,
 }
@@ -560,6 +560,17 @@ pub struct FakeLlm {
 impl FakeLlm {
     /// Replies in order; an `Err` is a reply that fails to parse.
     pub fn new(replies: Vec<Result<Value, String>>) -> Self {
+        Self::scripted(
+            replies
+                .into_iter()
+                .map(|r| r.map_err(LlmError::Parse))
+                .collect(),
+        )
+    }
+
+    /// Replies in order, each a value or the error the call returns, such as
+    /// [`LlmError::Truncated`].
+    pub fn scripted(replies: Vec<Result<Value, LlmError>>) -> Self {
         Self {
             replies: Mutex::new(replies.into_iter().rev().collect()),
             seen: Mutex::new(Vec::new()),
@@ -580,8 +591,7 @@ impl LlmClient for FakeLlm {
         }
         let next = self.replies.lock().ok().and_then(|mut r| r.pop());
         match next {
-            Some(Ok(v)) => Ok(v),
-            Some(Err(e)) => Err(LlmError::Parse(e)),
+            Some(reply) => reply,
             None => Err(LlmError::Http("no scripted reply left".into())),
         }
     }

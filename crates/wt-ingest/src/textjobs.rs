@@ -314,13 +314,16 @@ pub async fn run_correct(
 }
 
 /// The `extract` job: finds verified citations in the corrected words, stages them, and queues
-/// `resolve`.
+/// `resolve`. On the job's `last_attempt`, a model failure stages the extraction as skipped with
+/// the error as its reason, so the talk still goes on to `resolve` and `index` instead of
+/// stopping at `extracting`, and `wt pipeline retry-extract` can run it again.
 pub async fn run_extract(
     conn: &mut sqlx::PgConnection,
     talk_id: TalkId,
     objects: &dyn ObjectStore,
     glossary: &Glossary,
     llm: &dyn LlmClient,
+    last_attempt: bool,
 ) -> Result<TextOutcome, TextJobError> {
     let talk = match TalkRepo::authorize(conn, talk_id).await? {
         Ok(t) => t,
@@ -350,15 +353,18 @@ pub async fn run_extract(
                     // `wt pipeline retry-extract` runs it once a model may.
                     Err(e @ (LlmError::RealDataRefused | LlmError::NoModel(_))) => {
                         tracing::warn!(talk = %talk_id, reason = %e, "extraction skipped");
-                        Staging {
-                            schema: 1,
-                            talk_id: talk_id.as_uuid().to_string(),
-                            practice_period: None,
-                            citations: Vec::new(),
-                            discarded: 0,
-                            input_hash: None,
-                            skipped: Some(e.to_string()),
-                        }
+                        skipped(talk_id, &e)
+                    }
+                    // Out of attempts (decision of October 14, 2026): the talk is served without
+                    // citations rather than held. The spend cap defers the job instead, and a
+                    // ledger failure is the database's, so both still fail it.
+                    Err(e)
+                        if last_attempt
+                            && !matches!(e, LlmError::CapReached { .. } | LlmError::Ledger(_)) =>
+                    {
+                        tracing::warn!(talk = %talk_id, reason = %e,
+                                       "extraction failed on its last attempt; staged as skipped");
+                        skipped(talk_id, &e)
                     }
                     Err(e) => return Err(e.into()),
                 };
@@ -379,6 +385,21 @@ pub async fn run_extract(
     )
     .await?;
     Ok(TextOutcome::Done(Some(JobKind::Resolve)))
+}
+
+/// An empty extraction staged as skipped for `reason`, with no input hash, so it runs again once
+/// it may.
+fn skipped(talk_id: TalkId, reason: &LlmError) -> Staging {
+    Staging {
+        schema: 1,
+        talk_id: talk_id.as_uuid().to_string(),
+        practice_period: None,
+        citations: Vec::new(),
+        discarded: 0,
+        input_hash: None,
+        skipped: Some(reason.to_string()),
+        cut_off_windows: 0,
+    }
 }
 
 /// The `resolve` job: resolves each staged citation against the hand list and the series map,

@@ -16,6 +16,12 @@ use crate::llm::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 pub const WINDOW_WORDS: usize = 6_000;
 /// Words shared by neighboring windows.
 pub const OVERLAP_WORDS: usize = 200;
+/// The output limit of one window's reply.
+pub const MAX_REPLY_TOKENS: u32 = 4_096;
+/// The smallest window a cut-off reply is split down to. A window this small cannot honestly
+/// need more than [`MAX_REPLY_TOKENS`] of exact quotations, so a reply still cut off here is a
+/// runaway reply, and that window is given up rather than the talk.
+pub const MIN_WINDOW_WORDS: usize = 500;
 
 /// The extractor's instructions (Spec 04): copy the teacher's exact words for each citation or
 /// quotation, never paraphrase, with title and locator hints and a kind.
@@ -109,6 +115,16 @@ pub struct Staging {
     /// citations are empty and extraction runs once it may.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped: Option<String>,
+    /// Windows of [`MIN_WINDOW_WORDS`] or fewer whose reply was still cut off at the output
+    /// limit, so their citations are missing.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cut_off_windows: usize,
+}
+
+/// For `skip_serializing_if`, so staging objects written before `cut_off_windows` existed keep
+/// their bytes and their resolve and index keys.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Lowercase letters and digits: the form citations are matched in, so case, spacing and
@@ -180,7 +196,34 @@ pub fn verify(
     (kept, discarded)
 }
 
-/// Runs extraction over a talk's corrected words.
+/// Adds `c` unless a citation of its kind already covers its words. Overlapping windows can find
+/// the same words twice, and a quotation cut at a window's edge again whole in the next window;
+/// the longer reading is kept.
+fn merge(citations: &mut Vec<StagedCitation>, c: StagedCitation) {
+    let covers = |a: &StagedCitation, b: &StagedCitation| {
+        a.raw.kind == b.raw.kind && a.w0 <= b.w0 && b.w1 <= a.w1
+    };
+    if citations.iter().any(|s| covers(s, &c)) {
+        return;
+    }
+    citations.retain(|s| !covers(&c, s));
+    citations.push(c);
+}
+
+/// The two halves of a window whose reply was cut off, overlapping by [`OVERLAP_WORDS`].
+fn halves(window: (usize, usize)) -> [(usize, usize); 2] {
+    let (start, end) = window;
+    let mid = start + (end - start) / 2;
+    let half_overlap = OVERLAP_WORDS / 2;
+    [
+        (start, (mid + half_overlap).min(end)),
+        (mid.saturating_sub(half_overlap).max(start), end),
+    ]
+}
+
+/// Runs extraction over a talk's corrected words. A window whose reply is cut off at the output
+/// limit is split in two and each half asked again, down to [`MIN_WINDOW_WORDS`]; a window that
+/// small still cut off is counted in `cut_off_windows` and the rest of the talk is kept.
 pub async fn extract(
     client: &dyn LlmClient,
     talk_id: &str,
@@ -195,8 +238,12 @@ pub async fn extract(
         discarded: 0,
         input_hash: None,
         skipped: None,
+        cut_off_windows: 0,
     };
-    for window in windows(words.len()) {
+    // Windows still to ask, the next on top, so they are asked in order.
+    let mut pending: Vec<(usize, usize)> = windows(words.len());
+    pending.reverse();
+    while let Some(window) = pending.pop() {
         let text = words[window.0..window.1]
             .iter()
             .map(|(w, _)| w.text.as_str())
@@ -206,23 +253,40 @@ pub async fn extract(
             stage: LlmStage::Extract,
             system: SYSTEM.into(),
             user: text,
-            max_tokens: 4_096,
+            max_tokens: MAX_REPLY_TOKENS,
         };
-        let facts: WindowFacts = complete_json(client, &req, class).await?;
+        let facts: WindowFacts = match complete_json(client, &req, class).await {
+            Ok(facts) => facts,
+            Err(LlmError::Truncated) if window.1 - window.0 > MIN_WINDOW_WORDS => {
+                let [first, second] = halves(window);
+                tracing::info!(
+                    talk = talk_id,
+                    words = window.1 - window.0,
+                    "reply cut off; asking again in two halves"
+                );
+                pending.push(second);
+                pending.push(first);
+                continue;
+            }
+            Err(LlmError::Truncated) => {
+                tracing::warn!(
+                    talk = talk_id,
+                    from = window.0,
+                    to = window.1,
+                    "reply cut off even for a small window; its citations are missing"
+                );
+                staging.cut_off_windows += 1;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         if staging.practice_period.is_none() {
             staging.practice_period = facts.practice_period.clone();
         }
         let (kept, discarded) = verify(words, window, &facts);
         staging.discarded += discarded;
         for c in kept {
-            // Overlapping windows can find the same words twice.
-            if !staging
-                .citations
-                .iter()
-                .any(|s| (s.w0, s.w1) == (c.w0, c.w1))
-            {
-                staging.citations.push(c);
-            }
+            merge(&mut staging.citations, c);
         }
     }
     staging.citations.sort_by_key(|c| (c.w0, c.w1));
@@ -230,6 +294,7 @@ pub async fn extract(
         talk = talk_id,
         kept = staging.citations.len(),
         discarded = staging.discarded,
+        cut_off_windows = staging.cut_off_windows,
         "citations extracted"
     );
     Ok(staging)
@@ -273,6 +338,95 @@ mod tests {
         assert_eq!(staging.citations.len(), 1);
         let c = &staging.citations[0];
         assert_eq!((c.w0, c.w1), (3, 12), "word positions found by the code");
+    }
+
+    /// `n` invented words, `word0 word1 ...`.
+    fn numbered(n: usize) -> Vec<(Word, (usize, usize))> {
+        mapped(
+            &(0..n)
+                .map(|i| format!("word{i}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    /// A quotation of words `from..to` of [`numbered`].
+    fn quote(from: usize, to: usize) -> serde_json::Value {
+        let text = (from..to).map(|i| format!("word{i}")).collect::<Vec<_>>();
+        json!({"text": text.join(" "), "work_hint": null, "locator_hint": null,
+               "kind": "quotation"})
+    }
+
+    fn words_sent(fake: &FakeLlm) -> Vec<usize> {
+        fake.seen
+            .lock()
+            .unwrap_or_else(|e| panic!("{e}"))
+            .iter()
+            .map(|(req, _)| req.user.split_whitespace().count())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_cut_off_reply_is_asked_again_in_halves_and_the_results_merged() {
+        let words = numbered(1_200);
+        let fake = FakeLlm::scripted(vec![
+            Err(LlmError::Truncated),
+            // Words 0..700: one quotation, and one cut off at the window's edge.
+            Ok(json!({"practice_period": null,
+                      "citations": [quote(10, 13), quote(690, 700)]})),
+            // Words 500..1200: the edge quotation whole, and one more.
+            Ok(json!({"practice_period": "Fall practice period",
+                      "citations": [quote(690, 705), quote(900, 902)]})),
+        ]);
+        let staging = extract(&fake, "t1", &words, DataClass::Synthetic)
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(words_sent(&fake), [1_200, 700, 700]);
+        let ranges: Vec<_> = staging.citations.iter().map(|c| (c.w0, c.w1)).collect();
+        assert_eq!(
+            ranges,
+            [(10, 13), (690, 705), (900, 902)],
+            "the edge quotation is kept once, whole"
+        );
+        assert_eq!(staging.cut_off_windows, 0);
+        assert_eq!(
+            staging.practice_period.as_deref(),
+            Some("Fall practice period")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_small_window_still_cut_off_is_given_up_and_the_rest_kept() {
+        let words = numbered(800);
+        let fake = FakeLlm::scripted(vec![
+            Err(LlmError::Truncated),
+            Ok(json!({"practice_period": null, "citations": [quote(10, 13)]})),
+            Err(LlmError::Truncated),
+        ]);
+        let staging = extract(&fake, "t1", &words, DataClass::Synthetic)
+            .await
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(words_sent(&fake), [800, 500, 500]);
+        assert_eq!(staging.citations.len(), 1);
+        assert_eq!(staging.cut_off_windows, 1);
+        let json = serde_json::to_value(&staging).unwrap_or_default();
+        assert_eq!(json["cut_off_windows"], 1);
+    }
+
+    #[test]
+    fn a_staging_with_no_cut_off_window_serializes_as_before() {
+        let staging = Staging {
+            schema: 1,
+            talk_id: "t1".into(),
+            practice_period: None,
+            citations: Vec::new(),
+            discarded: 0,
+            input_hash: None,
+            skipped: None,
+            cut_off_windows: 0,
+        };
+        let json = serde_json::to_string(&staging).unwrap_or_default();
+        assert!(!json.contains("cut_off_windows"));
     }
 
     #[test]
