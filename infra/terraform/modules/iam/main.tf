@@ -102,11 +102,12 @@ data "aws_iam_policy_document" "web_exec" {
   statement {
     sid     = "InjectWebSecrets"
     actions = ["secretsmanager:GetSecretValue"]
-    # The Anthropic key joins this list when synthesis (M6) first needs it. ECS refuses to start a
-    # task whose secret has no value yet, and that key is set out of band.
+    # ECS refuses to start a task whose secret has no value yet: the Anthropic key is set out of
+    # band before the first deploy that uses it.
     resources = [
       var.secret_arns["db_wt_web_login"],
       var.secret_arns["session_secret"],
+      var.secret_arns["anthropic_api_key"],
     ]
   }
 }

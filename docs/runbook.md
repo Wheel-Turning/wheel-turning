@@ -259,3 +259,39 @@ owner deletes them after the run (step 5).
 5. Afterwards: `wt audit` must show no `audio_residue`. Once the SSZ talks you expected are past
    `transcribing`, delete the files: `rm -rf data/storage/ssz`. The review table in
    `data/storage-match/` holds titles and file names only.
+
+## 12. The beta on AWS
+
+Owner's decision of October 13, 2026: invited testers use the AWS v1 stack, not the PC alpha.
+Everything below runs with `AWS_PROFILE=wheel-turning` after `aws sso login --profile
+wheel-turning` (on Windows, `--use-device-code` works when the browser callback does not).
+
+- Site: `https://app.wheelturning.org`, also `https://demo.wheelturning.org` (Cloudflare DNS, set
+  by hand to the load balancer; `terraform output dns_records_for_cloudflare`).
+- Web service: Fargate, 2 vCPU / 8 GB, one task. Its `models` container copies
+  `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-904883674947/` into the
+  task before `wt-api` starts; startup takes about a minute. A new model goes to that bucket
+  (`aws s3 sync models/<dir> s3://wt-v1-models-904883674947/<dir>`), then a redeploy.
+- Settings: `WT_ENV=prod` (Secure cookies), the session secret, database password and Claude key
+  from Secrets Manager (`wt-v1/*`), the language model settings from the `llm_*` variables in
+  `infra/terraform/envs/v1/variables.tf`. Config files (`config/`) are baked into the image, so a
+  config change ships as a new image.
+- Database: RDS `wt-v1`, Postgres 16, `db.t4g.medium`, private. Loaded on October 13, 2026 from
+  the PC's `wt-m3-ssz` database (data only, into the same migration level) through the batch host.
+- Deploys: `deploy.yml` (plan, review, apply). An infrastructure change beyond the web task and
+  service is applied by hand from `infra/terraform/envs/v1` with `-var image_tag=$(terraform
+  output -raw image_tag)`.
+- Testers: invites are created against RDS through the batch host forward (procedure 1, step 2),
+  connecting as `wt_owner_login` (its secret is `wt-v1/db_wt_owner_login`), since only the owner
+  role writes `tester`:
+
+  ```bash
+  wt tester invite --label "<name>" --base-url https://app.wheelturning.org
+  ```
+
+- Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
+  about $30). Scale the service to 0 tasks between test rounds to save the task's share.
+
+The PC keeps its own database: the transcription worker still writes to `wt-m3-ssz`, so new
+talks reach the beta only when they are loaded again (or once the PC switches to RDS, which is
+the owner's call).

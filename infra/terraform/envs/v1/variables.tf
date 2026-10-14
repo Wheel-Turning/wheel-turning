@@ -34,11 +34,12 @@ variable "migrate_image_tag" {
   default     = ""
 }
 
-# Sizes are the smallest that run v1, chosen to keep the monthly cost low. Spec 01's defaults are
-# db.t4g.medium with 50 GB and a 2 vCPU / 8 GB task; raise these when M5 loads the models.
+# Spec 01's sizes, raised from the M1 minimum (db.t4g.micro, 0.5 vCPU / 1 GB) for the beta: the
+# HNSW index over about 137,000 passages needs the database's memory, and the task holds the
+# embedder and four reranker sessions.
 variable "db_instance_class" {
   type    = string
-  default = "db.t4g.micro"
+  default = "db.t4g.medium"
 }
 
 variable "db_deletion_protection" {
@@ -49,12 +50,35 @@ variable "db_deletion_protection" {
 
 variable "web_cpu" {
   type    = number
-  default = 512
+  default = 2048
 }
 
 variable "web_memory" {
   type    = number
-  default = 1024
+  default = 8192
+}
+
+variable "llm_model" {
+  description = "WT_LLM_MODEL for the web service; every stage falls back to it."
+  type        = string
+  default     = "claude-haiku-4-5"
+}
+
+variable "anthropic_workspace_id" {
+  description = "ANTHROPIC_WORKSPACE_ID. Not a secret; the API key is in Secrets Manager."
+  type        = string
+  default     = "wrkspc_01UH3bhoPidR6S5oJvidFSBS"
+}
+
+variable "llm_real_data_ok" {
+  description = "WT_LLM_REAL_DATA_OK, set by the owner (runbook procedure 8)."
+  type        = bool
+  default     = true
+}
+
+variable "llm_monthly_cap_usd" {
+  type    = number
+  default = 60
 }
 
 variable "batch_host_enabled" {

@@ -111,6 +111,10 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 | `iam` | Task execution role, web task role, batch host role, CI deploy role | Least privilege per the rules below. The CI role trusts GitHub OIDC and holds no long-lived keys. |
 | `observability` | CloudWatch log groups, alarms, a Route 53 health check | 30-day log retention. Alarms on load balancer 5xx rate, database CPU and free storage, and on a nonempty scratch bucket after 24 hours. Two alarms fire with no traffic: no healthy web task behind the load balancer for 5 minutes, and a Route 53 HTTPS health check on `/healthz` failing for 3 minutes. Route 53 health check metrics exist only in us-east-1, so that alarm and a second alarm topic live there. |
 
+### The beta deployment
+
+Owner's decision of October 13, 2026: invited testers use this stack, not the PC alpha, so they can test asynchronously. The web task loads the embedder and reranker into a task volume through a `models` container that copies them from the models bucket before `wt-api` starts, and the image carries ONNX Runtime and `config/`. Sizes are back to the table's: `db.t4g.medium` and a 2 vCPU / 8 GB task, about $170 a month in all. The database was loaded from the PC's working database on that day. The runbook, procedure 12, has the details.
+
 ## Secrets, IAM and network rules
 
 1. The web task role reads the models bucket and the database, Anthropic and session secrets. It cannot write to the transcripts or scratch buckets.
@@ -164,7 +168,7 @@ Decisions of October 3, 2026.
 
 Acceptance criteria:
 
-- [ ] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply.
+- [x] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply. (Checked October 13, 2026 with the beta deploy. DNS stays at Cloudflare, so the validation record and the CNAME are Terraform outputs copied there by hand. `app.wheelturning.org` is the primary name and `demo.` an alternate on the same certificate.)
 - [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed.
 - [ ] The web role can publish to the alert topic and to nothing else in SNS.
 

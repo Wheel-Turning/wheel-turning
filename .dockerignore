@@ -3,6 +3,7 @@ target/
 .github/
 docs/
 !docs/accessibility/
+!docs/model-licenses.md
 infra/
 data/
 models/
