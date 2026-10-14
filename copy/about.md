@@ -10,7 +10,7 @@
 
 **Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time.
 
-- Your question is sent to a language model provider, Anthropic, to check it for sensitive topics and, when the answer opens with a summary, to write the summary. Anthropic's standard commercial terms apply: it does not train on what it receives and deletes it within 30 days.
+- Your question is sent to a language model provider to check it for sensitive topics and, when the answer opens with a summary, to write the summary. The provider's terms apply: it does not train on what it receives and deletes it within 30 days.
 - If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.
 
 Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student". To make that edit, the student's question is sent to the same provider under the same terms, and only the edited text is kept.
