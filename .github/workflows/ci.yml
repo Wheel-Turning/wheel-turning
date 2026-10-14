@@ -46,6 +46,21 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  rustdoc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A broken intra-doc link or a stray HTML tag in a doc comment fails the build.
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install  # reads rust-toolchain.toml
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo doc --workspace --no-deps --locked
+
   test:
     name: cargo test
     runs-on: ubuntu-latest
@@ -310,7 +325,7 @@ jobs:
   ci-ok:
     name: ci ok
     if: always()
-    needs: [fmt, clippy, test, sqlx-prepare, deny, machete, terraform, tflint, ruff, gitleaks, workflows, typos, a11y]
+    needs: [fmt, clippy, rustdoc, test, sqlx-prepare, deny, machete, terraform, tflint, ruff, gitleaks, workflows, typos, a11y]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

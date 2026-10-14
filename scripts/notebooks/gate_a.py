@@ -59,6 +59,8 @@ WORD = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 
 @dataclasses.dataclass(frozen=True)
 class Passage:
+    """One exported passage, with opaque talk and teacher IDs and no names."""
+
     passage_id: str
     talk_id: str
     teacher_id: str
@@ -68,6 +70,8 @@ class Passage:
 
 @dataclasses.dataclass(frozen=True)
 class Question:
+    """One question from the eval TOML, with its tags."""
+
     id: str
     text: str
     tags: tuple[str, ...]
@@ -75,6 +79,8 @@ class Question:
 
 @dataclasses.dataclass
 class Hit:
+    """A kept passage with its reranker logit and its 1-based rank in the fused list."""
+
     passage: Passage
     rerank_score: float
     fused_rank: int
@@ -129,6 +135,7 @@ def passages_digest(passages: Sequence[Passage]) -> str:
 
 
 def file_sha256(path: Path) -> str:
+    """Hex SHA-256 of a file, read in 1 MiB blocks, to check the model against export.json."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
@@ -163,6 +170,7 @@ class Bge:
         self.output = self.session.get_outputs()[0].name
 
     def embed(self, texts: Sequence[str]) -> np.ndarray:
+        """Normalized first-token vectors for a batch, as `wt_ml::OnnxEmbedder` computes them."""
         enc = self.tokenizer.encode_batch(list(texts))
         ids = np.array([e.ids for e in enc], dtype=np.int64)
         mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
@@ -172,6 +180,7 @@ class Bge:
 
 
 def normalize(v: np.ndarray) -> np.ndarray:
+    """Rows scaled to unit length; an all-zero row stays zero instead of dividing by zero."""
     n = np.linalg.norm(v, axis=1, keepdims=True)
     return v / np.where(n == 0, 1, n)
 
@@ -275,6 +284,10 @@ def check_vectors(
 
 
 def dense_ranking(matrix: np.ndarray, query: np.ndarray, depth: int = FUSE_DEPTH) -> list[int]:
+    """Passage indexes by cosine with the query, best first, the top `depth` only.
+
+    The rows of `matrix` are unit vectors, so the dot product is the cosine.
+    """
     scores = matrix @ query
     depth = min(depth, len(scores))
     top = np.argpartition(-scores, depth - 1)[:depth]
@@ -285,16 +298,20 @@ def dense_ranking(matrix: np.ndarray, query: np.ndarray, depth: int = FUSE_DEPTH
 
 
 def tokenize(text: str) -> list[str]:
+    """Lowercased words without stopwords: the BM25 terms for passages and queries alike."""
     return [w for w in WORD.findall(text.lower()) if w not in STOPWORDS]
 
 
 class Sparse:
+    """BM25 over the passages, the keyword half of the hybrid search."""
+
     def __init__(self, passages: Sequence[Passage]):
         from rank_bm25 import BM25Okapi
 
         self.bm25 = BM25Okapi([tokenize(p.text) or [""] for p in passages])
 
     def ranking(self, query: str, depth: int = FUSE_DEPTH) -> list[int]:
+        """Passage indexes by BM25 score, best first, dropping passages that share no term."""
         terms = tokenize(query)
         if not terms:
             return []
@@ -325,6 +342,7 @@ def rrf(rankings: Sequence[Sequence[int]], k: int = RRF_K) -> list[int]:
 def cap_per_teacher(
     ordered: Sequence[Passage], keep: int = KEEP_TOP, cap: int = PER_TEACHER_CAP
 ) -> list[Passage]:
+    """The first `keep` passages in order, with at most `cap` from any one teacher (Spec 07)."""
     out, seen = [], Counter()
     for p in ordered:
         if seen[p.teacher_id] < cap:
@@ -350,6 +368,7 @@ class Reranker:
         self.batch_size = batch_size
 
     def score(self, query: str, texts: Sequence[str]) -> list[float]:
+        """One reranker logit per text against the query, batched to bound memory."""
         out: list[float] = []
         with self.torch.no_grad():
             for i in range(0, len(texts), self.batch_size):
@@ -368,6 +387,8 @@ class Reranker:
 
 @dataclasses.dataclass
 class Retriever:
+    """The hybrid search under test: dense and BM25 fused by RRF, then reranked and capped."""
+
     passages: Sequence[Passage]
     matrix: np.ndarray
     sparse: Sparse
@@ -375,6 +396,7 @@ class Retriever:
     rerank: Callable[[str, Sequence[str]], list[float]]
 
     def search(self, query: str) -> list[Hit]:
+        """The top passages for a question, best first, at most three per teacher."""
         q = self.embed([query])[0]
         fused = rrf([dense_ranking(self.matrix, q), self.sparse.ranking(query)])[:RERANK_TOP]
         cands = [self.passages[i] for i in fused]
@@ -414,6 +436,7 @@ def teacher_labels(results: dict[str, list[Hit]]) -> dict[str, str]:
 
 
 def clock(ms: int) -> str:
+    """Milliseconds as H:MM:SS, the start time shown beside a passage."""
     s = ms // 1000
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
 
@@ -465,6 +488,7 @@ def source_link(src: Source, start_ms: int) -> tuple[str | None, str]:
 
 
 def results_json(questions: Sequence[Question], results: dict[str, list[Hit]], meta: dict) -> dict:
+    """The run's results as JSON: the questions and, per question, the kept passages."""
     return {
         "meta": meta,
         "questions": [
@@ -593,6 +617,8 @@ def review_html(
 
 @dataclasses.dataclass
 class QuestionScore:
+    """One question's ratings: how many passages were rated, how many good, and the verdict."""
+
     id: str
     rated: int
     good: int
@@ -601,6 +627,8 @@ class QuestionScore:
 
 @dataclasses.dataclass
 class GateScore:
+    """A reviewer's ratings for a whole run, read back from the review page's saved file."""
+
     reviewer: str
     rated_on: str
     run: str
@@ -608,10 +636,12 @@ class GateScore:
 
     @property
     def passed_count(self) -> int:
+        """How many questions met the pass ratio."""
         return sum(q.passed for q in self.questions)
 
     @property
     def rated_count(self) -> int:
+        """How many passages the reviewer rated across all questions."""
         return sum(q.rated for q in self.questions)
 
     @property

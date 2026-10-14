@@ -28,6 +28,7 @@ PROBE_KEY = "lifecycle-probe/probe.txt"
 
 
 def aws(*args: str) -> dict:
+    """Runs an AWS CLI command and parses its JSON output, or {} when it prints nothing."""
     out = subprocess.run(
         ["aws", *args, "--output", "json"], check=True, capture_output=True, text=True
     )
@@ -35,11 +36,13 @@ def aws(*args: str) -> dict:
 
 
 def default_bucket() -> str:
+    """The bucket Terraform names after the account: wt-v1-scratch-<account id>."""
     account = aws("sts", "get-caller-identity")["Account"]
     return f"wt-v1-scratch-{account}"
 
 
 def covers_whole_bucket(rule: dict) -> bool:
+    """Whether a lifecycle rule applies to every key, under either the legacy or the Filter form."""
     if rule.get("Prefix"):  # legacy top-level prefix
         return False
     filt = rule.get("Filter")
@@ -49,6 +52,7 @@ def covers_whole_bucket(rule: dict) -> bool:
 
 
 def check_rule(bucket: str) -> list[str]:
+    """The findings for the lifecycle rules: none when one enabled rule sets both expiries."""
     config = aws("s3api", "get-bucket-lifecycle-configuration", "--bucket", bucket)
     rules = config.get("Rules", [])
     for rule in rules:
@@ -66,6 +70,7 @@ def check_rule(bucket: str) -> list[str]:
 
 
 def put_probe(bucket: str) -> None:
+    """Writes the plain-text probe object that `--check-probe` later expects to be gone."""
     stamp = dt.datetime.now(dt.UTC).isoformat()
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "probe.txt"
@@ -76,6 +81,7 @@ def put_probe(bucket: str) -> None:
 
 
 def check_probe(bucket: str) -> list[str]:
+    """The findings for the probe: none once S3 has expired it (head-object returns 404)."""
     result = subprocess.run(
         ["aws", "s3api", "head-object", "--bucket", bucket, "--key", PROBE_KEY],
         capture_output=True,
@@ -90,6 +96,7 @@ def check_probe(bucket: str) -> list[str]:
 
 
 def main() -> int:
+    """Checks the rule by default, or writes or checks the probe."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bucket", help="defaults to wt-v1-scratch-<account id>")
     mode = parser.add_mutually_exclusive_group()

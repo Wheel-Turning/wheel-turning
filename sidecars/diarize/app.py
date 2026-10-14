@@ -83,6 +83,7 @@ def diarize_bytes(data: bytes, run=None):
 
 
 def _warm() -> None:
+    """Loads the pipeline at startup; a failure is printed by type only, so the token never is."""
     try:
         pipeline()
     except Exception as error:  # noqa: BLE001 - reported on /healthz and on the first request
@@ -91,6 +92,7 @@ def _warm() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """Starts loading the pipeline in the background when the app starts."""
     # Load in the background so /healthz can report progress.
     threading.Thread(target=_warm, daemon=True).start()
     yield
@@ -101,6 +103,7 @@ app = FastAPI(title="wt-diarize", lifespan=lifespan)
 
 @app.get("/healthz")
 def healthz() -> JSONResponse:
+    """503 until the pipeline has loaded, which it never does if loading failed."""
     if _pipeline is None:
         return JSONResponse({"status": "loading", "pipeline": PIPELINE_NAME}, status_code=503)
     return JSONResponse({"status": "ok", "pipeline": PIPELINE_NAME, "device": str(device())})
@@ -114,6 +117,7 @@ _run_lock = threading.Lock()
 
 @app.post("/diarize")
 def diarize(file: UploadFile = File(...)) -> JSONResponse:  # noqa: B008
+    """Diarizes one WAV upload: 400 for unreadable audio, 503 when the pipeline cannot load."""
     data = file.file.read()
     try:
         with _run_lock:

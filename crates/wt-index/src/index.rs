@@ -2,7 +2,7 @@
 //! words of each segment, citations mapped onto them, and one transaction that brings the talk's
 //! passages up to date. A passage whose segment and content hash are unchanged keeps its id, so
 //! answers, feedback and eval ratings that name it survive a reindex. [`plan`] and
-//! [`match_stored`] are pure; [`write`] runs inside the caller's transaction, which also moves
+//! [`match_stored`] are pure; [`write()`] runs inside the caller's transaction, which also moves
 //! the talk to `ready`.
 
 use sqlx::PgConnection;
@@ -284,7 +284,7 @@ impl Plan {
         self
     }
 
-    /// The texts to embed, in the order [`write`] takes their vectors: the passages whose
+    /// The texts to embed, in the order [`write()`] takes their vectors: the passages whose
     /// stored vector cannot be kept, then the questions.
     pub fn texts(&self, reuse: &Reuse) -> Vec<String> {
         self.passages

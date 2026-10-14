@@ -108,6 +108,7 @@ CHECK_PAIRS = [
 
 
 def sha256(path: Path) -> str:
+    """Hex SHA-256 of a file, read in 1 MiB blocks so a multi-GB graph never sits in memory."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
@@ -149,6 +150,11 @@ def embed(session: ort.InferenceSession, tok: Tokenizer, texts: list[str]) -> np
 
 
 def export_embedder(out_dir: Path, cache: Path | None, per_channel: bool) -> None:
+    """Downloads the pinned embedder, quantizes it to int8 and writes the manifest.
+
+    The manifest is written only when every check sentence keeps a cosine of at least 0.95
+    against the fp32 graph, so a model that drifted never reaches models/.
+    """
     spec = EMBED
     target = out_dir / spec["name"]
     print(f"downloading {spec['repo']} at {spec['revision']}", flush=True)
@@ -227,6 +233,11 @@ def rerank_logits(session: ort.InferenceSession, tok: Tokenizer) -> list[float]:
 
 
 def export_reranker(out_dir: Path, cache: Path | None, per_channel: bool) -> None:
+    """Traces the pinned reranker to ONNX, quantizes it to int8 and writes the manifest.
+
+    The repository ships no ONNX graph, so this one is traced from PyTorch. The manifest is
+    written only when no check pair's sigmoid score moves by more than 0.05.
+    """
     import torch
     from transformers import AutoModelForSequenceClassification
 
@@ -326,6 +337,7 @@ def export_reranker(out_dir: Path, cache: Path | None, per_channel: bool) -> Non
 
 
 def main() -> None:
+    """Exports both models unless `--only` picks one, then copies ONNX Runtime beside them."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=Path("models"), help="WT_MODEL_DIR")
     parser.add_argument("--cache", type=Path, default=None, help="Hugging Face cache directory")
