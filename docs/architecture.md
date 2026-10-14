@@ -256,7 +256,7 @@ flowchart LR
   fargate --> rds
 ```
 
-CI runs the five checks in `CLAUDE.md` plus cargo machete, Terraform validate and tflint, ruff, gitleaks, workflow lint, typos and the accessibility suite. The nightly audit runs against the database in the `WT_AUDIT_DATABASE_URL` secret, or a freshly migrated one when that secret is unset. Deploy applies Terraform in two plans around a migration step that runs as `wt_owner`, then checks `/healthz` over HTTPS. The GPU script stops its workers after a set number of hours.
+CI runs the five checks in `CLAUDE.md` plus `cargo doc` with warnings denied, cargo machete, Terraform validate and tflint, ruff, gitleaks, workflow lint, typos and the accessibility suite. The nightly audit runs against the database in the `WT_AUDIT_DATABASE_URL` secret, or a freshly migrated one when that secret is unset. Deploy applies Terraform in two plans around a migration step that runs as `wt_owner`, then checks `/healthz` over HTTPS. The GPU script stops its workers after a set number of hours.
 
 ## Invariants and where they are enforced
 

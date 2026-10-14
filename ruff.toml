@@ -3,4 +3,17 @@ target-version = "py311"
 line-length = 100
 
 [lint]
-select = ["E", "F", "W", "I", "B", "UP"]
+select = ["E", "F", "W", "I", "B", "UP", "D"]
+# The house style lets a docstring's first sentence wrap onto the next line and close on its last
+# line, as the Rust doc comments do. `__init__` is covered by its class's docstring.
+ignore = ["D205", "D209", "D107"]
+
+[lint.pydocstyle]
+# Google style without D401: docstrings describe ("Loads the pipeline once"), they do not command.
+convention = "google"
+
+[lint.per-file-ignores]
+# A test's name says what it checks. Notebooks are driven by the modules they import.
+"**/test_*.py" = ["D1"]
+"**/tests/*.py" = ["D1"]
+"*.ipynb" = ["D1"]

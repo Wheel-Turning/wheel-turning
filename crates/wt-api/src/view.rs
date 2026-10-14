@@ -35,7 +35,7 @@ pub struct Link {
 /// lay them out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceLinks {
-    /// "Read the talk's transcript at <sangha>" for a talk whose source made its transcript,
+    /// "Read the talk's transcript at `<sangha>`" for a talk whose source made its transcript,
     /// with a text fragment; "Read our transcript" at display level `full` otherwise.
     pub read: Option<Link>,
     /// The recording at the excerpt's first word, when the source's player takes a time, or
@@ -211,7 +211,7 @@ pub struct PassageView {
     pub cite: String,
     /// Read, Listen and "starts at" (rule 2).
     pub links: SourceLinks,
-    /// "Give to <sangha>" target, when eligible.
+    /// "Give to `<sangha>`" target, when eligible.
     pub give_href: Option<String>,
     /// The credit line.
     pub credit: String,

@@ -18,6 +18,7 @@ import sys
 
 
 def aws(*args: str) -> dict:
+    """Runs an AWS CLI command and parses its JSON output; raises on a nonzero exit."""
     out = subprocess.run(
         ["aws", *args, "--output", "json"], check=True, capture_output=True, text=True
     )
@@ -25,6 +26,7 @@ def aws(*args: str) -> dict:
 
 
 def group_id(name: str) -> str:
+    """The id of the one security group with this name; exits if there are none or several."""
     groups = aws("ec2", "describe-security-groups", "--filters", f"Name=group-name,Values={name}")
     found = groups["SecurityGroups"]
     if len(found) != 1:
@@ -33,6 +35,7 @@ def group_id(name: str) -> str:
 
 
 def main() -> int:
+    """Collects every finding before exiting, so one run lists all of them."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--name", default="wt-v1", help="stack name prefix")
     args = parser.parse_args()

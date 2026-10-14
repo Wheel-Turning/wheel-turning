@@ -1,5 +1,9 @@
 //! The wt binary: commands and the worker.
 
+// clap prints the commands' doc comments as `--help` text, where `<dir>` is a placeholder and not
+// an HTML tag. Rustdoc would read it as one.
+#![allow(rustdoc::invalid_html_tags)]
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -192,6 +196,8 @@ enum Command {
 }
 
 #[derive(Debug, clap::Args)]
+// `[asr]` in the help text names the config.toml table, not an intra-doc link.
+#[allow(rustdoc::broken_intra_doc_links)]
 struct BenchmarkArgs {
     /// A clip with known text: a public-domain or CC0 recording, never a teacher's talk.
     #[arg(long, conflicts_with = "talk")]

@@ -22,6 +22,7 @@ import sys
 
 
 def aws(*args: str) -> dict:
+    """Runs an AWS CLI command and parses its JSON output, or {} when it prints nothing."""
     out = subprocess.run(
         ["aws", *args, "--output", "json"], check=True, capture_output=True, text=True
     )
@@ -29,6 +30,7 @@ def aws(*args: str) -> dict:
 
 
 def tf_output(tf_dir: str) -> dict:
+    """The environment's Terraform outputs as a flat name-to-value map."""
     out = subprocess.run(
         ["terraform", f"-chdir={tf_dir}", "output", "-json"],
         check=True,
@@ -39,6 +41,11 @@ def tf_output(tf_dir: str) -> dict:
 
 
 def run_task(outputs: dict, family: str, command: list[str] | None, label: str) -> None:
+    """Runs one Fargate task to completion, prints its log, and exits if it failed.
+
+    The task runs in the public subnets with the web group, the one the database accepts.
+    `command` overrides the container's command; None keeps the task definition's.
+    """
     network = {
         "awsvpcConfiguration": {
             "subnets": outputs["public_subnet_ids"],
@@ -86,6 +93,7 @@ def run_task(outputs: dict, family: str, command: list[str] | None, label: str) 
 
 
 def main() -> int:
+    """Migrates as master, creates the three logins, then proves the owner login can migrate."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tf-dir", default="infra/terraform/envs/v1")
     args = parser.parse_args()
