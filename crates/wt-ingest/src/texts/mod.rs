@@ -203,6 +203,7 @@ struct PdfPages {
     ocr_confidences: Vec<f32>,
     text_layer_pages: usize,
     ocr_pages: usize,
+    low_ranges: Vec<pdf::LowRange>,
 }
 
 fn vector_literal(v: &[f32]) -> String {
@@ -488,34 +489,26 @@ pub async fn import_with(
     }
 
     if m.parts.is_empty() {
-        return import_one(
-            conn,
-            objects,
-            embedder,
-            &m,
-            &manifest_text,
-            &manifest_hash,
+        let input = EditionInput {
+            manifest: &m,
+            manifest_text: &manifest_text,
+            key_seed: &manifest_hash,
             manifest_path,
-            opts,
-        )
-        .await;
+        };
+        return import_one(conn, objects, embedder, &input, opts).await;
     }
     let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
     report.unchanged = true;
     for (i, p) in m.parts.iter().enumerate() {
         let part = part_manifest(&m, p)?;
         let seed = sha256_hex(format!("{manifest_hash}:part:{i}").as_bytes());
-        let r = import_one(
-            conn,
-            objects,
-            embedder,
-            &part,
-            &manifest_text,
-            &seed,
+        let input = EditionInput {
+            manifest: &part,
+            manifest_text: &manifest_text,
+            key_seed: &seed,
             manifest_path,
-            opts,
-        )
-        .await?;
+        };
+        let r = import_one(conn, objects, embedder, &input, opts).await?;
         report.units += r.units;
         report.applied |= r.applied;
         report.unchanged &= r.unchanged;
@@ -524,40 +517,198 @@ pub async fn import_with(
     Ok(report)
 }
 
-/// Imports one edition.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// One edition to import: its manifest (a part's own, for a compilation), the manifest file's
+/// text and path, and the seed its content key starts from.
+struct EditionInput<'a> {
+    /// The edition's manifest.
+    manifest: &'a CorpusManifest,
+    /// The manifest file as read, stored with the edition so it can be imported again.
+    manifest_text: &'a str,
+    /// The manifest's hash, or for a part the hash of the manifest and the part's index, so two
+    /// parts of one file never share a key.
+    key_seed: &'a str,
+    /// Where the manifest is; source files are read relative to it.
+    manifest_path: &'a Path,
+}
+
+/// The source files read into sections (Spec 08, Import pipeline, steps 2 and 3).
+struct Extracted {
+    /// The content key: the seed and every file's hash. An edition stored under the same key is
+    /// unchanged.
+    key: String,
+    /// Every section of every file, before the `include_sections` filter.
+    sections: Vec<extract::Section>,
+    /// Each file's name and bytes, kept in the object store after a real run.
+    files: Vec<(String, Vec<u8>)>,
+    /// For a PDF: its words, exclusions and page facts.
+    pdf: PdfPages,
+}
+
+/// Imports one edition: the dry run's checks and report, and with `--apply` the write.
 async fn import_one(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
     embedder: &dyn Embedder,
-    m: &CorpusManifest,
-    manifest_text: &str,
-    key_seed: &str,
-    manifest_path: &Path,
+    input: &EditionInput<'_>,
     opts: &ImportOptions<'_>,
 ) -> Result<ImportReport, TextError> {
-    let (apply, pdf_env) = (opts.apply, opts.pdf_env);
-    let dir = manifest_path.parent().unwrap_or(Path::new("."));
+    let m = input.manifest;
+    let dir = input.manifest_path.parent().unwrap_or(Path::new("."));
+    let is_pdf = m.source.format == Format::Pdf;
+    let settings = m.pdf.clone().unwrap_or_default();
 
     // 1. The evidence must exist, be approved, and carry an allowed code.
     let (evidence_id, evidence) =
         check_evidence(conn, &m.edition.license_evidence_id, opts.allowed_codes).await?;
 
     // 2 and 3. Extract and filter.
+    let extracted = extract_sources(objects, m, dir, input.key_seed, opts.pdf_env)?;
+    let (mut kept, excluded): (Vec<_>, Vec<_>) = extracted
+        .sections
+        .into_iter()
+        .partition(|s| extract::keep(s.title.as_deref(), &m.source.include_sections));
+    let (key, files, pdf_pages) = (extracted.key, extracted.files, extracted.pdf);
+
+    // Legal pages are kept apart, whole, and never embedded or shown (Spec 08, Source copies
+    // and legal pages).
+    let (legal, legal_places) = notice::take_legal(&mut kept);
+
+    if let Some(reason) = not_english(m, &kept) {
+        let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
+        report.skipped = Some(reason);
+        return Ok(report);
+    }
+    let (third, action) = third_party_notices(conn, m, &evidence, &legal, &kept).await?;
+
+    // 4 and 5. Units and locators.
+    let units = units::cut(&kept, &m.units, &m.work.title)?;
+    if units.is_empty() {
+        return Err(TextError::Empty(format!(
+            "{} sections kept, none yields a unit",
+            kept.len()
+        )));
+    }
+    check_not_taken_down(conn, m, &files, &units).await?;
+
+    let mut report = dry_run_report(
+        m,
+        &kept,
+        &excluded,
+        &units,
+        legal.len(),
+        &third,
+        action.as_deref(),
+    );
+    if action.as_deref() == Some("block") {
+        return Ok(report);
+    }
+    let notice_text: Option<String> = (!third.is_empty()).then(|| {
+        third
+            .iter()
+            .map(|n| n.line.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    let legal_text: Option<String> = (!legal.is_empty()).then(|| legal.join("\n\n"));
+
+    // PDFs: each unit's page and confidence, and the suspect check (steps 4 and 6).
+    let placements = if is_pdf {
+        pdf::rebuild::place(units.iter().map(|u| u.text.as_str()), &pdf_pages.words)
+    } else {
+        Vec::new()
+    };
+    let confidences: Vec<Option<f32>> = (0..units.len())
+        .map(|i| {
+            placements
+                .get(i)
+                .and_then(Option::as_ref)
+                .filter(|p| pdf_pages.ocr.contains(&(p.file, p.page)))
+                .map(|p| p.conf)
+        })
+        .collect();
+    if is_pdf && let Some(env) = opts.pdf_env {
+        report.pdf =
+            Some(pdf_report(conn, env, &units, &confidences, &settings, &pdf_pages).await?);
+    }
+    if report.pdf.as_ref().is_some_and(|p| p.stopped.is_some()) {
+        return Ok(report);
+    }
+    // A dry run changes nothing in the database (Spec 08 acceptance), so it is not logged.
+    if !opts.apply {
+        return Ok(report);
+    }
+    if !opts.force
+        && texts::edition_hash(conn, &m.work.title, &m.edition.label).await?
+            == Some(Some(key.clone()))
+    {
+        report.unchanged = true;
+        return Ok(report);
+    }
+
+    let ocr_engine = match opts.pdf_env {
+        Some(env) if pdf_pages.ocr_pages > 0 => Some(env.tools.engine()?),
+        _ => None,
+    };
+    let written = Written {
+        input,
+        key: &key,
+        evidence: evidence_id,
+        units: &units,
+        placements: &placements,
+        confidences: &confidences,
+        legal_text: legal_text.as_deref(),
+        legal_places: &legal_places,
+        notice_text: notice_text.as_deref(),
+        extraction: report
+            .pdf
+            .as_ref()
+            .map_or("native", |p| p.extraction.as_str()),
+        ocr_engine: ocr_engine.as_deref(),
+        mean_confidence: report.pdf.as_ref().and_then(|p| p.mean_confidence),
+        sections: (report.sections_kept.len(), report.sections_excluded.len()),
+    };
+    let edition = write_edition(conn, embedder, &written, opts.actor).await?;
+    // A held document waits in quarantine to be released one at a time.
+    if action.as_deref() == Some("hold") {
+        wt_db::text_takedown::set_state_logged(
+            conn,
+            edition,
+            "quarantined",
+            &format!(
+                "held for a notice: {}",
+                notice_text.as_deref().unwrap_or("")
+            ),
+            opts.actor,
+        )
+        .await?;
+    }
+    store_sources(objects, input, &files, &units, &placements, pdf_pages)?;
+    report.applied = true;
+    Ok(report)
+}
+
+/// Reads every source file into sections, through the page cache and OCR for a PDF, and works
+/// out the content key from `key_seed` and the files' hashes.
+fn extract_sources(
+    objects: &dyn ObjectStore,
+    m: &CorpusManifest,
+    dir: &Path,
+    key_seed: &str,
+    pdf_env: Option<&PdfEnv<'_>>,
+) -> Result<Extracted, TextError> {
+    let settings = m.pdf.clone().unwrap_or_default();
     let mut key_input = key_seed.to_owned();
     let mut sections = Vec::new();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    let is_pdf = m.source.format == Format::Pdf;
-    let settings = m.pdf.clone().unwrap_or_default();
     let mut pdf_pages = PdfPages::default();
-    let mut low_ranges: Vec<pdf::LowRange> = Vec::new();
     for (index, name) in m.source.files.iter().enumerate() {
         let path = dir.join(name);
         let bytes = std::fs::read(&path)
             .map_err(|e| TextError::Source(format!("{}: {e}", path.display())))?;
-        key_input.push_str(&sha256_hex(&bytes));
+        let file_sha256 = sha256_hex(&bytes);
+        key_input.push_str(&file_sha256);
         files.push((name.clone(), bytes));
-        if !is_pdf {
+        if m.source.format != Format::Pdf {
             sections.extend(extract::read(&path, m.source.format)?);
             continue;
         }
@@ -565,14 +716,37 @@ async fn import_one(
             TextError::Source("a PDF import needs poppler and Tesseract (PdfEnv)".into())
         })?;
         // Pages come from the cache when an earlier run or chunk job read them.
-        let cache = pdf::PageCache::new(objects, &sha256_hex(bytes_of(&files, name)), &settings);
+        let cache = pdf::PageCache::new(objects, &file_sha256, &settings);
+        let verse = m.units.scheme == Scheme::Verse;
+        sections.extend(pdf_pages.read_file(env, &cache, &path, index, &settings, verse)?);
+    }
+    Ok(Extracted {
+        key: sha256_hex(key_input.as_bytes()),
+        sections,
+        files,
+        pdf: pdf_pages,
+    })
+}
+
+impl PdfPages {
+    /// Reads one PDF, the `index`th of the manifest's files, adds its words and page facts to
+    /// these, and returns its sections. A tenth of the pages that reads weak is read once more
+    /// at `reocr_dpi`, and if still weak, named in `low_ranges` for the proofread (Spec 08,
+    /// Large documents, step 6).
+    fn read_file(
+        &mut self,
+        env: &PdfEnv<'_>,
+        cache: &pdf::PageCache<'_>,
+        path: &Path,
+        index: usize,
+        settings: &pdf::PdfSettings,
+        verse: bool,
+    ) -> Result<Vec<extract::Section>, TextError> {
         let cached = pdf::ReadOptions {
-            cache: Some(&cache),
+            cache: Some(cache),
             ..pdf::ReadOptions::default()
         };
-        let mut read = pdf::read(env.tools, &path, &settings, &env.scratch, cached)?;
-        // The per-range check (Spec 08, Large documents, step 6): a weak tenth is read once
-        // more at `reocr_dpi`, and if still weak, named for the proofread.
+        let mut read = pdf::read(env.tools, path, settings, &env.scratch, cached)?;
         let mut reread = false;
         for (first, last, _) in pdf::weak_ranges(&read, settings.range_min_confidence) {
             let low_dpi = read
@@ -583,11 +757,11 @@ async fn import_one(
             if low_dpi {
                 pdf::read(
                     env.tools,
-                    &path,
-                    &settings,
+                    path,
+                    settings,
                     &env.scratch,
                     pdf::ReadOptions {
-                        cache: Some(&cache),
+                        cache: Some(cache),
                         pages: Some((first, last)),
                         force_dpi: Some(settings.reocr_dpi),
                     },
@@ -596,9 +770,9 @@ async fn import_one(
             }
         }
         if reread {
-            read = pdf::read(env.tools, &path, &settings, &env.scratch, cached)?;
+            read = pdf::read(env.tools, path, settings, &env.scratch, cached)?;
         }
-        low_ranges.extend(
+        self.low_ranges.extend(
             pdf::weak_ranges(&read, settings.range_min_confidence)
                 .into_iter()
                 .map(|(first, last, mean_confidence)| pdf::LowRange {
@@ -608,41 +782,30 @@ async fn import_one(
                     mean_confidence,
                 }),
         );
-        let mut rebuilt = pdf::rebuild::rebuild(
-            &read.pages,
-            settings.strip_running_heads,
-            m.units.scheme == Scheme::Verse,
-        );
+        let mut rebuilt = pdf::rebuild::rebuild(&read.pages, settings.strip_running_heads, verse);
         for w in &mut rebuilt.words {
             w.file = index;
         }
         for (page, dpi) in read.pages.iter().zip(&read.dpis) {
-            pdf_pages
-                .sizes
+            self.sizes
                 .insert((index, page.number), pdf::page_points(page, *dpi));
             if page.origin == pdf::layout::Origin::Ocr {
-                pdf_pages.ocr.insert((index, page.number));
-                pdf_pages
-                    .ocr_confidences
-                    .extend(page.words().map(|w| w.conf));
+                self.ocr.insert((index, page.number));
+                self.ocr_confidences.extend(page.words().map(|w| w.conf));
             }
         }
-        pdf_pages.text_layer_pages += read.text_layer_pages;
-        pdf_pages.ocr_pages += read.ocr_pages;
-        pdf_pages.words.extend(rebuilt.words);
-        pdf_pages.excluded.extend(rebuilt.excluded);
-        sections.extend(rebuilt.sections);
+        self.text_layer_pages += read.text_layer_pages;
+        self.ocr_pages += read.ocr_pages;
+        self.words.extend(rebuilt.words);
+        self.excluded.extend(rebuilt.excluded);
+        Ok(rebuilt.sections)
     }
-    let key = sha256_hex(key_input.as_bytes());
-    let (mut kept, excluded): (Vec<_>, Vec<_>) = sections
-        .into_iter()
-        .partition(|s| extract::keep(s.title.as_deref(), &m.source.include_sections));
+}
 
-    // Legal pages are kept apart, whole, and never embedded or shown (Spec 08, Source copies
-    // and legal pages).
-    let (legal, legal_places) = notice::take_legal(&mut kept);
-
-    // Only English in v1 (Spec 08, Mandated sources).
+/// Why the edition is skipped when it is not English, which is all v1 loads (Spec 08, Mandated
+/// sources): the manifest says another language, or too few of the first 200 blocks' words are
+/// common English ones.
+fn not_english(m: &CorpusManifest, kept: &[extract::Section]) -> Option<String> {
     let sample: String = kept
         .iter()
         .flat_map(|s| s.blocks.iter())
@@ -650,51 +813,59 @@ async fn import_one(
         .cloned()
         .collect::<Vec<_>>()
         .join(" ");
-    if !m.edition.language.eq_ignore_ascii_case("en") || !notice::is_english(&sample) {
-        let mut report = ImportReport::empty(&m.work.title, &m.edition.label);
-        report.skipped = Some(format!(
-            "not English (language {:?}, {:.0}% common English words): only English is loaded \
-             in v1",
-            m.edition.language,
-            notice::english_share(&sample) * 100.0
-        ));
-        return Ok(report);
+    if m.edition.language.eq_ignore_ascii_case("en") && notice::is_english(&sample) {
+        return None;
     }
+    Some(format!(
+        "not English (language {:?}, {:.0}% common English words): only English is loaded in v1",
+        m.edition.language,
+        notice::english_share(&sample) * 100.0
+    ))
+}
 
-    // The notice scan: the legal pages and the first and last blocks. A notice naming a holder
-    // the evidence does not cover blocks the document, unless its mandated source flags or
-    // holds noticed documents instead.
+/// The notice scan: the legal pages and the first and last blocks. Returns the notices naming
+/// a holder that neither the manifest's rights holder nor the evidence covers, and what to do
+/// about them: nothing when there are none, else the mandated source's `notice_action` (`flag`
+/// or `hold`), or `block`.
+async fn third_party_notices(
+    conn: &mut sqlx::PgConnection,
+    m: &CorpusManifest,
+    evidence: &texts::ImportEvidence,
+    legal: &[String],
+    kept: &[extract::Section],
+) -> Result<(Vec<notice::Notice>, Option<String>), TextError> {
     let found = notice::notices(
         legal
             .iter()
             .map(String::as_str)
-            .chain(notice::edges(&kept, 3)),
+            .chain(notice::edges(kept, 3)),
     );
     let mut covers: Vec<&str> = vec![m.edition.rights_holder.as_str()];
     covers.extend(evidence.publisher.as_deref());
     covers.extend(evidence.grantor.as_deref());
     let third = notice::third_party(&found, &covers);
-    let action = if third.is_empty() {
-        None
-    } else {
-        let source_action = match &m.edition.source_key {
-            Some(key) => wt_db::text_takedown::notice_action(conn, key).await?,
-            None => None,
-        };
-        Some(source_action.unwrap_or_else(|| "block".to_owned()))
-    };
-
-    // 4 and 5. Units and locators.
-    let units = units::cut(&kept, &m.units, &m.work.title)?;
-    if units.is_empty() {
-        return Err(TextError::Empty(format!(
-            "{} sections kept, none yields a unit",
-            kept.len()
-        )));
+    if third.is_empty() {
+        return Ok((third, None));
     }
+    let source_action = match &m.edition.source_key {
+        Some(key) => wt_db::text_takedown::notice_action(conn, key).await?,
+        None => None,
+    };
+    Ok((
+        third,
+        Some(source_action.unwrap_or_else(|| "block".to_owned())),
+    ))
+}
 
-    // Nothing taken down comes back: not the work, not the source, not the same content at
-    // another address (Spec 08, Rights lifecycle, "Never use it again").
+/// Refuses what was taken down before: not the work, not the source, not the same content at
+/// another address (Spec 08, Rights lifecycle, "Never use it again"). Also refuses a
+/// `source_key` that names no source.
+async fn check_not_taken_down(
+    conn: &mut sqlx::PgConnection,
+    m: &CorpusManifest,
+    files: &[(String, Vec<u8>)],
+    units: &[Unit],
+) -> Result<(), TextError> {
     let file_hashes: Vec<String> = files.iter().map(|(_, b)| sha256_hex(b)).collect();
     let unit_hashes: Vec<String> = units
         .iter()
@@ -720,6 +891,21 @@ async fn import_one(
             "source_key {key:?} is not a source"
         )));
     }
+    Ok(())
+}
+
+/// The report a dry run prints: sections kept and left out, the first and last units, word
+/// counts, warnings for long units and unused aliases, and what the notices did. `units` is
+/// never empty.
+fn dry_run_report(
+    m: &CorpusManifest,
+    kept: &[extract::Section],
+    excluded: &[extract::Section],
+    units: &[Unit],
+    legal_blocks: usize,
+    third: &[notice::Notice],
+    action: Option<&str>,
+) -> ImportReport {
     let mut lengths: Vec<usize> = units.iter().map(|u| u.word_count).collect();
     lengths.sort_unstable();
     let mut warnings = Vec::new();
@@ -732,7 +918,7 @@ async fn import_one(
         }
     }
     let title_of = |s: &extract::Section| s.title.clone().unwrap_or_else(|| "(untitled)".into());
-    let mut report = ImportReport {
+    ImportReport {
         work: m.work.title.clone(),
         edition: m.edition.label.clone(),
         sections_kept: kept.iter().map(title_of).collect(),
@@ -755,9 +941,9 @@ async fn import_one(
         pdf: None,
         queued: None,
         parts: Vec::new(),
-        legal_blocks: legal.len(),
-        notices: third.clone(),
-        notice_outcome: action.as_deref().map(|a| match a {
+        legal_blocks,
+        notices: third.to_vec(),
+        notice_outcome: action.map(|a| match a {
             "flag" => "flagged".to_owned(),
             "hold" => "held".to_owned(),
             _ => "blocked: third_party_notice".to_owned(),
@@ -767,110 +953,115 @@ async fn import_one(
             .iter()
             .map(|u| (u.locator.clone(), sha256_hex(u.text.as_bytes())))
             .collect(),
-    };
-    if action.as_deref() == Some("block") {
-        return Ok(report);
     }
-    let notice_text: Option<String> = (!third.is_empty()).then(|| {
-        third
-            .iter()
-            .map(|n| n.line.clone())
-            .collect::<Vec<_>>()
-            .join("\n")
-    });
-    let legal_text: Option<String> = (!legal.is_empty()).then(|| legal.join("\n\n"));
+}
 
-    // PDFs: each unit's page and confidence, and the suspect check (steps 4 and 6).
-    let placements = if is_pdf {
-        pdf::rebuild::place(units.iter().map(|u| u.text.as_str()), &pdf_pages.words)
-    } else {
-        Vec::new()
-    };
-    let unit_confidence = |i: usize| -> Option<f32> {
-        placements
-            .get(i)
-            .and_then(Option::as_ref)
-            .filter(|p| pdf_pages.ocr.contains(&(p.file, p.page)))
-            .map(|p| p.conf)
-    };
-    if is_pdf && let Some(env) = pdf_env {
-        let glossary: Vec<String> = wt_db::glossary::load(conn)
-            .await?
-            .into_iter()
-            .flat_map(|t| std::iter::once(t.canonical).chain(t.variants))
-            .collect();
-        let dictionary = pdf::quality::Dictionary::load(&env.word_list, &glossary)?;
-        let suspect: Vec<pdf::quality::Suspect> = units
-            .iter()
-            .enumerate()
-            .filter_map(|(i, u)| {
-                let confidence = unit_confidence(i);
-                let share = dictionary.share(&u.text);
-                pdf::quality::suspect(
-                    confidence,
-                    share,
-                    settings.min_unit_confidence,
-                    settings.min_dictionary_share,
-                )
-                .then(|| pdf::quality::Suspect {
-                    locator: u.locator.clone(),
-                    confidence,
-                    dictionary_share: share,
-                })
-            })
-            .collect();
-        #[allow(clippy::cast_precision_loss)]
-        let suspect_share = suspect.len() as f32 / units.len() as f32;
-        let stopped = (suspect_share > settings.max_suspect_share).then(|| {
-            format!(
-                "{} of {} units are suspect ({:.0}%, over max_suspect_share {:.0}%): the scan \
-                 probably needs better settings or a better copy",
-                suspect.len(),
-                units.len(),
-                suspect_share * 100.0,
-                settings.max_suspect_share * 100.0
+/// What a PDF import found, with the suspect check (Spec 08, PDFs and OCR): a unit is suspect
+/// when its OCR confidence or its share of dictionary words (the English word list and the
+/// glossary) is low, and the import stops when more than `max_suspect_share` of the units are.
+async fn pdf_report(
+    conn: &mut sqlx::PgConnection,
+    env: &PdfEnv<'_>,
+    units: &[Unit],
+    confidences: &[Option<f32>],
+    settings: &pdf::PdfSettings,
+    pages: &PdfPages,
+) -> Result<PdfReport, TextError> {
+    let glossary: Vec<String> = wt_db::glossary::load(conn)
+        .await?
+        .into_iter()
+        .flat_map(|t| std::iter::once(t.canonical).chain(t.variants))
+        .collect();
+    let dictionary = pdf::quality::Dictionary::load(&env.word_list, &glossary)?;
+    let suspect: Vec<pdf::quality::Suspect> = units
+        .iter()
+        .zip(confidences)
+        .filter_map(|(u, &confidence)| {
+            let share = dictionary.share(&u.text);
+            pdf::quality::suspect(
+                confidence,
+                share,
+                settings.min_unit_confidence,
+                settings.min_dictionary_share,
             )
-        });
-        report.pdf = Some(PdfReport {
-            text_layer_pages: pdf_pages.text_layer_pages,
-            ocr_pages: pdf_pages.ocr_pages,
-            extraction: if pdf_pages.ocr_pages > 0 {
-                "ocr"
-            } else {
-                "text_layer"
-            }
-            .into(),
-            mean_confidence: pdf::layout::mean(pdf_pages.ocr_confidences.iter().copied()),
-            excluded_blocks: pdf_pages.excluded.clone(),
-            suspect,
-            suspect_share,
-            stopped,
-            low_ranges: low_ranges.clone(),
-        });
-    }
-    if report.pdf.as_ref().is_some_and(|p| p.stopped.is_some()) {
-        return Ok(report);
-    }
-    // A dry run changes nothing in the database (Spec 08 acceptance), so it is not logged.
-    if !apply {
-        return Ok(report);
-    }
-    if !opts.force
-        && texts::edition_hash(conn, &m.work.title, &m.edition.label).await?
-            == Some(Some(key.clone()))
-    {
-        report.unchanged = true;
-        return Ok(report);
-    }
+            .then(|| pdf::quality::Suspect {
+                locator: u.locator.clone(),
+                confidence,
+                dictionary_share: share,
+            })
+        })
+        .collect();
+    #[allow(clippy::cast_precision_loss)]
+    let suspect_share = suspect.len() as f32 / units.len() as f32;
+    let stopped = (suspect_share > settings.max_suspect_share).then(|| {
+        format!(
+            "{} of {} units are suspect ({:.0}%, over max_suspect_share {:.0}%): the scan \
+             probably needs better settings or a better copy",
+            suspect.len(),
+            units.len(),
+            suspect_share * 100.0,
+            settings.max_suspect_share * 100.0
+        )
+    });
+    Ok(PdfReport {
+        text_layer_pages: pages.text_layer_pages,
+        ocr_pages: pages.ocr_pages,
+        extraction: if pages.ocr_pages > 0 {
+            "ocr"
+        } else {
+            "text_layer"
+        }
+        .into(),
+        mean_confidence: pdf::layout::mean(pages.ocr_confidences.iter().copied()),
+        excluded_blocks: pages.excluded.clone(),
+        suspect,
+        suspect_share,
+        stopped,
+        low_ranges: pages.low_ranges.clone(),
+    })
+}
 
-    let ocr_engine = match pdf_env {
-        Some(env) if pdf_pages.ocr_pages > 0 => Some(env.tools.engine()?),
-        _ => None,
-    };
+/// What a real run writes for one edition, all of it worked out and checked by the dry run.
+struct Written<'a> {
+    /// The edition's manifest and where it came from.
+    input: &'a EditionInput<'a>,
+    /// The content key the edition is stored under.
+    key: &'a str,
+    /// The approved license evidence.
+    evidence: sqlx::types::Uuid,
+    /// The units, in order.
+    units: &'a [Unit],
+    /// For a PDF, where each unit starts; empty otherwise.
+    placements: &'a [Option<pdf::rebuild::Placement>],
+    /// Each unit's OCR confidence, when it starts on an OCR page.
+    confidences: &'a [Option<f32>],
+    /// The legal pages, kept apart and never embedded.
+    legal_text: Option<&'a str>,
+    /// Where the legal pages were.
+    legal_places: &'a [String],
+    /// The third-party notices' lines, for a flagged or held document.
+    notice_text: Option<&'a str>,
+    /// `native`, `text_layer` or `ocr`.
+    extraction: &'a str,
+    /// The OCR engine and version, when any page was read by OCR.
+    ocr_engine: Option<&'a str>,
+    /// The mean OCR word confidence.
+    mean_confidence: Option<f32>,
+    /// Sections kept and left out, for the import run's counts.
+    sections: (usize, usize),
+}
 
-    // 6. Embed, then one transaction.
+/// Steps 6 and 7: embeds the units, then writes the persons, work, edition, units, locators and
+/// the import run in one transaction. Returns the edition.
+async fn write_edition(
+    conn: &mut sqlx::PgConnection,
+    embedder: &dyn Embedder,
+    w: &Written<'_>,
+    actor: &str,
+) -> Result<sqlx::types::Uuid, TextError> {
+    let m = w.input.manifest;
     let vectors = embedder
-        .embed(&units.iter().map(|u| u.text.clone()).collect::<Vec<_>>())
+        .embed(&w.units.iter().map(|u| u.text.clone()).collect::<Vec<_>>())
         .await?;
     let mut tx = sqlx::Acquire::begin(&mut *conn).await?;
     let author = match &m.work.author {
@@ -895,45 +1086,39 @@ async fn import_one(
             language: &m.edition.language,
             source_url: m.edition.source_url.as_deref(),
             rights_holder: &m.edition.rights_holder,
-            evidence: evidence_id,
+            evidence: w.evidence,
             excerptable: true,
-            content_hash: &key,
+            content_hash: w.key,
             source_key: m.edition.source_key.as_deref(),
-            legal_text: legal_text.as_deref(),
-            legal_pages: serde_json::json!(legal_places),
-            notice: notice_text.as_deref(),
-            extraction: report
-                .pdf
-                .as_ref()
-                .map_or("native", |p| p.extraction.as_str()),
-            ocr_engine: ocr_engine.as_deref(),
-            mean_confidence: report.pdf.as_ref().and_then(|p| p.mean_confidence),
+            legal_text: w.legal_text,
+            legal_pages: serde_json::json!(w.legal_places),
+            notice: w.notice_text,
+            extraction: w.extraction,
+            ocr_engine: w.ocr_engine,
+            mean_confidence: w.mean_confidence,
         },
     )
     .await?;
-    let new_units: Vec<NewUnit<'_>> = units
+    let new_units: Vec<NewUnit<'_>> = w
+        .units
         .iter()
         .zip(&vectors)
         .enumerate()
-        .map(|(i, (u, v))| NewUnit {
-            ordinal: i32::try_from(u.ordinal).unwrap_or(i32::MAX),
-            locator: &u.locator,
-            label: &u.label,
-            heading: u.heading.as_deref(),
-            text: &u.text,
-            word_count: i32::try_from(u.word_count).unwrap_or(i32::MAX),
-            content_hash: sha256_hex(u.text.as_bytes()),
-            embedding: vector_literal(v),
-            source_page: placements
-                .get(i)
-                .and_then(Option::as_ref)
-                .and_then(|p| i32::try_from(p.page).ok()),
-            confidence: unit_confidence(i),
-            source_anchor: source_anchor(
-                m.source.format,
-                &u.text,
-                placements.get(i).and_then(Option::as_ref).map(|p| p.page),
-            ),
+        .map(|(i, (u, v))| {
+            let placed = w.placements.get(i).and_then(Option::as_ref);
+            NewUnit {
+                ordinal: i32::try_from(u.ordinal).unwrap_or(i32::MAX),
+                locator: &u.locator,
+                label: &u.label,
+                heading: u.heading.as_deref(),
+                text: &u.text,
+                word_count: i32::try_from(u.word_count).unwrap_or(i32::MAX),
+                content_hash: sha256_hex(u.text.as_bytes()),
+                embedding: vector_literal(v),
+                source_page: placed.and_then(|p| i32::try_from(p.page).ok()),
+                confidence: w.confidences.get(i).copied().flatten(),
+                source_anchor: source_anchor(m.source.format, &u.text, placed.map(|p| p.page)),
+            }
         })
         .collect();
     texts::replace_units(
@@ -946,7 +1131,8 @@ async fn import_one(
     .await?;
 
     // 7. Locators, with any aliases from the manifest.
-    let locators: Vec<(String, String, Vec<String>)> = units
+    let locators: Vec<(String, String, Vec<String>)> = w
+        .units
         .iter()
         .map(|u| {
             (
@@ -958,39 +1144,39 @@ async fn import_one(
         .collect();
     texts::sync_locators(&mut tx, work, &locators).await?;
     let counts = serde_json::json!({
-        "units": units.len(),
-        "sections_kept": report.sections_kept.len(),
-        "sections_excluded": report.sections_excluded.len(),
-        "key": key,
+        "units": w.units.len(),
+        "sections_kept": w.sections.0,
+        "sections_excluded": w.sections.1,
+        "key": w.key,
     });
     texts::record_run(
         &mut tx,
-        &manifest_path.display().to_string(),
+        &w.input.manifest_path.display().to_string(),
         "corpus",
         false,
         &counts,
-        opts.actor,
+        actor,
     )
     .await?;
     tx.commit().await?;
-    // A held document waits in quarantine to be released one at a time.
-    if action.as_deref() == Some("hold") {
-        wt_db::text_takedown::set_state_logged(
-            conn,
-            edition,
-            "quarantined",
-            &format!(
-                "held for a notice: {}",
-                notice_text.as_deref().unwrap_or("")
-            ),
-            opts.actor,
-        )
-        .await?;
-    }
+    Ok(edition)
+}
 
-    // The source files, kept so the import can be repeated (Spec 08, step 6).
+/// Keeps what a later run needs after the edition is written: the source files and their
+/// hashes, so the import can be repeated and a takedown can find them (Spec 08, step 6), the
+/// manifest for `wt text reocr` and `wt text refresh`, and for a PDF where each unit stands,
+/// for the proof sheet's crops. Geometry only, never page images.
+fn store_sources(
+    objects: &dyn ObjectStore,
+    input: &EditionInput<'_>,
+    files: &[(String, Vec<u8>)],
+    units: &[Unit],
+    placements: &[Option<pdf::rebuild::Placement>],
+    pdf_pages: PdfPages,
+) -> Result<(), TextError> {
+    let m = input.manifest;
     let prefix = source_prefix(&m.work.title, &m.edition.label);
-    for (name, bytes) in &files {
+    for (name, bytes) in files {
         objects.put(&format!("{prefix}/{name}"), bytes)?;
     }
     let listed: Vec<takedown::StoredFile> = files
@@ -1002,58 +1188,43 @@ async fn import_one(
         .collect();
     let listed =
         serde_json::to_vec(&listed).map_err(|e| TextError::Source(format!("files.json: {e}")))?;
+    let work = work_prefix(&m.work.title, &m.edition.label);
+    objects.put(&format!("{work}/{FILES}"), &listed)?;
     objects.put(
-        &format!("{}/{FILES}", work_prefix(&m.work.title, &m.edition.label)),
-        &listed,
+        &format!("{work}/manifest.toml"),
+        input.manifest_text.as_bytes(),
     )?;
-    // The manifest, so `wt text reocr` and `wt text refresh` can import the edition again.
-    objects.put(
-        &format!(
-            "{}/manifest.toml",
-            work_prefix(&m.work.title, &m.edition.label)
-        ),
-        manifest_text.as_bytes(),
-    )?;
-    // Where each unit stands, for the proof sheet's crops: geometry only.
-    if is_pdf {
-        let mut stored = pdf::Placements {
-            files: m.source.files.clone(),
-            units: BTreeMap::new(),
-            low_ranges,
-        };
-        for (u, p) in units.iter().zip(&placements) {
-            if let Some(p) = p {
-                let (w_pts, h_pts) = pdf_pages
-                    .sizes
-                    .get(&(p.file, p.page))
-                    .copied()
-                    .unwrap_or((612.0, 792.0));
-                stored.units.insert(
-                    u.locator.clone(),
-                    pdf::UnitPlace {
-                        file: p.file,
-                        page: p.page,
-                        frac: p.frac,
-                        w_pts,
-                        h_pts,
-                    },
-                );
-            }
-        }
-        let json = serde_json::to_vec(&stored)
-            .map_err(|e| TextError::Source(format!("placements: {e}")))?;
-        let work = work_prefix(&m.work.title, &m.edition.label);
-        objects.put(&format!("{work}/{}", pdf::PLACEMENTS), &json)?;
+    if m.source.format != Format::Pdf {
+        return Ok(());
     }
-    report.applied = true;
-    Ok(report)
-}
-
-fn bytes_of<'a>(files: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
-    files
-        .iter()
-        .find(|(n, _)| n == name)
-        .map_or(&[], |(_, b)| b.as_slice())
+    let mut stored = pdf::Placements {
+        files: m.source.files.clone(),
+        units: BTreeMap::new(),
+        low_ranges: pdf_pages.low_ranges,
+    };
+    for (u, p) in units.iter().zip(placements) {
+        if let Some(p) = p {
+            let (w_pts, h_pts) = pdf_pages
+                .sizes
+                .get(&(p.file, p.page))
+                .copied()
+                .unwrap_or((612.0, 792.0));
+            stored.units.insert(
+                u.locator.clone(),
+                pdf::UnitPlace {
+                    file: p.file,
+                    page: p.page,
+                    frac: p.frac,
+                    w_pts,
+                    h_pts,
+                },
+            );
+        }
+    }
+    let json =
+        serde_json::to_vec(&stored).map_err(|e| TextError::Source(format!("placements: {e}")))?;
+    objects.put(&format!("{work}/{}", pdf::PLACEMENTS), &json)?;
+    Ok(())
 }
 
 /// Where a unit starts in its original (Spec 08, Ingesting from URLs, source links): a text

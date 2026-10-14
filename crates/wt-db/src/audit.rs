@@ -149,10 +149,39 @@ const TAKEN_DOWN: &str = "select t.id from talk t where t.state = 'withdrawn'
    union select e::uuid from takedown_log l,
                 jsonb_array_elements_text(coalesce(l.counts->'talks', '[]')) e";
 
-/// Runs every database check.
+/// Runs every database check, in the order the report lists them.
 pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, DbError> {
-    let mut checks = Vec::new();
+    let mut checks = serving_checks(pool).await?;
+    checks.extend(content_checks(pool, settings).await?);
+    checks.extend(upkeep_checks(pool, settings).await?);
+    checks.extend(mandate_checks(pool, settings).await?);
+    checks.extend(text_checks(pool).await?);
+    checks.extend(mandate_reach_checks(pool, settings).await?);
 
+    Ok(AuditReport {
+        checks,
+        not_yet_checked: vec![
+            (
+                "audio_residue",
+                "reads the scratch directory and buckets; joins with the transcript pipeline (M4)",
+            ),
+            (
+                "student_speech (transcript JSON)",
+                "reads transcript objects in S3; joins with the transcript pipeline (M4)",
+            ),
+            (
+                "takedown_completeness (objects)",
+                "reads transcript and citation objects in S3; joins with the transcript pipeline (M4)",
+            ),
+        ],
+    })
+}
+
+/// Rule 3's checks (Spec 07): no passage or stored student question outlives its talk's rights,
+/// and each serving view holds exactly the rows the servable predicate allows, which is stated
+/// again here rather than read from the view.
+async fn serving_checks(pool: &PgPool) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     checks.push(
         check(
             pool,
@@ -165,7 +194,6 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
-
     let in_view: i64 = sqlx::query_scalar!(r#"select count(*) as "n!" from servable_passage"#)
         .fetch_one(pool)
         .await?;
@@ -175,18 +203,12 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
     )))
     .fetch_one(pool)
     .await?;
-    checks.push(CheckResult {
-        name: "serving_parity",
-        severity: Severity::Fail,
-        findings: (in_view - expected).abs(),
-        examples: if in_view == expected {
-            vec![]
-        } else {
-            vec![format!(
-                "servable_passage has {in_view} rows, expected {expected}"
-            )]
-        },
-    });
+    checks.push(parity(
+        "serving_parity",
+        "servable_passage",
+        in_view,
+        expected,
+    ));
 
     // Rule 3's checks over every stored student question (Spec 04, Student questions): none
     // outlives its talk's rights, and the serving view shows exactly the ones the rule allows.
@@ -212,19 +234,37 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
     )))
     .fetch_one(pool)
     .await?;
-    checks.push(CheckResult {
-        name: "question_serving_parity",
+    checks.push(parity(
+        "question_serving_parity",
+        "servable_student_question",
+        in_view,
+        expected,
+    ));
+    Ok(checks)
+}
+
+/// A parity check's result: one finding per row of difference between the view's count and
+/// the predicate's.
+fn parity(name: &'static str, view: &str, in_view: i64, expected: i64) -> CheckResult {
+    CheckResult {
+        name,
         severity: Severity::Fail,
         findings: (in_view - expected).abs(),
         examples: if in_view == expected {
             vec![]
         } else {
-            vec![format!(
-                "servable_student_question has {in_view} rows, expected {expected}"
-            )]
+            vec![format!("{view} has {in_view} rows, expected {expected}")]
         },
-    });
+    }
+}
 
+/// What must never be stored at all: student speech, rows left for a taken-down talk, fixture
+/// talks outside dev, and passages embedded by two models at once.
+async fn content_checks(
+    pool: &PgPool,
+    settings: AuditSettings,
+) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     checks.push(check(pool, "student_speech", Severity::Fail, STUDENT_SPEECH).await?);
 
     // Takedown completeness: any row left in a deleting store for a withdrawn talk or a talk in
@@ -271,7 +311,16 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
+    Ok(checks)
+}
 
+/// Upkeep warnings: dead or stuck jobs, donation links and consent overdue for review, talks
+/// quarantined too long, and series missing from talks whose titles name one.
+async fn upkeep_checks(
+    pool: &PgPool,
+    settings: AuditSettings,
+) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     checks.push(
         check(
             pool,
@@ -346,7 +395,16 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
+    Ok(checks)
+}
 
+/// The mandate's obligations (Spec 08, Rights lifecycle; Spec 03, Mandated talks): requests go
+/// out and are followed up, and nothing opted out, excluded or switched off is served.
+async fn mandate_checks(
+    pool: &PgPool,
+    settings: AuditSettings,
+) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     // Spec 08, Rights lifecycle: every mandate is followed by a request for permission, and
     // every request that went out is followed up.
     checks.push(
@@ -407,6 +465,13 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
+    Ok(checks)
+}
+
+/// Texts (Spec 08): nothing excluded or switched off serves, takedowns leave no units, and
+/// removal requests are answered within a business day.
+async fn text_checks(pool: &PgPool) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     // Texts (Spec 08): nothing excluded or switched off serves, takedowns leave no units, and
     // removal requests are answered within a business day.
     checks.push(
@@ -464,6 +529,17 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
+    Ok(checks)
+}
+
+/// How far the mandate reaches (Spec 08, Mandated sources; Spec 03, Mandated talks): mandated
+/// sources once the tool is public, and teachers used on the mandate who were never sent a
+/// notice.
+async fn mandate_reach_checks(
+    pool: &PgPool,
+    settings: AuditSettings,
+) -> Result<Vec<CheckResult>, DbError> {
+    let mut checks = Vec::new();
     checks.push(
         check(
             pool,
@@ -496,26 +572,11 @@ pub async fn run(pool: &PgPool, settings: AuditSettings) -> Result<AuditReport, 
         )
         .await?,
     );
-
-    Ok(AuditReport {
-        checks,
-        not_yet_checked: vec![
-            (
-                "audio_residue",
-                "reads the scratch directory and buckets; joins with the transcript pipeline (M4)",
-            ),
-            (
-                "student_speech (transcript JSON)",
-                "reads transcript objects in S3; joins with the transcript pipeline (M4)",
-            ),
-            (
-                "takedown_completeness (objects)",
-                "reads transcript and citation objects in S3; joins with the transcript pipeline (M4)",
-            ),
-        ],
-    })
+    Ok(checks)
 }
 
+/// Runs one check's query, whose every row is a finding; the first 20 non-null rows are its
+/// examples.
 async fn check(
     pool: &PgPool,
     name: &'static str,
