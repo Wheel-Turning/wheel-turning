@@ -41,9 +41,34 @@ fi
 # Route (c): the files a sangha gave the owner, under data/storage, so the machine's workers can
 # copy matched ones into scratch (Spec 03, the storage adapter). work.sh removes the machine's copy
 # when it exits; the originals on the PC are the owner's, deleted by the owner after the run.
+# Only the files of talks with a queued audio job are sent, so a rerun for a few talks does not
+# upload the whole folder again. Set WT_STORAGE_ALL=1 to send everything.
 if [ -d "$MAIN/data/storage" ] && [ -n "$(ls -A "$MAIN/data/storage")" ]; then
-  step "copy the storage files ($(du -sh "$MAIN/data/storage" | cut -f1))"
-  tar -C "$MAIN" -cf - data/storage | "${SSH[@]}" "$HOST" 'mkdir -p ~/wt && tar -x -C ~/wt'
+  if [ "${WT_STORAGE_ALL:-0}" = 1 ]; then
+    step "copy the storage files ($(du -sh "$MAIN/data/storage" | cut -f1))"
+    tar -C "$MAIN" -cf - data/storage | "${SSH[@]}" "$HOST" 'mkdir -p ~/wt && tar -x -C ~/wt'
+  else
+    LIST=$(mktemp)
+    # Each storage source's root, from the [[source]] blocks of config/sources.toml.
+    declare -A ROOT
+    while read -r name root; do ROOT[$name]=$root; done < <(awk -F' *= *' '
+      /^\[\[source\]\]/ { name = ""; root = "" }
+      $1 == "name" { gsub(/"/, "", $2); name = $2 }
+      $1 == "root" { gsub(/"/, "", $2); root = $2; if (name != "") print name, root }
+    ' "$(git rev-parse --show-toplevel)/config/sources.toml")
+    docker exec wt-m3-ssz psql -U wt -d wt -tAc \
+      "select distinct (sv.raw->'storage'->>'source') || ' ' || (sv.raw->'storage'->>'key')
+       from job j join talk t on t.id = j.talk_id join source_video sv on sv.id = t.source_video_id
+       where j.kind = 'audio' and j.state = 'queued' and sv.raw ? 'storage'" |
+      tr -d '\r' | while read -r source key; do
+        [ -n "${ROOT[$source]:-}" ] && [ -f "$MAIN/${ROOT[$source]}/$key" ] && echo "${ROOT[$source]}/$key"
+      done > "$LIST"
+    if [ -s "$LIST" ]; then
+      step "copy $(wc -l < "$LIST") storage files for queued talks"
+      tar -C "$MAIN" -cf - -T "$LIST" | "${SSH[@]}" "$HOST" 'mkdir -p ~/wt && tar -x -C ~/wt'
+    fi
+    rm -f "$LIST"
+  fi
 fi
 step "token"
 grep '^HF_TOKEN=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n' |

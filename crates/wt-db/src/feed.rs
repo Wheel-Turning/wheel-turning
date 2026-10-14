@@ -214,6 +214,9 @@ pub enum MediaRoute {
         mime_type: Option<String>,
         /// The episode's row.
         episode: SourceVideoId,
+        /// The storage file matched to the talk, read when the enclosure cannot be fetched
+        /// (item 2c).
+        storage: Option<StorageRef>,
     },
     /// The talk page's own audio file: an EngageWisdom talk (Spec 03, EngageWisdom sources).
     Direct {
@@ -248,7 +251,8 @@ pub async fn media_route(
 ) -> Result<MediaRoute, IngestDbError> {
     let row = sqlx::query!(
         r#"select e.id, e.raw->'item'->'enclosure'->>'url' as url,
-                  e.raw->'item'->'enclosure'->>'type' as mime_type
+                  e.raw->'item'->'enclosure'->>'type' as mime_type,
+                  sv.raw->'storage' as storage
            from talk t
            join source_video sv on sv.id = t.source_video_id
            join source_video e on e.platform = 'rss' and e.raw->'match'->>'vimeo_id' = sv.external_id
@@ -279,6 +283,7 @@ pub async fn media_route(
             url,
             mime_type: r.mime_type,
             episode: SourceVideoId::from(r.id),
+            storage: StorageRef::from_raw(r.storage),
         });
     }
     let own = sqlx::query!(
