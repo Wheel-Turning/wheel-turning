@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select display_name, opted_out_at is not null as \"opted_out!\", display_level\n           from teacher",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "opted_out!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "teacher",
+            "name": "display_level"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "a7ed98c85d7d4a73adf0ff88899268c910e47ffff94249213d7c2034cf423f8e"
+}

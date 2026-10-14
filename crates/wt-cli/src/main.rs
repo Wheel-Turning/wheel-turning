@@ -246,7 +246,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             return commands::audit(&ctx.pool().await?, &ctx.config, &config_dir).await;
         }
         Command::Source { command } => rights_cmds::source(&ctx, command).await?,
-        Command::Rights { command } => rights_cmds::rights(&ctx, command).await?,
+        Command::Rights { command } => return rights_cmds::rights(&ctx, command).await,
         Command::Exclusion { command } => rights_cmds::exclusion(&ctx, command).await?,
         Command::Text { command } => text_cmds::text(&ctx, command).await?,
         Command::Intake { inbox, config_dir } => {

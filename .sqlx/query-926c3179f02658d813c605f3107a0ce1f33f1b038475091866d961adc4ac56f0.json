@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select case when to_regclass('public._sqlx_migrations') is null then false\n                       else has_table_privilege('public._sqlx_migrations', 'select')\n                  end as \"readable!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "readable!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "926c3179f02658d813c605f3107a0ce1f33f1b038475091866d961adc4ac56f0"
+}

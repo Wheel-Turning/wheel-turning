@@ -55,6 +55,11 @@ The PC worker reaches the database through an SSM port forward via the batch hos
 
 Target the same day.
 
+While two databases hold real data (the PC's `wt-m3-ssz` and the beta's RDS, §12), every step
+below runs against both: once with the PC `.env`, once against RDS through the batch host
+forward as `wt_owner_login` (§12, "Rights actions on both databases"). Then run the parity
+check, which must exit 0. A takedown run on one side only leaves the talk served from the other.
+
 1. Confirm the request comes from the teacher, or from someone who can act for them, through a
    channel already on record. Note how you confirmed it.
 2. Dry run, which changes nothing and prints rows and objects per store:
@@ -81,6 +86,19 @@ Target the same day.
 A teacher who opts out of the mandate uses `wt teacher opt-out` instead, which also excludes
 them for good (Spec 03, Mandated talks). Texts use `wt takedown --edition | --source | --url`
 (Spec 08).
+
+The same rule holds for every other rights action while two databases hold real data: `wt
+teacher opt-out` (with or without `--suspend-only`), `wt teacher display` for a teacher or one
+talk, `wt talk exclude`, `wt consent set`, `wt source disable | enable`, `wt rights decline`,
+`wt rights set-talks-basis`, `wt exclusion lift` and `wt takedown requests suspend | remove`. Run
+it with the PC `.env`, run it again against RDS, then run the parity check (§12). A `--talk
+<id>` names the same talk on both for talks loaded on October 13, 2026; a talk found later
+exists only on the PC, and the dry run's title confirms which talk an id is.
+
+Removal requests from the beta's `/rights` form are written to RDS only. Each business day, list
+them against RDS (`wt takedown requests list`, as `wt_owner_login` through the forward) and handle
+each one on both databases. `wt audit` against RDS warns `takedown_request_overdue` once one has
+waited more than a business day; the audit against the PC never sees them.
 
 ## 4. A blocking quality failure
 
@@ -295,3 +313,45 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 The PC keeps its own database: the transcription worker still writes to `wt-m3-ssz`, so new
 talks reach the beta only when they are loaded again (or once the PC switches to RDS, which is
 the owner's call).
+
+### Rights actions on both databases
+
+Until one database is the single source of truth, both hold real data, and every `wt` command
+acts on the one `DATABASE_URL` names. So each rights action (procedure 3 and the list after it)
+runs twice:
+
+1. With the PC `.env` as it is, against `wt-m3-ssz`.
+2. Against RDS: open the batch host forward (procedure 1, steps 1 and 2), then, in the same
+   PowerShell window, point this shell only at RDS as the owner login (its password is the
+   `wt-v1/db_wt_owner_login` secret, percent-encoded):
+
+   ```powershell
+   $env:DATABASE_URL = "postgres://wt_owner_login:<password>@localhost:5433/wt?sslmode=require"
+   ```
+
+   Object deletion uses the PC's object store both times, which is the only one until objects
+   move to S3; the second run finds nothing left to delete there and says so.
+3. Compare the two, read-only on both. It exits 1 when one side could serve something the other
+   has removed (a talk, teacher, source, exclusion, takedown or `talks_basis` that differs that
+   way), and lists every other difference too, such as talks the PC found after the load or a
+   removal request that reached RDS only:
+
+   ```powershell
+   $env:WT_OTHER_DATABASE_URL = "postgres://wt_owner_login:<password>@localhost:5433/wt?sslmode=require"
+   wt rights parity --this-name pc --other-name rds   # with DATABASE_URL back on the PC database
+   ```
+
+   Every `"unsafe": true` difference is fixed by replaying the action on the side that lacks it,
+   never by editing rows. Run the check after each rights action, and at least once each
+   business day with the removal-request check (procedure 3).
+
+### Reloading RDS from the PC
+
+> **Warning.** A PC-to-RDS reload overwrites RDS. Since October 13, 2026, rows exist only on RDS:
+> `tester`, `query_log`, `feedback` and `takedown_request` from the beta, and any takedown,
+> opt-out or display change run there. Do not reload until (1) every takedown and rights action
+> recorded on RDS is replayed on the PC, and `wt rights parity` exits 0; and (2) the RDS rows of
+> `tester`, `query_log`, `feedback` and `takedown_request` are exported and carried into the
+> load. Otherwise testers lose their invites, logs and feedback, and a talk taken down on RDS
+> comes back. After the load, run `wt takedown --replay --actor "<you>" --yes` against RDS
+> (procedure 6) and the parity check again.

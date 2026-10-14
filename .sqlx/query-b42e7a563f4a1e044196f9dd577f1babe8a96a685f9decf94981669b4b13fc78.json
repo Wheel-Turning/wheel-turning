@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select scope || ' ' || pattern as \"key!\" from source_exclusion where lifted_at is null",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b42e7a563f4a1e044196f9dd577f1babe8a96a685f9decf94981669b4b13fc78"
+}
