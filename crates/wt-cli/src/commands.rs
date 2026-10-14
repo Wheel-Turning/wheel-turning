@@ -16,7 +16,7 @@ use wt_db::takedown::{Scope, TakedownReport};
 use wt_ingest::config::SourcesFile;
 use wt_registry::RegistryFile;
 
-use crate::Target;
+use crate::talk_cmds::Target;
 
 pub(crate) fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     println!(

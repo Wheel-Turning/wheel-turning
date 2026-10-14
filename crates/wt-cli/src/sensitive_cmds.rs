@@ -8,12 +8,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
+use wt_core::Config;
 use wt_extract::LlmClient;
 use wt_ml::Embedder;
 use wt_retrieve::Sensitivity;
 use wt_retrieve::sensitive::redteam::{self, Finding, Probe, Target};
 use wt_retrieve::sensitive::triage::Triage;
 use wt_retrieve::sensitive::{Exemplars, SensitiveConfig, normalize};
+
+use crate::admin_cmds::analyst_pool;
+use crate::commands;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SensitiveCommand {
@@ -54,7 +58,7 @@ pub(crate) enum SensitiveCommand {
     /// triage_degraded, out_of_scope and unrelated rates. Never question text.
     Report {
         /// How far back: a number with d (days) or h (hours), for example 7d.
-        #[arg(long, default_value = "7d", value_parser = crate::parse_since)]
+        #[arg(long, default_value = "7d", value_parser = crate::admin_cmds::parse_since)]
         since: chrono::Duration,
     },
 }
@@ -388,6 +392,55 @@ fn push(
     array.set_trailing_comma(true);
     array.set_trailing("\n");
     Ok(true)
+}
+
+/// Dispatches `wt sensitive`.
+pub(crate) async fn run(config: &Config, command: SensitiveCommand) -> anyhow::Result<()> {
+    match command {
+        SensitiveCommand::Redteam {
+            count,
+            category,
+            out_dir,
+        } => {
+            // The models, rules, exemplars and spend cap the server uses; the gate marks the
+            // questions synthetic.
+            let pool = wt_db::connect(&config.database_url).await?;
+            let site = wt_api::site::load(config, &pool)
+                .await
+                .context("loading the models and config/ files the server uses")?;
+            let gate = wt_retrieve::sensitive::triage::LlmTriage::synthetic(site.llm.clone());
+            let targets = category.map_or_else(|| Target::ALL.to_vec(), |t| vec![t]);
+            let sheet = out_dir.join(format!(
+                "review-{}.csv",
+                chrono::Utc::now().date_naive().format("%Y-%m-%d")
+            ));
+            let summary = redteam(
+                site.llm.as_ref(),
+                &site.sensitivity,
+                site.embedder.as_ref(),
+                Some(&gate),
+                &targets,
+                count,
+                &sheet,
+            )
+            .await?;
+            commands::print_json(&summary)?;
+        }
+        SensitiveCommand::Accept {
+            sheet,
+            config_dir,
+            eval_file,
+        } => {
+            let dir = config_dir.unwrap_or_else(wt_api::site::config_dir);
+            commands::print_json(&accept(&sheet, &dir, &eval_file)?)?;
+        }
+        SensitiveCommand::Report { since } => {
+            let pool = analyst_pool(config).await?;
+            let from = chrono::Utc::now() - since;
+            commands::print_json(&wt_db::report::triage(&pool, from).await?)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

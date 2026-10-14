@@ -514,9 +514,9 @@ async fn request_scope(
 pub async fn takedown_requests(
     pool: &PgPool,
     config: &Config,
-    command: crate::RequestsCommand,
+    command: crate::talk_cmds::RequestsCommand,
 ) -> anyhow::Result<()> {
-    use crate::RequestsCommand as R;
+    use crate::talk_cmds::RequestsCommand as R;
     use wt_db::text_takedown::{self as td, TextScope};
     let mut conn = pool.acquire().await?;
     let find = |r: Option<td::Request>, id| r.with_context(|| format!("no request {id}"));
@@ -785,9 +785,9 @@ pub async fn intake(
 pub async fn license(
     pool: &PgPool,
     records: &wt_core::records::LocalRecords,
-    command: crate::LicenseCommand,
+    command: crate::text_cmds::LicenseCommand,
 ) -> anyhow::Result<()> {
-    use crate::LicenseCommand as L;
+    use crate::text_cmds::LicenseCommand as L;
     let mut conn = pool.acquire().await?;
     match command {
         L::Capture {

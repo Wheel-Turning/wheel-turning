@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use clap::Subcommand;
 use sqlx::PgPool;
 use wt_asr::bench::{self, BenchConfig, WhisperEngine};
 use wt_asr::{AsrHints, glossary_prompt, model_name};
@@ -10,6 +11,7 @@ use wt_core::Config;
 use wt_core::ids::TalkId;
 use wt_core::scratch::{Converter, Ffmpeg, ScratchDir};
 
+use crate::Ctx;
 use crate::commands;
 use crate::stages;
 
@@ -228,4 +230,111 @@ pub async fn requeue(pool: &PgPool, config: &Config, dry_run: bool) -> anyhow::R
         "talks": talks.len(),
         "queued": !dry_run,
     }))
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AsrCommand {
+    /// Runs every available setup and model on a clip, or on talks, and prints the real-time
+    /// factor, peak memory, word error rate and error rates on glossary terms and teacher names,
+    /// then the setup Spec 04's decision rule picks.
+    Benchmark(Box<BenchmarkArgs>),
+    /// Queues retranscription for every talk transcribed with a model other than
+    /// WT_WHISPER_MODEL's.
+    Requeue {
+        /// Count them without queueing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, clap::Args)]
+// `[asr]` in the help text names the config.toml table, not an intra-doc link.
+#[allow(rustdoc::broken_intra_doc_links)]
+pub(crate) struct BenchmarkArgs {
+    /// A clip with known text: a public-domain or CC0 recording, never a teacher's talk.
+    #[arg(long, conflicts_with = "talk")]
+    clip: Option<PathBuf>,
+    /// The clip's known text.
+    #[arg(long, requires = "clip")]
+    reference: Option<PathBuf>,
+    /// Cleared talks to fetch instead. Repeat for several.
+    #[arg(long)]
+    talk: Vec<TalkId>,
+    /// Hand-corrected text for talks, as <dir>/<talk id>.txt. Keep it under data/.
+    #[arg(long, requires = "talk")]
+    references: Option<PathBuf>,
+    /// The setups and models.
+    #[arg(long, default_value = "config/asr_bench.toml")]
+    setups: PathBuf,
+    /// Where the file's relative paths start.
+    #[arg(long, default_value = ".")]
+    bench_root: PathBuf,
+    /// Only this setup. Repeat for several.
+    #[arg(long = "setup")]
+    only_setups: Vec<String>,
+    /// Only this model. Repeat for several.
+    #[arg(long = "model")]
+    only_models: Vec<String>,
+    /// Append the result, the date and the hardware to this file.
+    #[arg(long, num_args = 0..=1, default_missing_value = "docs/asr-benchmark.md")]
+    record: Option<PathBuf>,
+    /// A line for the record, such as the GPU and its driver.
+    #[arg(long)]
+    note: Option<String>,
+    /// Run without the glossary prompt, whatever [asr] glossary_prompt says.
+    #[arg(long, conflicts_with = "prompt")]
+    no_prompt: bool,
+    /// Run with the glossary prompt, whatever [asr] glossary_prompt says.
+    #[arg(long)]
+    prompt: bool,
+    /// The directory holding pipeline.toml.
+    #[arg(long, default_value = "config")]
+    config_dir: PathBuf,
+}
+
+/// `wt asr`: the benchmark and the requeue after a model change (Spec 04).
+pub(crate) async fn run(ctx: &Ctx, command: AsrCommand) -> anyhow::Result<()> {
+    match command {
+        AsrCommand::Benchmark(args) => {
+            let BenchmarkArgs {
+                clip,
+                reference,
+                talk,
+                references,
+                setups,
+                bench_root,
+                only_setups,
+                only_models,
+                record,
+                note,
+                no_prompt,
+                prompt,
+                config_dir,
+            } = *args;
+            benchmark(
+                &ctx.pool().await?,
+                &ctx.config,
+                &config_dir,
+                BenchArgs {
+                    clip,
+                    reference,
+                    talks: talk,
+                    references,
+                    setups_file: setups,
+                    bench_root,
+                    only_setups,
+                    only_models,
+                    record,
+                    note,
+                    no_prompt,
+                    prompt,
+                },
+            )
+            .await?;
+        }
+        AsrCommand::Requeue { dry_run } => {
+            requeue(&ctx.pool().await?, &ctx.config, dry_run).await?;
+        }
+    }
+    Ok(())
 }
