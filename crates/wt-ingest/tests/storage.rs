@@ -571,6 +571,56 @@ async fn without_a_token_the_storage_file_is_used_and_vimeo_is_not_asked() {
 }
 
 #[tokio::test]
+async fn a_refused_podcast_enclosure_falls_back_to_the_storage_file() {
+    let fx = start().await;
+    let talk = cleared_talk(&fx, "800000035").await;
+    fx.put("talk.mp4", MEDIA);
+    let files = fx.list(&[("talk.mp4", 600.0)]);
+    record(&fx, "800000035", &files[0]).await;
+    // A matched podcast episode whose audio host answers 403, as SSZ's old podcast audio does
+    // for some talks (October 14, 2026).
+    Mock::given(method("GET"))
+        .and(path("/audio/talk.mp3"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&fx.server)
+        .await;
+    let enclosure = format!("{}/audio/talk.mp3", fx.server.uri());
+    sqlx::query(
+        "insert into source_video (platform, external_id, url, title, raw)
+         values ('rss', 'episode-1', $1, 'Fixture episode', $2)",
+    )
+    .bind(&enclosure)
+    .bind(serde_json::json!({
+        "item": { "enclosure": { "url": enclosure, "type": "audio/mpeg" } },
+        "match": { "vimeo_id": "800000035" },
+    }))
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+
+    let converter = FakeConverter::default();
+    let outcome = run(&fx, talk, &fx.fetcher(false), &converter, false)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, AudioOutcome::Segmented { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(converter.fetched.lock().unwrap().as_deref(), Some(MEDIA));
+    assert!(
+        fx.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.url.path() == "/audio/talk.mp3"),
+        "route (a) was tried first"
+    );
+    assert!(fx.scratch_is_empty());
+    assert_eq!(std::fs::read(fx.root().join("talk.mp4")).unwrap(), MEDIA);
+}
+
+#[tokio::test]
 async fn a_failure_after_the_copy_deletes_the_scratch_and_keeps_the_original() {
     let fx = start().await;
     let talk = cleared_talk(&fx, "800000040").await;

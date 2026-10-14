@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select e.id, e.raw->'item'->'enclosure'->>'url' as url,\n                  e.raw->'item'->'enclosure'->>'type' as mime_type\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           join source_video e on e.platform = 'rss' and e.raw->'match'->>'vimeo_id' = sv.external_id\n           where t.id = $1 and sv.platform = 'vimeo'\n           limit 1",
+  "query": "select e.id, e.raw->'item'->'enclosure'->>'url' as url,\n                  e.raw->'item'->'enclosure'->>'type' as mime_type,\n                  sv.raw->'storage' as storage\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           join source_video e on e.platform = 'rss' and e.raw->'match'->>'vimeo_id' = sv.external_id\n           where t.id = $1 and sv.platform = 'vimeo'\n           limit 1",
   "describe": {
     "columns": [
       {
@@ -25,6 +25,12 @@
         "name": "mime_type",
         "type_info": "Text",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "storage",
+        "type_info": "Jsonb",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -35,8 +41,9 @@
     "nullable": [
       false,
       null,
+      null,
       null
     ]
   },
-  "hash": "4d388941d09862f8bc96bbede4fa39f7c7131a6b8248294ce3534024587186c9"
+  "hash": "990f62869a055953fcf88d2c58c2a9ab908fc17e2190321abf2354e7a9a81d4f"
 }

@@ -45,10 +45,12 @@ pub const CAPTION_REFERENCE: &str = "vimeo-captions.vtt";
 /// Where a talk's media comes from, in the order Spec 03 tries them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MediaSource {
-    /// A matched podcast episode's audio enclosure.
+    /// A matched podcast episode's audio enclosure, or a talk page's own audio file.
     Enclosure {
         /// Its address.
         url: String,
+        /// The storage file to read when the address cannot be fetched (route c).
+        storage: Option<StorageRef>,
     },
     /// A Vimeo video's smallest file, read through the API with its source's token (Spec 03,
     /// item 2b).
@@ -81,9 +83,14 @@ impl MediaSource {
     /// depends on its source's token: see [`MediaFetcher::source_for`].
     pub fn from_route(route: &MediaRoute) -> Option<Self> {
         match route {
-            MediaRoute::FeedEnclosure { url, .. } | MediaRoute::Direct { url } => {
-                Some(MediaSource::Enclosure { url: url.clone() })
-            }
+            MediaRoute::FeedEnclosure { url, storage, .. } => Some(MediaSource::Enclosure {
+                url: url.clone(),
+                storage: storage.clone(),
+            }),
+            MediaRoute::Direct { url } => Some(MediaSource::Enclosure {
+                url: url.clone(),
+                storage: None,
+            }),
             MediaRoute::Vimeo {
                 source,
                 video_id,
@@ -182,6 +189,10 @@ impl MediaFetcher {
                 .roots
                 .contains_key(&file.source)
                 .then_some(MediaSource::Storage { file, page }),
+            MediaSource::Enclosure { url, storage } => Some(MediaSource::Enclosure {
+                url,
+                storage: storage.filter(|f| self.storage.roots.contains_key(&f.source)),
+            }),
             other => Some(other),
         }
     }
@@ -206,11 +217,27 @@ impl MediaFetcher {
                 Err(IngestError::ThirdPartyFetchDisabled)
             }
             MediaSource::ThirdParty { .. } => Err(IngestError::MediaNotAvailable),
-            MediaSource::Enclosure { url } => {
+            MediaSource::Enclosure { url, storage } => {
                 let target = self.exclusions.clear(&parse_url(url)?)?;
-                http::check_robots(&self.client, &target).await?;
-                let response = http::get_ok(&self.client, &target).await?;
-                self.download(talk, url, response, scratch).await
+                match (
+                    self.fetch_enclosure(talk, url, &target, scratch).await,
+                    storage,
+                ) {
+                    // The enclosure refused or failed: route (c), when the talk has a storage
+                    // file. SSZ's old podcast audio answers 403 for some talks (October 14, 2026).
+                    (
+                        Err(
+                            e @ (IngestError::Status { .. }
+                            | IngestError::Http { .. }
+                            | IngestError::RobotsDisallowed(_)),
+                        ),
+                        Some(file),
+                    ) => {
+                        tracing::warn!(error = %e, "enclosure unavailable, reading the storage file");
+                        self.fetch_storage(talk, file, scratch).await
+                    }
+                    (result, _) => result,
+                }
             }
             MediaSource::Vimeo {
                 source,
@@ -233,6 +260,19 @@ impl MediaFetcher {
                 self.fetch_storage(talk, file, scratch).await
             }
         }
+    }
+
+    /// Route (a): the enclosure's robots check and download.
+    async fn fetch_enclosure(
+        &self,
+        talk: &Talk<Consented>,
+        url: &str,
+        target: &http::FetchTarget,
+        scratch: &ScratchDir,
+    ) -> Result<PathBuf, IngestError> {
+        http::check_robots(&self.client, target).await?;
+        let response = http::get_ok(&self.client, target).await?;
+        self.download(talk, url, response, scratch).await
     }
 
     /// Route (c). Copies the matched file from its source's root into the talk's scratch
