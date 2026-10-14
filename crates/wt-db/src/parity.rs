@@ -151,6 +151,7 @@ pub async fn run(
     })
 }
 
+/// The counts for one side of the report, under its name.
 fn summary(name: &str, s: &Snapshot) -> Summary {
     Summary {
         name: name.to_owned(),
@@ -174,6 +175,7 @@ pub async fn snapshot(conn: &mut PgConnection) -> Result<Snapshot, DbError> {
     out
 }
 
+/// Reads the rights state inside the snapshot transaction that [`snapshot`] opened.
 async fn read(conn: &mut PgConnection) -> Result<Snapshot, DbError> {
     // A login that may not read the migrations table gets no version rather than an aborted
     // snapshot. Postgres checks table rights before it runs a statement, so this is two.
@@ -419,6 +421,8 @@ fn compare_sets(
     }
 }
 
+/// Adds a difference for each key whose facts differ between the two sides or exist on one
+/// side only. It is unsafe only when the side that exposes more of it already serves it.
 fn compare_facts(
     out: &mut Vec<Difference>,
     kind: Kind,
