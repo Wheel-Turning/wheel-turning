@@ -22,6 +22,7 @@ pub mod job;
 pub mod license;
 pub mod llm;
 pub mod locator;
+pub mod parity;
 pub mod privacy;
 pub mod public_forms;
 pub mod quarantine;
