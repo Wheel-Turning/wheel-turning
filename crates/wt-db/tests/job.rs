@@ -172,6 +172,65 @@ async fn claim_takes_only_due_jobs_of_the_named_kinds_oldest_first() {
 }
 
 #[tokio::test]
+async fn claim_from_takes_only_jobs_of_the_named_sources() {
+    let fx = common::start().await;
+    for key in ["first-source", "second-source"] {
+        sqlx::query(
+            "insert into source_policy (key, publisher, url_prefixes, basis, kind)
+             values ($1, 'Fixture Publisher', '{https://example.org/}', 'permission', 'talks')",
+        )
+        .bind(key)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    }
+    let mut jobs = Vec::new();
+    for (key, hash) in [("first-source", "f"), ("second-source", "s")] {
+        let t = talk(&fx.pool, Some(ADA), Some(ADA)).await;
+        sqlx::query("update talk set source_key = $2 where id = $1")
+            .bind(t.as_uuid())
+            .bind(key)
+            .execute(&fx.pool)
+            .await
+            .unwrap();
+        let mut conn = fx.pool.acquire().await.unwrap();
+        let id = job::enqueue(&mut conn, JobKind::Index, Some(t), hash, &NO_PAYLOAD)
+            .await
+            .unwrap()
+            .unwrap();
+        jobs.push(id);
+    }
+    let untied = enqueue(&fx.pool, JobKind::Index, "no talk").await.unwrap();
+
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let only_second = ["second-source".to_owned()];
+    let got = job::claim_from(&mut conn, &[JobKind::Index], &only_second, "w")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.id, jobs[1]);
+    assert!(
+        job::claim_from(&mut conn, &[JobKind::Index], &only_second, "w")
+            .await
+            .unwrap()
+            .is_none(),
+        "the first source's job and the job with no talk are left queued"
+    );
+    let mut rest = HashSet::new();
+    while let Some(j) = job::claim_from(&mut conn, &[JobKind::Index], &[], "w")
+        .await
+        .unwrap()
+    {
+        rest.insert(j.id);
+    }
+    assert_eq!(
+        rest,
+        HashSet::from([jobs[0], untied]),
+        "no sources takes any job"
+    );
+}
+
+#[tokio::test]
 async fn a_failed_attempt_retries_after_a_doubling_backoff() {
     let fx = common::start().await;
     let id = enqueue(&fx.pool, JobKind::Extract, "h").await.unwrap();

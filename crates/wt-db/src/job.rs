@@ -194,11 +194,26 @@ pub async fn claim(
     kinds: &[JobKind],
     worker: &str,
 ) -> Result<Option<Job>, JobError> {
+    claim_from(conn, kinds, &[], worker).await
+}
+
+/// [`claim`] limited to jobs whose talk comes from one of `sources` (`talk.source_key`), so one
+/// source can be processed ahead of a queue another source fills. An empty `sources` takes any
+/// job, including jobs with no talk.
+pub async fn claim_from(
+    conn: &mut PgConnection,
+    kinds: &[JobKind],
+    sources: &[String],
+    worker: &str,
+) -> Result<Option<Job>, JobError> {
     let kinds: Vec<String> = kinds.iter().map(|k| k.as_str().to_owned()).collect();
     let Some(row) = sqlx::query!(
         r#"with next as (
              select id from job
              where state = 'queued' and run_at <= now() and kind = any($1)
+               and (cardinality($3::text[]) = 0
+                    or exists (select 1 from talk t
+                               where t.id = job.talk_id and t.source_key = any($3)))
              order by run_at
              for update skip locked
              limit 1)
@@ -207,7 +222,8 @@ pub async fn claim(
            from next where job.id = next.id
            returning job.id, job.kind, job.talk_id, job.payload, job.attempts, job.max_attempts"#,
         &kinds,
-        worker
+        worker,
+        sources
     )
     .fetch_optional(&mut *conn)
     .await?

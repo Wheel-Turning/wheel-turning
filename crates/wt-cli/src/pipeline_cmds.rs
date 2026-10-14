@@ -106,6 +106,10 @@ pub(crate) struct WorkerArgs {
     /// Exit once no job is due instead of waiting for more.
     #[arg(long)]
     drain: bool,
+    /// Only jobs for talks from this source key, such as ssz-vimeo. Repeat for several; without
+    /// it every source's jobs run.
+    #[arg(long = "source")]
+    sources: Vec<String>,
     /// The directory holding sources.toml, pipeline.toml and series.toml.
     #[arg(long, default_value = "config")]
     config_dir: PathBuf,
@@ -646,6 +650,7 @@ pub(crate) async fn worker(ctx: &Ctx, args: WorkerArgs) -> anyhow::Result<()> {
         &args.kinds,
         args.concurrency,
         args.drain,
+        &args.sources,
     )
     .await
 }
