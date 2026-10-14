@@ -6,6 +6,9 @@
 //! every speaker's words, so it is written only into the talk's scratch directory and read back
 //! from there.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -202,32 +205,46 @@ pub fn model_name(path: &Path) -> String {
     format!("whisper-{}", stem.strip_prefix("ggml-").unwrap_or(stem))
 }
 
+/// whisper-cli's JSON output: its segments.
 #[derive(Debug, Deserialize)]
 struct CliOutput {
+    /// The segments in order.
     transcription: Vec<CliSegment>,
 }
 
+/// One segment of whisper-cli's output, with its tokens.
 #[derive(Debug, Deserialize)]
 struct CliSegment {
+    /// Where the segment starts and ends.
     offsets: CliOffsets,
+    /// The segment's text.
     text: String,
+    /// The segment's tokens, which carry the word timing and probabilities.
     #[serde(default)]
     tokens: Vec<CliToken>,
 }
 
+/// A segment's start and end in milliseconds.
 #[derive(Debug, Deserialize)]
 struct CliOffsets {
+    /// Start, in milliseconds.
     from: i64,
+    /// End, in milliseconds.
     to: i64,
 }
 
+/// One token and its probability.
 #[derive(Debug, Deserialize)]
 struct CliToken {
+    /// The token's text.
     text: String,
+    /// Its probability.
     #[serde(default)]
     p: f32,
 }
 
+/// Whether a token or segment is one of whisper's special markers, such as `[_BEG_]`, which are not
+/// words.
 fn special(text: &str) -> bool {
     text.trim_start().starts_with("[_")
 }
@@ -324,6 +341,7 @@ fn failure_message(stderr: &str) -> String {
 /// A transcriber that returns a scripted word list, for tests.
 #[derive(Debug, Default)]
 pub struct FakeTranscriber {
+    /// The words it returns.
     words: Mutex<Vec<Word>>,
     /// The audio length it reports.
     pub audio_ms: i64,

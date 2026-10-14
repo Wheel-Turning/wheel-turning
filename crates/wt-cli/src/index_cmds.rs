@@ -181,6 +181,7 @@ pub async fn segment_sample(
     }))
 }
 
+/// Escapes text for the sample page's HTML.
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -188,11 +189,13 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Milliseconds as H:MM:SS.
 fn clock(ms: i32) -> String {
     let s = ms / 1000;
     format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
 }
 
+/// The CSS colour of a span kind on the timeline.
 fn color(kind: SpanKind) -> &'static str {
     match kind {
         SpanKind::Talk => "var(--talk)",
@@ -204,6 +207,7 @@ fn color(kind: SpanKind) -> &'static str {
     }
 }
 
+/// A talk's section when it could not be sampled: its title, id and why.
 fn note(title: &str, talk: TalkId, message: &str) -> String {
     format!(
         "<section><h2>{}</h2><p class=\"id\">{}</p><p class=\"note\">{}</p></section>",
@@ -285,6 +289,7 @@ fn render_talk(title: &str, talk: TalkId, seg: &Segmentation, audio_ms: i64) -> 
     )
 }
 
+/// The whole sample page around the talks' sections, with its inline styles.
 fn page(sections: &[String]) -> String {
     format!(
         r#"<!doctype html>

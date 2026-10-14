@@ -42,7 +42,9 @@ pub trait Diarizer: Send + Sync {
 /// The sidecar at `WT_DIARIZE_URL`.
 #[derive(Debug, Clone)]
 pub struct SidecarDiarizer {
+    /// The sidecar's base URL.
     url: String,
+    /// The HTTP client.
     client: reqwest::Client,
 }
 
@@ -69,8 +71,10 @@ impl SidecarDiarizer {
 /// How often a diarization request that did not reach the sidecar is sent.
 const SEND_ATTEMPTS: u32 = 4;
 
+/// The sidecar's answer: the speaker turns. Its speaker count is not read.
 #[derive(Debug, Deserialize)]
 struct SidecarResponse {
+    /// The speaker turns.
     turns: Vec<Turn>,
 }
 
@@ -123,6 +127,7 @@ impl Diarizer for SidecarDiarizer {
 }
 
 impl SidecarDiarizer {
+    /// A sidecar failure, naming the sidecar's URL.
     fn error(&self, e: impl std::fmt::Display) -> DiarizeError {
         DiarizeError::Sidecar {
             url: self.url.clone(),
@@ -134,6 +139,7 @@ impl SidecarDiarizer {
 /// A diarizer that returns scripted turns, for tests.
 #[derive(Debug, Default)]
 pub struct FakeDiarizer {
+    /// The turns it returns.
     turns: Mutex<Vec<Turn>>,
 }
 

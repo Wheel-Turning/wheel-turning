@@ -27,6 +27,7 @@ mod stages;
 mod talk_cmds;
 mod text_cmds;
 
+/// The command line: one command, and where records are stored.
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
 struct Cli {
@@ -37,6 +38,8 @@ struct Cli {
     records_dir: PathBuf,
 }
 
+/// Every `wt` command, one variant per group; each group's subcommands and handler live in its
+/// module.
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Database operations.

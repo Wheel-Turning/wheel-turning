@@ -12,6 +12,7 @@ use wt_core::transcript::Word;
 /// Below this share of source words matched, the text and the recording probably differ.
 pub const MIN_ALIGNMENT_SHARE: f32 = 0.6;
 
+/// A time marker such as `[12:34]` or `[1:02:03]` in a source transcript.
 static MARKER: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]$").ok());
 /// Stage directions such as `[laughs]` or `[Tape turned over.]`, but not time markers.
@@ -29,6 +30,7 @@ pub struct SourceWord {
     pub marker_ms: Option<i32>,
 }
 
+/// A time marker's position in milliseconds: `[M:SS]` or `[H:MM:SS]`.
 fn marker_ms(token: &str) -> Option<i32> {
     let c = MARKER.as_ref()?.captures(token)?;
     let a: i32 = c[1].parse().ok()?;
@@ -97,6 +99,7 @@ pub fn labeled_source_words(text: &str) -> Vec<(SourceWord, Option<String>)> {
     out
 }
 
+/// A word folded for matching: lowercase letters and digits only.
 fn key(word: &str) -> String {
     word.chars()
         .filter(|c| c.is_alphanumeric())

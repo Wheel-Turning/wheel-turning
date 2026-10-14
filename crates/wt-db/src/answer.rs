@@ -337,6 +337,8 @@ pub struct TalkCard {
     pub citation_sort: Option<String>,
 }
 
+/// Builds a [`TalkCard`] from a query row with the card's columns, which several queries share
+/// without sharing a row type.
 macro_rules! card {
     ($r:expr) => {
         TalkCard {

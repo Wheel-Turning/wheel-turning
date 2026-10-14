@@ -44,6 +44,7 @@ static REPLY: LazyLock<Option<Regex>> = LazyLock::new(|| {
     .ok()
 });
 
+/// A word as the scope search compares it: lowercased.
 fn clean(word: &str) -> String {
     word.to_lowercase()
 }

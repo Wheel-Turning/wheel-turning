@@ -218,7 +218,9 @@ pub async fn run(gate: Option<&dyn Triage>, settings: TriageSettings, question: 
 /// The gate as a call through the shared Claude client, so the monthly cap and the real-data
 /// switch apply.
 pub struct LlmTriage {
+    /// The model client.
     llm: Arc<dyn LlmClient>,
+    /// The questions' data class, which the client checks before sending.
     class: DataClass,
 }
 

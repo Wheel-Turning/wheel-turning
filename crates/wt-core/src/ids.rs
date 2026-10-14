@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Defines each id as a UUID newtype, so ids of different tables cannot be mixed up.
 macro_rules! define_ids {
     ($($(#[$doc:meta])* $name:ident),+ $(,)?) => {
         $(

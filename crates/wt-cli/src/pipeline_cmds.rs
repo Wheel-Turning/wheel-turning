@@ -12,6 +12,7 @@ use wt_core::Config;
 
 use crate::{Ctx, commands, index_cmds, ingest, stages};
 
+/// `wt ingest`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum IngestCommand {
     /// List each source, or the named one, record new and changed videos and queue them for
@@ -93,6 +94,7 @@ pub(crate) enum IngestCommand {
     },
 }
 
+/// `wt worker`'s arguments.
 #[derive(Debug, Args)]
 pub(crate) struct WorkerArgs {
     /// Job kinds to run, comma separated: classify, audio, correct, extract, resolve, index.
@@ -109,6 +111,7 @@ pub(crate) struct WorkerArgs {
     config_dir: PathBuf,
 }
 
+/// Parses a job kind for `--kinds`, listing the known kinds when it is not one.
 pub(crate) fn parse_kind(value: &str) -> Result<wt_db::job::JobKind, String> {
     wt_db::job::JobKind::parse(value).ok_or_else(|| {
         let known: Vec<_> = wt_db::job::JobKind::ALL
@@ -122,6 +125,7 @@ pub(crate) fn parse_kind(value: &str) -> Result<wt_db::job::JobKind, String> {
     })
 }
 
+/// `wt pipeline`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum PipelineCommand {
     /// Queues an audio job for every talk at cleared.
@@ -173,6 +177,7 @@ pub(crate) enum PipelineCommand {
     },
 }
 
+/// `wt reindex`'s arguments: the talks, all of them, or the citations.
 #[derive(Debug, clap::Args)]
 #[command(group(clap::ArgGroup::new("which").required(true).args(["talk", "all", "citations"])))]
 pub(crate) struct ReindexArgs {
@@ -194,6 +199,7 @@ pub(crate) struct ReindexArgs {
     config_dir: PathBuf,
 }
 
+/// `wt transcript`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TranscriptCommand {
     /// Writes one review file per talk: an HTML page with the corrected text paragraph by
@@ -225,6 +231,7 @@ pub(crate) enum TranscriptCommand {
     },
 }
 
+/// `wt export`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ExportCommand {
     /// Writes a teacher's talks for their own use, such as books (Spec 04, Owner exports): one
@@ -253,6 +260,7 @@ pub(crate) enum ExportCommand {
     },
 }
 
+/// `wt segment`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum SegmentCommand {
     /// Runs fetch, recognition, diarization and segmentation on cleared talks without storing
@@ -273,6 +281,7 @@ pub(crate) enum SegmentCommand {
     },
 }
 
+/// `wt glossary`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum GlossaryCommand {
     /// Load terms from a glossary file, such as scripts/seed_glossary.toml. Variants merge into
@@ -326,6 +335,7 @@ pub(crate) async fn glossary_change(
     }))
 }
 
+/// `wt llm`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum LlmCommand {
     /// Inspect or change the monthly cap.
@@ -335,6 +345,7 @@ pub(crate) enum LlmCommand {
     },
 }
 
+/// `wt llm cap`'s subcommands; without one it shows the cap and the month's spend.
 #[derive(Debug, Subcommand)]
 pub(crate) enum CapCommand {
     /// Set the monthly cap in US dollars, and release ingestion jobs the cap had put off.

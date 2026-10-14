@@ -100,13 +100,18 @@ pub struct GateQuestion {
     pub tags: Vec<String>,
 }
 
+/// A TOML value that is one item or a list of them.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum OneOrMany<T> {
+    /// A single item.
     One(T),
+    /// A list.
     Many(Vec<T>),
 }
 
+/// Reads one item or a list as a list, so a question with one right route can name it without
+/// brackets.
 fn one_or_many<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
@@ -118,6 +123,7 @@ where
     })
 }
 
+/// [`one_or_many`] for an optional field.
 fn some_one_or_many<'de, D, T>(d: D) -> Result<Option<Vec<T>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -126,9 +132,11 @@ where
     one_or_many(d).map(Some)
 }
 
+/// The gate question file: its `[[question]]` tables.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
+    /// The questions.
     #[serde(default)]
     question: Vec<GateQuestion>,
 }
@@ -379,6 +387,8 @@ pub fn report(results: &[GateResult]) -> GateReport {
     r
 }
 
+/// A question the gate routed wrongly, as the report lists it, with `unanswered` where the gate
+/// gave no verdict.
 fn miss(x: &GateResult) -> Miss {
     const UNANSWERED: &str = "unanswered";
     let o = &x.observed;
@@ -405,6 +415,7 @@ fn miss(x: &GateResult) -> Miss {
     }
 }
 
+/// `n` as a share of `of`, zero when `of` is.
 fn share(n: usize, of: usize) -> f64 {
     if of == 0 { 0.0 } else { n as f64 / of as f64 }
 }

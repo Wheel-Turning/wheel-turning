@@ -126,6 +126,7 @@ pub struct Thresholds {
     pub out_of_scope_sim: f32,
 }
 
+/// `out_of_scope_sim`'s default.
 fn default_out_of_scope_sim() -> f32 {
     0.80
 }
@@ -210,6 +211,7 @@ pub enum SensitiveError {
     Embed(MlError),
 }
 
+/// Reads and parses a TOML configuration file.
 fn load_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, SensitiveError> {
     let text = std::fs::read_to_string(path).map_err(|source| SensitiveError::Read {
         path: path.display().to_string(),
@@ -218,6 +220,7 @@ fn load_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Sensitive
     parse_toml(&text, &path.display().to_string())
 }
 
+/// Parses TOML, naming the file in the error.
 fn parse_toml<T: serde::de::DeserializeOwned>(text: &str, path: &str) -> Result<T, SensitiveError> {
     toml::from_str(text).map_err(|source| SensitiveError::Parse {
         path: path.to_owned(),
@@ -289,10 +292,15 @@ pub struct Classified {
 
 /// The loaded rules and embedded exemplars.
 pub struct Sensitivity {
+    /// The phrase rules per level.
     rules: Vec<(Level, Vec<String>)>,
+    /// The embedded exemplars per level.
     exemplars: Vec<(Level, Vec<f32>)>,
+    /// The similarity thresholds per level.
     thresholds: Thresholds,
+    /// The triage gate's settings.
     triage: TriageSettings,
+    /// The fixed query behind the acute notice's curated teachings.
     curated_query: String,
 }
 
@@ -437,6 +445,8 @@ impl Sensitivity {
         out
     }
 
+    /// The similarity a question needs to an exemplar of `level` to take that level; never for
+    /// `None`.
     fn threshold(&self, level: Level) -> f32 {
         match level {
             Level::Acute => self.thresholds.acute_sim,

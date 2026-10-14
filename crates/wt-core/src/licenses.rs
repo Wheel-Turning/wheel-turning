@@ -42,11 +42,14 @@ pub enum LicenseError {
 /// The parsed record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LicenseRecord {
+    /// Where the record was read from, for error messages.
     path: PathBuf,
     /// Each listed name and whether some row gives it a revision.
     models: BTreeMap<String, bool>,
 }
 
+/// Whether a word is a revision hash, 40 or 64 hex digits. A row with one pins its models'
+/// revision, and a ticked hash is not a model name.
 fn is_hash(word: &str) -> bool {
     matches!(word.len(), 40 | 64) && word.chars().all(|c| c.is_ascii_hexdigit())
 }

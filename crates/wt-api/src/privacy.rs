@@ -111,6 +111,7 @@ pub fn gpc(headers: &HeaderMap) -> bool {
 /// What replaces a removed detail.
 pub const REMOVED: &str = "[removed]";
 
+/// The patterns [`scrub`] removes, in order (Spec 06, Privacy modes, rule 1).
 static PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         // Email addresses.
@@ -198,6 +199,7 @@ pub async fn save(
     Redirect::to(to).into_response()
 }
 
+/// The page that confirms "Delete my data".
 #[derive(Template)]
 #[template(path = "delete.html")]
 struct ConfirmPage {

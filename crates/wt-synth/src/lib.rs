@@ -8,6 +8,9 @@
 //! parallel. A failed or slow call removes the summary and nothing else, so the caller always
 //! renders the excerpts. Every drop is logged with its reason.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 pub mod excerpt;
 pub mod filter;
 
@@ -69,6 +72,7 @@ impl SummaryExcerpt {
         self.window.text(self.range.0, self.range.1)
     }
 
+    /// The excerpt's header in the model's message: its label, the teacher and the talk's year.
     fn header(&self, label: &str) -> String {
         match self.year {
             Some(y) => format!("{label}: {}, talk from {y}", self.teacher),
@@ -280,8 +284,11 @@ impl Synthesis {
 
 /// A sentence that passed the deterministic filters, waiting on the verifier.
 struct Candidate {
+    /// Its section.
     part: SummaryPart,
+    /// The sentence.
     text: String,
+    /// The excerpt labels it cites.
     refs: Vec<String>,
     /// Distinct citations: excerpt position and window-wide words of the quotation.
     cites: Vec<(usize, usize, usize)>,
@@ -385,6 +392,8 @@ pub async fn summarize(
     out
 }
 
+/// Records a failed model call on the synthesis and logs it; a spend cap that stopped the call is
+/// reported as such, not as a failure.
 fn fail(mut out: Synthesis, stage: &'static str, e: LlmError) -> Synthesis {
     out.failure = Some(match e {
         LlmError::CapReached { .. } => Failure::CapReached,
@@ -397,6 +406,7 @@ fn fail(mut out: Synthesis, stage: &'static str, e: LlmError) -> Synthesis {
     out
 }
 
+/// Records a model call that did not answer in time, and logs it.
 fn timed_out(mut out: Synthesis, stage: &'static str, after: Duration) -> Synthesis {
     out.failure = Some(Failure::Failed {
         stage,
@@ -422,6 +432,8 @@ fn position(r: &str, offered: usize) -> Option<usize> {
     (1..=offered).contains(&n).then(|| n - 1)
 }
 
+/// The user message for the draft: the question, then each excerpt under its header with numbered
+/// sentences and their word counts, which the draft cites by number.
 fn generation_message(input: &SummaryInput) -> String {
     let mut text = format!("Question: {}\n\nExcerpts:\n", input.query);
     for (i, x) in input.excerpts.iter().enumerate() {

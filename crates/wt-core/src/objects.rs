@@ -40,6 +40,7 @@ pub trait ObjectStore: Send + Sync {
 /// Objects as files under a directory.
 #[derive(Debug, Clone)]
 pub struct LocalObjects {
+    /// The directory every key lives under.
     root: PathBuf,
 }
 
@@ -49,6 +50,8 @@ impl LocalObjects {
         Self { root: root.into() }
     }
 
+    /// The file for a key under the root. A key with an empty, `.` or `..` segment, a backslash or
+    /// a colon is refused, so no key reaches outside the root.
     fn path(&self, key: &str) -> Result<PathBuf, ObjectError> {
         let parts: Vec<&str> = key.split('/').collect();
         let valid = !key.is_empty()
@@ -63,6 +66,7 @@ impl LocalObjects {
     }
 }
 
+/// Wraps an I/O error with the path it concerns.
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> ObjectError + '_ {
     move |source| ObjectError::Io {
         path: path.to_owned(),
@@ -134,6 +138,7 @@ impl ObjectStore for LocalObjects {
 }
 
 impl LocalObjects {
+    /// The key of a file under the root, with `/` separators on every platform.
     fn key_of(&self, path: &Path) -> Option<String> {
         let rel = path.strip_prefix(&self.root).ok()?;
         let parts: Vec<String> = rel
@@ -144,6 +149,7 @@ impl LocalObjects {
     }
 }
 
+/// Every file under a directory, recursively; an unreadable directory counts as empty.
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {

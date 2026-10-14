@@ -383,6 +383,8 @@ pub async fn build(pool: &PgPool, run: Uuid, pass_ratio: f64) -> Result<Report, 
     })
 }
 
+/// The report's lines for named-teacher questions: those tagged `named_teacher` or answered in that
+/// mode.
 fn named(answers: &[RunAnswer]) -> Vec<NamedLine> {
     answers
         .iter()
@@ -421,6 +423,7 @@ pub fn percentiles(values: &[u64]) -> Percentiles {
     }
 }
 
+/// Latency percentiles per query stage across the run's answers.
 fn latency(answers: &[RunAnswer]) -> Vec<(String, Percentiles)> {
     type Get = fn(&wt_api::ask::StageTimings) -> u64;
     let stages: [(&str, Get); 10] = [
@@ -444,6 +447,7 @@ fn latency(answers: &[RunAnswer]) -> Vec<(String, Percentiles)> {
         .collect()
 }
 
+/// A verdict as the report prints it.
 fn verdict(v: Verdict) -> &'static str {
     match v {
         Verdict::Pass => "pass",

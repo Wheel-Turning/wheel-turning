@@ -423,6 +423,8 @@ impl Stages {
         Ok((labeler, editor, hints))
     }
 
+    /// What an audio job needs from these stages, with the window labeler and the question editor
+    /// the caller built.
     fn audio_deps<'a>(
         &'a self,
         labeler: &'a dyn WindowLabeler,

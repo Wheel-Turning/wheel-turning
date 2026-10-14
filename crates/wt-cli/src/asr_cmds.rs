@@ -234,6 +234,7 @@ pub async fn requeue(pool: &PgPool, config: &Config, dry_run: bool) -> anyhow::R
     }))
 }
 
+/// `wt asr`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum AsrCommand {
     /// Runs every available setup and model on a clip, or on talks, and prints the real-time
@@ -251,6 +252,7 @@ pub(crate) enum AsrCommand {
 
 #[derive(Debug, clap::Args)]
 // `[asr]` in the help text names the config.toml table, not an intra-doc link.
+/// `wt asr benchmark`'s arguments.
 #[allow(rustdoc::broken_intra_doc_links)]
 pub(crate) struct BenchmarkArgs {
     /// A clip with known text: a public-domain or CC0 recording, never a teacher's talk.

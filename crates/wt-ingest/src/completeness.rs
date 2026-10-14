@@ -38,12 +38,15 @@ pub struct RecordedVideo {
     pub state: String,
 }
 
+/// A video card in a saved Vimeo account page: its id and title.
 static CARD_TITLE: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"href="https?://vimeo\.com/(\d{6,12})"[^>]*data-testid="content-card-title"[^>]*>([^<]*)<"#).ok()
 });
+/// A card's duration badge, `M:SS` or `H:MM:SS`.
 static CARD_DURATION: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"chakra-badge[^>]*>\s*((?:\d{1,2}:)?\d{1,2}:\d{2})\s*<"#).ok());
 
+/// Decodes the HTML entities a saved page uses in titles.
 fn decode_entities(text: &str) -> String {
     text.replace("&quot;", "\"")
         .replace("&#39;", "'")
@@ -53,6 +56,7 @@ fn decode_entities(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// `H:MM:SS` or `M:SS` as seconds.
 fn seconds(clock: &str) -> Option<i32> {
     clock
         .split(':')
@@ -268,12 +272,14 @@ pub fn compare(
     }
 }
 
+/// Seconds as H:MM:SS, or empty when unknown.
 fn clock(seconds: Option<i32>) -> String {
     seconds.map_or_else(String::new, |s| {
         format!("{}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60)
     })
 }
 
+/// A table of entries, or `empty` when there are none.
 fn table(out: &mut String, entries: &[Entry], empty: &str) {
     if entries.is_empty() {
         let _ = writeln!(out, r#"<p class="muted">{}</p>"#, escape(empty));
@@ -295,6 +301,7 @@ fn table(out: &mut String, entries: &[Entry], empty: &str) {
     out.push_str("</table>\n");
 }
 
+/// The report page's inline stylesheet, light and dark, so the page is one file.
 const STYLE: &str = "body{font:15px/1.45 system-ui,sans-serif;margin:24px auto;max-width:1100px;\
 padding:0 16px;color:#1d1d1f;background:#fff}h1{font-size:24px}h2{font-size:19px;margin-top:32px;\
 border-bottom:1px solid #ddd;padding-bottom:4px}table{border-collapse:collapse;width:100%;margin:8px 0}\

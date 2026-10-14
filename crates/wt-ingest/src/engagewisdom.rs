@@ -24,33 +24,46 @@ use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform}
 /// The crawl delay EngageWisdom's `robots.txt` asks for.
 pub const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
+/// A listing page's links to talk pages, without query or fragment.
 static TALK_LINK: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"href="(/talks/[^"?#]+)[^"]*""#).ok());
+/// A talk page's title, in the title pane's heading.
 static TITLE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"(?s)pane-ew-talk-title-pane.*?<h3[^>]*>(.*?)</h3>"#).ok());
+/// A talk page's byline pane, which holds the speaker and location links.
 static BYLINE: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"(?s)pane-byline[^>]*>\s*<div class="pane-content">(.*?)</div>"#).ok()
 });
+/// A speaker link in the byline: the talk's teacher as the site names them.
 static SPEAKER: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"<a href="/speaker/[^"]*">([^<]+)</a>"#).ok());
+/// A location link in the byline.
 static LOCATION: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"<a href="/location/[^"]*">([^<]+)</a>"#).ok());
+/// The talk's date, written "Month day, year", with or without an ordinal suffix.
 static DATE: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"<strong>\s*([A-Z][a-z]+ \d{1,2})(?:st|nd|rd|th)?, (\d{4})\s*</strong>").ok()
 });
+/// The talk's serial number, such as `ST-1234`.
 static SERIAL: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"(?s)field-name-field-serial-number.*?</div>\s*([A-Z]{1,4}-\d{3,6})"#).ok()
 });
+/// The transcript field, up to the end of its wrapping divs.
 static TRANSCRIPT: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"(?s)field-name-field-wisdom-transcript[^>]*>(.*?)</div>\s*</div>\s*</div>"#).ok()
 });
+/// One paragraph of the transcript.
 static PARAGRAPH: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?s)<p[^>]*>(.*?)</p>").ok());
+/// Any HTML tag, stripped from extracted text.
 static TAG: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"<[^>]+>").ok());
+/// The audio address in the page's player settings.
 static AUDIO: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#""wavesurfer-player-id":"(https?:[^"]+?\.(?:mp4|m4a|mp3))""#).ok()
 });
 
+/// A compiled pattern, or a parse error naming EngageWisdom when one failed to compile, so a bad
+/// pattern fails discovery instead of panicking.
 fn re(r: &LazyLock<Option<Regex>>) -> Result<&Regex, IngestError> {
     r.as_ref().ok_or_else(|| IngestError::Parse {
         url: String::new(),
@@ -58,6 +71,8 @@ fn re(r: &LazyLock<Option<Regex>>) -> Result<&Regex, IngestError> {
     })
 }
 
+/// The text of an HTML fragment: tags removed, the entities these pages use decoded, and whitespace
+/// collapsed.
 fn text(html: &str) -> String {
     let stripped = TAG.as_ref().map_or_else(
         || html.to_owned(),
@@ -260,6 +275,8 @@ impl EngageWisdomAdapter {
         Ok(links)
     }
 
+    /// Fetches one page as text, after the source's exclusions clear it, waiting the crawl delay
+    /// before every request but the first.
     async fn page(&self, url: &Url, first: &mut bool) -> Result<String, IngestError> {
         if !*first {
             tokio::time::sleep(self.delay).await;

@@ -12,16 +12,22 @@ use wt_segment::{AnsweredTurn, EditError, QuestionEdit, QuestionEditor};
 
 use crate::llm::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 
+/// The model's JSON answer: the edited question, and whether it removed identifying details.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct Reply {
+    /// The edited question.
     question: String,
+    /// Whether the edit removed identifying details.
     removed_identifying_details: bool,
 }
 
 /// Edits student questions with the extraction model.
 pub struct LlmQuestionEditor<'a> {
+    /// The model client.
     client: &'a dyn LlmClient,
+    /// The transcripts' data class, which the client checks before sending.
     class: DataClass,
+    /// The model to ask.
     model: String,
 }
 

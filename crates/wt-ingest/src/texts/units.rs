@@ -33,6 +33,7 @@ pub struct Unit {
     pub word_count: usize,
 }
 
+/// A text's word count, by whitespace.
 fn words(text: &str) -> usize {
     text.split_whitespace().count()
 }
@@ -164,6 +165,7 @@ fn drafts(
     Ok(out)
 }
 
+/// A unit's label from the scheme's template, filling `{work}`, `{n}`, `{chapter}` and `{heading}`.
 fn label(template: &str, work: &str, n: &str, chapter: usize, heading: Option<&str>) -> String {
     template
         .replace("{work}", work)

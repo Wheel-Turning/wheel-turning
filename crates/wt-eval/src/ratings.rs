@@ -76,6 +76,7 @@ pub struct Imported {
     pub claims_unrated: usize,
 }
 
+/// The verdicts a reviewer may give a summary line's claim.
 const VERDICTS: [&str; 3] = ["supported", "drifting", "invented"];
 
 /// Imports a ratings file for `run` as `reviewer`. Every entry must name a question, passage or
@@ -202,6 +203,7 @@ pub async fn import(
     Ok(out)
 }
 
+/// A note as given, or none when it is blank.
 fn note(s: &str) -> Option<String> {
     let t = s.trim();
     (!t.is_empty()).then(|| t.to_owned())

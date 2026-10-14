@@ -25,6 +25,8 @@ const LEGAL_TITLES: [&str; 8] = [
     "rights",
 ];
 
+/// A line that looks like a copyright or license notice: the word, the sign, an ISBN, or the usual
+/// reservation wording.
 static NOTICE: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(copyright|\u{00A9}|\(c\)\s*\d{4}|all rights reserved|\bisbn\b|creative commons|licensed under|no part of this (book|publication|work) may be)",
@@ -50,6 +52,7 @@ pub fn is_notice(block: &str) -> bool {
     re.is_match(block) && words <= 120
 }
 
+/// Whether a section title names a legal page, by a whole word from [`LEGAL_TITLES`].
 fn legal_title(title: &str) -> bool {
     let t = title.to_lowercase();
     LEGAL_TITLES.iter().any(|w| {
@@ -102,6 +105,8 @@ pub struct Notice {
     pub holder: String,
 }
 
+/// A holder's name folded for comparison: lowercase letters and digits, single spaces, no
+/// punctuation.
 fn fold(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
@@ -182,6 +187,7 @@ pub fn edges(sections: &[Section], n: usize) -> Vec<&str> {
         .collect()
 }
 
+/// The forty most common English words, which [`english_share`] counts.
 const ENGLISH: [&str; 40] = [
     "the", "and", "of", "to", "were", "in", "is", "that", "it", "was", "for", "on", "as", "with",
     "his", "he", "be", "at", "by", "this", "are", "not", "from", "or", "but", "have", "an", "they",

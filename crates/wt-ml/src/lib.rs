@@ -5,6 +5,9 @@
 //! Embedding input is passage text and nothing else; queries are embedded the same way, with no
 //! instruction prefix. Vectors are L2-normalized for cosine distance.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -95,6 +98,8 @@ impl OnnxSettings {
     }
 }
 
+/// Whether ONNX Runtime loaded, kept for the process: the runtime loads only once, so a second
+/// model sees the first attempt's outcome.
 static RUNTIME: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Loads ONNX Runtime once per process.
@@ -115,6 +120,7 @@ fn load_runtime(path: Option<&Path>) -> Result<(), MlError> {
         .map_err(MlError::Runtime)
 }
 
+/// An ONNX Runtime error as an embedding or reranking error.
 fn runtime_err(e: impl std::fmt::Display) -> MlError {
     MlError::Runtime(e.to_string())
 }
@@ -122,8 +128,11 @@ fn runtime_err(e: impl std::fmt::Display) -> MlError {
 /// bge-m3 exported to ONNX by `scripts/export_models.py`: `model.onnx` and `tokenizer.json` in
 /// one directory. The dense vector is the first token's hidden state, normalized.
 pub struct OnnxEmbedder {
+    /// The model's directory name, stored with each vector.
     model_id: String,
+    /// The ONNX session, one call at a time.
     session: Arc<Mutex<Session>>,
+    /// The model's tokenizer.
     tokenizer: Arc<Tokenizer>,
 }
 
@@ -269,6 +278,7 @@ impl Embedder for OnnxEmbedder {
 /// that share words are near each other.
 #[derive(Debug, Clone)]
 pub struct FakeEmbedder {
+    /// The id it reports.
     model_id: String,
 }
 
@@ -364,8 +374,11 @@ impl Reranker for FakeReranker {
 /// trained, `<s> query </s></s> passage </s>`, truncated to `max_tokens` from the longer side,
 /// and the model returns one logit.
 pub struct OnnxReranker {
+    /// The model's directory name.
     model_id: String,
+    /// Sessions to spread calls over.
     sessions: Vec<Arc<Mutex<Session>>>,
+    /// The model's tokenizer.
     tokenizer: Arc<Tokenizer>,
 }
 

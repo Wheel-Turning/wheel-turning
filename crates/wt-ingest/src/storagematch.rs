@@ -80,6 +80,7 @@ pub enum Status {
 }
 
 impl Status {
+    /// The status as the review table writes it.
     fn as_str(self) -> &'static str {
         match self {
             Status::Conflict => "conflict",
@@ -171,6 +172,8 @@ struct FileFacts {
     numbers: BTreeSet<String>,
 }
 
+/// What a file's name and length say: its normalized title, a recording date from the name or the
+/// key, and the six-to-twelve-digit numbers that may be a Vimeo id.
 fn facts(file: &StorageFile) -> FileFacts {
     let stem = file.stem();
     let numbers = stem
@@ -186,6 +189,8 @@ fn facts(file: &StorageFile) -> FileFacts {
     }
 }
 
+/// A talk's side of the podcast rule: the recording date from its title when it has one, else its
+/// talk date, else the upload day, and whether the date came from the title.
 fn talk_side(t: &StorageTalk) -> Side {
     let uploaded = t.published_at.map(|p| p.date_naive());
     let titled = dates::recording_date(&t.title, uploaded);
@@ -269,6 +274,7 @@ fn by_title(
     (tied == 1).then(|| (best.key.clone(), How::Title))
 }
 
+/// The talk's state for the table, with its reason when it has one.
 fn talk_state(t: &StorageTalk) -> String {
     match &t.state_reason {
         Some(reason) => format!("{} ({reason})", t.state),
@@ -276,6 +282,7 @@ fn talk_state(t: &StorageTalk) -> String {
     }
 }
 
+/// One row of the review table, with the file's and the talk's columns filled when given.
 fn row(status: Status, file: Option<&StorageFile>, talk: Option<&StorageTalk>) -> SheetRow {
     let mut r = SheetRow {
         status: status.as_str().to_owned(),
@@ -298,6 +305,8 @@ fn row(status: Status, file: Option<&StorageFile>, talk: Option<&StorageTalk>) -
     r
 }
 
+/// Whether the talk already holds this file, unchanged since it was matched, so a rerun leaves it
+/// as matched.
 fn is_current(source: &str, file: &StorageFile, held: Option<&StorageRef>) -> bool {
     held.is_some_and(|s| {
         s.source == source && s.key == file.key && s.fingerprint == file.fingerprint()
@@ -393,6 +402,8 @@ pub async fn review(
     })
 }
 
+/// The table's order: conflicts first, then proposals, unmatched files, unmatched talks, and
+/// matches last.
 fn status_rank(status: &str) -> u8 {
     match status {
         "conflict" => 0,
@@ -403,6 +414,8 @@ fn status_rank(status: &str) -> u8 {
     }
 }
 
+/// Whether the owner accepted a proposed row: `yes`, `y`, `x`, `true` or `1` in `accept`, in any
+/// case.
 fn accepted(r: &SheetRow) -> bool {
     matches!(
         r.accept.trim().to_ascii_lowercase().as_str(),
@@ -502,6 +515,7 @@ pub fn to_csv(review: &Review) -> Result<String, MatchError> {
     String::from_utf8(bytes).map_err(|e| MatchError::Sheet(e.to_string()))
 }
 
+/// The review page's inline stylesheet, light and dark, so the page is one file.
 const STYLE: &str = "body{font:15px/1.45 system-ui,sans-serif;margin:24px auto;max-width:1200px;\
 padding:0 16px;color:#1d1d1f;background:#fff}h1{font-size:24px}h2{font-size:19px;margin-top:32px;\
 border-bottom:1px solid #ddd;padding-bottom:4px}table{border-collapse:collapse;width:100%;margin:8px 0}\
@@ -510,12 +524,14 @@ th{font-weight:600;background:#f6f6f6}.muted{color:#666}\
 @media (prefers-color-scheme:dark){body{background:#151515;color:#e6e6e6}th{background:#222}\
 th,td{border-color:#333}.muted{color:#aaa}a{color:#8ab4f8}}";
 
+/// Seconds as H:MM:SS, or empty when unknown.
 fn clock(s: Option<i32>) -> String {
     s.map_or_else(String::new, |s| {
         format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
     })
 }
 
+/// A value as text, or empty when absent.
 fn opt<T: ToString>(v: Option<T>) -> String {
     v.map_or_else(String::new, |v| v.to_string())
 }

@@ -123,6 +123,7 @@ pub fn normalize(text: &str) -> String {
         .join(" ")
 }
 
+/// A resolution with its confidence, how it was reached, and the locator it found.
 fn resolution(confidence: &str, method: Option<&str>, id: Option<String>) -> Resolution {
     Resolution {
         confidence: confidence.into(),

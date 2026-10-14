@@ -50,6 +50,8 @@ pub struct Poppler {
     tesseract: PathBuf,
 }
 
+/// Runs a tool to completion and returns its stdout; a tool that will not start or exits nonzero is
+/// an error naming `what` and its stderr.
 fn run(cmd: &mut Command, what: &str) -> Result<Vec<u8>, TextError> {
     let out = cmd
         .output()
@@ -75,6 +77,7 @@ impl Poppler {
         }
     }
 
+    /// A poppler command, from `WT_POPPLER_BIN` when set, else from the path.
     fn poppler(&self, name: &str) -> Command {
         Command::new(
             self.bin

@@ -16,7 +16,10 @@ use wt_core::Secret;
 use crate::http::{self, Exclusions, parse_url};
 use crate::source::{DiscoveredVideo, IngestError, SourceAdapter, SourcePlatform};
 
+/// Videos per API page, Vimeo's maximum, so a large account takes as few requests as possible.
 const PAGE_SIZE: u32 = 100;
+/// The fields the API returns per video: only what discovery stores, and the text track count that
+/// says whether the video has captions.
 const API_FIELDS: &str = "uri,name,description,duration,created_time,link,privacy,license,\
                           metadata.connections.texttracks.total";
 
@@ -77,6 +80,8 @@ impl VimeoAdapter {
         })
     }
 
+    /// A GET that the source's exclusions clear first, with the token for the API and without it
+    /// for public pages.
     async fn get(
         &self,
         url: &Url,
@@ -97,6 +102,7 @@ impl VimeoAdapter {
         }
     }
 
+    /// [`Self::get`], failing on any status other than success.
     async fn get_ok(
         &self,
         url: &Url,
@@ -105,6 +111,7 @@ impl VimeoAdapter {
         http::ok(url, self.get(url, token).await?)
     }
 
+    /// Parses a response body as JSON, naming the URL but not the response in the error.
     async fn json<T: for<'de> Deserialize<'de>>(
         url: &Url,
         response: reqwest::Response,
@@ -115,6 +122,7 @@ impl VimeoAdapter {
         })
     }
 
+    /// Lists the account's videos through the API, following `paging.next` until it is empty.
     async fn discover_api(&self, token: &Secret) -> Result<Vec<DiscoveredVideo>, IngestError> {
         let mut next = Some(self.api_url(&format!(
             "/me/videos?per_page={PAGE_SIZE}&fields={API_FIELDS}"
@@ -135,6 +143,7 @@ impl VimeoAdapter {
         Ok(videos)
     }
 
+    /// An API URL from a path and query, relative to the configured API base.
     fn api_url(&self, path_and_query: &str) -> Result<Url, IngestError> {
         self.endpoints
             .api
@@ -169,6 +178,9 @@ impl VimeoAdapter {
         }
     }
 
+    /// Lists the videos the talks page embeds, describing each through oEmbed. A video the
+    /// exclusions cover, oEmbed refuses, or oEmbed gives no title for (one restricted to its
+    /// owner's domain) is skipped with a warning; the completeness report lists them.
     async fn discover_page(&self, page: &Url) -> Result<Vec<DiscoveredVideo>, IngestError> {
         let ids = self.talks_page_ids().await?;
         let mut videos = Vec::new();
@@ -275,17 +287,20 @@ fn parse_upload_date(text: &str) -> Option<DateTime<Utc>> {
         .map(|n| n.and_utc())
 }
 
+/// One page of `/me/videos`. Items stay raw JSON so each video's `raw` keeps every field.
 #[derive(Debug, Deserialize)]
 struct ApiPage {
     data: Vec<serde_json::Value>,
     paging: Option<Paging>,
 }
 
+/// The API's paging links; only `next` is followed.
 #[derive(Debug, Deserialize)]
 struct Paging {
     next: Option<String>,
 }
 
+/// The fields of an API video that discovery reads.
 #[derive(Debug, Deserialize)]
 struct ApiItem {
     uri: String,
@@ -297,21 +312,26 @@ struct ApiItem {
     metadata: Option<ApiMetadata>,
 }
 
+/// `metadata` in an API video, read only for its text tracks.
 #[derive(Debug, Deserialize)]
 struct ApiMetadata {
     connections: Option<ApiConnections>,
 }
 
+/// `metadata.connections` in an API video.
 #[derive(Debug, Deserialize)]
 struct ApiConnections {
     texttracks: Option<ApiTotal>,
 }
 
+/// A connection's count of items.
 #[derive(Debug, Deserialize)]
 struct ApiTotal {
     total: Option<i64>,
 }
 
+/// Vimeo's public oEmbed answer for one video. `domain_status_code` 403 with no title marks a video
+/// restricted to its owner's domain.
 #[derive(Debug, Deserialize)]
 struct OEmbed {
     title: Option<String>,
@@ -322,6 +342,8 @@ struct OEmbed {
     author_url: Option<String>,
 }
 
+/// A discovered video from one API item: the id is the last segment of `uri`, and captions mean at
+/// least one text track.
 fn api_video(page: &Url, raw: serde_json::Value) -> Result<DiscoveredVideo, IngestError> {
     let item: ApiItem = serde_json::from_value(raw.clone()).map_err(|e| IngestError::Parse {
         url: page.to_string(),

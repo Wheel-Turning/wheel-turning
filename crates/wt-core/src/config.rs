@@ -27,6 +27,7 @@ impl Env {
         self == Env::Dev
     }
 
+    /// Parses `WT_ENV`.
     fn parse(value: &str) -> Option<Self> {
         match value {
             "dev" => Some(Env::Dev),
@@ -146,6 +147,7 @@ pub struct Config {
 #[derive(Clone)]
 struct KeyLookup(Arc<LookupFn>);
 
+/// How configuration keys are looked up: the environment, or a map in tests.
 type LookupFn = dyn Fn(&str) -> Option<String> + Send + Sync;
 
 impl fmt::Debug for KeyLookup {
@@ -348,6 +350,7 @@ fn percent_encode(value: &str) -> String {
     out
 }
 
+/// A database URL must be a Postgres one, and outside dev must require TLS.
 fn check_database_url(key: &'static str, url: &Secret, env: Env) -> Result<(), ConfigError> {
     let value = url.expose();
     if !(value.starts_with("postgres://") || value.starts_with("postgresql://")) {
@@ -449,6 +452,7 @@ impl LlmStage {
     }
 }
 
+/// A boolean key: unset is false, and anything but `true` or `false` is an error.
 fn parse_bool(key: &'static str, value: Option<String>) -> Result<bool, ConfigError> {
     match value.as_deref().map(str::trim) {
         None => Ok(false),

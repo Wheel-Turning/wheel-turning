@@ -92,42 +92,55 @@ pub struct PdfSettings {
     pub vision_max_pages: u32,
 }
 
+/// `languages`' default: English, the only language v1 loads.
 fn eng() -> Vec<String> {
     vec!["eng".into()]
 }
+/// `dpi`'s default for rendering a page to OCR.
 fn dpi() -> u32 {
     300
 }
+/// `columns`' default: Tesseract's automatic page segmentation finds the columns.
 fn auto() -> String {
     "auto".into()
 }
+/// `strip_running_heads`' default: on.
 fn yes() -> bool {
     true
 }
+/// `vision_pass`' default: off, since the vision pass is deferred.
 fn off() -> String {
     "off".into()
 }
+/// `min_layer_chars`' default: a page whose text layer has fewer characters is read by OCR.
 fn min_layer_chars() -> usize {
     200
 }
+/// `min_unit_confidence`' default: a unit under this mean OCR confidence is suspect.
 fn min_unit_confidence() -> f32 {
     0.80
 }
+/// `min_dictionary_share`' default: a unit with fewer dictionary words than this is suspect.
 fn min_dictionary_share() -> f32 {
     0.85
 }
+/// `max_suspect_share`' default: the import stops when more units than this are suspect.
 fn max_suspect_share() -> f32 {
     0.10
 }
+/// `chunk_pages`' default: pages per chunk job for a large PDF.
 fn chunk_pages() -> u32 {
     50
 }
+/// `range_min_confidence`' default: a tenth of the pages under this mean confidence is read again.
 fn range_min_confidence() -> f32 {
     0.85
 }
+/// `reocr_dpi`' default for that second reading.
 fn reocr_dpi() -> u32 {
     400
 }
+/// `vision_max_pages`' default, accepted and unused while the vision pass is deferred.
 fn vision_max_pages() -> u32 {
     200
 }
@@ -271,6 +284,7 @@ impl<'a> PageCache<'a> {
         }
     }
 
+    /// The object key for one cached page.
     fn key(&self, page: u32) -> String {
         format!("{}/{page}.json", self.prefix)
     }

@@ -9,6 +9,7 @@ use wt_core::ids::TalkId;
 
 use crate::{Ctx, commands, index_cmds, rights, stages};
 
+/// `wt talk`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TalkCommand {
     /// Set the rights holder for a talk or every talk of a teacher, and clear any talk that
@@ -97,6 +98,7 @@ pub(crate) enum TalkCommand {
     },
 }
 
+/// One talk or every talk of a teacher, exactly one of the two.
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(crate) struct TalkOrTeacher {
@@ -108,6 +110,8 @@ pub(crate) struct TalkOrTeacher {
     teacher: Option<String>,
 }
 
+/// What `wt takedown` removes: a talk, a teacher, or text editions; or `--finish` and `--replay`,
+/// which act on the logged takedowns.
 #[derive(Debug, Args)]
 #[group(id = "takedown_target", required = true, multiple = false)]
 pub(crate) struct TakedownTarget {
@@ -136,6 +140,7 @@ pub(crate) struct TakedownTarget {
     replay: bool,
 }
 
+/// `wt takedown`'s arguments, or its `requests` subcommand.
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 pub(crate) struct TakedownArgs {
@@ -157,6 +162,7 @@ pub(crate) struct TakedownArgs {
     yes: bool,
 }
 
+/// `wt takedown`'s one subcommand.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TakedownSubcommand {
     /// Removal requests from the rights page (Spec 08, Mandated sources, Handling).
@@ -166,6 +172,7 @@ pub(crate) enum TakedownSubcommand {
     },
 }
 
+/// `wt takedown requests`' subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum RequestsCommand {
     /// Open and suspended requests, or all with --all.
@@ -244,6 +251,7 @@ impl From<TalkOrTeacher> for Target {
     }
 }
 
+/// `wt teacher`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TeacherCommand {
     /// Take a teacher out. Their passages leave the serving view at once and no job of theirs
@@ -324,6 +332,7 @@ pub(crate) enum TeacherCommand {
     },
 }
 
+/// Parses a display level for `--level`: a letter from a to f or its name.
 pub(crate) fn parse_display_level(value: &str) -> Result<wt_db::display::DisplayLevel, String> {
     wt_db::display::DisplayLevel::parse(value)
         .ok_or_else(|| format!("unknown display level {value:?}; use a to f or its name"))

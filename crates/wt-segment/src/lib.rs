@@ -1,6 +1,9 @@
 //! The `Diarizer` client, segment labels and student-speech removal (Spec 04, Diarization and
 //! segmentation).
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 pub mod diarize;
 pub mod questions;
 pub mod scope;

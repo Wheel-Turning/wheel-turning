@@ -4,6 +4,9 @@
 //! `dg registry import`, and speaker resolution, which matches teacher aliases in a talk's title
 //! and description. `wt-db` stores what these produce.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 pub mod glossary;
 
 use std::collections::BTreeSet;
@@ -91,10 +94,12 @@ pub struct TeacherEntry {
     pub aliases: Vec<String>,
 }
 
+/// `lineage`'s default.
 fn soto() -> String {
     "soto".to_owned()
 }
 
+/// `listed`'s default: a sangha is listed unless the registry says not.
 fn yes() -> bool {
     true
 }
@@ -119,6 +124,9 @@ impl RegistryFile {
         Ok(file)
     }
 
+    /// Checks the whole file before anything is stored: unique sangha names, each sangha's
+    /// donation settings, teachers that name a sangha the file defines, and no alias, in any
+    /// case, shared by two teachers.
     fn validate(&self) -> Result<(), RegistryError> {
         let sanghas: BTreeSet<&str> = self.sanghas.iter().map(|s| s.name.as_str()).collect();
         if sanghas.len() != self.sanghas.len() {
@@ -159,6 +167,8 @@ impl SanghaEntry {
         }
     }
 
+    /// Checks a sangha's donation settings: a known kind, an https `donation_url`, and a
+    /// `donation_url_template` only beside a URL it fits.
     fn check_donation(&self) -> Result<(), RegistryError> {
         let invalid = |why: String| {
             Err(RegistryError::Invalid(format!(
@@ -216,7 +226,9 @@ pub enum SpeakerMatch<T> {
 
 /// Matches teacher aliases on word boundaries, case-insensitively (Spec 03, rule 6).
 pub struct AliasMatcher<T> {
+    /// Finds every alias at once.
     automaton: AhoCorasick,
+    /// Each pattern's teacher and alias, by pattern index.
     owners: Vec<(T, String)>,
 }
 
@@ -261,6 +273,7 @@ impl<T: Clone + Ord> AliasMatcher<T> {
         }
     }
 
+    /// Every alias found in `text` on word boundaries, with its teacher.
     fn matches(&self, text: &str) -> Vec<(T, String)> {
         self.automaton
             .find_iter(text)
@@ -273,6 +286,8 @@ impl<T: Clone + Ord> AliasMatcher<T> {
     }
 }
 
+/// Whether a match stands alone: no letter or digit right before or after it, so an alias never
+/// matches inside a longer word.
 fn on_word_boundary(text: &str, start: usize, end: usize) -> bool {
     let before = text[..start].chars().next_back();
     let after = text[end..].chars().next();

@@ -97,6 +97,7 @@ pub struct EditionSection {
     pub source_key: Option<String>,
 }
 
+/// `language`'s default: English, the only language v1 loads.
 fn english() -> String {
     "en".into()
 }
@@ -168,6 +169,7 @@ pub struct UnitsSection {
     pub chapters: bool,
 }
 
+/// `max_words`' default: a longer unit gets a warning in the dry run.
 fn max_words() -> usize {
     220
 }

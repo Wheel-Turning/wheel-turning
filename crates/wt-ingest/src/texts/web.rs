@@ -138,6 +138,7 @@ pub struct WebFetcher {
     robots: Mutex<HashMap<String, Robots>>,
 }
 
+/// An HTTP error for a URL.
 fn http_err(url: &Url, message: impl ToString) -> IngestError {
     IngestError::Http {
         url: url.to_string(),
@@ -162,6 +163,8 @@ impl WebFetcher {
         }
     }
 
+    /// The host's slot: when the last request to it was made. Each host has its own, so a slow host
+    /// never delays another.
     async fn slot(&self, host: &str) -> Arc<Mutex<Option<Instant>>> {
         self.hosts
             .lock()
@@ -262,6 +265,7 @@ impl WebFetcher {
         Ok(target)
     }
 
+    /// Waits until `fetch_delay` has passed since the host's last request.
     async fn wait(&self, last: &mut Option<Instant>) {
         if let Some(t) = *last {
             let since = t.elapsed();
