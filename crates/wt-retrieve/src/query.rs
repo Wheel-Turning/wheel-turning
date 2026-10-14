@@ -64,8 +64,11 @@ pub struct ParsedQuery {
 /// Finds teacher aliases in a query (rules 2 to 5). Build it at startup and again when the
 /// registry changes.
 pub struct NamedDetector {
+    /// Finds every alias at once.
     automaton: AhoCorasick,
+    /// Each pattern's teacher and alias, by pattern index.
     owners: Vec<(TeacherId, String)>,
+    /// Aliases that are also common words, which count as names only after a title (rule 3).
     common: BTreeSet<String>,
 }
 
@@ -155,12 +158,15 @@ impl NamedDetector {
     }
 }
 
+/// Whether a match stands alone: no letter or digit right before or after it.
 fn on_word_boundary(text: &str, start: usize, end: usize) -> bool {
     let before = text[..start].chars().next_back();
     let after = text[end..].chars().next();
     !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
 }
 
+/// Whether the word before the match is a title such as "roshi", which marks a short alias as a
+/// name (rule 3).
 fn after_title_word(text: &str, start: usize) -> bool {
     text[..start]
         .split_whitespace()

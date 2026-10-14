@@ -107,6 +107,7 @@ pub enum ReviewError {
     Io(String),
 }
 
+/// A word as the transcript JSON stores it.
 #[derive(Debug, Deserialize)]
 struct StoredWord {
     w: String,
@@ -123,6 +124,8 @@ struct Current {
     reviewed: bool,
 }
 
+/// The talk's current transcript from the object store, refusing a talk without one or whose object
+/// is missing.
 async fn current(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
@@ -177,6 +180,7 @@ async fn paragraphs(
     Ok(out)
 }
 
+/// Escapes text for the review page's HTML, quotes included.
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -184,6 +188,7 @@ fn esc(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Milliseconds as H:MM:SS.
 fn clock(ms: i32) -> String {
     let s = ms.max(0) / 1000;
     format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)

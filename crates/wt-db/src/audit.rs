@@ -710,6 +710,7 @@ pub async fn run_with_files(
     Ok(report)
 }
 
+/// A check's result from the files: one finding per entry, the first 20 as examples.
 fn result(name: &'static str, severity: Severity, found: Vec<String>) -> CheckResult {
     CheckResult {
         name,

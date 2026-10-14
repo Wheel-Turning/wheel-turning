@@ -77,6 +77,7 @@ pub fn suggestions_key(talk: TalkId) -> String {
     format!("transcripts/{}/glossary_suggestions.csv", talk.as_uuid())
 }
 
+/// A word as the transcript JSON stores it.
 #[derive(Debug, Deserialize)]
 struct StoredWord {
     w: String,
@@ -85,6 +86,7 @@ struct StoredWord {
     p: f32,
 }
 
+/// The parts of a stored transcript correction reads: the words and how they were made.
 #[derive(Debug, Deserialize)]
 struct StoredTranscript {
     words: Vec<StoredWord>,
@@ -170,6 +172,7 @@ pub(crate) fn corrected(
         .collect()
 }
 
+/// A run of corrected words as one text, for embedding.
 fn join(words: &[(Word, (usize, usize))]) -> String {
     words
         .iter()
@@ -538,6 +541,7 @@ impl PgHandList {
     }
 }
 
+/// A failure to read the citation hand list, as the error the hand list's trait returns.
 fn hand_list_error(e: impl std::fmt::Display) -> LlmError {
     LlmError::Ledger(format!("reading the hand list: {e}"))
 }

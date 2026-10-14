@@ -32,6 +32,8 @@ fn strip_metadata(svg: &str) -> String {
     }
 }
 
+/// The logo's SVG as a `<symbol>` the pages reuse, with its accent colour moved into a class so the
+/// stylesheet sets it.
 fn symbol(svg: &str) -> String {
     let body = svg
         .find('>')

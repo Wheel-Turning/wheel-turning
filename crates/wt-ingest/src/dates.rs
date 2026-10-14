@@ -12,30 +12,36 @@ use std::sync::LazyLock;
 use chrono::NaiveDate;
 use regex::Regex;
 
+/// Month abbreviations in order, as a regex alternation; a name matches by its first three letters.
 const MONTHS: &str = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec";
 
 /// A recording is taken to be at most this many days after its upload date, for time zones.
 const UPLOAD_TOLERANCE_DAYS: i64 = 1;
 
+/// `2023-04-09`, also with `_`, `/` or `.`, not inside a longer number.
 static ISO: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"(?:^|[^0-9])(20\d{2})[-_/.](\d{1,2})[-_/.](\d{1,2})(?:[^0-9]|$)").ok()
 });
+/// `April 9th, 2023` and `Apr. 9 2023`.
 static MONTH_DAY_YEAR: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(&format!(
         r"(?i)\b({MONTHS})[a-z]*\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b"
     ))
     .ok()
 });
+/// `9 April 2023`.
 static DAY_MONTH_YEAR: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(&format!(
         r"(?i)\b(\d{{1,2}})\s+({MONTHS})[a-z]*\.?,?\s+(\d{{4}})\b"
     ))
     .ok()
 });
+/// `4/9/2023` or `4-9-23`, month first.
 static US_NUMERIC: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"(?:^|[^0-9])(\d{1,2})[-/](\d{1,2})[-/](\d{4}|\d{2})(?:[^0-9]|$)").ok()
 });
 
+/// A month's number from its name or abbreviation.
 fn month_number(name: &str) -> Option<u32> {
     let lower = name.to_ascii_lowercase();
     MONTHS
@@ -44,6 +50,7 @@ fn month_number(name: &str) -> Option<u32> {
         .and_then(|i| u32::try_from(i + 1).ok())
 }
 
+/// A date in this century, or none, so a stray number never makes a year like 1907.
 fn date(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
     (2000..=2099)
         .contains(&year)
@@ -51,6 +58,7 @@ fn date(year: i32, month: u32, day: u32) -> Option<NaiveDate> {
         .flatten()
 }
 
+/// A capture group parsed as a number.
 fn number<T: std::str::FromStr>(caps: &regex::Captures<'_>, i: usize) -> Option<T> {
     caps.get(i)?.as_str().parse().ok()
 }

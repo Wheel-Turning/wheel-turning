@@ -69,10 +69,12 @@ pub enum Event {
 }
 
 impl Event {
+    /// Whether the event ends the stream.
     fn closes(&self) -> bool {
         matches!(self, Self::Done(_) | Self::Page(_))
     }
 
+    /// The event as server-sent event data for the progress script.
     fn sse(&self) -> SseEvent {
         #[derive(Serialize)]
         struct StageData {
@@ -125,6 +127,7 @@ impl Sink {
         self.0.is_some()
     }
 
+    /// Sends an event to the stream, if there is one.
     fn send(&self, event: Event) {
         if let Some(tx) = &self.0 {
             // A reader who left closes the channel; the question still runs to the end.
@@ -187,6 +190,7 @@ impl Progress for Sink {
 pub struct ScopeSizes(Mutex<HashMap<Option<TeacherId>, (Instant, u64)>>);
 
 impl ScopeSizes {
+    /// The scope's passage count, when it was counted less than five minutes ago.
     fn fresh(&self, teacher: Option<TeacherId>) -> Option<u64> {
         let map = self.0.lock().ok()?;
         map.get(&teacher)
@@ -194,6 +198,7 @@ impl ScopeSizes {
             .map(|(_, n)| *n)
     }
 
+    /// Keeps a scope's passage count.
     fn store(&self, teacher: Option<TeacherId>, n: u64) {
         if let Ok(mut map) = self.0.lock() {
             map.insert(teacher, (Instant::now(), n));

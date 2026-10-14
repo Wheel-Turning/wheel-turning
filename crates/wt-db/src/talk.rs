@@ -229,6 +229,8 @@ impl TalkRepo {
         Ok(())
     }
 
+    /// The error for a transition the talk's state does not allow: its actual state, or not found
+    /// when it is gone.
     async fn wrong_state(conn: &mut PgConnection, id: TalkId, target: TalkState) -> TalkError {
         match sqlx::query_scalar!(
             r#"select state::text as "s!" from talk where id = $1"#,
@@ -244,6 +246,8 @@ impl TalkRepo {
     }
 }
 
+/// The nil id, for the placeholder consent of a talk with no speaker, which the gate refuses for
+/// its missing speaker before the consent matters.
 fn uuid_nil() -> sqlx::types::Uuid {
     sqlx::types::Uuid::nil()
 }

@@ -8,6 +8,7 @@ use clap::Subcommand;
 
 use crate::{Ctx, commands, index_cmds, stages};
 
+/// `wt text`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TextCommand {
     /// Records a work read elsewhere, with its locators and no text, so talks can cite it and
@@ -191,6 +192,7 @@ pub(crate) enum TextCommand {
     },
 }
 
+/// `wt license`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum LicenseCommand {
     /// Saves a license page and records it as evidence, unapproved until a person reads it.
@@ -254,6 +256,7 @@ pub(crate) enum LicenseCommand {
     },
 }
 
+/// `wt reference`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ReferenceCommand {
     /// Imports a reference asset from a manifest and its CSV files: a dry run unless --apply.

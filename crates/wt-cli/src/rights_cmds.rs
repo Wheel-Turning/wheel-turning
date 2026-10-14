@@ -10,6 +10,7 @@ use crate::{Ctx, commands, rights, source};
 
 #[derive(Debug, Subcommand)]
 // `[rights]` in the help text names the pipeline.toml table, not an intra-doc link.
+/// `wt source`'s subcommands.
 #[allow(rustdoc::broken_intra_doc_links)]
 pub(crate) enum SourceCommand {
     /// Lists text editions with a copyright notice the evidence does not cover, and those in
@@ -97,11 +98,13 @@ pub(crate) enum SourceCommand {
     },
 }
 
+/// Parses a rights basis for `--basis`.
 pub(crate) fn parse_basis(value: &str) -> Result<wt_db::rights::Basis, String> {
     wt_db::rights::Basis::parse(value)
         .ok_or_else(|| format!("{value:?} is not one of mandate, license, permission"))
 }
 
+/// `wt rights`' subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum RightsCommand {
     /// Record a drafted permission request. Nothing is sent: a person sends it by hand.
@@ -238,6 +241,7 @@ pub(crate) enum RightsCommand {
     },
 }
 
+/// A source or a teacher, exactly one of the two: whom a request went to.
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(crate) struct SourceOrTeacher {
@@ -249,6 +253,7 @@ pub(crate) struct SourceOrTeacher {
     teacher: Option<String>,
 }
 
+/// `wt exclusion`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ExclusionCommand {
     /// Every active exclusion.

@@ -391,6 +391,7 @@ pub async fn is_current(
     .await?)
 }
 
+/// A vector as pgvector's text literal, `[0.1,0.2,...]`.
 fn vector_literal(v: &[f32]) -> String {
     let mut s = String::with_capacity(v.len() * 10 + 2);
     s.push('[');

@@ -488,6 +488,8 @@ fn dead_reason(kind: JobKind, error: &str) -> String {
     format!("{kind} job dead: {summary}")
 }
 
+/// Turns an update's row count into whether the worker still held the job's lock: anything but one
+/// row means another worker reaped and took it.
 fn held(rows: u64, job: &Job) -> Result<(), JobError> {
     if rows == 1 {
         Ok(())

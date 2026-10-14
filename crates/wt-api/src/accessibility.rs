@@ -82,6 +82,7 @@ pub fn parse(text: &str) -> Register {
 /// The register this binary was built with.
 pub static BUILT: LazyLock<Register> = LazyLock::new(|| parse(REGISTER));
 
+/// An ISO date written out, such as "October 9, 2026"; anything else is shown as it is.
 fn long_date(iso: &str) -> String {
     chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d")
         .map(|d| d.format("%B %-d, %Y").to_string())
@@ -137,6 +138,8 @@ pub struct ReportForm {
     website: String,
 }
 
+/// The accessibility statement page: the statement, the checks by group, the known gaps and the
+/// report form.
 #[derive(Template)]
 #[template(path = "accessibility.html")]
 struct StatementPage {
@@ -158,6 +161,7 @@ pub struct StatementQuery {
     sent: Option<u8>,
 }
 
+/// Renders the statement page with the report form as given.
 fn render(
     status: StatusCode,
     form: ReportForm,
@@ -200,6 +204,7 @@ pub async fn statement(Query(q): Query<StatementQuery>) -> Response {
     render(StatusCode::OK, form, q.sent.is_some(), None)
 }
 
+/// A form field trimmed and cut to `max` characters, or none when empty.
 fn optional(s: &str, max: usize) -> Option<&str> {
     let s = s.trim();
     (!s.is_empty()).then(|| {

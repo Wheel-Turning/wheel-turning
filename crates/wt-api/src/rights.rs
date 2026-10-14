@@ -23,6 +23,7 @@ pub struct SourceLine {
     pub status: String,
 }
 
+/// A date written out, such as "October 9, 2026".
 fn date(d: chrono::NaiveDate) -> String {
     d.format("%B %-d, %Y").to_string()
 }
@@ -79,6 +80,8 @@ pub struct RequestForm {
     excerpt: String,
 }
 
+/// The rights page: each source and its status, and the removal request form with its outcome or
+/// error.
 #[derive(Template)]
 #[template(path = "rights.html")]
 struct RightsPage {
@@ -99,6 +102,7 @@ pub struct RightsQuery {
     sent: Option<u8>,
 }
 
+/// Renders the rights page with the sources' current statuses and the form as given.
 async fn render(
     state: &AppState,
     status: StatusCode,
@@ -146,6 +150,7 @@ pub async fn rights_page(State(state): State<AppState>, Query(q): Query<RightsQu
     render(&state, StatusCode::OK, form, q.sent.is_some(), None).await
 }
 
+/// A form field trimmed and cut to `max` characters, or none when empty.
 fn optional(s: &str, max: usize) -> Option<&str> {
     let s = s.trim();
     (!s.is_empty()).then(|| {

@@ -186,6 +186,7 @@ impl MediaFetcher {
         }
     }
 
+    /// The API base and this source's Vimeo token, when one is configured.
     fn vimeo_token(&self, source: &str) -> Option<(&Url, &Secret)> {
         let vimeo = self.vimeo.as_ref()?;
         Some((&vimeo.api, vimeo.tokens.get(source)?))
@@ -505,12 +506,14 @@ struct VideoFiles {
     play: Option<Play>,
 }
 
+/// The player's files in the API's answer.
 #[derive(Debug, Default, Deserialize)]
 struct Play {
     #[serde(default)]
     progressive: Vec<VimeoFile>,
 }
 
+/// One file of a video in the API's answer: its address, quality, type and size.
 #[derive(Debug, Deserialize)]
 struct VimeoFile {
     #[serde(default)]
@@ -556,6 +559,7 @@ struct TextTracks {
     data: Vec<TextTrack>,
 }
 
+/// One text track in the API's answer.
 #[derive(Debug, Deserialize)]
 struct TextTrack {
     #[serde(default)]
@@ -579,6 +583,7 @@ impl TextTrack {
     }
 }
 
+/// An error reading a storage file, named by its label rather than its path.
 fn storage_error(label: &str, e: &std::io::Error) -> IngestError {
     IngestError::Http {
         url: label.to_owned(),
@@ -586,6 +591,7 @@ fn storage_error(label: &str, e: &std::io::Error) -> IngestError {
     }
 }
 
+/// A scratch error while fetching, named by the URL.
 fn scratch_error(url: &str, e: wt_core::scratch::ScratchError) -> IngestError {
     IngestError::Http {
         url: url.to_owned(),

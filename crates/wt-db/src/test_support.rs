@@ -22,7 +22,9 @@ const READY_POLL: Duration = Duration::from_millis(250);
 
 /// A running test database. The container stops when this value is dropped.
 pub struct TestDb {
+    /// The container, held so it lives as long as the database is used.
     _container: ContainerAsync<GenericImage>,
+    /// The database's connection string.
     url: Secret,
 }
 

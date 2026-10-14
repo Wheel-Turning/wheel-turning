@@ -11,6 +11,7 @@ pub const COOKIE: &str = "wt_session";
 /// How long a session lasts.
 pub const LIFETIME_S: i64 = 30 * 24 * 3600;
 
+/// The MAC that signs cookies and CSRF tokens.
 type HmacSha256 = Hmac<Sha256>;
 
 /// A fresh invite token: 32 random bytes from the operating system, URL-safe.
@@ -52,6 +53,7 @@ impl Keys {
         Ok(Self { key })
     }
 
+    /// The HMAC of a message under the site key.
     fn mac(&self, message: &str) -> HmacSha256 {
         // An HMAC key may have any length, so this never fails.
         let mut mac = <HmacSha256 as KeyInit>::new_from_slice(&self.key)
@@ -60,10 +62,12 @@ impl Keys {
         mac
     }
 
+    /// A message's tag, URL-safe base64.
     fn sign(&self, message: &str) -> String {
         URL_SAFE_NO_PAD.encode(self.mac(message).finalize().into_bytes())
     }
 
+    /// Whether `tag` is the message's tag, compared in constant time.
     fn verify(&self, message: &str, tag: &str) -> bool {
         URL_SAFE_NO_PAD
             .decode(tag)

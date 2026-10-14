@@ -16,6 +16,7 @@ use wt_eval::run::RunConfig;
 
 use crate::commands::print_json;
 
+/// `wt eval`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum EvalCommand {
     /// Load a question file as a set. A loaded set never changes; load a change as a new
@@ -100,6 +101,7 @@ pub(crate) enum EvalCommand {
     },
 }
 
+/// Dispatches `wt eval`.
 pub(crate) async fn eval(
     pool: &PgPool,
     config: &Config,
@@ -233,6 +235,8 @@ pub(crate) async fn eval(
     Ok(())
 }
 
+/// The retrieval settings the server uses, from config/retrieval.toml, so an eval run ranks as the
+/// site does.
 fn retrieval_config() -> anyhow::Result<wt_retrieve::RetrievalConfig> {
     let path = wt_api::site::config_dir().join("retrieval.toml");
     wt_retrieve::RetrievalConfig::load(&path).with_context(|| format!("loading {}", path.display()))

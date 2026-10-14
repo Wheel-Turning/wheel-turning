@@ -66,6 +66,7 @@ pub enum AssetKind {
 }
 
 impl AssetKind {
+    /// The asset kind as the report and the stored asset row name it.
     fn as_str(self) -> &'static str {
         match self {
             AssetKind::Glossary => "glossary",
@@ -92,6 +93,7 @@ pub struct ReferenceSource {
     pub columns: BTreeMap<String, String>,
 }
 
+/// `format`'s default.
 fn csv() -> String {
     "csv".into()
 }
@@ -162,6 +164,7 @@ fn read_rows(
     Ok((rows, files))
 }
 
+/// A `;`-separated cell as a list, empty items left out.
 fn list(value: Option<&String>) -> Vec<String> {
     value
         .map(|v| {
@@ -174,6 +177,7 @@ fn list(value: Option<&String>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A row's field, refusing the row when it is missing or empty.
 fn required<'a>(row: &'a BTreeMap<String, String>, field: &str) -> Result<&'a str, TextError> {
     row.get(field)
         .map(String::as_str)
@@ -181,6 +185,7 @@ fn required<'a>(row: &'a BTreeMap<String, String>, field: &str) -> Result<&'a st
         .ok_or_else(|| TextError::Source(format!("a row has no {field}")))
 }
 
+/// A glossary row's `kind`: `name`, `text_title` (or `title`), or a term otherwise.
 fn term_kind(value: Option<&String>) -> TermKind {
     match value.map(|v| v.to_ascii_lowercase()).as_deref() {
         Some("name") => TermKind::Name,

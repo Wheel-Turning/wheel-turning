@@ -238,6 +238,7 @@ pub(crate) async fn run_in(
     Ok(report)
 }
 
+/// The talks a scope covers, and the teacher when it names one.
 async fn resolve_scope(
     conn: &mut PgConnection,
     scope: &Scope,
@@ -269,6 +270,7 @@ async fn resolve_scope(
     }
 }
 
+/// What a takedown of these talks would remove, counted per store.
 async fn count(conn: &mut PgConnection, talks: &[TalkId]) -> Result<TakedownReport, TakedownError> {
     let ids: Vec<Uuid> = talks.iter().map(TalkId::as_uuid).collect();
     let mut report = TakedownReport {

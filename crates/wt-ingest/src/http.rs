@@ -108,6 +108,7 @@ pub async fn get_authorized(
     send(request, target.url()).await
 }
 
+/// Sends a request, naming the URL but not the client's own message about it in the error.
 async fn send(
     request: reqwest::RequestBuilder,
     url: &Url,

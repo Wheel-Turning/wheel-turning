@@ -1,5 +1,8 @@
 //! The sqlx connection pool, the migration runner, repositories and views.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -104,6 +107,7 @@ pub async fn migrate(pool: &PgPool) -> Result<MigrateReport, DbError> {
     })
 }
 
+/// How many migrations have been applied successfully, 0 on a database sqlx has never migrated.
 async fn applied_count(pool: &PgPool) -> Result<usize, DbError> {
     // Postgres resolves table names when it parses a statement, so the existence check has to be
     // its own query before the count can name the table.

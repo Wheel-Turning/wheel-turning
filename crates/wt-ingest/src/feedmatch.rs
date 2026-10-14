@@ -128,6 +128,8 @@ pub fn lengths_fit(cfg: &ClassifyConfig, a: i32, b: i32) -> bool {
     f64::from((a - b).abs()) <= tolerance
 }
 
+/// Whether a talk can be the episode's: both dated within `feed_match_days` of each other and both
+/// with lengths that fit. Missing facts never qualify.
 fn qualifies(cfg: &ClassifyConfig, episode: &Side, talk: &Side) -> bool {
     let (Some(de), Some(dt)) = (episode.date, talk.date) else {
         return false;

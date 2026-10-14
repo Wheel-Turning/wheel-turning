@@ -132,6 +132,9 @@ pub async fn set_consent(
     Ok(propagation)
 }
 
+/// Applies a teacher's new consent to their talks: granted clears every talk waiting on it;
+/// declined or withdrawn sends every talk that rested on consent back to wait. Talks under a
+/// license or the mandate stay where they are.
 async fn propagate(
     conn: &mut PgConnection,
     teacher_id: TeacherId,
@@ -261,6 +264,7 @@ pub fn gate_reason(gate: &GateError) -> &'static str {
     }
 }
 
+/// Logs one talk's state change in correction_log.
 async fn log_state(
     conn: &mut PgConnection,
     talk: sqlx::types::Uuid,

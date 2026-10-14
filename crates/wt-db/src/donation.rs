@@ -192,6 +192,7 @@ pub async fn unverify(
     one(pool, name).await
 }
 
+/// One sangha's donation link, by name.
 async fn one(pool: &PgPool, name: &str) -> Result<Link, DonationError> {
     list(pool)
         .await?

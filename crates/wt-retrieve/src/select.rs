@@ -38,9 +38,13 @@ pub struct Chosen {
 
 /// Limits that differ between standard and named selection.
 struct Limits {
+    /// Passages in the answer.
     max_passages: usize,
+    /// Passages from one teacher.
     per_teacher_cap: usize,
+    /// Passages from one talk.
     per_talk_cap: usize,
+    /// Talks in the answer.
     max_sources: usize,
 }
 
@@ -87,6 +91,7 @@ pub fn named(candidates: &[SelectInput], cfg: &SelectionConfig) -> Vec<Chosen> {
     chosen(candidates, &picked)
 }
 
+/// Candidate indexes from the best score down.
 fn by_score(candidates: &[SelectInput]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..candidates.len()).collect();
     order.sort_by(|&a, &b| candidates[b].score.total_cmp(&candidates[a].score));
@@ -156,6 +161,7 @@ fn allowed(
     true
 }
 
+/// The picked candidates as the selection's result, best score first.
 fn chosen(candidates: &[SelectInput], picked: &[usize]) -> Vec<Chosen> {
     // Rule 1 of answer assembly orders groups by their best passage and passages by score, so
     // the selection order itself carries no meaning; return by score for a stable result.

@@ -102,6 +102,7 @@ pub async fn compare(pool: &PgPool, a: Uuid, b: Uuid) -> Result<Comparison, Eval
     })
 }
 
+/// A run's median total latency, 0 when it has none.
 fn total_p50(r: &Report) -> u64 {
     r.latency
         .iter()
@@ -109,6 +110,7 @@ fn total_p50(r: &Report) -> u64 {
         .map_or(0, |(_, p)| p.p50)
 }
 
+/// Each question's text with the passages its answer served, for comparing two runs' answers.
 async fn passage_sets(
     pool: &PgPool,
     run: Uuid,

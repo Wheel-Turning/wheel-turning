@@ -212,6 +212,7 @@ pub async fn discover(
 /// Talks an EngageWisdom discovery records at a time.
 const EW_BATCH: usize = 25;
 
+/// A discovery report's counts as JSON for one source.
 fn report_json(report: &pipeline::DiscoveryReport) -> serde_json::Value {
     serde_json::json!({
         "listed": report.listed, "new": report.new, "changed": report.changed,
@@ -291,6 +292,9 @@ pub async fn worker(
     }
 }
 
+/// The worker loop: claims jobs of `kinds` one at a time and runs each, reaping stale locks older
+/// than `lock_timeout` as it goes. With `drain` it stops when no job is left; otherwise it waits
+/// for more.
 #[allow(clippy::too_many_arguments)]
 async fn run_worker(
     pool: &PgPool,

@@ -11,6 +11,7 @@ use wt_core::gate::ConsentStatus;
 
 use crate::{Ctx, commands};
 
+/// `wt db`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum DbCommand {
     /// Apply every pending migration. Safe to run repeatedly.
@@ -30,6 +31,7 @@ pub(crate) enum DbCommand {
     },
 }
 
+/// `wt registry`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum RegistryCommand {
     /// Load sanghas, teachers and aliases from a registry file. Safe to run repeatedly.
@@ -43,6 +45,7 @@ pub(crate) enum RegistryCommand {
     },
 }
 
+/// `wt sangha`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum SanghaCommand {
     /// Every sangha's donation link, kind and verification, as JSON.
@@ -75,6 +78,7 @@ pub(crate) enum SanghaCommand {
     },
 }
 
+/// `wt report`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ReportCommand {
     /// Answers per day, mode and teacher count, from v_answer_stats.
@@ -132,6 +136,7 @@ pub(crate) fn parse_since(raw: &str) -> Result<chrono::Duration, String> {
     }
 }
 
+/// `wt consent`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ConsentCommand {
     /// Record a teacher's consent and apply it to their talks. declined and withdrawn run the
@@ -160,12 +165,14 @@ pub(crate) enum ConsentCommand {
     List,
 }
 
+/// Parses a consent status for `--status`.
 pub(crate) fn parse_status(value: &str) -> Result<ConsentStatus, String> {
     ConsentStatus::parse(value).ok_or_else(|| {
         format!("{value:?} is not one of granted, requested, declined, withdrawn, unknown")
     })
 }
 
+/// `wt tester`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TesterCommand {
     /// Create a tester and print their invite link once. Only the token's SHA-256 is stored.
@@ -187,6 +194,7 @@ pub(crate) enum TesterCommand {
     },
 }
 
+/// `wt accessibility`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum AccessibilityCommand {
     /// Read and handle reports.
@@ -196,6 +204,7 @@ pub(crate) enum AccessibilityCommand {
     },
 }
 
+/// `wt accessibility reports`' subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ReportsCommand {
     /// Open and in-progress reports, or all with --all, oldest first.

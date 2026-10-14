@@ -45,6 +45,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// Records kept in a local directory.
 #[derive(Debug, Clone)]
 pub struct LocalRecords {
+    /// The directory records are stored in.
     dir: PathBuf,
 }
 

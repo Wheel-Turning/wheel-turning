@@ -500,6 +500,7 @@ async fn stopped(
     Ok(Gated::Stopped { stop, triaged })
 }
 
+/// Milliseconds since `since`, for the timings log.
 fn millis(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }

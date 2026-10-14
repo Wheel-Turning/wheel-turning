@@ -42,6 +42,7 @@ pub struct Setup {
     pub path_prepend: Vec<PathBuf>,
 }
 
+/// `use_gpu`'s default: on.
 fn yes() -> bool {
     true
 }
@@ -263,6 +264,8 @@ impl Rate {
         (self.total > 0).then(|| self.errors as f64 * 100.0 / self.total as f64)
     }
 
+    /// An error rate as a table cell: the percentage with its counts, or `n/a` with nothing to
+    /// count.
     fn cell(self) -> String {
         match self.percent() {
             Some(p) => format!("{p:.2}% ({}/{})", self.errors, self.total),
@@ -546,6 +549,7 @@ pub fn decide(results: &[RunResult], models: &[String], max_wer_percent: f64) ->
     }
 }
 
+/// Bytes as gigabytes, or `n/a` when not measured.
 fn gib(bytes: Option<u64>) -> String {
     bytes.map_or("n/a".into(), |b| format!("{:.1} GB", b as f64 / 1e9))
 }

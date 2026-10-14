@@ -202,6 +202,9 @@ impl Drop for Fetched {
     }
 }
 
+/// Copies a queued import's manifest, plan and source files (or only `only_file`) from the object
+/// store into a scratch directory of its own, unique per fetch since one process may run several
+/// chunks of an import at once.
 fn fetch(
     objects: &dyn ObjectStore,
     bundle: &str,

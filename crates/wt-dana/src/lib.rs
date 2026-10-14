@@ -5,6 +5,9 @@
 //! in integer cents, and an optional site amount, which is a separate line and never taken out
 //! of the sangha total.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 use url::Url;
 use wt_core::ids::SanghaId;
 
@@ -110,6 +113,7 @@ pub enum TemplateError {
     NoPlaceholder,
 }
 
+/// The placeholders a donation URL template may hold for the amount.
 const PLACEHOLDERS: [&str; 2] = ["{amount_cents}", "{amount}"];
 
 /// The host of a URL, which must parse after the placeholders are filled with a sample amount.

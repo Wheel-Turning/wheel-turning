@@ -80,6 +80,7 @@ impl Dictionary {
             .map_err(|e| missing_word_list(path, &e))
     }
 
+    /// Whether a lowercased token is a known word, also as the possessive or plural of one.
     fn knows(&self, token: &str) -> bool {
         if self.words.contains(token) {
             return true;

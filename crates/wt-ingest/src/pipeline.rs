@@ -434,6 +434,7 @@ async fn merge_duplicates(
     Ok((best != talk).then_some(best))
 }
 
+/// A date as a day number, which the duplicate rule compares (Spec 03, rule 3).
 fn day(date: NaiveDate) -> i64 {
     i64::from(date.num_days_from_ce())
 }

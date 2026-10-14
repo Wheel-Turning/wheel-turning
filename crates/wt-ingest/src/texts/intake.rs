@@ -106,6 +106,7 @@ pub struct IntakeEnv<'a> {
     pub pdf_env: Option<&'a PdfEnv<'a>>,
 }
 
+/// A source file's format from its extension, or none for a file intake does not read.
 fn format_of(path: &Path) -> Option<Format> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "epub" => Some(Format::Epub),
@@ -118,6 +119,7 @@ fn format_of(path: &Path) -> Option<Format> {
     }
 }
 
+/// A format as the manifest writes it.
 fn format_name(f: Format) -> &'static str {
     match f {
         Format::Epub => "epub",
@@ -167,6 +169,7 @@ pub fn propose_scheme(sections: &[Section]) -> (Scheme, Option<String>) {
     (Scheme::Paragraph, None)
 }
 
+/// A unit scheme as the manifest writes it.
 fn scheme_name(s: Scheme) -> &'static str {
     match s {
         Scheme::Verse => "verse",
@@ -176,6 +179,7 @@ fn scheme_name(s: Scheme) -> &'static str {
     }
 }
 
+/// A TOML string literal on one line, for values written into the manifest.
 fn toml_str(s: &str) -> String {
     format!("{:?}", s.replace(['\n', '\r'], " "))
 }
@@ -236,6 +240,8 @@ async fn evidence_by_url(
     }
 }
 
+/// Marks a folder blocked by writing why into it, so the next intake run skips it until the
+/// evidence exists.
 fn block(folder: &Path, missing: &str) -> Result<Outcome, TextError> {
     let text = format!(
         "This folder is blocked: {missing}\nNothing here is imported until approved evidence \

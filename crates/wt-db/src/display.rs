@@ -147,6 +147,7 @@ pub struct LevelChange {
     pub changed: bool,
 }
 
+/// A stored display level, refusing a value this build does not know.
 fn level(value: &str) -> Result<DisplayLevel, DisplayError> {
     DisplayLevel::parse(value).ok_or_else(|| DisplayError::Unknown(value.to_owned()))
 }

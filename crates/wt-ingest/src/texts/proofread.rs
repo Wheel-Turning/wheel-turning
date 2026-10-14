@@ -32,6 +32,7 @@ pub struct Thresholds {
     pub worst_max: u32,
 }
 
+/// Whether an edition was read by OCR, which changes how its proof sample is drawn.
 fn is_ocr(extraction: &str) -> bool {
     matches!(extraction, "ocr" | "ocr_vision")
 }
@@ -45,6 +46,8 @@ struct Drawn {
     placements: Option<Placements>,
 }
 
+/// The edition's proof sample, drawn again from its seed, with what the sheet shows around each
+/// unit.
 async fn drawn(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,

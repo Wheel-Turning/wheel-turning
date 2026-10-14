@@ -12,6 +12,7 @@ use wt_segment::{Label, LabelError, Window, WindowLabeler};
 
 use crate::llm::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 
+/// The labeler's instructions (Spec 04): four labels and a reason for each window.
 const SYSTEM: &str = "You label stretches of a recorded Zen service. Each window is about a \
 minute of the teacher's words, transcribed automatically. Label each window as one of: talk \
 (the teacher teaching), chant (liturgy recited or sung), announcement (practical notices such \
@@ -19,24 +20,35 @@ as schedules, thanks or reminders), or other (anything else, such as silence, in
 sitting, or unclear speech). Give a one-sentence reason for each label. Label every window you \
 are given, by its index.";
 
+/// The model's JSON answer: one label per window.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct Labels {
+    /// One label per window given.
     windows: Vec<WindowLabel>,
 }
 
+/// One window's label and the reason the model gave.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct WindowLabel {
+    /// The window's index as given.
     index: usize,
+    /// Its label.
     label: LabelValue,
+    /// Why, in one sentence.
     reason: String,
 }
 
+/// The labels the model may give.
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 enum LabelValue {
+    /// The teacher teaching.
     Talk,
+    /// Liturgy recited or sung.
     Chant,
+    /// Practical notices such as schedules, thanks or reminders.
     Announcement,
+    /// Anything else.
     Other,
 }
 
@@ -53,7 +65,9 @@ impl From<LabelValue> for Label {
 
 /// Labels ambiguous windows with the extraction model.
 pub struct LlmLabeler<'a> {
+    /// The model client.
     client: &'a dyn LlmClient,
+    /// The transcripts' data class, which the client checks before sending.
     class: DataClass,
 }
 

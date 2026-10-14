@@ -247,6 +247,7 @@ pub struct TriageReport {
     pub disagreements: Vec<LayerRow>,
 }
 
+/// A sensitivity level's order from none to acute, or none for an unknown name.
 fn rank(level: &str) -> Option<u8> {
     ["none", "medical", "distress", "out_of_scope", "acute"]
         .iter()
@@ -254,6 +255,7 @@ fn rank(level: &str) -> Option<u8> {
         .and_then(|i| u8::try_from(i).ok())
 }
 
+/// `n` as a share of `of`, zero when `of` is.
 fn rate(n: i64, of: i64) -> f64 {
     if of == 0 { 0.0 } else { n as f64 / of as f64 }
 }
