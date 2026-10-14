@@ -625,9 +625,10 @@ async fn the_database_normalizes_titles_exactly_as_rule_1_does() {
     .unwrap();
     let from_sql: std::collections::BTreeSet<String> =
         candidates.into_iter().map(|c| c.normalized_title).collect();
+    // The database normalizes the talk's title, which drops a media extension the video's has.
     let from_rust: std::collections::BTreeSet<String> = titles
         .iter()
-        .map(|t| wt_ingest::classify::normalize_title(t))
+        .map(|t| wt_ingest::classify::normalize_title(wt_db::ingest::talk_title(t)))
         .collect();
     assert_eq!(from_sql, from_rust);
 }
