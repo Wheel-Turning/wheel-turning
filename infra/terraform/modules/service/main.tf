@@ -109,6 +109,20 @@ variable "admin_exec_role_arn" {
   type = string
 }
 
+variable "eval_task_role_arn" {
+  type = string
+}
+
+variable "eval_cpu" {
+  type    = number
+  default = 2048
+}
+
+variable "eval_memory" {
+  type    = number
+  default = 8192
+}
+
 variable "web_task_role_arn" {
   type = string
 }
@@ -271,6 +285,113 @@ resource "aws_ecs_task_definition" "web" {
           awslogs-group         = var.log_group_names["web"]
           awslogs-region        = local.region
           awslogs-stream-prefix = "web"
+        }
+      }
+    },
+  ])
+}
+
+# One-off evaluation runs (Spec 07) on the deployed stack: the image, models, config and database
+# the site uses. The eval container's command is set per run, for example
+# ["wt", "eval", "run", "--set", "practitioner@2"]; whatever it writes under /out (an
+# export-review page) is copied to s3://<transcripts>/eval-reviews/ when it ends. It connects as
+# the owner login, since evaluation writes eval_run and eval_result and asks as the tester eval.
+# It takes the migrate tag, so a deploy's first plan moves it with the migrate and admin tasks.
+resource "aws_ecs_task_definition" "eval" {
+  family                   = "${var.name}-eval"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.eval_cpu
+  memory                   = var.eval_memory
+  execution_role_arn       = var.admin_exec_role_arn
+  task_role_arn            = var.eval_task_role_arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+
+  volume {
+    name = "models"
+  }
+
+  volume {
+    name = "out"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name       = "models"
+      image      = var.models_image
+      essential  = false
+      entryPoint = ["sh", "-c"]
+      # /out is created writable here because the eval image runs as a non-root user.
+      command = [join(" ", [
+        "aws s3 sync s3://${var.bucket_names["models"]}/ /models/ --only-show-errors",
+        "--exclude '*' --include '${var.models.embed}/*' --include '${var.models.rerank}/*'",
+        "&& chmod 0777 /out",
+      ])]
+      mountPoints = [
+        { sourceVolume = "models", containerPath = "/models" },
+        { sourceVolume = "out", containerPath = "/out" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_names["admin"]
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "eval-models"
+        }
+      }
+    },
+    {
+      name      = "eval"
+      image     = "${aws_ecr_repository.this.repository_url}:${local.migrate_tag}"
+      essential = false
+      command   = ["wt", "eval", "--help"]
+      dependsOn = [{ containerName = "models", condition = "SUCCESS" }]
+      mountPoints = [
+        { sourceVolume = "models", containerPath = "/models", readOnly = true },
+        { sourceVolume = "out", containerPath = "/out" },
+      ]
+      environment = concat(local.common_env, local.db_env, [
+        { name = "WT_DB_USER", value = "wt_owner_login" },
+        { name = "WT_MODEL_DIR", value = "/models" },
+        { name = "WT_EMBED_MODEL", value = var.models.embed },
+        { name = "WT_RERANK_MODEL", value = var.models.rerank },
+        { name = "WT_LLM_MODEL", value = var.llm.model },
+        { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
+        { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
+        { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
+      ])
+      secrets = [
+        { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_owner_login"] },
+        { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+        { name = "ANTHROPIC_API_KEY", valueFrom = var.secret_arns["anthropic_api_key"] },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_names["admin"]
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "eval"
+        }
+      }
+    },
+    {
+      # Runs whether the eval succeeded or not, and ends the task.
+      name        = "upload"
+      image       = var.models_image
+      essential   = true
+      command     = ["s3", "cp", "/out/", "s3://${var.bucket_names["transcripts"]}/eval-reviews/", "--recursive", "--only-show-errors"]
+      dependsOn   = [{ containerName = "eval", condition = "COMPLETE" }]
+      mountPoints = [{ sourceVolume = "out", containerPath = "/out", readOnly = true }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = var.log_group_names["admin"]
+          awslogs-region        = local.region
+          awslogs-stream-prefix = "eval-upload"
         }
       }
     },
@@ -490,6 +611,7 @@ output "task_definition_families" {
     web     = aws_ecs_task_definition.web.family
     migrate = aws_ecs_task_definition.migrate.family
     admin   = aws_ecs_task_definition.admin.family
+    eval    = aws_ecs_task_definition.eval.family
   }
 }
 
