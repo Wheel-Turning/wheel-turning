@@ -205,10 +205,13 @@ struct TranscriptJson<'a> {
     alignment_share: Option<f32>,
 }
 
+/// Leaves a zero count out of the transcript JSON.
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
+/// A word in the transcript JSON: index, text, start, end and probability, with short keys since a
+/// talk has thousands.
 #[derive(Debug, Serialize)]
 struct JsonWord<'a> {
     i: usize,
@@ -218,6 +221,8 @@ struct JsonWord<'a> {
     p: f32,
 }
 
+/// A span in the transcript JSON: its kind, start and end, and its first and last word when it has
+/// words.
 #[derive(Debug, Serialize)]
 struct JsonSpan {
     kind: &'static str,
@@ -821,6 +826,8 @@ pub async fn student_gap_talks(
     Ok(out)
 }
 
+/// The transcript JSON for one talk's segmentation (Spec 04): the words, the spans and how they
+/// were made.
 #[allow(clippy::too_many_arguments)]
 fn transcript_json(
     talk: TalkId,
@@ -871,6 +878,7 @@ fn transcript_json(
     serde_json::to_string(&doc).unwrap_or_default()
 }
 
+/// A span kind as the transcript JSON names it.
 fn span_kind(kind: SpanKind) -> &'static str {
     kind.as_str()
 }

@@ -131,18 +131,36 @@ pub async fn sent(
     )
 }
 
+/// A source's permission, as `wt rights grant` records it.
+pub struct GrantArgs<'a> {
+    /// The source.
+    pub key: &'a str,
+    /// The reply granting permission, stored as a record by its SHA-256.
+    pub statement: &'a Path,
+    /// Who gave it.
+    pub from: &'a str,
+    /// When.
+    pub given_on: NaiveDate,
+    /// What it covers, in the grantor's words.
+    pub scope: &'a str,
+    /// Who recorded it.
+    pub by: &'a str,
+}
+
 /// `wt rights grant`.
-#[allow(clippy::too_many_arguments)]
 pub async fn grant(
     pool: &PgPool,
     records: &LocalRecords,
-    key: &str,
-    statement: &Path,
-    from: &str,
-    given_on: NaiveDate,
-    scope: &str,
-    by: &str,
+    args: GrantArgs<'_>,
 ) -> anyhow::Result<()> {
+    let GrantArgs {
+        key,
+        statement,
+        from,
+        given_on,
+        scope,
+        by,
+    } = args;
     let stored = records.store_file(statement)?;
     let evidence = rights::grant(pool, key, &stored, from, given_on, scope, by).await?;
     print_json(&serde_json::json!({

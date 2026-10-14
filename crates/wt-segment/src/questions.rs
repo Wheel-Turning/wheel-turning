@@ -113,18 +113,23 @@ impl Rejection {
     }
 }
 
+/// Compiles one of the constant patterns below; a fixed pattern that compiles once always does.
 #[allow(clippy::expect_used)]
 fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a constant pattern compiles")
 }
 
+/// An email address in an edit, which the edit must not keep (Spec 04, Student questions).
 static EMAIL: LazyLock<Regex> = LazyLock::new(|| regex(r"[\w.+-]+@[\w-]+\.[\w.-]+"));
+/// A web address or a bare domain in an edit.
 static URL: LazyLock<Regex> = LazyLock::new(|| {
     regex(
         r"(?i)\b(?:https?://|www\.)\S+|\b[a-z0-9-]+\.(?:com|org|net|edu|gov|io|info|co|us|uk|ca|de)\b",
     )
 });
+/// A phone number in an edit.
 static PHONE: LazyLock<Regex> = LazyLock::new(|| regex(r"\+?\(?\d[\d\s().-]{5,}\d"));
+/// Six digits in a row in an edit.
 static DIGITS: LazyLock<Regex> = LazyLock::new(|| regex(r"\d{6,}"));
 
 /// Function words left out of the overlap: an edit made only of them shares nothing to check.
@@ -299,6 +304,7 @@ pub async fn edit_all(
 
 /// An editor for tests: returns the edit `f` makes of the student's words.
 pub struct FakeEditor<F: Fn(&str) -> String + Send + Sync> {
+    /// Makes the edit.
     f: F,
     /// Turns it was asked to edit.
     pub calls: std::sync::atomic::AtomicUsize,

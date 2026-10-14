@@ -73,6 +73,7 @@ impl Target {
     }
 }
 
+/// The model's JSON answer when asked to write probe questions.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct Written {
     /// The questions, one per entry.

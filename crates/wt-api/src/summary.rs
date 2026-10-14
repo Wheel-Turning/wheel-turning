@@ -67,6 +67,7 @@ impl SummaryView {
     }
 }
 
+/// A count with its noun, singular for one.
 fn plural(n: usize, one: &str, many: &str) -> String {
     if n == 1 {
         format!("1 {one}")

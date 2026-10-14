@@ -17,6 +17,8 @@ pub const WINDOW_WORDS: usize = 6_000;
 /// Words shared by neighboring windows.
 pub const OVERLAP_WORDS: usize = 200;
 
+/// The extractor's instructions (Spec 04): copy the teacher's exact words for each citation or
+/// quotation, never paraphrase, with title and locator hints and a kind.
 const SYSTEM: &str = "You read a transcript of a Zen dharma talk and find where the teacher \
 cites or quotes a text: a sutra, a teaching of Dogen or another ancestor, a koan or case, a \
 poem or verse. For each, copy the teacher's exact words from the transcript that make the \

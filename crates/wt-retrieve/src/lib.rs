@@ -6,6 +6,9 @@
 //! fields, so those can never move a passage (CLAUDE.md rules 3 and 4). Answer assembly joins
 //! sangha details afterwards.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 pub mod config;
 pub mod excerpt;
 pub mod fuse;
@@ -290,6 +293,7 @@ async fn score(
     (scores, true)
 }
 
+/// The candidates from one teacher, for a question that names them.
 fn only(inputs: Vec<SelectInput>, teacher: TeacherId) -> Vec<SelectInput> {
     inputs
         .into_iter()
@@ -297,6 +301,8 @@ fn only(inputs: Vec<SelectInput>, teacher: TeacherId) -> Vec<SelectInput> {
         .collect()
 }
 
+/// The notice above an answer, when one applies (Spec 05): a named teacher with no or too few
+/// passages, nothing found, several teachers named, or fewer teachers than the selection aims for.
 fn notice(
     query: &ParsedQuery,
     named: Option<TeacherId>,
@@ -320,10 +326,12 @@ fn notice(
     }
 }
 
+/// The logistic function, which turns a reranker logit into a score between 0 and 1.
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// A duration in whole milliseconds, for the timings log.
 fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }

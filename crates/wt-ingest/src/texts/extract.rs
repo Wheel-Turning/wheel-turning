@@ -54,6 +54,7 @@ fn page_number(line: &str) -> bool {
             || l.chars().all(|c| "ivxlcdmIVXLCDM".contains(c)) && l.len() <= 5)
 }
 
+/// A block with its text normalized and page-number lines dropped, or none when nothing is left.
 fn tidy_block(text: &str) -> Option<String> {
     let lines: Vec<String> = normalize(text)
         .lines()
@@ -168,11 +169,13 @@ pub fn decode_entities(text: &str) -> String {
     out
 }
 
+/// An element's tag name in lowercase, or none for text and comments.
 fn tag_name(node: &Node<'_>) -> Option<String> {
     node.as_tag()
         .map(|t| t.name().as_utf8_str().to_ascii_lowercase())
 }
 
+/// An element's direct children, none for text.
 fn children(node: &Node<'_>) -> Vec<NodeHandle> {
     node.as_tag()
         .map(|t| t.children().top().iter().copied().collect())
@@ -210,6 +213,7 @@ fn node_text(handle: NodeHandle, parser: &Parser<'_>, out: &mut String) {
     }
 }
 
+/// The elements that each make one block.
 const BLOCKS: [&str; 9] = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre"];
 
 /// Walks the document in order, starting a section at each heading and taking a block from
@@ -301,6 +305,7 @@ fn xml_elements(xml: &str, tag: &str) -> Vec<std::collections::HashMap<String, S
         .collect()
 }
 
+/// One file of the EPUB archive as text.
 fn zip_text(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Result<String, TextError> {
     let mut file = zip
         .by_name(name)

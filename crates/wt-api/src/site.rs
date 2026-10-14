@@ -20,6 +20,7 @@ use wt_retrieve::{RetrievalConfig, Sensitivity, Triage};
 use crate::Site;
 use crate::session::Keys;
 
+/// Any error behind a [`SiteError`].
 type Source = Box<dyn std::error::Error + Send + Sync>;
 
 /// Why the site could not be built.
@@ -30,6 +31,7 @@ pub struct SiteError {
     source: Source,
 }
 
+/// A closure that wraps an error with what was being loaded.
 fn err<E: Into<Source>>(what: &'static str) -> impl FnOnce(E) -> SiteError {
     move |e| SiteError {
         what,

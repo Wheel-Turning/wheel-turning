@@ -285,22 +285,32 @@ pub struct Segmentation {
 /// A window and its rule label, if the rules decided.
 #[derive(Debug, Clone)]
 struct RuleWindow {
+    /// Start, in milliseconds.
     start_ms: i32,
+    /// End, in milliseconds.
     end_ms: i32,
+    /// The rules' label, or none for the labeler to decide.
     label: Option<Label>,
 }
 
 /// The state between the two phases.
 #[derive(Debug, Clone)]
 pub struct Plan {
+    /// The segmentation settings.
     cfg: SegmentSettings,
+    /// The recording's length.
     audio_ms: i32,
     /// Each aligned word with its speaker.
     aligned: Vec<(Word, String)>,
+    /// Words the alignment could not place.
     unaligned: usize,
+    /// The speaker label taken to be the teacher.
     teacher: String,
+    /// Stretches of sitting, start and end in milliseconds.
     sitting: Vec<(i32, i32)>,
+    /// Every window with its rule label.
     windows: Vec<RuleWindow>,
+    /// The windows the rules left for the labeler.
     ambiguous: Vec<Window>,
 }
 
@@ -312,10 +322,12 @@ fn norm(word: &str) -> String {
         .collect()
 }
 
+/// How many milliseconds two spans share.
 fn overlap(a: (i32, i32), b: (i32, i32)) -> i32 {
     (a.1.min(b.1) - a.0.max(b.0)).max(0)
 }
 
+/// The gap in milliseconds between two spans, zero when they overlap.
 fn distance(a: (i32, i32), b: (i32, i32)) -> i32 {
     if overlap(a, b) > 0 {
         0
@@ -388,6 +400,9 @@ fn chant_share(tokens: &[String], phrases: &[Vec<String>]) -> f64 {
     covered.iter().filter(|c| **c).count() as f64 / tokens.len() as f64
 }
 
+/// A window's label from the rules alone (Spec 04): slow, repetitive speech or a high share of
+/// chant phrases is chant; fast, varied speech with few chant phrases is talk; anything between is
+/// left to the labeler. An empty window is other.
 fn rule_label(
     tokens: &[String],
     minutes: f64,
@@ -530,8 +545,11 @@ pub fn plan(
 /// A run of windows with one label, before smoothing.
 #[derive(Debug, Clone)]
 struct Run {
+    /// The run's label.
     label: Label,
+    /// Start, in milliseconds.
     start_ms: i32,
+    /// End, in milliseconds.
     end_ms: i32,
 }
 
@@ -610,6 +628,8 @@ impl Plan {
         runs
     }
 
+    /// The segmentation from the labeled runs: the spans, with each word assigned to the run it
+    /// falls in.
     fn build(self, runs: &[Run]) -> Segmentation {
         let run_of = |ms: i32| {
             runs.iter()

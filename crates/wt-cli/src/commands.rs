@@ -18,6 +18,7 @@ use wt_registry::RegistryFile;
 
 use crate::talk_cmds::Target;
 
+/// Prints a report as pretty JSON on stdout, where every command's output goes; logs go to stderr.
 pub(crate) fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     println!(
         "{}",
@@ -38,6 +39,7 @@ async fn refuse_unconfirmed(pool: &PgPool, scope: &Scope, what: &str) -> anyhow:
     )
 }
 
+/// `wt registry import`: loads the registry file and prints what changed.
 pub async fn registry_import(pool: &PgPool, file: &Path, by: &str) -> anyhow::Result<()> {
     let registry = RegistryFile::load(file)?;
     let report = wt_db::registry::import(pool, &registry, by)
@@ -46,17 +48,37 @@ pub async fn registry_import(pool: &PgPool, file: &Path, by: &str) -> anyhow::Re
     print_json(&report)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// A consent decision, as `wt consent set` records it (Spec 03, the consent gate).
+pub struct ConsentChange<'a> {
+    /// The teacher, by display name or alias.
+    pub teacher: &'a str,
+    /// The new status.
+    pub status: ConsentStatus,
+    /// Pointer to the stored reply, never the reply text.
+    pub evidence: Option<&'a str>,
+    /// Limits the speaker set, in their words.
+    pub scope_note: Option<&'a str>,
+    /// Who recorded it.
+    pub by: &'a str,
+    /// Confirms a decline or withdrawal, which takes the teacher's talks down.
+    pub yes: bool,
+}
+
+/// `wt consent set`: records the decision, and a decline or withdrawal takes the teacher's talks
+/// down, so it needs `yes`.
 pub async fn consent_set(
     pool: &PgPool,
     config: &wt_core::Config,
-    teacher: &str,
-    status: ConsentStatus,
-    evidence: Option<&str>,
-    scope_note: Option<&str>,
-    by: &str,
-    yes: bool,
+    change: ConsentChange<'_>,
 ) -> anyhow::Result<()> {
+    let ConsentChange {
+        teacher,
+        status,
+        evidence,
+        scope_note,
+        by,
+        yes,
+    } = change;
     let takes_down = matches!(status, ConsentStatus::Declined | ConsentStatus::Withdrawn);
     if takes_down && !yes {
         let what = format!("consent {status} for {teacher}");
@@ -74,6 +96,8 @@ pub async fn consent_set(
     print_json(&crate::stages::with_objects(&propagation, deleted))
 }
 
+/// `wt consent list`: one line per teacher with the latest consent status, when it was recorded,
+/// the evidence pointer and the talk counts.
 pub async fn consent_list(pool: &PgPool) -> anyhow::Result<()> {
     let rows = wt_db::consent::list_consent(pool)
         .await
@@ -105,11 +129,14 @@ pub async fn consent_list(pool: &PgPool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What `wt talk set-rights` prints: the talks the new holder cleared.
 #[derive(Serialize)]
 struct Cleared {
     cleared: Vec<TalkId>,
 }
 
+/// `wt talk set-rights`: records the rights holder of one talk or of all a teacher's talks;
+/// `speaker` means the speaker holds them.
 pub async fn set_rights(
     pool: &PgPool,
     target: Target,
@@ -155,6 +182,8 @@ pub async fn assign_speaker(
     print_json(&done)
 }
 
+/// Assigns one talk's speaker in a transaction. Without `sangha`, the sangha is the default of the
+/// talk's source in sources.toml.
 async fn assign_one(
     pool: &PgPool,
     sources: &SourcesFile,
@@ -214,6 +243,8 @@ enum Decision {
 }
 
 impl Decision {
+    /// Reads a sheet's decision cell: empty or `hold` holds the talk, `exclude` excludes it, and
+    /// anything else names the teacher to assign.
     fn of(decision: &str) -> Self {
         let d = decision.trim();
         if d.is_empty() || d.eq_ignore_ascii_case("hold") {
@@ -238,6 +269,7 @@ struct SheetOutcome {
     detail: Option<String>,
 }
 
+/// What `wt talk assign-speaker --sheet` prints: counts per outcome and every row's outcome.
 #[derive(Debug, Default, Serialize)]
 struct SheetReport {
     assigned: usize,
@@ -332,6 +364,7 @@ pub async fn assign_speaker_sheet(
     print_json(&report)
 }
 
+/// Excludes the talk a sheet row names.
 async fn exclude_row(pool: &PgPool, talk: &str, reason: &str, by: &str) -> anyhow::Result<()> {
     let talk: TalkId = talk
         .trim()
@@ -343,6 +376,8 @@ async fn exclude_row(pool: &PgPool, talk: &str, reason: &str, by: &str) -> anyho
     Ok(())
 }
 
+/// `wt talk exclude`: excludes a talk and deletes its objects. Without `yes` it shows what would go
+/// and changes nothing.
 pub async fn exclude(
     pool: &PgPool,
     config: &wt_core::Config,
@@ -362,6 +397,9 @@ pub async fn exclude(
     print_json(&crate::stages::with_objects(&report, deleted))
 }
 
+/// `wt takedown --talk | --teacher`: with `dry_run` counts what would go, without `yes` refuses,
+/// and otherwise removes the scope from every store and logs it (Spec 07). A failure after the
+/// database part is finished by `--finish`.
 pub async fn takedown(
     pool: &PgPool,
     config: &wt_core::Config,
@@ -417,6 +455,8 @@ pub async fn takedown_replay(
     print_json(&report)
 }
 
+/// `wt audit`: runs every check with the deployment's exposure from pipeline.toml, prints the
+/// report and exits 1 when a `fail` check has findings (Spec 07).
 pub async fn audit(
     pool: &PgPool,
     config: &wt_core::Config,

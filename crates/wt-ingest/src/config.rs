@@ -74,6 +74,7 @@ pub enum ConfigError {
     },
 }
 
+/// Reads a configuration file, naming the path in the error.
 fn read(path: &Path) -> Result<String, ConfigError> {
     std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
         path: path.display().to_string(),
@@ -81,6 +82,7 @@ fn read(path: &Path) -> Result<String, ConfigError> {
     })
 }
 
+/// Parses TOML, naming where it came from in the error.
 fn parse<T: for<'de> Deserialize<'de>>(text: &str, origin: &str) -> Result<T, ConfigError> {
     toml::from_str(text).map_err(|e| ConfigError::Parse {
         origin: origin.to_owned(),
@@ -361,6 +363,7 @@ impl Default for RightsSettings {
     }
 }
 
+/// pipeline.toml as `[rights]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct RightsFile {
     #[serde(default)]
@@ -408,6 +411,7 @@ impl Default for LicenseSettings {
     }
 }
 
+/// pipeline.toml as `[licenses]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct LicensesFile {
     #[serde(default)]
@@ -430,6 +434,7 @@ pub struct CitationSettings {
     pub work_alias_stoplist: Vec<String>,
 }
 
+/// pipeline.toml as `[citations]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct CitationsFile {
     #[serde(default)]
@@ -466,6 +471,7 @@ impl Default for TextSettings {
     }
 }
 
+/// pipeline.toml as `[texts]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct TextsFile {
     #[serde(default)]
@@ -495,6 +501,7 @@ impl Default for Deployment {
     }
 }
 
+/// pipeline.toml as `[deployment]` sees it; a missing table means a private deployment.
 #[derive(Debug, Deserialize)]
 struct DeploymentFile {
     #[serde(default)]
@@ -547,6 +554,7 @@ impl Default for UrlPolicy {
     }
 }
 
+/// pipeline.toml as `[url_policy]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct UrlPolicyFile {
     #[serde(default)]
@@ -587,6 +595,7 @@ impl UrlPolicy {
     }
 }
 
+/// pipeline.toml as `[ingest]` sees it; a missing table means the defaults.
 #[derive(Debug, Deserialize)]
 struct PipelineFile {
     #[serde(default)]
@@ -610,6 +619,7 @@ pub struct SeriesEntry {
     pub locator: Option<String>,
 }
 
+/// The series list, one `[[series]]` table per series.
 #[derive(Debug, Deserialize)]
 struct SeriesFile {
     #[serde(rename = "series", default)]

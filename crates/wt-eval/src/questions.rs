@@ -38,9 +38,11 @@ pub fn is_draft(tags: &[String]) -> bool {
     tags.iter().any(|t| t == DRAFT_TAG)
 }
 
+/// A question file: its `[[question]]` tables.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
+    /// The questions.
     #[serde(default)]
     question: Vec<Question>,
 }

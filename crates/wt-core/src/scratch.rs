@@ -227,7 +227,9 @@ pub fn wav_duration_ms(path: &Path) -> Result<i64, ScratchError> {
 /// A talk's scratch directory. Dropping the guard deletes it.
 #[derive(Debug)]
 pub struct ScratchDir {
+    /// The directory.
     path: PathBuf,
+    /// Whether it was already removed, so the drop does not try again.
     removed: bool,
 }
 
@@ -294,6 +296,7 @@ impl Drop for ScratchDir {
     }
 }
 
+/// Removes a directory and everything in it; one already gone is not an error.
 fn remove(path: &Path) -> Result<(), ScratchError> {
     match std::fs::remove_dir_all(path) {
         Ok(()) => {}

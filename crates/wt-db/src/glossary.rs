@@ -7,6 +7,7 @@ use wt_registry::glossary::{GlossaryTerm, TermKind};
 use crate::DbError;
 use crate::correction::log_change;
 
+/// A term kind as stored.
 fn kind_str(kind: TermKind) -> &'static str {
     match kind {
         TermKind::Term => "term",
@@ -15,6 +16,7 @@ fn kind_str(kind: TermKind) -> &'static str {
     }
 }
 
+/// A stored term kind; anything unknown reads as a plain term.
 fn parse_kind(kind: &str) -> TermKind {
     match kind {
         "name" => TermKind::Name,

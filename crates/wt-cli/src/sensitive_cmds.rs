@@ -19,6 +19,7 @@ use wt_retrieve::sensitive::{Exemplars, SensitiveConfig, normalize};
 use crate::admin_cmds::analyst_pool;
 use crate::commands;
 
+/// `wt sensitive`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum SensitiveCommand {
     /// Has the model write synthetic edge-case questions per category, runs every layer on
@@ -63,6 +64,7 @@ pub(crate) enum SensitiveCommand {
     },
 }
 
+/// Parses a red-team category for `--category`.
 fn parse_target(raw: &str) -> Result<Target, String> {
     Target::parse(raw).ok_or_else(|| {
         format!("{raw:?} is not one of acute, distress, medical, out_of_scope or benign")
@@ -99,6 +101,7 @@ pub(crate) struct SheetRow {
 }
 
 impl SheetRow {
+    /// A probe's row on the review sheet, with `unanswered` where the gate gave no verdict.
     fn from_probe(p: &Probe) -> Self {
         const UNANSWERED: &str = "unanswered";
         let v = p.gate.verdict;
@@ -247,6 +250,8 @@ pub(crate) struct Accepted {
     pub left_alone: usize,
 }
 
+/// The categories a row's `category` may name: one of these for a rule or an exemplar, and for
+/// `eval` also `none`.
 const LEVELS: [&str; 4] = ["acute", "distress", "medical", "out_of_scope"];
 
 /// Applies a reviewed sheet. Every row is checked before anything is written; each file is
@@ -347,6 +352,7 @@ pub(crate) fn accept(
     Ok(done)
 }
 
+/// Reads a configuration file as an editable TOML document, so comments and order survive the edit.
 fn read_doc(path: &Path) -> anyhow::Result<toml_edit::DocumentMut> {
     std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?
@@ -354,6 +360,7 @@ fn read_doc(path: &Path) -> anyhow::Result<toml_edit::DocumentMut> {
         .with_context(|| format!("parsing {}", path.display()))
 }
 
+/// Writes an edited TOML document back.
 fn write(path: &Path, doc: &toml_edit::DocumentMut) -> anyhow::Result<()> {
     std::fs::write(path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
 }

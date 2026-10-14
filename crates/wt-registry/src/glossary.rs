@@ -80,9 +80,11 @@ pub struct Suggestion {
 /// The glossary, compiled.
 #[derive(Debug, Clone)]
 pub struct Glossary {
+    /// The glossary's version: a hash of its terms.
     version: String,
     /// One entry per pattern: the canonical form's words.
     replacements: Vec<Vec<String>>,
+    /// Finds every variant at once; none for an empty glossary.
     automaton: Option<AhoCorasick>,
     /// Single-word canonical forms, lowercased, for near-miss detection.
     singles: Vec<(String, String)>,

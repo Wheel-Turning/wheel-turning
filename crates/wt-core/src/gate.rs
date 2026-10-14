@@ -403,7 +403,9 @@ pub struct Talk<S> {
     pub sangha_id: Option<SanghaId>,
     /// The state when the talk was loaded.
     pub state: TalkState,
+    /// The proof the gate passed, present only in [`Consented`].
     granted: Option<Granted>,
+    /// Marks the state without storing it.
     _s: PhantomData<S>,
 }
 

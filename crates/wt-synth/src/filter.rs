@@ -358,6 +358,8 @@ fn is_label(word: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// The stems of a text's content words: no stopwords, excerpt labels or bare numbers, which the
+/// theme's overlap with its passages is measured on.
 fn content_stems(text: &str) -> Vec<String> {
     words(text)
         .into_iter()

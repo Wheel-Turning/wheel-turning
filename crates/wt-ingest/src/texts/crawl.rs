@@ -47,6 +47,7 @@ pub struct Crawl<'a> {
     pub inbox: &'a Path,
 }
 
+/// A URL without its fragment, so one page is crawled once.
 fn clean(mut u: Url) -> Url {
     u.set_fragment(None);
     u
@@ -57,6 +58,7 @@ pub fn pattern(text: &str) -> Result<Regex, TextError> {
     Regex::new(text).map_err(|e| TextError::Manifest(format!("--follow-pattern: {e}")))
 }
 
+/// The evidence or source that covers a URL, if any, matched on its normalized form.
 async fn covered(
     conn: &mut sqlx::PgConnection,
     u: &Url,

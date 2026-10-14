@@ -81,6 +81,8 @@ fn margin_key(line: &Line) -> String {
         .collect()
 }
 
+/// Whether a line is a page number: up to four digits or six roman numerals, perhaps in brackets or
+/// dashes.
 fn is_page_number(text: &str) -> bool {
     let t = text
         .trim()
@@ -90,6 +92,7 @@ fn is_page_number(text: &str) -> bool {
             || (t.len() <= 6 && t.chars().all(|c| "ivxlcdmIVXLCDM".contains(c))))
 }
 
+/// Whether a line sits in the top or bottom [`MARGIN`] of its page.
 fn in_margin(page: &Page, line: &Line) -> bool {
     page.height > 0.0
         && (line.bottom() <= page.height * MARGIN || line.top() >= page.height * (1.0 - MARGIN))
@@ -133,6 +136,7 @@ fn edge_lines(page: &Page, body: f32) -> HashSet<(usize, usize)> {
     out
 }
 
+/// The first 80 characters, for a report of what was left out.
 fn short(text: &str) -> String {
     text.chars().take(80).collect()
 }
@@ -179,6 +183,8 @@ fn running_heads(pages: &[Page], edges: &[HashSet<(usize, usize)>]) -> BTreeSet<
         .collect()
 }
 
+/// A word with its page and its box as fractions of the page, for the proof sheet's crops. `file`
+/// is set by the caller.
 fn placed(page: &Page, w: &super::layout::Word) -> Placed {
     let (pw, ph) = (page.width.max(1.0), page.height.max(1.0));
     Placed {
@@ -228,6 +234,8 @@ fn block_words(page: &Page, lines: &[&Line], line_breaks: bool) -> Vec<Vec<Place
     out
 }
 
+/// Whether a line ending in a hyphen joins the next line's word: a letter before the hyphen and a
+/// lowercase letter after the break.
 fn hyphen_joins(last: &str, next: &str) -> bool {
     let mut rev = last.chars().rev();
     rev.next() == Some('-')

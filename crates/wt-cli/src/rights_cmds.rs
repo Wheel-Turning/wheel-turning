@@ -2,6 +2,7 @@
 //! exclusions (Spec 03; Spec 08, Rights lifecycle). The work is in `rights` and `source`.
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Context;
 use clap::{Args, Subcommand};
@@ -10,6 +11,7 @@ use crate::{Ctx, commands, rights, source};
 
 #[derive(Debug, Subcommand)]
 // `[rights]` in the help text names the pipeline.toml table, not an intra-doc link.
+/// `wt source`'s subcommands.
 #[allow(rustdoc::broken_intra_doc_links)]
 pub(crate) enum SourceCommand {
     /// Lists text editions with a copyright notice the evidence does not cover, and those in
@@ -97,11 +99,13 @@ pub(crate) enum SourceCommand {
     },
 }
 
+/// Parses a rights basis for `--basis`.
 pub(crate) fn parse_basis(value: &str) -> Result<wt_db::rights::Basis, String> {
     wt_db::rights::Basis::parse(value)
         .ok_or_else(|| format!("{value:?} is not one of mandate, license, permission"))
 }
 
+/// `wt rights`' subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum RightsCommand {
     /// Record a drafted permission request. Nothing is sent: a person sends it by hand.
@@ -230,6 +234,23 @@ pub(crate) enum RightsCommand {
         #[arg(long, visible_alias = "actor")]
         by: String,
     },
+    /// Compare the rights state of DATABASE_URL with a second database that also holds real
+    /// data, by keys that survive a copy: removed and withdrawn talks, takedowns, teachers'
+    /// opt-outs and display levels, talks' display levels and rights, active exclusions, source
+    /// switches, talks_basis and open removal requests. Read-only on both. Prints JSON and exits
+    /// 1 when one side could serve something the other has removed (runbook §12).
+    Parity {
+        /// The other database. Prefer the environment variable, which keeps the password out
+        /// of shell history.
+        #[arg(long, env = "WT_OTHER_DATABASE_URL", hide_env_values = true)]
+        other_database_url: String,
+        /// The name for DATABASE_URL in the report.
+        #[arg(long, default_value = "this")]
+        this_name: String,
+        /// The name for the other database in the report.
+        #[arg(long, default_value = "other")]
+        other_name: String,
+    },
     /// List requests not yet sent and requests past their follow-up date.
     Due {
         /// The day to check against, YYYY-MM-DD. Defaults to today (UTC).
@@ -238,6 +259,7 @@ pub(crate) enum RightsCommand {
     },
 }
 
+/// A source or a teacher, exactly one of the two: whom a request went to.
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub(crate) struct SourceOrTeacher {
@@ -249,6 +271,7 @@ pub(crate) struct SourceOrTeacher {
     teacher: Option<String>,
 }
 
+/// `wt exclusion`'s subcommands.
 #[derive(Debug, Subcommand)]
 pub(crate) enum ExclusionCommand {
     /// Every active exclusion.
@@ -348,8 +371,9 @@ pub(crate) async fn source(ctx: &Ctx, command: SourceCommand) -> anyhow::Result<
     Ok(())
 }
 
-/// `wt rights`: the ledger of requests and answers (Spec 08, Rights lifecycle).
-pub(crate) async fn rights(ctx: &Ctx, command: RightsCommand) -> anyhow::Result<()> {
+/// `wt rights`: the ledger of requests and answers (Spec 08, Rights lifecycle), and the parity
+/// check between two databases, which alone can exit nonzero without an error.
+pub(crate) async fn rights(ctx: &Ctx, command: RightsCommand) -> anyhow::Result<ExitCode> {
     match command {
         RightsCommand::Request {
             source,
@@ -390,12 +414,14 @@ pub(crate) async fn rights(ctx: &Ctx, command: RightsCommand) -> anyhow::Result<
             rights::grant(
                 &ctx.pool().await?,
                 &ctx.records,
-                &source,
-                &statement_file,
-                &from,
-                given_on,
-                &scope,
-                &by,
+                rights::GrantArgs {
+                    key: &source,
+                    statement: &statement_file,
+                    from: &from,
+                    given_on,
+                    scope: &scope,
+                    by: &by,
+                },
             )
             .await?;
         }
@@ -461,8 +487,24 @@ pub(crate) async fn rights(ctx: &Ctx, command: RightsCommand) -> anyhow::Result<
             let today = today.unwrap_or_else(|| chrono::Utc::now().date_naive());
             rights::due(&ctx.pool().await?, today).await?;
         }
+        RightsCommand::Parity {
+            other_database_url,
+            this_name,
+            other_name,
+        } => {
+            let other = wt_db::connect(&wt_core::Secret::new(other_database_url))
+                .await
+                .context("connecting to the other database")?;
+            let report = wt_db::parity::run(&ctx.pool().await?, &other, (&this_name, &other_name))
+                .await
+                .context("comparing the two databases")?;
+            commands::print_json(&report)?;
+            if report.failed() {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `wt exclusion`: lists and lifts permanent exclusions (Spec 08).

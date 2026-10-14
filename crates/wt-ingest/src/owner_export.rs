@@ -66,6 +66,7 @@ fn place_questions(blocks: &mut Vec<Block>, questions: &[wt_db::questions::Store
     }
 }
 
+/// A word as the transcript JSON stores it: text, start, end and probability.
 #[derive(Debug, Deserialize)]
 struct StoredWord {
     w: String,
@@ -74,12 +75,14 @@ struct StoredWord {
     p: f32,
 }
 
+/// A span as the transcript JSON stores it: its kind and start.
 #[derive(Debug, Deserialize)]
 struct StoredSpan {
     kind: String,
     s: i32,
 }
 
+/// The parts of a stored transcript the export reads.
 #[derive(Debug, Deserialize)]
 struct StoredDoc {
     words: Vec<StoredWord>,
@@ -91,6 +94,7 @@ struct StoredDoc {
     origin: Option<String>,
 }
 
+/// How the export marks a stretch left out of the teacher's words, or none for the spans it keeps.
 fn gap_label(kind: &str) -> Option<&'static str> {
     match kind {
         "chant" => Some("Chanting"),
@@ -171,6 +175,7 @@ pub async fn talk_blocks(
     Ok((blocks, doc.model))
 }
 
+/// Milliseconds as H:MM:SS.
 fn clock(ms: i32) -> String {
     let s = ms.max(0) / 1000;
     format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)

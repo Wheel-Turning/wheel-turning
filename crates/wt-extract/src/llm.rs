@@ -148,6 +148,8 @@ pub fn api_schema<T: JsonSchema>() -> Value {
     value
 }
 
+/// Rewrites a generated schema, recursively, into what structured outputs accept: see
+/// [`api_schema`].
 fn clean(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -267,7 +269,9 @@ pub trait Ledger: Send + Sync {
 /// The ledger in Postgres.
 #[derive(Debug, Clone)]
 pub struct PgLedger {
+    /// The database holding the spend ledger.
     pool: sqlx::PgPool,
+    /// The cap when none is set in the database.
     default_cap: f64,
 }
 
@@ -278,6 +282,7 @@ impl PgLedger {
     }
 }
 
+/// A spend-ledger failure as a model-call error.
 fn ledger_error(e: impl std::fmt::Display) -> LlmError {
     LlmError::Ledger(e.to_string())
 }
@@ -367,11 +372,17 @@ pub struct ClaudeSettings {
 
 /// The Claude API client.
 pub struct ClaudeClient {
+    /// The HTTP client.
     http: reqwest::Client,
+    /// Endpoint, key, models and retry settings.
     settings: ClaudeSettings,
+    /// Prices per model, for the ledger.
     prices: PriceTable,
+    /// Where spend is recorded and the cap checked.
     ledger: Arc<dyn Ledger>,
+    /// Who hears when the cap is reached.
     alerter: Arc<dyn Alerter>,
+    /// The time, replaceable in tests.
     clock: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 
@@ -403,6 +414,8 @@ impl ClaudeClient {
         self
     }
 
+    /// Posts one Messages API request, retrying a 429 or a server error up to three times with
+    /// exponential backoff from `retry_base`.
     async fn send(&self, body: &Value) -> Result<Value, LlmError> {
         let mut attempt = 0u32;
         loop {
@@ -538,6 +551,7 @@ impl LlmClient for ClaudeClient {
 /// A client that returns scripted replies and keeps the requests, for tests.
 #[derive(Debug, Default)]
 pub struct FakeLlm {
+    /// The replies to give, in order.
     replies: Mutex<Vec<Result<Value, String>>>,
     /// Every request seen, with its data class.
     pub seen: Mutex<Vec<(LlmRequest, DataClass)>>,

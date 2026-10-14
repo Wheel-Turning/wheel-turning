@@ -174,11 +174,14 @@ pub fn mean(values: impl Iterator<Item = f32>) -> Option<f32> {
     (n > 0).then(|| (sum / f64::from(n)) as f32)
 }
 
+/// A page, block or line opening tag, or a word with its text, in `pdftotext -bbox-layout` output.
 static TAG: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r#"<(page|block|line)\b([^>]*)>|<word\b([^>]*)>([^<]*)</word>"#).ok()
 });
+/// One `name="value"` attribute.
 static ATTR: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r#"(\w+)="([^"]*)""#).ok());
 
+/// A numeric attribute, 0 when missing or not a number.
 fn attr(attrs: &str, name: &str) -> f32 {
     ATTR.as_ref()
         .and_then(|re| {

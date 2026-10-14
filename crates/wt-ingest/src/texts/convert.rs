@@ -76,11 +76,13 @@ pub fn sniff(bytes: &[u8], content_type: Option<&str>) -> Kind {
     ))
 }
 
+/// An element's tag name in lowercase, or none for text and comments.
 fn tag_name(node: &Node<'_>) -> Option<String> {
     node.as_tag()
         .map(|t| t.name().as_utf8_str().to_ascii_lowercase())
 }
 
+/// How many words an element holds, which decides the page's main content.
 fn text_of(handle: NodeHandle, parser: &Parser<'_>) -> usize {
     handle
         .get(parser)
@@ -217,13 +219,17 @@ pub fn html_meta(html: &str) -> Meta {
     meta
 }
 
+/// A `.docx` paragraph, or an empty one.
 static PARAGRAPH: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?s)<w:p[ >].*?</w:p>|<w:p/>").ok());
+/// A paragraph's style name, which marks headings.
 static STYLE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"<w:pStyle w:val="([^"]+)""#).ok());
+/// A run's text, a tab or a line break.
 static RUN_TEXT: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?s)<w:t(?:\s[^>]*)?>(.*?)</w:t>|<w:tab/>|<w:br/>").ok());
 
+/// One file of the `.docx` archive as text, or none when it is missing or unreadable.
 fn zip_entry(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
     let mut f = zip.by_name(name).ok()?;
     let mut s = String::new();

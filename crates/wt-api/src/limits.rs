@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// The window a per-hour limit refills over.
 const HOUR: Duration = Duration::from_secs(3600);
 /// Keys idle for this long are dropped, so the map does not grow without bound.
 const FORGET_AFTER: Duration = Duration::from_secs(2 * 3600);
 
+/// A key's token bucket: the tokens left and when they were counted.
 #[derive(Debug, Clone, Copy)]
 struct Bucket {
     tokens: f64,
@@ -37,6 +39,8 @@ impl Limiter {
         self.check_at(key, Instant::now())
     }
 
+    /// [`check`](Self::check) at a given time, so tests need no clock. Refills the key's bucket for
+    /// the time since it was last counted and takes one token, or says how long until one is free.
     fn check_at(&self, key: &str, now: Instant) -> Result<(), Duration> {
         let capacity = f64::from(self.per_hour);
         if self.per_hour == 0 {

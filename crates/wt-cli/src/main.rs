@@ -27,6 +27,7 @@ mod stages;
 mod talk_cmds;
 mod text_cmds;
 
+/// The command line: one command, and where records are stored.
 #[derive(Debug, Parser)]
 #[command(name = "wt", version, about = "Wheel Turning operations")]
 struct Cli {
@@ -37,6 +38,8 @@ struct Cli {
     records_dir: PathBuf,
 }
 
+/// Every `wt` command, one variant per group; each group's subcommands and handler live in its
+/// module.
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Database operations.
@@ -243,7 +246,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             return commands::audit(&ctx.pool().await?, &ctx.config, &config_dir).await;
         }
         Command::Source { command } => rights_cmds::source(&ctx, command).await?,
-        Command::Rights { command } => rights_cmds::rights(&ctx, command).await?,
+        Command::Rights { command } => return rights_cmds::rights(&ctx, command).await,
         Command::Exclusion { command } => rights_cmds::exclusion(&ctx, command).await?,
         Command::Text { command } => text_cmds::text(&ctx, command).await?,
         Command::Intake { inbox, config_dir } => {

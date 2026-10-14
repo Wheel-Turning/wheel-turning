@@ -18,8 +18,12 @@ use wt_db::answer::Served;
 use crate::EvalError;
 use crate::run::{self, RunAnswer};
 
+/// The review page's stylesheet, shared with the Gate A notebook's review page so reviewers see one
+/// layout.
 const CSS: &str = include_str!("../../../scripts/notebooks/review.css");
+/// The review page's script: keeps ratings in the browser and saves them as JSON.
 const JS: &str = include_str!("../assets/review.js");
+/// Styles only this page needs: claims and withdrawn passages.
 const EXTRA_CSS: &str = ".c{border-left:3px solid #999;padding-left:.75rem;margin:1rem 0}\
 .claim{font-style:italic}.withdrawn{color:#666}";
 
@@ -62,6 +66,7 @@ pub async fn export(pool: &PgPool, run: Uuid, lead_in_ms: i64) -> Result<String,
     ))
 }
 
+/// Each passage's text before and after it in its talk, for the reviewer.
 type Context = BTreeMap<PassageId, (Option<String>, Option<String>)>;
 
 /// The passage before and after each passage of these talks, for the reviewer's context.
@@ -82,6 +87,7 @@ async fn neighbors(pool: &PgPool, talks: &BTreeSet<TalkId>) -> Result<Context, E
     Ok(out)
 }
 
+/// Escapes text for HTML, quotes included, since passage text goes into attributes too.
 fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -198,6 +204,8 @@ pub fn render(
     h
 }
 
+/// One passage of an answer on the review page, with its talk, a "Listen at" link `lead_in_ms`
+/// before its start, its neighbours and its rating controls.
 fn passage(h: &mut String, qid: &str, n: usize, p: &Served, context: &Context, lead_in_ms: i64) {
     let pid = esc(&p.id.to_string());
     let when = p

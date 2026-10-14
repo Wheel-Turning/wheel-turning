@@ -78,6 +78,7 @@ pub struct UrlReport {
 }
 
 impl UrlReport {
+    /// A URL's report before anything is known about it.
     fn new(url: &str) -> Self {
         Self {
             url: url.to_owned(),
@@ -93,6 +94,7 @@ impl UrlReport {
     }
 }
 
+/// The file extension a fetched document is stored under.
 fn ext(format: Format) -> &'static str {
     match format {
         Format::Epub => "epub",
@@ -104,10 +106,12 @@ fn ext(format: Format) -> &'static str {
     }
 }
 
+/// A format as the manifest writes it, which is its extension.
 fn format_name(format: Format) -> &'static str {
     ext(format)
 }
 
+/// A TOML basic string on one line, for values written into a manifest.
 fn toml_str(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {

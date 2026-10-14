@@ -11,11 +11,13 @@ use crate::source::IngestError;
 /// Apple's lookup API.
 pub const APPLE_LOOKUP: &str = "https://itunes.apple.com/lookup";
 
+/// The iTunes lookup answer.
 #[derive(Debug, Deserialize)]
 struct Lookup {
     results: Vec<LookupResult>,
 }
 
+/// One podcast in the lookup answer: its feed address and name.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LookupResult {

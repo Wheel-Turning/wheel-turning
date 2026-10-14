@@ -123,9 +123,20 @@ async fn index(
     let texts = plan.texts(&reuse);
     let vectors: Vec<Vec<f32>> = texts.iter().map(|_| vec![0.01; DIM]).collect();
     let mut tx = sqlx::Acquire::begin(&mut *conn).await.unwrap();
-    index::write(&mut tx, fx.talk, &plan, &reuse, &vectors, model, 2, DIM)
-        .await
-        .unwrap();
+    index::write(
+        &mut tx,
+        fx.talk,
+        &plan,
+        &reuse,
+        &index::Embedded {
+            vectors: &vectors,
+            model_id: model,
+            vector_version: 2,
+            dim: DIM,
+        },
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     (plan, reuse, texts.len())
 }
@@ -271,7 +282,19 @@ async fn a_passage_gone_since_matching_fails_the_write() {
         .await
         .unwrap();
     let mut tx = sqlx::Acquire::begin(&mut *conn).await.unwrap();
-    let err = index::write(&mut tx, fx.talk, &plan, &reuse, &[], MODEL, 2, DIM).await;
+    let err = index::write(
+        &mut tx,
+        fx.talk,
+        &plan,
+        &reuse,
+        &index::Embedded {
+            vectors: &[],
+            model_id: MODEL,
+            vector_version: 2,
+            dim: DIM,
+        },
+    )
+    .await;
     assert!(matches!(err, Err(index::IndexError::Changed(_))), "{err:?}");
 }
 

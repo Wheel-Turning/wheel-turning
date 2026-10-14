@@ -206,11 +206,14 @@ struct PdfPages {
     low_ranges: Vec<pdf::LowRange>,
 }
 
+/// A vector as pgvector's text literal, `[0.1,0.2,...]`.
 fn vector_literal(v: &[f32]) -> String {
     let parts: Vec<String> = v.iter().map(f32::to_string).collect();
     format!("[{}]", parts.join(","))
 }
 
+/// A title as an object-key segment: lowercase letters and digits, every other run of
+/// characters one `-`.
 fn slug(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {

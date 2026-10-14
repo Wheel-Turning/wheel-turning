@@ -6,6 +6,9 @@
 //! its stage timings. The reviewer's file comes from [`review::export`], their ratings go back in
 //! through [`ratings::import`], and [`report::build`] prints the PRD's pass and fail verdicts.
 
+// Private items carry docs too, as the public ones do through `missing_docs`.
+#![warn(clippy::missing_docs_in_private_items)]
+
 pub mod compare;
 pub mod gate;
 pub mod questions;

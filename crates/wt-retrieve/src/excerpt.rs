@@ -24,10 +24,12 @@ pub enum RerankMiss {
     },
 }
 
+/// The logistic function, which turns a reranker logit into a score between 0 and 1.
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// Reranker scores for the texts, refusing an answer with the wrong number of scores.
 async fn scores(
     reranker: &dyn Reranker,
     query: &str,

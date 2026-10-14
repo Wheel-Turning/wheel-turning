@@ -257,10 +257,12 @@ async fn security_headers(request: Request, next: Next) -> Response {
     response
 }
 
+/// `GET /robots.txt`: disallows everything (Spec 06).
 async fn robots() -> &'static str {
     "User-agent: *\nDisallow: /\n"
 }
 
+/// `GET /static/app.css`, compiled into the binary so the server needs no static directory.
 async fn stylesheet() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
@@ -268,6 +270,8 @@ async fn stylesheet() -> impl IntoResponse {
     )
 }
 
+/// `GET /static/dana.js`: the giving panel's split and amount script, which the panel works
+/// without.
 async fn dana_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -275,6 +279,8 @@ async fn dana_script() -> impl IntoResponse {
     )
 }
 
+/// `GET /static/references.js`: opens the closed References list when a footnote link points
+/// into it. Without the script the reader opens the list.
 async fn references_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -282,6 +288,8 @@ async fn references_script() -> impl IntoResponse {
     )
 }
 
+/// `GET /static/progress.js`: streams the stages while a question runs (Spec 06, Live progress);
+/// without it the form posts and redirects as usual.
 async fn progress_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -289,6 +297,8 @@ async fn progress_script() -> impl IntoResponse {
     )
 }
 
+/// `GET /static/answer.js`: the answer page's small additions (Spec 06, Answer page structure).
+/// The page works without it.
 async fn answer_script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
@@ -298,6 +308,8 @@ async fn answer_script() -> impl IntoResponse {
 
 // ---- pages ----------------------------------------------------------------------------------
 
+/// The generic error page: a title and one sentence, with the bare chrome so it shows no navigation
+/// to someone without a session.
 #[derive(Template)]
 #[template(path = "error.html")]
 struct ErrorPage<'a> {
@@ -306,6 +318,8 @@ struct ErrorPage<'a> {
     message: &'a str,
 }
 
+/// Renders a template with `status`. A template that fails to render is logged and answered with a
+/// plain 500, never with partial HTML.
 pub(crate) fn page(status: StatusCode, t: &impl Template) -> Response {
     match t.render() {
         Ok(html) => (status, Html(html)).into_response(),
@@ -320,6 +334,7 @@ pub(crate) fn page(status: StatusCode, t: &impl Template) -> Response {
     }
 }
 
+/// An error page with `status`, a title and a message for the reader.
 fn error_page(status: StatusCode, title: &str, message: &str) -> Response {
     page(
         status,
@@ -391,6 +406,8 @@ pub(crate) fn not_found_page() -> Response {
     )
 }
 
+/// The fallback route: the same generic 404 that a request without a session gets, so the two
+/// cannot be told apart.
 async fn not_found() -> Response {
     not_found_page()
 }
@@ -441,15 +458,19 @@ impl FromRequestParts<AppState> for Session {
 }
 
 impl Session {
+    /// The CSRF token for this session's forms, derived from the cookie so it needs no storage.
     pub(crate) fn csrf(&self, keys: &Keys) -> String {
         keys.csrf(&self.cookie)
     }
 
+    /// Whether `token` is this session's CSRF token.
     pub(crate) fn csrf_ok(&self, keys: &Keys, token: &str) -> bool {
         keys.check_csrf(&self.cookie, token)
     }
 }
 
+/// The 403 for a form whose CSRF token is missing or stale, which asks the reader to reload and try
+/// again.
 pub(crate) fn csrf_refused() -> Response {
     error_page(
         StatusCode::FORBIDDEN,
@@ -490,12 +511,15 @@ async fn join(State(state): State<AppState>, Path(token): Path<String>) -> Respo
 
 // ---- home and ask ---------------------------------------------------------------------------
 
+/// The example questions under the home page's question box.
 const EXAMPLES: [&str; 3] = [
     "I keep judging myself during zazen.",
     "How do I stay with grief without being swallowed by it?",
     "What is the difference between practice and trying to improve myself?",
 ];
 
+/// The home page: the question box, its examples and the privacy switch, with the question and an
+/// error when the last one was refused.
 #[derive(Template)]
 #[template(path = "home.html")]
 struct HomePage {
@@ -515,6 +539,7 @@ struct Saved {
     deleted: Option<u8>,
 }
 
+/// `GET /`: the home page, with "saved" when the privacy choice was just stored.
 async fn home(
     State(state): State<AppState>,
     s: Session,
@@ -540,6 +565,7 @@ async fn home(
     )
 }
 
+/// The about page: who runs the tool, the privacy switch, and the outcome of a save or a deletion.
 #[derive(Template)]
 #[template(path = "about.html")]
 struct AboutPage<'a> {
@@ -551,6 +577,8 @@ struct AboutPage<'a> {
     deleted: bool,
 }
 
+/// `GET /about`: the about page, with the privacy choice's state and the outcome of the last save
+/// or delete.
 async fn about(
     State(state): State<AppState>,
     s: Session,
@@ -576,6 +604,7 @@ async fn about(
     )
 }
 
+/// The question form posted to `/ask`.
 #[derive(Debug, Deserialize)]
 struct AskForm {
     q: String,
@@ -600,6 +629,10 @@ async fn ask(
     progress::stream(move |sink| async move { ask_with(&state, &s, &headers, form, &sink).await })
 }
 
+/// The body of `POST /ask`, shared by the redirecting and the streaming forms. Checks the CSRF
+/// token and the rate limit (which never holds back an acute question), then runs the sensitivity
+/// layers alongside the triage gate before any search (Spec 05), and answers with the permalink or
+/// the notice page the gate chose. `sink` reports the stages to the progress script.
 async fn ask_with(
     state: &AppState,
     s: &Session,
@@ -703,6 +736,8 @@ async fn ask_with(
     }
 }
 
+/// The response once a question ran: a redirect to the answer's permalink, or a 500 when it was
+/// stopped or failed.
 fn answered(result: Result<ask::Gated, ask::AskError>) -> Response {
     match result {
         Ok(ask::Gated::Answered(asked)) => {
@@ -715,6 +750,7 @@ fn answered(result: Result<ask::Gated, ask::AskError>) -> Response {
     }
 }
 
+/// A form whose only field is its CSRF token.
 #[derive(Debug, Deserialize)]
 struct CsrfForm {
     csrf: String,
@@ -736,6 +772,8 @@ async fn ask_curated(
     })
 }
 
+/// The body of `POST /ask/curated`: the CSRF and rate-limit checks, then the fixed curated query
+/// framed as distress, with no gate run.
 async fn ask_curated_with(
     state: &AppState,
     s: &Session,
@@ -762,6 +800,7 @@ async fn ask_curated_with(
     answered(ask::answer_framed(&state.pool, site, s.tester, text, framing, None, sink).await)
 }
 
+/// The acute notice (Spec 05): the support resources and the button for the curated teachings.
 #[derive(Template)]
 #[template(path = "sensitive_acute.html")]
 struct AcutePage {
@@ -793,6 +832,8 @@ fn acute_page(state: &AppState, s: &Session) -> Response {
     ))
 }
 
+/// Marks a response `Cache-Control: no-store`, for pages that must not be kept, such as a notice
+/// shown instead of an answer.
 fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
@@ -800,6 +841,7 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
+/// The notice for a question outside what the tool answers (Spec 05, out of scope).
 #[derive(Template)]
 #[template(path = "sensitive_out_of_scope.html")]
 struct OutOfScopePage {
@@ -817,6 +859,8 @@ fn out_of_scope_page(state: &AppState, s: &Session) -> Response {
     ))
 }
 
+/// The page for a question the talks do not address, with "Search the talks anyway", which posts
+/// the question again with `anyway` set.
 #[derive(Template)]
 #[template(path = "sensitive_unrelated.html")]
 struct UnrelatedPage {
@@ -840,6 +884,8 @@ fn unrelated_page(state: &AppState, s: &Session, question: String) -> Response {
 
 // ---- answer ---------------------------------------------------------------------------------
 
+/// The answer page (Spec 06): the question, its excerpts grouped by teacher, the References, the
+/// feedback controls and, when allowed, the summary line and the giving panel.
 #[derive(Template)]
 #[template(path = "answer.html")]
 struct AnswerPage {
@@ -893,6 +939,8 @@ struct DanaFragment {
     d: view::DanaView,
 }
 
+/// The answer page's query string: the thanks flag after feedback, and which feedback control a
+/// reload without the script returns to.
 #[derive(Debug, Deserialize)]
 struct AnswerQuery {
     thanks: Option<u8>,
@@ -902,6 +950,8 @@ struct AnswerQuery {
     fbs: Option<String>,
 }
 
+/// Parses a path segment, `None` when it does not parse, so a malformed id gets the same 404 as a
+/// missing one.
 pub(crate) fn parse<T: std::str::FromStr>(raw: &str) -> Option<T> {
     raw.parse().ok()
 }
@@ -1049,6 +1099,8 @@ async fn answer_page(
     )
 }
 
+/// The giving panel's form, posted to `/a/{answer}/dana`: the total and the site's share as typed,
+/// and the flags that mark the panel's first use.
 #[derive(Debug, Deserialize)]
 struct DanaForm {
     csrf: String,
@@ -1211,6 +1263,8 @@ async fn dana(
     )
 }
 
+/// `GET /give/{answer}/{target}`'s query: the amount the panel suggested, in cents, carried to the
+/// sangha's page.
 #[derive(Debug, Deserialize)]
 struct GiveQuery {
     amount_cents: Option<String>,
@@ -1263,6 +1317,8 @@ async fn give(
 
 // ---- talks ----------------------------------------------------------------------------------
 
+/// The talk page: title, teacher, sangha, date line, source link and credit, and the transcript
+/// link at display level `full`.
 #[derive(Template)]
 #[template(path = "talk.html")]
 struct TalkPage {
@@ -1276,6 +1332,8 @@ struct TalkPage {
     transcript_href: Option<String>,
 }
 
+/// `GET /talk/{talk}`: a talk's card, read through the serving views. An unknown or unservable talk
+/// gets the generic 404.
 async fn talk_page(
     State(state): State<AppState>,
     s: Session,
@@ -1309,6 +1367,8 @@ async fn talk_page(
     )
 }
 
+/// One passage on the transcript page, with its start time, whether a gap comes before it, and the
+/// student's question it answers.
 struct Row {
     ordinal: i32,
     at: String,
@@ -1320,6 +1380,7 @@ struct Row {
     asked: bool,
 }
 
+/// The transcript page (display level `full` only): the talk's details and its passages in order.
 #[derive(Template)]
 #[template(path = "transcript.html")]
 struct TranscriptPage {

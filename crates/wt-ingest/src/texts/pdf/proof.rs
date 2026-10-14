@@ -49,6 +49,7 @@ pub struct Candidate {
 struct Rng(u64);
 
 impl Rng {
+    /// The next splitmix64 value.
     fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
@@ -57,6 +58,7 @@ impl Rng {
         z ^ (z >> 31)
     }
 
+    /// A draw below `n`, or 0 when `n` is 0.
     fn below(&mut self, n: usize) -> usize {
         #[allow(clippy::cast_possible_truncation)]
         let i = (self.next() % n.max(1) as u64) as usize;
@@ -105,6 +107,9 @@ pub fn sample_with_ranges(
     out
 }
 
+/// The proof sample for an edition (Spec 08), drawn again the same from `seed`: for
+/// an OCR edition one random unit from each tenth of the pages, topped up at random, plus units
+/// from the weak ranges; for a native one random units only.
 fn draw(units: &[Candidate], ocr: bool, seed: u64) -> Vec<(Uuid, Group)> {
     let mut rng = Rng(seed);
     let mut sorted: Vec<&Candidate> = units.iter().collect();
@@ -308,6 +313,7 @@ pub struct SheetUnit {
     pub crop_png_base64: Option<String>,
 }
 
+/// Escapes text for the proof sheet's HTML, quotes included.
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

@@ -391,6 +391,7 @@ pub async fn is_current(
     .await?)
 }
 
+/// A vector as pgvector's text literal, `[0.1,0.2,...]`.
 fn vector_literal(v: &[f32]) -> String {
     let mut s = String::with_capacity(v.len() * 10 + 2);
     s.push('[');
@@ -404,23 +405,38 @@ fn vector_literal(v: &[f32]) -> String {
     s
 }
 
+/// The new vectors for [`write()`] and the model that made them.
+#[derive(Debug, Clone, Copy)]
+pub struct Embedded<'a> {
+    /// The vectors for the texts [`Plan::texts`] lists, in that order.
+    pub vectors: &'a [Vec<f32>],
+    /// The embedding model's id, stored with each passage.
+    pub model_id: &'a str,
+    /// `wt_ml::VECTOR_VERSION` when they were made.
+    pub vector_version: i32,
+    /// Their dimension. A vector of any other length is refused.
+    pub dim: usize,
+}
+
 /// Brings the talk's passages, citations and student questions up to date and records the
 /// content hash. A passage `reuse` matched keeps its id and is updated in place, with a new
 /// vector only when its stored one is stale; a new chunk is inserted; a stored passage that
 /// nothing matched is deleted, which cascades to its citations and answers' rows. `vectors` are
 /// those [`Plan::texts`] lists for the same `reuse`. Run it inside the transaction that moves
 /// the talk to `ready`; the caller commits.
-#[allow(clippy::too_many_arguments)]
 pub async fn write(
     conn: &mut PgConnection,
     talk: Uuid,
     plan: &Plan,
     reuse: &Reuse,
-    vectors: &[Vec<f32>],
-    model_id: &str,
-    vector_version: i32,
-    dim: usize,
+    embedded: &Embedded<'_>,
 ) -> Result<(), IndexError> {
+    let Embedded {
+        vectors,
+        model_id,
+        vector_version,
+        dim,
+    } = *embedded;
     if reuse.ids.len() != plan.passages.len() || reuse.keep_vector.len() != plan.passages.len() {
         return Err(IndexError::Embedding(format!(
             "a match for {} passages, not {}",

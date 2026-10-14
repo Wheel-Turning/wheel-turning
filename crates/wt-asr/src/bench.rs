@@ -42,6 +42,7 @@ pub struct Setup {
     pub path_prepend: Vec<PathBuf>,
 }
 
+/// `use_gpu`'s default: on.
 fn yes() -> bool {
     true
 }
@@ -263,6 +264,8 @@ impl Rate {
         (self.total > 0).then(|| self.errors as f64 * 100.0 / self.total as f64)
     }
 
+    /// An error rate as a table cell: the percentage with its counts, or `n/a` with nothing to
+    /// count.
     fn cell(self) -> String {
         match self.percent() {
             Some(p) => format!("{p:.2}% ({}/{})", self.errors, self.total),
@@ -546,6 +549,7 @@ pub fn decide(results: &[RunResult], models: &[String], max_wer_percent: f64) ->
     }
 }
 
+/// Bytes as gigabytes, or `n/a` when not measured.
 fn gib(bytes: Option<u64>) -> String {
     bytes.map_or("n/a".into(), |b| format!("{:.1} GB", b as f64 / 1e9))
 }
@@ -618,8 +622,20 @@ pub fn render(results: &[RunResult], decision: &Decision, skipped: &[(String, St
     out
 }
 
-/// Runs every setup with every model on `wav` and scores each against `reference`.
-#[allow(clippy::too_many_arguments)]
+/// What a benchmark run is scored against: the clip's known text, and the glossary terms and
+/// teacher names whose error rates are counted apart (Spec 04).
+#[derive(Debug, Clone, Copy)]
+pub struct Scoring<'a> {
+    /// The known text.
+    pub reference: &'a str,
+    /// Glossary terms.
+    pub terms: &'a [String],
+    /// Teacher names and aliases from the registry.
+    pub names: &'a [String],
+}
+
+/// Runs every setup with every model on `wav` and, given `scoring`, scores each run. Without a
+/// known text the runs are timed only.
 pub async fn run(
     engine: &dyn BenchEngine,
     setups: &[&Setup],
@@ -627,9 +643,7 @@ pub async fn run(
     wav: &Path,
     scratch: &ScratchDir,
     hints: &AsrHints,
-    reference: Option<&str>,
-    terms: &[String],
-    names: &[String],
+    scoring: Option<Scoring<'_>>,
 ) -> Result<Vec<RunResult>, AsrError> {
     let audio_ms = wav_duration_ms(wav)?;
     let mut out = Vec::new();
@@ -659,7 +673,7 @@ pub async fn run(
                         wall: Some(run.wall),
                         peak_bytes: run.peak_bytes,
                         words: run.words.len(),
-                        rates: reference.map(|r| score(r, &text, terms, names)),
+                        rates: scoring.map(|s| score(s.reference, &text, s.terms, s.names)),
                         error: None,
                     }
                 }

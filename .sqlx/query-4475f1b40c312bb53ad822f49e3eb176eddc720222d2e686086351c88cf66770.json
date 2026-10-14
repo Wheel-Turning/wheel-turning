@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select l.scope || ' ' || coalesce(\n                    case l.scope\n                      when 'teacher' then te.display_name\n                      when 'talk' then sv.platform::text || ':' || sv.external_id\n                      when 'edition' then w.title || ' / ' || e.edition_label\n                      when 'source' then l.source_key\n                    end,\n                    l.teacher_id::text, l.talk_id::text, l.edition_id::text, '?') as \"scope!\"\n           from takedown_log l\n           left join teacher te on te.id = l.teacher_id\n           left join talk t on t.id = l.talk_id\n           left join source_video sv on sv.id = t.source_video_id\n           left join text_edition e on e.id = l.edition_id\n           left join work w on w.id = e.work_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4475f1b40c312bb53ad822f49e3eb176eddc720222d2e686086351c88cf66770"
+}

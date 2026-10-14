@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select sv.platform::text || ':' || sv.external_id as \"key!\",\n                  t.state::text as \"state!\", t.display_level, t.rights_basis::text as rights_basis,\n                  t.consent_status::text as \"consent_status!\",\n                  (t.rights_holder is not null and lower(t.rights_holder) <> 'unknown')\n                    as \"holder_known!\",\n                  coalesce(le.allowed, false) as \"license_allowed!\"\n           from talk t\n           join source_video sv on sv.id = t.source_video_id\n           left join license_evidence le on le.id = t.license_evidence_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "state!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_level",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "talk",
+            "name": "display_level"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "rights_basis",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "consent_status!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "holder_known!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "license_allowed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6760d101d56d703872a56d5bca2f1fbc4ad11f6036164d9e2eb1645b8b6d7a2f"
+}

@@ -36,6 +36,7 @@ const DONATION_WORDS: [&str; 12] = [
     "tithe.ly",
 ];
 
+/// A web address in a talk's description; one naming a donation word is listed as a giving link.
 static LINK: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"https?://[^\s<>"'()\[\]]+"#).ok());
 
@@ -152,10 +153,12 @@ pub struct IngestReport {
     pub donation_links: Vec<DonationLink>,
 }
 
+/// Whether a talk still counts in the report: anything not excluded or withdrawn.
 fn live(state: &str) -> bool {
     !matches!(state, "excluded" | "withdrawn")
 }
 
+/// A talk's line in the report.
 fn item(r: &ReportRow) -> Item {
     Item {
         source: format!("{} {}", r.platform, r.external_id),
@@ -179,10 +182,12 @@ fn item(r: &ReportRow) -> Item {
     }
 }
 
+/// Months since year 0, so consecutive months differ by one and gaps can be counted.
 fn month_index(at: DateTime<Utc>) -> i32 {
     at.year() * 12 + i32::try_from(at.month0()).unwrap_or(0)
 }
 
+/// A month index as `YYYY-MM`.
 fn month_label(index: i32) -> String {
     format!(
         "{:04}-{:02}",
@@ -380,6 +385,7 @@ fn link(url: &str, text: &str) -> String {
     }
 }
 
+/// The report page's inline stylesheet, light and dark, so the page is one file.
 const STYLE: &str = "body{font:15px/1.45 system-ui,sans-serif;margin:24px auto;max-width:1100px;\
 padding:0 16px;color:#1d1d1f;background:#fff}h1{font-size:24px}h2{font-size:19px;margin-top:32px;\
 border-bottom:1px solid #ddd;padding-bottom:4px}table{border-collapse:collapse;width:100%;\
@@ -389,6 +395,7 @@ th{font-weight:600;background:#f6f6f6}.kept{font-weight:600}.muted{color:#666}.g
 @media (prefers-color-scheme:dark){body{background:#151515;color:#e6e6e6}th{background:#222}\
 th,td{border-color:#333}.muted{color:#aaa}.note{background:#2b2615}a{color:#8ab4f8}}";
 
+/// A table of talks, or `empty` when there are none.
 fn items_table(out: &mut String, items: &[Item], empty: &str) {
     if items.is_empty() {
         let _ = writeln!(out, r#"<p class="muted">{}</p>"#, escape(empty));
@@ -401,6 +408,7 @@ fn items_table(out: &mut String, items: &[Item], empty: &str) {
     out.push_str("</table>\n");
 }
 
+/// One talk's row; `class` is `kept` for the record a duplicate cluster keeps.
 fn item_row(out: &mut String, i: &Item, class: &str) {
     let _ = writeln!(
         out,

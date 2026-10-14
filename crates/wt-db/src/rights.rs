@@ -238,6 +238,7 @@ pub fn host_of(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
+/// Whether a host is `pattern` or one of its subdomains. `host` is already lowercase.
 fn host_matches(host: &str, pattern: &str) -> bool {
     let pattern = pattern.to_ascii_lowercase();
     host == pattern || host.ends_with(&format!(".{pattern}"))
@@ -288,6 +289,8 @@ pub async fn active_exclusions(conn: &mut PgConnection) -> Result<Vec<Exclusion>
         .collect())
 }
 
+/// Appends one row to the rights ledger (Spec 08, Rights lifecycle), timed with `clock_timestamp()`
+/// so events in one transaction keep their order.
 async fn event(
     conn: &mut PgConnection,
     key: Option<&str>,
@@ -313,6 +316,8 @@ async fn event(
     Ok(())
 }
 
+/// A source's URL prefixes, locking its policy row for the rest of the transaction; also the check
+/// that the source exists.
 async fn source_prefixes(conn: &mut PgConnection, key: &str) -> Result<Vec<String>, RightsError> {
     sqlx::query_scalar!(
         "select url_prefixes from source_policy where key = $1 for update",
@@ -461,6 +466,8 @@ pub async fn set_enabled(
     Ok(changed)
 }
 
+/// Switches a source on or off inside a transaction and logs the change. Returns false when it was
+/// already so, and logs nothing then.
 async fn set_enabled_in(
     conn: &mut PgConnection,
     key: &str,
@@ -501,6 +508,8 @@ pub struct Target {
     pub label: String,
 }
 
+/// Resolves a source key or a teacher name to what ledger rows point at, failing when neither
+/// exists.
 async fn target(conn: &mut PgConnection, subject: Subject<'_>) -> Result<Target, RightsError> {
     Ok(match subject {
         Subject::Source(key) => {
@@ -617,6 +626,8 @@ async fn answer_request(
     answer_request_for(conn, Some(key), None, status, Some(&reply.key)).await
 }
 
+/// Records the answer to the latest open request for a source or a teacher. Returns false when
+/// there is no open request.
 async fn answer_request_for(
     conn: &mut PgConnection,
     key: Option<&str>,
@@ -643,7 +654,6 @@ async fn answer_request_for(
 
 /// `wt rights grant`: stores the reply as approved permission evidence for the source's
 /// prefixes and switches the source's basis to `permission`. Returns the new evidence id.
-#[allow(clippy::too_many_arguments)]
 pub async fn grant(
     pool: &PgPool,
     key: &str,
@@ -820,6 +830,8 @@ pub async fn no_response(
     Ok(())
 }
 
+/// Adds an exclusion inside a transaction, logging it in the source's ledger when it belongs to a
+/// source.
 async fn add_exclusion_in(
     conn: &mut PgConnection,
     scope: &str,
@@ -1022,6 +1034,8 @@ pub async fn clear_waiting(
     clear_these(conn, waiting, actor, &format!("mandate of {key}")).await
 }
 
+/// Clears each waiting talk that now passes the gate, logging each change. Returns the talks
+/// cleared.
 async fn clear_these(
     conn: &mut PgConnection,
     waiting: Vec<Uuid>,
@@ -1125,6 +1139,7 @@ pub async fn set_talks_basis(
     })
 }
 
+/// A talk error as a database error, for the paths that only expect the database to fail.
 fn talk_db_error(e: crate::talk::TalkError) -> DbError {
     match e {
         crate::talk::TalkError::Db(db) => db,
