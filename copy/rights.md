@@ -16,7 +16,7 @@ Our judgement that terms allow something is our own decision, not the rights hol
 
 **Form.** Fields: Name (optional). Email (optional, but we can only reply if you give a way to reach you). What should be removed? (a web address, a title, or the code shown next to an excerpt). Message (optional). Button: Send request. Note under the button: The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.
 
-**Student voices.** Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. If you recognize your own question and want it removed, use the form below.
+**Student voices.** Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. The edit is made by a language model provider, Anthropic, under its standard commercial terms: it does not train on what it receives and deletes it within 30 days. If you recognize your own question and want it removed, use the form below.
 
 **Sources and their status.** One line per source, in plain words, generated from the ledger. The four statuses are:
 

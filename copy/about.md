@@ -8,10 +8,12 @@
 
 **Giving.** Dana is the Sanskrit and Pali word for generosity. Every excerpt from a talk links to the giving page of the sangha that offered it. After an answer, you can choose to share a gift equally among the sanghas it drew on. This site handles no money and takes no share. The links open each sangha's own page. A separate, optional line is for the site's own running costs, and giving is never needed to use the site.
 
-**Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time. Student questions and student voices from recorded classes are never stored.
+**Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time.
 
-- To write the summary and to check for sensitive topics, the text of your question may be sent to a language model provider. \[Confirm before launch that the provider's zero-retention terms are in place, and say so here in one sentence.\]
+- Your question is sent to a language model provider, Anthropic, to check it for sensitive topics and, when the answer opens with a summary, to write the summary. Anthropic's standard commercial terms apply: it does not train on what it receives and deletes it within 30 days.
 - If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary line and the giving panel, and does not save the text of the most serious questions.
+
+Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student". To make that edit, the student's question is sent to the same provider under the same terms, and only the edited text is kept.
 
 **Who runs this.** Wheel Turning is run by \[name\], an individual, as a free project with no advertising and no fees. The plan is to form a nonprofit. The site uses a single cookie to keep you signed in for 30 days.
 
