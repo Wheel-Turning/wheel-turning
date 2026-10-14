@@ -328,12 +328,14 @@ pub(crate) async fn consent(ctx: &Ctx, command: ConsentCommand) -> anyhow::Resul
             commands::consent_set(
                 &ctx.pool().await?,
                 &ctx.config,
-                &teacher,
-                status,
-                evidence.as_deref(),
-                scope_note.as_deref(),
-                &by,
-                yes,
+                commands::ConsentChange {
+                    teacher: &teacher,
+                    status,
+                    evidence: evidence.as_deref(),
+                    scope_note: scope_note.as_deref(),
+                    by: &by,
+                    yes,
+                },
             )
             .await?;
         }

@@ -191,7 +191,6 @@ fn term_kind(value: Option<&String>) -> TermKind {
 
 /// Runs a reference import. `link_teachers` links teachers whose display names match a lineage
 /// person's exactly.
-#[allow(clippy::too_many_arguments)]
 pub async fn import(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,

@@ -127,9 +127,11 @@ async fn the_benchmark_prints_three_error_rates_for_both_models_and_keeps_the_vo
             glossary_prompt: String::new(),
             language: "en".into(),
         },
-        Some(REFERENCE),
-        &["Dogen".into(), "Genjokoan".into()],
-        &["Ada Fixture".into(), "Ada".into()],
+        Some(bench::Scoring {
+            reference: REFERENCE,
+            terms: &["Dogen".into(), "Genjokoan".into()],
+            names: &["Ada Fixture".into(), "Ada".into()],
+        }),
     )
     .await
     .unwrap();
