@@ -113,7 +113,7 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 
 ### The beta deployment
 
-Owner's decision of October 13, 2026: invited testers use this stack, not the PC alpha, so they can test asynchronously. The web task loads the embedder and reranker into a task volume through a `models` container that copies them from the models bucket before `wt-api` starts, and the image carries ONNX Runtime and `config/`. Sizes are back to the table's: `db.t4g.medium` and a 2 vCPU / 8 GB task, about $170 a month in all. The database was loaded from the PC's working database on that day. The runbook, procedure 11, has the details.
+Owner's decision of October 13, 2026: invited testers use this stack, not the PC alpha, so they can test asynchronously. The web task loads the embedder and reranker into a task volume through a `models` container that copies them from the models bucket before `wt-api` starts, and the image carries ONNX Runtime and `config/`. Sizes are back to the table's: `db.t4g.medium` and a 2 vCPU / 8 GB task, about $170 a month in all. The database was loaded from the PC's working database on that day. The runbook, procedure 12, has the details.
 
 ## Secrets, IAM and network rules
 
