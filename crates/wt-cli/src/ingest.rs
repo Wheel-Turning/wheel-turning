@@ -229,6 +229,7 @@ pub async fn worker(
     kinds: &[JobKind],
     concurrency: usize,
     drain: bool,
+    only_sources: &[String],
 ) -> anyhow::Result<()> {
     let cfg = ClassifyConfig::load(
         &config_dir.join("pipeline.toml"),
@@ -256,12 +257,13 @@ pub async fn worker(
 
     let mut tasks = tokio::task::JoinSet::new();
     for n in 0..concurrency.max(1) {
-        let (pool, cfg, sources, kinds, stages) = (
+        let (pool, cfg, sources, kinds, stages, only_sources) = (
             pool.clone(),
             cfg.clone(),
             sources.clone(),
             kinds.to_vec(),
             stages.clone(),
+            only_sources.to_vec(),
         );
         let name = format!("{host}-{}-{n}", std::process::id());
         tasks.spawn(async move {
@@ -271,6 +273,7 @@ pub async fn worker(
                 &sources,
                 stages.as_deref(),
                 &kinds,
+                &only_sources,
                 &name,
                 lock_timeout,
                 drain,
@@ -302,6 +305,7 @@ async fn run_worker(
     sources: &SourcesFile,
     stages: Option<&crate::stages::Stages>,
     kinds: &[JobKind],
+    only_sources: &[String],
     name: &str,
     lock_timeout: Duration,
     drain: bool,
@@ -320,7 +324,7 @@ async fn run_worker(
             }
             last_reap = Some(tokio::time::Instant::now());
         }
-        let Some(claimed) = job::claim(&mut conn, kinds, name).await? else {
+        let Some(claimed) = job::claim_from(&mut conn, kinds, only_sources, name).await? else {
             if let Some(stages) = stages {
                 stages.idle(&mut conn).await?;
             }

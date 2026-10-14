@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "with next as (\n             select id from job\n             where state = 'queued' and run_at <= now() and kind = any($1)\n             order by run_at\n             for update skip locked\n             limit 1)\n           update job set state = 'running', locked_by = $2, locked_at = now(),\n                          attempts = attempts + 1\n           from next where job.id = next.id\n           returning job.id, job.kind, job.talk_id, job.payload, job.attempts, job.max_attempts",
+  "query": "with next as (\n             select id from job\n             where state = 'queued' and run_at <= now() and kind = any($1)\n               and (cardinality($3::text[]) = 0\n                    or exists (select 1 from talk t\n                               where t.id = job.talk_id and t.source_key = any($3)))\n             order by run_at\n             for update skip locked\n             limit 1)\n           update job set state = 'running', locked_by = $2, locked_at = now(),\n                          attempts = attempts + 1\n           from next where job.id = next.id\n           returning job.id, job.kind, job.talk_id, job.payload, job.attempts, job.max_attempts",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,8 @@
     "parameters": {
       "Left": [
         "TextArray",
-        "Text"
+        "Text",
+        "TextArray"
       ]
     },
     "nullable": [
@@ -85,5 +86,5 @@
       false
     ]
   },
-  "hash": "3383a876bd87bd641a05e5aeb1b9467bdae37f53730bc3c6365f43ef1ada32f6"
+  "hash": "02212966d8513e5a9107f27d5a830df36047ace4591a4a7effb1ed3748603a9c"
 }
