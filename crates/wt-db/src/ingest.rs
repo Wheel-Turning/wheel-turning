@@ -160,7 +160,7 @@ pub async fn record_video(
                  values ($1, $2, ($3::timestamptz at time zone 'UTC')::date, $4, $5)
                  returning id",
                 video.id,
-                v.title,
+                talk_title(v.title),
                 v.published_at,
                 v.duration_s,
                 v.rights_source
@@ -182,7 +182,7 @@ pub async fn record_video(
             // put back a recording date the upload date would overwrite.
             "update talk set title = $2, duration_s = $3, source_key = $4 where id = $1",
             talk.as_uuid(),
-            v.title,
+            talk_title(v.title),
             v.duration_s,
             v.rights_source
         )
@@ -677,4 +677,45 @@ pub async fn carry_talk_date(
     )
     .await?;
     Ok(true)
+}
+
+/// A talk's title from its source video's: an upload named after its file, such as
+/// "Uji Being Time - Part-1.mp4", loses the media extension, so the answer page shows a title
+/// rather than a file name (owner's decision of October 14, 2026). The source video keeps the
+/// title as the platform states it.
+pub fn talk_title(video_title: &str) -> &str {
+    const MEDIA: [&str; 6] = [".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav"];
+    let trimmed = video_title.trim_end();
+    MEDIA
+        .iter()
+        .find_map(|ext| {
+            let cut = trimmed.len().checked_sub(ext.len())?;
+            let (stem, tail) = (trimmed.get(..cut)?, trimmed.get(cut..)?);
+            (tail.eq_ignore_ascii_case(ext) && !stem.trim_end().is_empty()).then(|| stem.trim_end())
+        })
+        .unwrap_or(trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::talk_title;
+
+    #[test]
+    fn a_media_extension_is_dropped_from_a_talk_title() {
+        assert_eq!(
+            talk_title("2021-10-17 Kanshin - Sunday - Uji Being Time - Part-1.mp4"),
+            "2021-10-17 Kanshin - Sunday - Uji Being Time - Part-1"
+        );
+        assert_eq!(talk_title("Karma.MOV "), "Karma");
+        assert_eq!(
+            talk_title("Talk on the .mp4 format"),
+            "Talk on the .mp4 format"
+        );
+        assert_eq!(talk_title("Genjokoan Paragraph 1"), "Genjokoan Paragraph 1");
+        assert_eq!(
+            talk_title(".mp4"),
+            ".mp4",
+            "a title that is only an extension stays"
+        );
+    }
 }
