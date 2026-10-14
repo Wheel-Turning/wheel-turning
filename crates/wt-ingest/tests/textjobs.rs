@@ -10,7 +10,7 @@ use wt_core::ids::TalkId;
 use wt_core::objects::{LocalObjects, ObjectStore};
 use wt_db::test_support::TestDb;
 use wt_extract::extract::Staging;
-use wt_extract::{DataClass, FakeLlm};
+use wt_extract::{DataClass, FakeLlm, LlmError};
 use wt_ingest::textjobs::{
     self, PgHandList, TextOutcome, requeue_after_glossary_change, staging_key, suggestions_key,
 };
@@ -208,7 +208,7 @@ async fn correct_extract_and_resolve_run_in_turn() {
              "kind": "quotation"}
         ]
     }))]);
-    let out = textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm)
+    let out = textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm, false)
         .await
         .unwrap();
     assert_eq!(out, TextOutcome::Done(Some(wt_db::job::JobKind::Resolve)));
@@ -325,6 +325,7 @@ async fn with_no_model_a_real_talk_is_staged_as_skipped_and_goes_on() {
         &fx.objects,
         &g,
         &wt_extract::UnavailableLlm,
+        false,
     )
     .await
     .unwrap();
@@ -338,6 +339,57 @@ async fn with_no_model_a_real_talk_is_staged_as_skipped_and_goes_on() {
         "it runs again once a model may"
     );
     assert_eq!(queued(&fx.pool, talk, "resolve").await, 1);
+}
+
+/// Decision of October 14, 2026: a model failure fails the `extract` job while it has attempts
+/// left, and on its last attempt is staged as skipped, so the talk goes on to `resolve` instead
+/// of stopping at `extracting`. The spend cap still defers the job.
+#[tokio::test]
+async fn a_model_failure_on_the_last_attempt_is_staged_as_skipped_and_goes_on() {
+    let fx = start().await;
+    let talk = segmented_talk(&fx, "lastattempt", "To study the way is to study the self.").await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let g = glossary(None);
+    textjobs::run_correct(&mut conn, talk, &fx.objects, &g, &|_| false)
+        .await
+        .unwrap();
+    let failing = || {
+        FakeLlm::scripted(vec![Err(LlmError::Status {
+            status: 500,
+            kind: "api_error".into(),
+            message: "invented".into(),
+        })])
+    };
+
+    let early = textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &failing(), false).await;
+    assert!(
+        early.is_err(),
+        "with attempts left the job fails and retries"
+    );
+    assert!(fx.objects.get(&staging_key(talk)).unwrap().is_none());
+    let capped = FakeLlm::scripted(vec![Err(LlmError::CapReached {
+        month_to_date: 60.0,
+        cap: 60.0,
+    })]);
+    let at_cap = textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &capped, true).await;
+    assert!(
+        at_cap.is_err(),
+        "the spend cap defers the job even on its last attempt"
+    );
+
+    let out = textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &failing(), true)
+        .await
+        .unwrap();
+    assert_eq!(out, TextOutcome::Done(Some(wt_db::job::JobKind::Resolve)));
+    let staging: Staging =
+        serde_json::from_slice(&fx.objects.get(&staging_key(talk)).unwrap().unwrap()).unwrap();
+    assert!(staging.citations.is_empty() && staging.input_hash.is_none());
+    assert!(staging.skipped.unwrap().contains("500"));
+    assert_eq!(queued(&fx.pool, talk, "resolve").await, 1);
+    let found = textjobs::retry_skipped_extracts(&mut conn, &fx.objects, Some(talk), "m", true)
+        .await
+        .unwrap();
+    assert_eq!(found, vec![talk], "retry-extract can run it again");
 }
 
 /// `wt pipeline retry-extract`: a talk staged as skipped gets one new `extract` job, and the
@@ -361,13 +413,14 @@ async fn retry_extract_reruns_a_skipped_extraction_through_resolve_and_index() {
         &fx.objects,
         &g,
         &wt_extract::UnavailableLlm,
+        false,
     )
     .await
     .unwrap();
     let none = FakeLlm::new(vec![Ok(
         json!({ "practice_period": null, "citations": [] }),
     )]);
-    textjobs::run_extract(&mut conn, done, &fx.objects, &g, &none)
+    textjobs::run_extract(&mut conn, done, &fx.objects, &g, &none, false)
         .await
         .unwrap();
     textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
@@ -407,7 +460,7 @@ async fn retry_extract_reruns_a_skipped_extraction_through_resolve_and_index() {
         "citations": [{"text": "to study the way is to study the self", "work_hint": "Genjokoan",
                        "locator_hint": null, "kind": "quotation"}]
     }))]);
-    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm)
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm, false)
         .await
         .unwrap();
     let staging: Staging =
@@ -422,7 +475,7 @@ async fn retry_extract_reruns_a_skipped_extraction_through_resolve_and_index() {
 
     // Reruns: no model call, no new jobs, and the talk is no longer skipped.
     let unused = FakeLlm::new(vec![]);
-    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &unused)
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &unused, false)
         .await
         .unwrap();
     textjobs::run_resolve(&mut conn, talk, &fx.objects, &[], &hand_list)
@@ -460,7 +513,7 @@ async fn a_new_link_out_work_resolves_a_citation_that_matched_nothing_and_a_reru
              "locator_hint": null, "kind": "reference"}
         ]
     }))]);
-    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm)
+    textjobs::run_extract(&mut conn, talk, &fx.objects, &g, &llm, false)
         .await
         .unwrap();
     let resolution = |objects: &LocalObjects| {

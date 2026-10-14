@@ -295,7 +295,10 @@ impl Stages {
                     Some(client) => client,
                     None => &unavailable,
                 };
-                match textjobs::run_extract(conn, talk, &self.objects, &glossary, llm).await {
+                let last_attempt = job.attempt >= job.max_attempts;
+                match textjobs::run_extract(conn, talk, &self.objects, &glossary, llm, last_attempt)
+                    .await
+                {
                     Ok(o) => format!("{o:?}"),
                     Err(TextJobError::Llm(e @ LlmError::CapReached { .. })) => {
                         return Ok(Ran::Capped(e.to_string()));
