@@ -643,7 +643,6 @@ async fn answer_request_for(
 
 /// `wt rights grant`: stores the reply as approved permission evidence for the source's
 /// prefixes and switches the source's basis to `permission`. Returns the new evidence id.
-#[allow(clippy::too_many_arguments)]
 pub async fn grant(
     pool: &PgPool,
     key: &str,

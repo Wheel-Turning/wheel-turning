@@ -46,17 +46,37 @@ pub async fn registry_import(pool: &PgPool, file: &Path, by: &str) -> anyhow::Re
     print_json(&report)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// A consent decision, as `wt consent set` records it (Spec 03, the consent gate).
+pub struct ConsentChange<'a> {
+    /// The teacher, by display name or alias.
+    pub teacher: &'a str,
+    /// The new status.
+    pub status: ConsentStatus,
+    /// Pointer to the stored reply, never the reply text.
+    pub evidence: Option<&'a str>,
+    /// Limits the speaker set, in their words.
+    pub scope_note: Option<&'a str>,
+    /// Who recorded it.
+    pub by: &'a str,
+    /// Confirms a decline or withdrawal, which takes the teacher's talks down.
+    pub yes: bool,
+}
+
+/// `wt consent set`: records the decision, and a decline or withdrawal takes the teacher's talks
+/// down, so it needs `yes`.
 pub async fn consent_set(
     pool: &PgPool,
     config: &wt_core::Config,
-    teacher: &str,
-    status: ConsentStatus,
-    evidence: Option<&str>,
-    scope_note: Option<&str>,
-    by: &str,
-    yes: bool,
+    change: ConsentChange<'_>,
 ) -> anyhow::Result<()> {
+    let ConsentChange {
+        teacher,
+        status,
+        evidence,
+        scope_note,
+        by,
+        yes,
+    } = change;
     let takes_down = matches!(status, ConsentStatus::Declined | ConsentStatus::Withdrawn);
     if takes_down && !yes {
         let what = format!("consent {status} for {teacher}");

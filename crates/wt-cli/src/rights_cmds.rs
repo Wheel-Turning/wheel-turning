@@ -390,12 +390,14 @@ pub(crate) async fn rights(ctx: &Ctx, command: RightsCommand) -> anyhow::Result<
             rights::grant(
                 &ctx.pool().await?,
                 &ctx.records,
-                &source,
-                &statement_file,
-                &from,
-                given_on,
-                &scope,
-                &by,
+                rights::GrantArgs {
+                    key: &source,
+                    statement: &statement_file,
+                    from: &from,
+                    given_on,
+                    scope: &scope,
+                    by: &by,
+                },
             )
             .await?;
         }

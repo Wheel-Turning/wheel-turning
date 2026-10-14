@@ -169,9 +169,11 @@ pub async fn benchmark(
             &wav,
             &scratch,
             &hints,
-            reference.as_deref(),
-            &terms,
-            &names,
+            reference.as_deref().map(|reference| bench::Scoring {
+                reference,
+                terms: &terms,
+                names: &names,
+            }),
         )
         .await?;
         scratch.finish()?;

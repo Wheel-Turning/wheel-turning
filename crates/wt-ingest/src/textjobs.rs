@@ -711,10 +711,12 @@ pub async fn run_index(
         talk_id.as_uuid(),
         &plan,
         &reuse,
-        &vectors,
-        embedder.model_id(),
-        wt_ml::VECTOR_VERSION,
-        embedder.dim(),
+        &index::Embedded {
+            vectors: &vectors,
+            model_id: embedder.model_id(),
+            vector_version: wt_ml::VECTOR_VERSION,
+            dim: embedder.dim(),
+        },
     )
     .await?;
     advance_forward(&mut tx, &talk, PipelineState::Ready).await?;
