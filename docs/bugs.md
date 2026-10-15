@@ -15,6 +15,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B7](#b7-navigation-does-not-mark-the-current-page) | 2026-10-15 | Navigation does not mark the current page | open |
 | [B8](#b8-no-placeholder-research-search-page-for-priests) | 2026-10-15 | No placeholder research search page for priests | open |
 | [B9](#b9-the-privacy-line-is-not-fully-accurate) | 2026-10-15 | The privacy line is not fully accurate | open |
+| [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -181,3 +182,47 @@ The line "You choose whether your questions are kept. Only totals are read, and 
 ### Cause
 
 Not diagnosed. The new wording needs the owner's approval, and every copy of the line should change together.
+
+## B10. Summaries use few excerpts and say little
+
+- Reported: October 15, 2026, by the owner, on the beta (app.wheelturning.org).
+- Answer: `/a/40fc360b-7287-4172-b40c-2a1b10b8442a`.
+- Question: "What is the difference between practice and trying to improve myself?"
+
+### Expected
+
+1. No em dashes anywhere in a summary.
+2. No note on how many excerpts come from one sangha.
+3. The top of the page gives the counts as teachers, teachings and excerpts, for example "6 teachers, 7 teachings, 10 excerpts".
+4. Every excerpt on the page is either used by the summary or not served. An excerpt worth showing is worth drawing on.
+5. The summary says something a reader could not get from the question alone: where the talks agree, where they put the weight differently, and how each one draws the line between practice and self-improvement.
+
+### Actual
+
+- The top line says "Passages from 6 teachers". The summary's closing line says "Drawn from 3 talks by 3 teachers". The two counts read as if they disagree.
+- Points to keep in mind holds only "8 of the 10 excerpts come from teachers at Berkeley Zen Center."
+- The summary cites 3 of the 10 excerpts: Rosenbaum (2007), Weitsman (2010) and Suzuki (1971). The other seven are shown with no mention, which suggests they are not relevant.
+- There are no "Where the talks agree" or "Where they differ" sentences, though the excerpts come from six teachers. The headline restates the question, the framing sentence only says what the talks address, and the sum-up repeats the Suzuki line.
+- The owner reports em dashes in summaries. This answer, as pasted, has none, so the rule needs an example to test against.
+
+### Cause
+
+Not fully diagnosed.
+
+1. Em dashes: the prompt (`crates/wt-synth/prompts/summarize.md`) does not forbid them and no code removes them.
+2. The sangha note is required by Spec 05, Summary and verifier, item 5, and written by `notes` in `crates/wt-api/src/summary.rs`. Removing it is a spec change, which the owner asked for in this report.
+3. The top line is `result_line` in `crates/wt-api/src/view.rs`, and it counts teachers only. "Drawn from" counts only the excerpts the shown summary sentences cite (Spec 05, item 7), so it is always smaller.
+4. Excerpts the summary does not use: the beta has no reranker ([B1](#b1-a-question-about-shakyamuni-returns-talks-not-texts), cause 4), so excerpts are ordered by search match and weak ones are served. The summary prompt says "Fewer true sentences are better than more", and the verifier drops any sentence whose words do not match the excerpts it cites, so a weak excerpt is left out rather than used. Whether the model wrote agree and differ sentences that the verifier then dropped is not checked. The stored draft and `llm_usage` for this answer would show it.
+5. Thin content follows from 4: with agree and differ empty, only the headline, framing and sum-up remain, and the prompt keeps those close to the excerpts' own words.
+
+### Open question for the owner
+
+Point 4 sets two ways to fix this against each other. One is to serve fewer excerpts: install the reranker and drop excerpts below a relevance threshold. The other is to make the summary draw on every excerpt it is given. They can be combined: serve only excerpts that pass the relevance check, and require the summary to cite each one or say why it does not.
+
+### Fix
+
+- Ban em dashes in the prompt and replace any that come back in code before the verifier runs.
+- Remove the sangha note from Spec 05 and `notes`.
+- Change the top line to "\<x> teachers, \<y> teachings, \<z> excerpts" in Spec 09 and `result_line`.
+- Settle the open question, then change selection, the prompt or both.
+- Pull the stored draft for this answer to see whether agree and differ were written and dropped.
