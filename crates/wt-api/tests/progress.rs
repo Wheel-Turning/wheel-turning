@@ -287,6 +287,27 @@ async fn a_streamed_ask_stores_what_a_plain_post_stores() {
     let streamed = ask(&fx, &cookie, QUESTION, true).await;
     assert!(streamed.body.contains("event: done"), "{}", streamed.body);
 
+    // Each answer's summary is written in the background after it is stored, so wait for both
+    // to settle before comparing them.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let pending: i64 = sqlx::query_scalar(
+            "select count(*) from answer
+             where coalesce((payload ->> 'summary_pending')::boolean, false)",
+        )
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+        if pending == 0 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a deferred summary never settled"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
     let rows: Vec<(serde_json::Value, i32, i32, Option<String>)> = sqlx::query_as(
         "select a.payload, q.teacher_count, q.passage_count, q.query_text
          from answer a join query_log q on q.id = a.query_log_id order by q.created_at",
