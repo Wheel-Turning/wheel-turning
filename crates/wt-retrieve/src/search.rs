@@ -46,20 +46,76 @@ pub fn parse_vector(text: &str) -> Option<Vec<f32>> {
         .collect()
 }
 
-/// Full-text candidates, best first.
+/// Passages the full-text statistics must cover before common lexemes are left out: a small
+/// collection's statistics say little about which words are common.
+pub const COMMON_MIN_ROWS: i64 = 10_000;
+
+/// The lexemes the full-text query keeps: those not in more than `max_share` of passages
+/// (`share` is `None` for them), or, when every lexeme is that common, the least common one so
+/// the search still runs. Order is kept.
+pub fn keep_lexemes(lexemes: &[(String, Option<f32>)]) -> Vec<String> {
+    let kept: Vec<String> = lexemes
+        .iter()
+        .filter(|(_, share)| share.is_none())
+        .map(|(l, _)| l.clone())
+        .collect();
+    if !kept.is_empty() {
+        return kept;
+    }
+    lexemes
+        .iter()
+        .min_by(|a, b| a.1.unwrap_or(0.0).total_cmp(&b.1.unwrap_or(0.0)))
+        .map(|(l, _)| vec![l.clone()])
+        .unwrap_or_default()
+}
+
+/// The kept lexemes as a `tsquery` in the `simple` configuration, which leaves stems as they are,
+/// each quoted so no lexeme can read as an operator.
+pub fn lexeme_query(lexemes: &[String]) -> String {
+    lexemes
+        .iter()
+        .map(|l| format!("'{}'", l.replace('\\', "\\\\").replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// Full-text candidates, best first. The query's words are stemmed as the passages were, and
+/// lexemes in more than `max_share` of passages are left out (migration 0045, owner's request of
+/// October 15, 2026): they matched most of the collection, cost over a second a question, and
+/// crowded out passages that share the question's distinctive words. `max_share` of 1 or more
+/// keeps every word.
 pub async fn full_text(
     conn: &mut PgConnection,
     tsquery: &str,
     teacher: Option<TeacherId>,
     k: i64,
+    max_share: f32,
 ) -> Result<Vec<PassageId>, sqlx::Error> {
+    let lexemes: Vec<(String, Option<f32>)> = sqlx::query!(
+        r#"select l.lexeme as "lexeme!", c.share
+           from unnest(to_tsvector('english', $1)) l
+           left join common_lexemes($2, $3) c using (lexeme)"#,
+        tsquery,
+        max_share,
+        COMMON_MIN_ROWS
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.lexeme, r.share))
+    .collect();
+    let kept = keep_lexemes(&lexemes);
+    if kept.is_empty() {
+        return Ok(Vec::new());
+    }
+    let query = lexeme_query(&kept);
     let rows = sqlx::query_scalar!(
         r#"select passage_id as "passage_id!" from servable_passage
-           where tsv @@ to_tsquery('english', $1)
+           where tsv @@ to_tsquery('simple', $1)
              and ($2::uuid is null or teacher_id = $2)
-           order by ts_rank_cd(tsv, to_tsquery('english', $1)) desc, passage_id
+           order by ts_rank_cd(tsv, to_tsquery('simple', $1)) desc, passage_id
            limit $3"#,
-        tsquery,
+        query,
         teacher.map(|t| t.as_uuid()),
         k
     )
@@ -238,6 +294,27 @@ pub async fn candidates(
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn common_lexemes_leave_the_query_unless_all_are_common() {
+        let l = |s: &str, share: Option<f32>| (s.to_owned(), share);
+        assert_eq!(
+            keep_lexemes(&[l("know", Some(0.52)), l("anger", None), l("resent", None)]),
+            ["anger", "resent"]
+        );
+        assert_eq!(
+            keep_lexemes(&[l("know", Some(0.52)), l("feel", Some(0.17))]),
+            ["feel"],
+            "the least common stays when every word is common"
+        );
+        assert!(keep_lexemes(&[]).is_empty());
+    }
+
+    #[test]
+    fn lexemes_are_quoted_for_tsquery() {
+        let q = lexeme_query(&["anger".to_owned(), "o'neil".to_owned(), "a\\b".to_owned()]);
+        assert_eq!(q, "'anger' | 'o''neil' | 'a\\\\b'");
+    }
 
     #[test]
     fn the_or_query_keeps_content_words_only() {
