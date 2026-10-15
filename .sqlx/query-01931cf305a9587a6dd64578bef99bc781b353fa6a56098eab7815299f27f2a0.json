@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select l.lexeme as \"lexeme!\", c.share\n           from unnest(to_tsvector('english', $1)) l\n           left join common_lexemes($2, $3) c using (lexeme)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lexeme!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "share",
+        "type_info": "Float4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Float4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "01931cf305a9587a6dd64578bef99bc781b353fa6a56098eab7815299f27f2a0"
+}

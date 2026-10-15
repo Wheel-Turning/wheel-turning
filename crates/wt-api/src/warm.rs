@@ -1,15 +1,17 @@
-//! Keeps the vector index in the database's cache (owner's request of October 15, 2026: answers
-//! under 5 seconds). A question whose search walks index pages that are not cached reads them
-//! from disk, which took 2 to 7 s on the beta. At startup the server runs a vector search for
-//! each of a set of practice phrases, which touches most of the index, and then one every few
-//! minutes, so a quiet hour does not let it go cold. The searches read passage ids only, through
-//! `servable_passage`, and nothing is stored or logged but their timing.
+//! Keeps the vector and full-text indexes in the database's cache (owner's request of October
+//! 15, 2026: answers under 5 seconds). A question whose search reads index pages that are not
+//! cached reads them from disk, which took 2 to 7 s on the beta. At startup the server runs a
+//! vector search and a full-text search for each of a set of practice phrases, which touches
+//! most of the vector index and the full-text pages questions read, and then one pair every few
+//! minutes, so a quiet hour does not let them go cold. The searches read passage ids only,
+//! through `servable_passage`, and nothing is stored or logged but their timing.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sqlx::PgPool;
 use wt_ml::Embedder;
+use wt_retrieve::config::SearchConfig;
 use wt_retrieve::search;
 
 /// Phrases close to what testers ask, spread over the subjects the talks cover.
@@ -43,12 +45,12 @@ const PHRASES: [&str; 24] = [
 /// Searches between keep-warm rounds.
 const EVERY: Duration = Duration::from_secs(300);
 
-/// Warms the index once, then keeps it warm. Failures are logged and the loop goes on.
-pub async fn keep_warm(pool: PgPool, embedder: Arc<dyn Embedder>, ef_search: i64, k: i64) {
+/// Warms the indexes once, then keeps them warm. Failures are logged and the loop goes on.
+pub async fn keep_warm(pool: PgPool, embedder: Arc<dyn Embedder>, cfg: SearchConfig) {
     let mut vectors = Vec::with_capacity(PHRASES.len());
     for phrase in PHRASES {
         match embedder.embed(&[phrase.to_owned()]).await {
-            Ok(mut v) if !v.is_empty() => vectors.push(v.swap_remove(0)),
+            Ok(mut v) if !v.is_empty() => vectors.push((phrase, v.swap_remove(0))),
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "embedding a warm-up phrase"),
         }
@@ -57,32 +59,43 @@ pub async fn keep_warm(pool: PgPool, embedder: Arc<dyn Embedder>, ef_search: i64
         return;
     }
     let started = Instant::now();
-    for v in &vectors {
-        search_once(&pool, v, ef_search, k).await;
+    for (phrase, v) in &vectors {
+        search_once(&pool, phrase, v, &cfg).await;
     }
     tracing::info!(
         searches = vectors.len(),
         ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        "vector index warmed"
+        "search indexes warmed"
     );
     let mut next = 0;
     loop {
         tokio::time::sleep(EVERY).await;
-        if let Some(v) = vectors.get(next % vectors.len()) {
-            search_once(&pool, v, ef_search, k).await;
+        if let Some((phrase, v)) = vectors.get(next % vectors.len()) {
+            search_once(&pool, phrase, v, &cfg).await;
         }
         next += 1;
     }
 }
 
-/// One standard-mode vector search, its result dropped.
-async fn search_once(pool: &PgPool, vector: &[f32], ef_search: i64, k: i64) {
+/// One standard-mode vector search and one full-text search, their results dropped.
+async fn search_once(pool: &PgPool, phrase: &str, vector: &[f32], cfg: &SearchConfig) {
     let found = async {
         let mut conn = pool.acquire().await?;
-        search::vector(&mut conn, vector, None, k, ef_search).await
+        search::vector(
+            &mut conn,
+            vector,
+            None,
+            cfg.vector_top_k,
+            cfg.hnsw_ef_search,
+        )
+        .await?;
+        if let Some(q) = search::or_query(phrase) {
+            search::full_text(&mut conn, &q, None, cfg.fts_top_k, cfg.fts_max_lexeme_share).await?;
+        }
+        Ok::<_, sqlx::Error>(())
     }
     .await;
     if let Err(e) = found {
-        tracing::warn!(error = %e, "warm-up vector search");
+        tracing::warn!(error = %e, "warm-up search");
     }
 }
