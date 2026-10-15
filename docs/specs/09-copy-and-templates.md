@@ -271,12 +271,13 @@ You can change your mind about any part of this at any time, by replying here or
 
 ## Attribution lines
 
-Every excerpt shows one credit line chosen by the rights basis. A line may use `{title}`, `{author}`, `{translator}`, `{publisher}`, `{teacher}`, `{sangha}`, `{grantor}`, `{license_name}`, `{license_url}` and `{url}`. A sentence that contains a variable with no value is left out, so a text with no translator simply loses its translator sentence. Lines are kept under 40 words. A mandate line never contains the words permission or licensed, and a test enforces that.
+Every excerpt shows one credit line chosen by the rights basis. A line may use `{title}`, `{author}`, `{translator}`, `{publisher}`, `{teacher}`, `{sangha}`, `{grantor}`, `{license_name}`, `{license_url}` and `{url}`. A sentence that contains a variable with no value is left out, so a text with no translator simply loses its translator sentence. Lines are kept under 40 words. A mandate line never contains the words permission or licensed, and a test enforces that, unless the talk's source holds a sangha's grant (Sangha permission, talks).
 
 | Basis and material | Credit line |
 | --- | --- |
 | Permission, texts | Used with permission of {grantor}. {title}. Translated by {translator}. Read it at the source: {url} |
 | Permission, talks | Talk by {teacher}, {sangha}. Used with permission of {teacher}. |
+| Sangha permission, talks | Talk by {teacher}, {sangha}. Used with permission of {grantor}. Shown when the talk's source has a sangha's written yes recorded with `wt rights grant` (owner's decision of October 14, 2026); {grantor} is the source's publisher, the sangha. |
 | License, texts or talks | {title}. {license\_name}, {license\_url}. Read it at the source: {url} |
 | Mandate, BDK America | Excerpt from {title}. Translated by {translator}. Published by BDK America, which offers the full text free. Read it at the source: {url} |
 | Mandate, Terebess | Excerpt from {title} by {author}. Translated by {translator}. Found on the Terebess Zen archive. The work belongs to its author or translator, not to this site. Read it at the source: {url} |

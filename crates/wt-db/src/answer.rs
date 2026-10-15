@@ -322,6 +322,9 @@ pub struct TalkCard {
     pub rights_basis: Option<String>,
     /// The license or mandate's attribution line.
     pub display_notice: Option<String>,
+    /// The publisher of the talk's source when that source's basis is `permission`: a sangha's
+    /// written yes for its talks counts as permission (owner's decision of October 14, 2026).
+    pub permission_of: Option<String>,
     /// `full` or `excerpts`: the transcript page exists only at `full`.
     pub display_level: String,
     /// The current transcript is the source's own text (`aligned` or `text`), so the page
@@ -359,6 +362,7 @@ macro_rules! card {
             donation_verified: $r.donation_verified,
             rights_basis: $r.rights_basis,
             display_notice: $r.display_notice,
+            permission_of: $r.permission_of,
             display_level: $r.display_level,
             transcript_from_source: $r.transcript_from_source,
             transcript_url: $r.transcript_url,
@@ -384,7 +388,7 @@ pub async fn passages(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Served>, D
                   donation_verified as "donation_verified!", rights_basis::text as rights_basis,
                   display_notice, display_level as "display_level!",
                   transcript_from_source as "transcript_from_source!", transcript_url,
-                  transcript_origin, citation_name, citation_sort
+                  transcript_origin, citation_name, citation_sort, permission_of
            from servable_passage where passage_id = any($1)"#,
         &uuids
     )
@@ -484,7 +488,7 @@ pub async fn talk(pool: &PgPool, talk: TalkId) -> Result<Option<(TalkCard, Vec<S
                   donation_verified as "donation_verified!", rights_basis::text as rights_basis,
                   display_notice, display_level as "display_level!",
                   transcript_from_source as "transcript_from_source!", transcript_url,
-                  transcript_origin, citation_name, citation_sort
+                  transcript_origin, citation_name, citation_sort, permission_of
            from servable_passage where talk_id = $1 order by ordinal"#,
         talk.as_uuid()
     )

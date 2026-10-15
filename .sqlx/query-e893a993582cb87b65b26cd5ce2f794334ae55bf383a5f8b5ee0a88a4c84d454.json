@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select passage_id as \"passage_id!\", text as \"text!\", ordinal as \"ordinal!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\", talk_id as \"talk_id!\",\n                  talk_title as \"talk_title!\", talk_date, series, part,\n                  platform::text as \"platform!\", external_id as \"external_id!\",\n                  source_url as \"source_url!\", teacher_id as \"teacher_id!\",\n                  teacher_name as \"teacher_name!\", sangha_id as \"sangha_id!\",\n                  sangha_name as \"sangha_name!\", listed as \"listed!\", donation_url,\n                  donation_verified as \"donation_verified!\", rights_basis::text as rights_basis,\n                  display_notice, display_level as \"display_level!\",\n                  transcript_from_source as \"transcript_from_source!\", transcript_url,\n                  transcript_origin, citation_name, citation_sort\n           from servable_passage where talk_id = $1 order by ordinal",
+  "query": "select passage_id as \"passage_id!\", text as \"text!\", ordinal as \"ordinal!\",\n                  start_ms as \"start_ms!\", end_ms as \"end_ms!\", talk_id as \"talk_id!\",\n                  talk_title as \"talk_title!\", talk_date, series, part,\n                  platform::text as \"platform!\", external_id as \"external_id!\",\n                  source_url as \"source_url!\", teacher_id as \"teacher_id!\",\n                  teacher_name as \"teacher_name!\", sangha_id as \"sangha_id!\",\n                  sangha_name as \"sangha_name!\", listed as \"listed!\", donation_url,\n                  donation_verified as \"donation_verified!\", rights_basis::text as rights_basis,\n                  display_notice, display_level as \"display_level!\",\n                  transcript_from_source as \"transcript_from_source!\", transcript_url,\n                  transcript_origin, citation_name, citation_sort, permission_of\n           from servable_passage where passage_id = any($1)",
   "describe": {
     "columns": [
       {
@@ -300,11 +300,22 @@
             "name": "citation_sort"
           }
         }
+      },
+      {
+        "ordinal": 28,
+        "name": "permission_of",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "permission_of"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "UuidArray"
       ]
     },
     "nullable": [
@@ -335,8 +346,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "d510798be05130d082b5bc0fefe640ee6c1c84e53c829113cda8805a822ad208"
+  "hash": "e893a993582cb87b65b26cd5ce2f794334ae55bf383a5f8b5ee0a88a4c84d454"
 }
