@@ -8,7 +8,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | --- | --- | --- | --- |
 | [B1](#b1-a-question-about-shakyamuni-returns-talks-not-texts) | 2026-10-15 | A question about Shakyamuni returns talks, not texts | diagnosed |
 | [B2](#b2-the-sticky-question-does-not-always-stick) | 2026-10-15 | The sticky question does not always stick | open |
-| [B3](#b3-a-question-about-the-pali-canon-returns-talks-not-sutta-central-texts) | 2026-10-15 | A question about the Pali Canon returns talks, not SuttaCentral texts | open |
+| [B3](#b3-a-question-about-the-pali-canon-returns-talks-not-suttacentral-texts) | 2026-10-15 | A question about the Pali Canon returns talks, not SuttaCentral texts | open |
 | [B4](#b4-a-summary-did-not-load) | 2026-10-15 | A summary did not load | open |
 | [B5](#b5-cite-opens-a-pop-up-instead-of-scrolling-to-the-reference) | 2026-10-15 | Cite opens a pop-up instead of scrolling to the reference | open |
 | [B6](#b6-talks-with-audio-outside-ssz-have-no-listen-link) | 2026-10-15 | Talks with audio outside SSZ have no Listen link | open |
