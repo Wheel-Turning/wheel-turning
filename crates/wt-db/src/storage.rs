@@ -9,7 +9,7 @@ use sqlx::PgConnection;
 use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use wt_core::ids::TalkId;
 
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::ingest::IngestDbError;
 
 /// A storage file a talk's media can be read from (route c).
@@ -136,13 +136,15 @@ pub async fn set_storage(
     for other in others {
         log_change(
             conn,
-            "source_video",
-            other.id,
-            "storage",
-            other.storage,
-            None,
-            actor,
-            "storage file matched to another talk",
+            &Change {
+                entity: "source_video",
+                entity_id: other.id,
+                field: "storage",
+                old_value: other.storage,
+                new_value: None,
+                actor,
+                reason: "storage file matched to another talk",
+            },
         )
         .await?;
     }
@@ -159,13 +161,15 @@ pub async fn set_storage(
     .await?;
     log_change(
         conn,
-        "source_video",
-        row.id,
-        "storage",
-        row.storage,
-        Some(value),
-        actor,
-        "storage file matched to a Vimeo talk",
+        &Change {
+            entity: "source_video",
+            entity_id: row.id,
+            field: "storage",
+            old_value: row.storage,
+            new_value: Some(value),
+            actor,
+            reason: "storage file matched to a Vimeo talk",
+        },
     )
     .await?;
     Ok(true)

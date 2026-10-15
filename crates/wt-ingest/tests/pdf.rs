@@ -362,10 +362,13 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        false,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: false,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -406,10 +409,13 @@ async fn a_pdf_imports_page_by_page_and_serves_only_after_a_proofread() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -613,10 +619,13 @@ async fn too_many_suspect_units_stop_the_import_with_a_report() {
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -639,10 +648,13 @@ async fn too_many_suspect_units_stop_the_import_with_a_report() {
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        false,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: false,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -676,10 +688,13 @@ async fn a_pdf_whose_first_page_names_another_holder_is_blocked_until_evidence_n
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -698,10 +713,13 @@ async fn a_pdf_whose_first_page_names_another_holder_is_blocked_until_evidence_n
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap();
@@ -1111,10 +1129,13 @@ async fn a_missing_word_list_refuses_the_import_before_any_page_is_read() {
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        false,
-        Some(&env),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: false,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await
     .unwrap_err()

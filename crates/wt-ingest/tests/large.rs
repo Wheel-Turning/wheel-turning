@@ -307,10 +307,13 @@ async fn a_300_page_pdf_runs_as_6_chunks_on_3_workers_and_matches_a_single_pass(
         &fx.objects,
         &embedder,
         &chunked,
-        &allowed(),
-        "owner",
-        false,
-        Some(&fx.env(&book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: false,
+            force: false,
+            pdf_env: Some(&fx.env(&book)),
+        },
     )
     .await
     .unwrap();
@@ -326,10 +329,13 @@ async fn a_300_page_pdf_runs_as_6_chunks_on_3_workers_and_matches_a_single_pass(
         &fx.objects,
         &embedder,
         &chunked,
-        &allowed(),
-        "owner",
-        true,
-        Some(&fx.env(&book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&fx.env(&book)),
+        },
     )
     .await
     .unwrap()
@@ -396,10 +402,13 @@ async fn a_300_page_pdf_runs_as_6_chunks_on_3_workers_and_matches_a_single_pass(
         &fx.objects,
         &embedder,
         &single,
-        &allowed(),
-        "owner",
-        true,
-        Some(&fx.env(&single_book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&fx.env(&single_book)),
+        },
     )
     .await
     .unwrap();
@@ -422,10 +431,13 @@ async fn a_worker_killed_mid_chunk_leaves_only_the_unfinished_pages_to_read() {
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&fx.env(&book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&fx.env(&book)),
+        },
     )
     .await
     .unwrap();
@@ -523,10 +535,13 @@ locator_prefix = "second"
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&fx.env(&book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&fx.env(&book)),
+        },
     )
     .await
     .unwrap();
@@ -624,10 +639,13 @@ async fn a_degraded_range_is_read_again_named_and_passes_after_reocr() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        Some(&fx.env(&book)),
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: Some(&fx.env(&book)),
+        },
     )
     .await
     .unwrap();
@@ -665,10 +683,12 @@ async fn a_degraded_range_is_read_again_named_and_passes_after_reocr() {
         &embedder,
         &fx.env(&book),
         &allowed(),
-        edition,
-        (13, 16),
-        600,
-        "owner",
+        &large::ReocrRequest {
+            edition,
+            pages: (13, 16),
+            dpi: 600,
+            by: "owner",
+        },
     )
     .await
     .unwrap();

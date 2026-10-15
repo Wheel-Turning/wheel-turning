@@ -287,18 +287,13 @@ pub async fn classify_talk(
 
     let series = classify::series(cfg, &title);
     let part = series.as_ref().and_then(|(_, p)| *p);
-    if let Some(kept) = merge_duplicates(
-        conn,
-        cfg,
-        talk,
-        &title,
-        date,
-        &facts,
-        series.as_ref(),
-        actor,
-    )
-    .await?
-    {
+    let me = DupFacts {
+        title: title.clone(),
+        day: date.map(day),
+        duration_s: facts.duration_s,
+        series_part: series.as_ref().and_then(|(n, p)| p.map(|p| (n.clone(), p))),
+    };
+    if let Some(kept) = merge_duplicates(conn, cfg, talk, &me, &facts, actor).await? {
         return Ok(Classified::Duplicate { of: kept });
     }
 
@@ -346,33 +341,26 @@ pub async fn classify_talk(
 /// Rule 3. Finds this talk's duplicates and keeps one record of the cluster: a talk already
 /// past the gate if there is one (it cannot be demoted), otherwise one with captions, otherwise
 /// the earliest published. The others before the gate become duplicates of it. Returns the
-/// kept talk when it is not this one.
-#[allow(clippy::too_many_arguments)]
+/// kept talk when it is not this one. `me` is this talk as the rule compares it; `facts` give
+/// its state, captions and upload time for choosing the one kept.
 async fn merge_duplicates(
     conn: &mut PgConnection,
     cfg: &ClassifyConfig,
     talk: TalkId,
-    title: &str,
-    date: Option<NaiveDate>,
+    me: &DupFacts,
     facts: &ingest::ClassifyFacts,
-    series: Option<&(String, Option<i32>)>,
     actor: &str,
 ) -> Result<Option<TalkId>, PipelineError> {
-    let Some(duration) = facts.duration_s else {
+    let Some(duration) = me.duration_s else {
         return Ok(None);
     };
+    let title = me.title.as_str();
     let s = &cfg.settings;
     let pct_gap = (f64::from(duration) * f64::from(s.dedupe_duration_tolerance_pct) / 50.0).ceil();
     let max_gap = s
         .dedupe_title_identical_tolerance_s
         .max(s.dedupe_duration_tolerance_min_s)
         .max(i32::try_from(pct_gap as i64).unwrap_or(i32::MAX));
-    let me = DupFacts {
-        title: title.to_owned(),
-        day: date.map(day),
-        duration_s: Some(duration),
-        series_part: series.and_then(|(n, p)| p.map(|p| (n.clone(), p))),
-    };
     let cluster: Vec<Candidate> =
         ingest::duplicate_candidates(conn, talk, title, duration, max_gap)
             .await?
@@ -390,7 +378,7 @@ async fn merge_duplicates(
                     series_part: classify::series(cfg, &c.normalized_title)
                         .and_then(|(name, part)| part.map(|p| (name, p))),
                 };
-                classify::is_duplicate(cfg, &me, &other, c.similarity)
+                classify::is_duplicate(cfg, me, &other, c.similarity)
             })
             .collect();
     if cluster.is_empty() {

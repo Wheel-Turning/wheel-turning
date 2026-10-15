@@ -280,22 +280,39 @@ pub struct AnswerView {
     pub degraded: bool,
 }
 
+/// What was read back for one stored answer, the input to [`assemble`].
+#[derive(Debug, Clone, Copy)]
+pub struct AnswerRows<'a> {
+    /// The answer being shown.
+    pub answer: AnswerId,
+    /// Its stored payload.
+    pub payload: &'a Payload,
+    /// Its passages still served, through the serving view.
+    pub served: &'a [Served],
+    /// The rebuilt excerpt of each passage that has one.
+    pub excerpts: &'a BTreeMap<PassageId, Excerpt>,
+    /// The resolved and probable citations of the passages the excerpts cover.
+    pub cited: &'a [CitedWork],
+    /// The teacher the question named, if any.
+    pub named_teacher: Option<&'a str>,
+    /// The day the answer was made, the References' access date.
+    pub accessed: NaiveDate,
+}
+
 /// Groups the served passages by teacher in payload order, which is best first, so groups
 /// are ordered by their best passage and passages inside a group by score (rule 1). Each shows
-/// its excerpt; "Listen at" and the transcript anchor follow the excerpt's first word (rule 8).
-/// `cited` holds the resolved and probable citations of the passages the excerpts cover, and
-/// `accessed` is the day the answer was made, the References' access date.
-#[allow(clippy::too_many_arguments)]
-pub fn assemble(
-    answer: AnswerId,
-    payload: &Payload,
-    served: &[Served],
-    excerpts: &BTreeMap<PassageId, Excerpt>,
-    cited: &[CitedWork],
-    named_teacher: Option<&str>,
-    lead_in_ms: i64,
-    accessed: NaiveDate,
-) -> AnswerView {
+/// its excerpt; "Listen at" and the transcript anchor follow the excerpt's first word (rule 8),
+/// starting `lead_in_ms` early.
+pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
+    let AnswerRows {
+        answer,
+        payload,
+        served,
+        excerpts,
+        cited,
+        named_teacher,
+        accessed,
+    } = *rows;
     let mut groups: Vec<Group> = Vec::new();
     let mut entries: BTreeMap<RefKey, RefEntry> = BTreeMap::new();
     // Per passage: its talk's key, then each footnote's offset and key.

@@ -306,10 +306,13 @@ pub async fn fetch_one(
         objects,
         embedder,
         &manifest_path,
-        opts.allowed_codes,
-        opts.actor,
-        apply,
-        opts.pdf_env,
+        &super::ImportOptions {
+            allowed_codes: opts.allowed_codes,
+            actor: opts.actor,
+            apply,
+            force: false,
+            pdf_env: opts.pdf_env,
+        },
     )
     .await
     {

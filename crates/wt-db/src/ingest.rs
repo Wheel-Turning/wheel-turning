@@ -11,7 +11,7 @@ use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use wt_core::ids::{JobId, TalkId};
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::job::{self, JobError, JobKind};
 
 /// States classification may change.
@@ -338,19 +338,21 @@ pub async fn exclude(
     };
     log_change(
         conn,
-        "talk",
-        talk.as_uuid(),
-        "state",
-        Some(serde_json::json!({ "state": old.state, "reason": old.state_reason })),
-        Some(serde_json::json!({
-            "state": "excluded", "reason": reason, "talk_type": talk_type,
-            "duplicate_of": duplicate_of,
-        })),
-        actor,
-        if duplicate_of.is_some() {
-            "duplicate merged at classification"
-        } else {
-            "excluded at classification"
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!({ "state": old.state, "reason": old.state_reason })),
+            new_value: Some(serde_json::json!({
+                "state": "excluded", "reason": reason, "talk_type": talk_type,
+                "duplicate_of": duplicate_of,
+            })),
+            actor,
+            reason: if duplicate_of.is_some() {
+                "duplicate merged at classification"
+            } else {
+                "excluded at classification"
+            },
         },
     )
     .await?;
@@ -408,13 +410,15 @@ pub async fn set_classification(
     if before != after {
         log_change(
             conn,
-            "talk",
-            talk.as_uuid(),
-            "classification",
-            Some(before),
-            Some(after),
-            actor,
-            "classified",
+            &Change {
+                entity: "talk",
+                entity_id: talk.as_uuid(),
+                field: "classification",
+                old_value: Some(before),
+                new_value: Some(after),
+                actor,
+                reason: "classified",
+            },
         )
         .await?;
     }
@@ -568,15 +572,17 @@ pub async fn reopen(
     };
     log_change(
         conn,
-        "talk",
-        talk.as_uuid(),
-        "state",
-        Some(serde_json::json!({
-            "state": "excluded", "reason": old.state_reason, "duplicate_of": old.duplicate_of,
-        })),
-        Some(serde_json::json!({ "state": "discovered" })),
-        actor,
-        "reopened for reclassification",
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!({
+                "state": "excluded", "reason": old.state_reason, "duplicate_of": old.duplicate_of,
+            })),
+            new_value: Some(serde_json::json!({ "state": "discovered" })),
+            actor,
+            reason: "reopened for reclassification",
+        },
     )
     .await?;
     Ok(true)
@@ -667,13 +673,15 @@ pub async fn carry_talk_date(
     };
     log_change(
         conn,
-        "talk",
-        talk.as_uuid(),
-        "talk_date",
-        Some(serde_json::json!(old.talk_date.map(|d| d.to_string()))),
-        Some(serde_json::json!(date.to_string())),
-        actor,
-        "recording date stated by another upload of the same recording",
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "talk_date",
+            old_value: Some(serde_json::json!(old.talk_date.map(|d| d.to_string()))),
+            new_value: Some(serde_json::json!(date.to_string())),
+            actor,
+            reason: "recording date stated by another upload of the same recording",
+        },
     )
     .await?;
     Ok(true)

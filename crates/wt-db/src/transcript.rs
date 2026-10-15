@@ -8,7 +8,7 @@ use sqlx::types::Uuid;
 use wt_core::ids::TalkId;
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 
 /// One segment to store.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,13 +188,15 @@ pub async fn hold_for_review(
     };
     log_change(
         conn,
-        "talk",
-        talk.as_uuid(),
-        "state",
-        Some(serde_json::json!(old)),
-        Some(serde_json::json!("needs_review")),
-        actor,
-        reason,
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!(old)),
+            new_value: Some(serde_json::json!("needs_review")),
+            actor,
+            reason,
+        },
     )
     .await?;
     Ok(true)
@@ -221,13 +223,15 @@ pub async fn release_held(
     for r in rows {
         log_change(
             conn,
-            "talk",
-            r.id,
-            "state",
-            Some(serde_json::json!("needs_review")),
-            Some(serde_json::json!("cleared")),
-            actor,
-            &format!("retry after {}", r.reason),
+            &Change {
+                entity: "talk",
+                entity_id: r.id,
+                field: "state",
+                old_value: Some(serde_json::json!("needs_review")),
+                new_value: Some(serde_json::json!("cleared")),
+                actor,
+                reason: &format!("retry after {}", r.reason),
+            },
         )
         .await?;
         out.push((

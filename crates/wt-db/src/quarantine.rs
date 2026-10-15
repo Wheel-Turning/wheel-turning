@@ -7,7 +7,7 @@ use wt_core::ids::TalkId;
 
 use crate::DbError;
 use crate::audit::RIGHTS_VALID;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 
 /// Why a quarantine or release was refused.
 #[derive(Debug, thiserror::Error)]
@@ -49,13 +49,15 @@ pub async fn quarantine(
     }
     log_change(
         &mut tx,
-        "talk",
-        talk.as_uuid(),
-        "state",
-        Some(serde_json::json!("ready")),
-        Some(serde_json::json!("quarantined")),
-        by,
-        reason,
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!("ready")),
+            new_value: Some(serde_json::json!("quarantined")),
+            actor: by,
+            reason,
+        },
     )
     .await?;
     tx.commit().await?;
@@ -121,13 +123,15 @@ pub async fn release(
     .await?;
     log_change(
         &mut tx,
-        "talk",
-        talk.as_uuid(),
-        "state",
-        Some(serde_json::json!("quarantined")),
-        Some(serde_json::json!("ready")),
-        by,
-        note,
+        &Change {
+            entity: "talk",
+            entity_id: talk.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!("quarantined")),
+            new_value: Some(serde_json::json!("ready")),
+            actor: by,
+            reason: note,
+        },
     )
     .await?;
     tx.commit().await?;

@@ -328,7 +328,7 @@ pub async fn run_assemble(
             job.bundle
         )));
     }
-    let report = super::import_with(
+    let report = super::import(
         conn,
         objects,
         embedder,
@@ -446,20 +446,36 @@ pub fn estimate(
     })
 }
 
-/// `wt text reocr`: reads a page range of an edition's source again at `dpi`, replacing the
-/// cached pages, and imports the edition again. Its units change, so it needs a new proofread.
-#[allow(clippy::too_many_arguments)]
+/// What `wt text reocr` reads again, and who asked.
+#[derive(Debug, Clone, Copy)]
+pub struct ReocrRequest<'a> {
+    /// The PDF edition.
+    pub edition: sqlx::types::Uuid,
+    /// The first and last page to read again.
+    pub pages: (u32, u32),
+    /// The resolution to read them at.
+    pub dpi: u32,
+    /// Who is importing.
+    pub by: &'a str,
+}
+
+/// `wt text reocr`: reads a page range of an edition's source again at the request's `dpi`,
+/// replacing the cached pages, and imports the edition again. Its units change, so it needs a
+/// new proofread.
 pub async fn reocr(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
     embedder: &dyn Embedder,
     env: &PdfEnv<'_>,
     allowed_codes: &[String],
-    edition: sqlx::types::Uuid,
-    pages: (u32, u32),
-    dpi: u32,
-    by: &str,
+    request: &ReocrRequest<'_>,
 ) -> Result<ImportReport, TextError> {
+    let ReocrRequest {
+        edition,
+        pages,
+        dpi,
+        by,
+    } = *request;
     let info = wt_db::texts::edition_summary(conn, edition)
         .await?
         .ok_or_else(|| TextError::Source(format!("edition {edition} does not exist")))?;
@@ -504,7 +520,7 @@ pub async fn reocr(
                 },
             )?;
         }
-        super::import_with(
+        super::import(
             conn,
             objects,
             embedder,

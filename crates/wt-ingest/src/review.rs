@@ -607,13 +607,15 @@ pub async fn import_corrections(
     for (old, new) in &log {
         wt_db::correction::log_change(
             &mut tx,
-            "transcript",
-            transcript_id,
-            "text",
-            Some(serde_json::json!(old)),
-            Some(serde_json::json!(new)),
-            reviewer,
-            "transcript review",
+            &wt_db::correction::Change {
+                entity: "transcript",
+                entity_id: transcript_id,
+                field: "text",
+                old_value: Some(serde_json::json!(old)),
+                new_value: Some(serde_json::json!(new)),
+                actor: reviewer,
+                reason: "transcript review",
+            },
         )
         .await?;
     }

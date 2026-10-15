@@ -14,7 +14,7 @@ use wt_ml::Embedder;
 use super::takedown::stored_files;
 use super::url::Sidecar;
 use super::web::{Got, Validators, WebFetcher};
-use super::{ImportOptions, ImportReport, PdfEnv, TextError, work_prefix};
+use super::{ImportOptions, ImportReport, TextError, work_prefix};
 
 /// What a refresh found.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -35,18 +35,16 @@ pub struct RefreshReport {
     pub import: Option<ImportReport>,
 }
 
-/// Refreshes an edition fetched from a URL.
-#[allow(clippy::too_many_arguments)]
+/// Refreshes an edition fetched from a URL. When the body changed it reports the diff against
+/// what serves, and with `opts.apply` imports the new body. The import always runs with `force`,
+/// whatever `opts` says, since the files on disk are new.
 pub async fn refresh(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
     embedder: &dyn Embedder,
     fetcher: &WebFetcher,
-    env: Option<&PdfEnv<'_>>,
-    allowed_codes: &[String],
     edition: Uuid,
-    apply: bool,
-    actor: &str,
+    opts: &ImportOptions<'_>,
 ) -> Result<RefreshReport, TextError> {
     let scope = wt_db::text_takedown::TextScope::Edition(edition);
     let e = wt_db::text_takedown::editions(conn, &scope)
@@ -122,13 +120,11 @@ pub async fn refresh(
         // A dry run first: the diff against what serves.
         let fake = wt_ml::FakeEmbedder::new("refresh-dry-run");
         let mut options = ImportOptions {
-            allowed_codes,
-            actor,
             apply: false,
             force: true,
-            pdf_env: env,
+            ..*opts
         };
-        let draft = super::import_with(conn, objects, &fake, &manifest_path, &options).await?;
+        let draft = super::import(conn, objects, &fake, &manifest_path, &options).await?;
         let served: BTreeMap<String, String> = wt_db::texts::unit_digest(conn, edition)
             .await?
             .into_iter()
@@ -146,11 +142,11 @@ pub async fn refresh(
             .filter(|l| !fresh.contains_key(*l))
             .cloned()
             .collect();
-        if !apply {
+        if !opts.apply {
             return Ok::<ImportReport, TextError>(draft);
         }
         options.apply = true;
-        let applied = super::import_with(conn, objects, embedder, &manifest_path, &options).await?;
+        let applied = super::import(conn, objects, embedder, &manifest_path, &options).await?;
         wt_db::texts::set_fetch_info(conn, edition, &fetched.sha256, fetched.etag.as_deref())
             .await?;
         Ok(applied)

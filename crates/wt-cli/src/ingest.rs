@@ -257,29 +257,18 @@ pub async fn worker(
 
     let mut tasks = tokio::task::JoinSet::new();
     for n in 0..concurrency.max(1) {
-        let (pool, cfg, sources, kinds, stages, only_sources) = (
-            pool.clone(),
-            cfg.clone(),
-            sources.clone(),
-            kinds.to_vec(),
-            stages.clone(),
-            only_sources.to_vec(),
-        );
-        let name = format!("{host}-{}-{n}", std::process::id());
-        tasks.spawn(async move {
-            run_worker(
-                &pool,
-                &cfg,
-                &sources,
-                stages.as_deref(),
-                &kinds,
-                &only_sources,
-                &name,
-                lock_timeout,
-                drain,
-            )
-            .await
-        });
+        let worker = Worker {
+            pool: pool.clone(),
+            cfg: cfg.clone(),
+            sources: sources.clone(),
+            stages: stages.clone(),
+            kinds: kinds.to_vec(),
+            only_sources: only_sources.to_vec(),
+            name: format!("{host}-{}-{n}", std::process::id()),
+            lock_timeout,
+            drain,
+        };
+        tasks.spawn(async move { worker.run().await });
     }
     tokio::select! {
         result = async {
@@ -295,93 +284,109 @@ pub async fn worker(
     }
 }
 
-/// The worker loop: claims jobs of `kinds` one at a time and runs each, reaping stale locks older
-/// than `lock_timeout` as it goes. With `drain` it stops when no job is left; otherwise it waits
-/// for more.
-#[allow(clippy::too_many_arguments)]
-async fn run_worker(
-    pool: &PgPool,
-    cfg: &ClassifyConfig,
-    sources: &SourcesFile,
-    stages: Option<&crate::stages::Stages>,
-    kinds: &[JobKind],
-    only_sources: &[String],
-    name: &str,
+/// One of [`worker`]'s workers: the jobs it takes and what it needs to run them.
+struct Worker {
+    /// The database pool.
+    pool: PgPool,
+    /// The classification rules, for classify jobs.
+    cfg: ClassifyConfig,
+    /// The configured sources, for classify jobs.
+    sources: SourcesFile,
+    /// The handlers for every other job kind, when any were asked for.
+    stages: Option<std::sync::Arc<crate::stages::Stages>>,
+    /// The job kinds it claims.
+    kinds: Vec<JobKind>,
+    /// When not empty, only jobs for talks of these sources.
+    only_sources: Vec<String>,
+    /// Its name in the job locks.
+    name: String,
+    /// How old a lock must be before it is reaped.
     lock_timeout: Duration,
+    /// Stop when no job is left instead of waiting for more.
     drain: bool,
-) -> anyhow::Result<()> {
-    let mut conn = pool.acquire().await?;
-    let mut last_reap: Option<tokio::time::Instant> = None;
-    loop {
-        if last_reap.is_none_or(|t| t.elapsed() >= REAP_EVERY) {
-            let reaped = job::reap(&mut conn, lock_timeout).await?;
-            if reaped.requeued + reaped.dead > 0 {
-                tracing::warn!(
-                    requeued = reaped.requeued,
-                    dead = reaped.dead,
-                    "reaped stale jobs"
-                );
+}
+
+impl Worker {
+    /// The worker loop: claims jobs of `kinds` one at a time and runs each, reaping stale locks
+    /// older than `lock_timeout` as it goes. With `drain` it stops when no job is left; otherwise
+    /// it waits for more.
+    async fn run(&self) -> anyhow::Result<()> {
+        let (pool, cfg, sources, name) = (&self.pool, &self.cfg, &self.sources, &self.name);
+        let (kinds, only_sources) = (&self.kinds, &self.only_sources);
+        let (stages, lock_timeout, drain) = (self.stages.as_deref(), self.lock_timeout, self.drain);
+        let mut conn = pool.acquire().await?;
+        let mut last_reap: Option<tokio::time::Instant> = None;
+        loop {
+            if last_reap.is_none_or(|t| t.elapsed() >= REAP_EVERY) {
+                let reaped = job::reap(&mut conn, lock_timeout).await?;
+                if reaped.requeued + reaped.dead > 0 {
+                    tracing::warn!(
+                        requeued = reaped.requeued,
+                        dead = reaped.dead,
+                        "reaped stale jobs"
+                    );
+                }
+                last_reap = Some(tokio::time::Instant::now());
             }
-            last_reap = Some(tokio::time::Instant::now());
-        }
-        let Some(claimed) = job::claim_from(&mut conn, kinds, only_sources, name).await? else {
-            if let Some(stages) = stages {
-                stages.idle(&mut conn).await?;
-            }
-            if drain {
-                return Ok(());
-            }
-            tokio::time::sleep(IDLE).await;
-            continue;
-        };
-        let result: anyhow::Result<()> = if claimed.kind == JobKind::Classify {
-            job::with_heartbeat(
-                pool,
-                &claimed,
-                job::HEARTBEAT_EVERY,
-                pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name),
-            )
-            .await
-                .map(|outcome| {
-                    tracing::info!(job = %claimed.id, kind = %claimed.kind, outcome = ?outcome, "job done");
-                })
-                .map_err(Into::into)
-        } else {
-            match stages {
-                None => Err(anyhow::anyhow!("no handler for {} jobs", claimed.kind)),
-                Some(stages) => match job::with_heartbeat(
+            let Some(claimed) = job::claim_from(&mut conn, kinds, only_sources, name).await? else {
+                if let Some(stages) = stages {
+                    stages.idle(&mut conn).await?;
+                }
+                if drain {
+                    return Ok(());
+                }
+                tokio::time::sleep(IDLE).await;
+                continue;
+            };
+            let result: anyhow::Result<()> = if claimed.kind == JobKind::Classify {
+                job::with_heartbeat(
                     pool,
                     &claimed,
                     job::HEARTBEAT_EVERY,
-                    stages.run(&mut conn, &claimed),
+                    pipeline::run_classify_job(&mut conn, &claimed, cfg, sources, name),
                 )
                 .await
-                {
-                    Ok(crate::stages::Ran::Done(outcome)) => {
-                        job::succeed(&mut conn, &claimed).await?;
-                        tracing::info!(job = %claimed.id, kind = %claimed.kind, %outcome, "job done");
-                        Ok(())
+                    .map(|outcome| {
+                        tracing::info!(job = %claimed.id, kind = %claimed.kind, outcome = ?outcome, "job done");
+                    })
+                    .map_err(Into::into)
+            } else {
+                match stages {
+                    None => Err(anyhow::anyhow!("no handler for {} jobs", claimed.kind)),
+                    Some(stages) => match job::with_heartbeat(
+                        pool,
+                        &claimed,
+                        job::HEARTBEAT_EVERY,
+                        stages.run(&mut conn, &claimed),
+                    )
+                    .await
+                    {
+                        Ok(crate::stages::Ran::Done(outcome)) => {
+                            job::succeed(&mut conn, &claimed).await?;
+                            tracing::info!(job = %claimed.id, kind = %claimed.kind, %outcome, "job done");
+                            Ok(())
+                        }
+                        Ok(crate::stages::Ran::Capped(reason)) => {
+                            let until = wt_db::llm::next_month(chrono::Utc::now());
+                            job::defer(&mut conn, &claimed, until, "cap_reached").await?;
+                            tracing::warn!(job = %claimed.id, kind = %claimed.kind, %reason, %until,
+                                           "language-model cap reached; job waits for next month");
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    },
+                }
+            };
+            match result {
+                Ok(()) => {}
+                Err(e) => {
+                    let error = format!("{e:#}");
+                    match job::fail(&mut conn, &claimed, &error).await? {
+                        Failure::Retry { run_at } => {
+                            tracing::warn!(job = %claimed.id, %error, %run_at, "job failed; will retry");
+                        }
+                        Failure::Dead => tracing::error!(job = %claimed.id, %error, "job dead"),
                     }
-                    Ok(crate::stages::Ran::Capped(reason)) => {
-                        let until = wt_db::llm::next_month(chrono::Utc::now());
-                        job::defer(&mut conn, &claimed, until, "cap_reached").await?;
-                        tracing::warn!(job = %claimed.id, kind = %claimed.kind, %reason, %until,
-                                       "language-model cap reached; job waits for next month");
-                        Ok(())
-                    }
-                    Err(e) => Err(e),
-                },
-            }
-        };
-        match result {
-            Ok(()) => {}
-            Err(e) => {
-                let error = format!("{e:#}");
-                match job::fail(&mut conn, &claimed, &error).await? {
-                    Failure::Retry { run_at } => {
-                        tracing::warn!(job = %claimed.id, %error, %run_at, "job failed; will retry");
-                    }
-                    Failure::Dead => tracing::error!(job = %claimed.id, %error, "job dead"),
                 }
             }
         }

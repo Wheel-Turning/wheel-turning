@@ -540,15 +540,17 @@ pub async fn run(
     stage_questions(deps.objects, talk_id, version, questions)?;
     let key = transcript_key(talk_id, version);
     let json = transcript_json(
-        talk_id,
-        version,
-        &model,
-        &deps.hints.language,
-        audio_ms,
+        &JsonHeader {
+            talk: talk_id,
+            version,
+            model: &model,
+            language: &deps.hints.language,
+            audio_ms,
+            fallback_windows,
+            aligned,
+            origin,
+        },
         &seg,
-        fallback_windows,
-        aligned,
-        origin,
     );
     let hash = sha256_hex(json.as_bytes());
     deps.objects.put(&key, json.as_bytes())?;
@@ -826,20 +828,40 @@ pub async fn student_gap_talks(
     Ok(out)
 }
 
+/// What the transcript JSON says about how a transcript was made, besides its words and spans.
+#[derive(Debug, Clone, Copy)]
+struct JsonHeader<'a> {
+    /// The talk.
+    talk: TalkId,
+    /// The transcript version being written.
+    version: i32,
+    /// The recognition model's name.
+    model: &'a str,
+    /// The language the recognizer was told.
+    language: &'a str,
+    /// Audio length.
+    audio_ms: i64,
+    /// Ambiguous windows labeled by the rule fallback instead of the model.
+    fallback_windows: usize,
+    /// For an aligned source transcript, the share of its words matched.
+    aligned: Option<f32>,
+    /// `asr`, `aligned` or `text`.
+    origin: &'a str,
+}
+
 /// The transcript JSON for one talk's segmentation (Spec 04): the words, the spans and how they
 /// were made.
-#[allow(clippy::too_many_arguments)]
-fn transcript_json(
-    talk: TalkId,
-    version: i32,
-    model: &str,
-    language: &str,
-    audio_ms: i64,
-    seg: &Segmentation,
-    fallback_windows: usize,
-    aligned: Option<f32>,
-    origin: &str,
-) -> String {
+fn transcript_json(header: &JsonHeader<'_>, seg: &Segmentation) -> String {
+    let JsonHeader {
+        talk,
+        version,
+        model,
+        language,
+        audio_ms,
+        fallback_windows,
+        aligned,
+        origin,
+    } = *header;
     let doc = TranscriptJson {
         schema: 1,
         talk_id: talk.as_uuid().to_string(),

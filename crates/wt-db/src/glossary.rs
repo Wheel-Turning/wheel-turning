@@ -5,7 +5,7 @@ use sqlx::PgConnection;
 use wt_registry::glossary::{GlossaryTerm, TermKind};
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 
 /// A term kind as stored.
 fn kind_str(kind: TermKind) -> &'static str {
@@ -122,13 +122,15 @@ pub async fn import(
                 .await?;
                 log_change(
                     conn,
-                    "glossary_term",
-                    id,
-                    "variants",
-                    Some(serde_json::json!(existing.variants)),
-                    Some(serde_json::json!(merged)),
-                    by,
-                    "glossary import",
+                    &Change {
+                        entity: "glossary_term",
+                        entity_id: id,
+                        field: "variants",
+                        old_value: Some(serde_json::json!(existing.variants)),
+                        new_value: Some(serde_json::json!(merged)),
+                        actor: by,
+                        reason: "glossary import",
+                    },
                 )
                 .await?;
                 report.variants_added += new.len();
@@ -153,13 +155,17 @@ pub async fn import(
                 .await?;
                 log_change(
                     conn,
-                    "glossary_term",
-                    id,
-                    "created",
-                    None,
-                    Some(serde_json::json!({ "canonical": canonical, "variants": variants })),
-                    by,
-                    "glossary import",
+                    &Change {
+                        entity: "glossary_term",
+                        entity_id: id,
+                        field: "created",
+                        old_value: None,
+                        new_value: Some(
+                            serde_json::json!({ "canonical": canonical, "variants": variants }),
+                        ),
+                        actor: by,
+                        reason: "glossary import",
+                    },
                 )
                 .await?;
                 report.added += 1;
