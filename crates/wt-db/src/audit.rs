@@ -520,11 +520,13 @@ async fn text_checks(pool: &PgPool) -> Result<Vec<CheckResult>, DbError> {
             pool,
             "takedown_request_overdue",
             Severity::Warn,
-            // More than one business day: count the weekdays since it arrived.
+            // More than one business day: count the weekdays since its sender confirmed it, or
+            // since it arrived for requests from before confirmation existed.
             "select r.id::text from takedown_request r
              where r.status = 'open'
-               and (select count(*) from generate_series(r.received_at::date + 1, now()::date,
-                                                         interval '1 day') d
+               and (select count(*) from generate_series(
+                        coalesce(r.verified_at, r.received_at)::date + 1, now()::date,
+                        interval '1 day') d
                     where extract(isodow from d) < 6) > 1",
         )
         .await?,

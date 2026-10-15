@@ -12,6 +12,9 @@ const PAGES = [
   ["talk", paths.talk],
   ["transcript", paths.transcript],
   ["rights", "/rights"],
+  // A well-formed token shows the page with its button; the page reads nothing until it is
+  // pressed.
+  ["rights-confirm", `/rights/confirm?token=${"A".repeat(43)}`],
   ["about", "/about"],
   ["accessibility", "/accessibility"],
 ];

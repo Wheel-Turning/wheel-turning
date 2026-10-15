@@ -189,3 +189,81 @@ async fn the_web_role_still_cannot_read_the_query_log_or_answers() {
         .await;
     assert!(rename.is_err(), "wt_web may update last_seen_at only");
 }
+
+/// Spec 08, Rights lifecycle: the web role stores a removal request only as unverified, and can
+/// confirm it only through the token, once and before it expires.
+#[tokio::test]
+async fn the_web_role_stores_removal_requests_unverified_and_confirms_them_only_by_token() {
+    use wt_db::public_forms::{self, NewRequest};
+    let fx = common::start().await;
+    let web = web_login(&fx).await;
+    let hash = [7u8; 32];
+    let new = NewRequest {
+        name: "A Holder",
+        email: "holder@example.org",
+        target: "Excerpt 1",
+        message: None,
+        text_unit: None,
+        token_hash: &hash,
+    };
+    public_forms::request_removal(&web, &new).await.unwrap();
+    let status: String = sqlx::query_scalar("select status from takedown_request")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "unverified");
+
+    let forged = sqlx::query("insert into takedown_request (target, status) values ('x', 'open')")
+        .execute(&web)
+        .await;
+    assert!(forged.is_err(), "the web role cannot choose a status");
+    let direct = sqlx::query("update takedown_request set status = 'open'")
+        .execute(&web)
+        .await;
+    assert!(direct.is_err(), "the web role cannot update a request");
+
+    assert!(
+        !public_forms::confirm_removal(&web, &[8u8; 32])
+            .await
+            .unwrap()
+    );
+    assert!(public_forms::confirm_removal(&web, &hash).await.unwrap());
+    assert!(
+        !public_forms::confirm_removal(&web, &hash).await.unwrap(),
+        "a link works once"
+    );
+    let (status, verified): (String, bool) =
+        sqlx::query_as("select status, verified_at is not null from takedown_request")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!((status.as_str(), verified), ("open", true));
+
+    let late = [9u8; 32];
+    public_forms::request_removal(
+        &web,
+        &NewRequest {
+            token_hash: &late,
+            ..new
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "update takedown_request set verification_expires_at = now() - interval '8 days'
+         where status = 'unverified'",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    assert!(
+        !public_forms::confirm_removal(&web, &late).await.unwrap(),
+        "an expired link confirms nothing"
+    );
+    assert_eq!(public_forms::purge_unverified(&web).await.unwrap(), 1);
+    let left: i64 = sqlx::query_scalar("select count(*) from takedown_request")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 1, "the confirmed request stays");
+}

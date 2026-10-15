@@ -92,3 +92,9 @@ variable "batch_host_instance_type" {
   type        = string
   default     = "g5.xlarge"
 }
+
+variable "mail_from" {
+  description = "Sender of the removal request confirmation email. Its domain is the SES identity in infra/terraform/account."
+  type        = string
+  default     = "rights@wheelturning.org"
+}

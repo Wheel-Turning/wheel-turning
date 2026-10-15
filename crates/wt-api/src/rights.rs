@@ -1,5 +1,11 @@
-//! `GET /rights` and `POST /rights/request` (Spec 08, Rights lifecycle; Spec 06, Page
-//! inventory; Spec 09, Rights and removal page). Both work without a session.
+//! `GET /rights`, `POST /rights/request` and `GET|POST /rights/confirm` (Spec 08, Rights
+//! lifecycle; Spec 06, Page inventory; Spec 09, Rights and removal page). All work without a
+//! session.
+//!
+//! A request is stored `unverified` and acted on only after its sender opens the emailed link
+//! and confirms it (owner's decision of October 15, 2026), so nobody can take material down
+//! with forged requests. The link opens a page with a button rather than confirming on `GET`,
+//! so a mail scanner that follows links confirms nothing.
 
 use askama::Template;
 use axum::Form;
@@ -11,7 +17,12 @@ use sqlx::types::Uuid;
 use wt_db::public_forms::{self, NewRequest, SourceStatus};
 
 use crate::chrome::{Chrome, Current};
+use crate::mail::Message;
+use crate::session::{new_token, token_hash};
 use crate::{AppState, ClientAddress, page, server_error, too_many};
+
+/// Where to write when the form cannot take a request.
+const RIGHTS_MAILBOX: &str = "rights@wheelturning.org";
 
 /// One line of the source list.
 pub struct SourceLine {
@@ -90,7 +101,7 @@ struct RightsPage {
     form: RequestForm,
     excerpt: Option<String>,
     sent: bool,
-    error_summary: Option<&'static str>,
+    error_summary: Option<String>,
     errors: FieldErrors,
 }
 
@@ -156,13 +167,15 @@ pub struct RightsQuery {
     sent: Option<u8>,
 }
 
-/// Renders the rights page with the sources' current statuses and the form as given.
+/// Renders the rights page with the sources' current statuses and the form as given. `problem`
+/// replaces the summary when the request could not go ahead for a reason not in its fields.
 async fn render(
     state: &AppState,
     status: StatusCode,
     form: RequestForm,
     sent: bool,
     errors: FieldErrors,
+    problem: Option<String>,
 ) -> Response {
     let sources = match public_forms::source_statuses(&state.pool).await {
         Ok(s) => s,
@@ -184,11 +197,11 @@ async fn render(
             sources,
             excerpt,
             sent,
-            error_summary: match errors.count() {
+            error_summary: problem.or_else(|| match errors.count() {
                 0 => None,
-                1 => Some("Please fix the field marked below."),
-                _ => Some("Please fix the fields marked below."),
-            },
+                1 => Some("Please fix the field marked below.".to_owned()),
+                _ => Some("Please fix the fields marked below.".to_owned()),
+            }),
             errors,
             form,
         },
@@ -211,6 +224,7 @@ pub async fn rights_page(State(state): State<AppState>, Query(q): Query<RightsQu
         form,
         q.sent.is_some(),
         FieldErrors::default(),
+        None,
     )
     .await
 }
@@ -224,9 +238,10 @@ fn optional(s: &str, max: usize) -> Option<&str> {
     })
 }
 
-/// `POST /rights/request`: stores a request, at most 5 an hour from one address. Name, email and
-/// what to remove are required (owner's decision of October 15, 2026). A filled honeypot gets the
-/// same thank-you and stores nothing.
+/// `POST /rights/request`: stores a request as `unverified` and emails its sender a link to
+/// confirm it. At most 5 an hour from one address and 3 confirmation emails an hour to one
+/// recipient. Name, email and what to remove are required (owner's decision of October 15,
+/// 2026). A filled honeypot gets the same thank-you, stores nothing and sends nothing.
 pub async fn request(
     State(state): State<AppState>,
     ClientAddress(address): ClientAddress,
@@ -241,9 +256,37 @@ pub async fn request(
     }
     let errors = check(&form);
     if errors.count() > 0 {
-        return render(&state, StatusCode::BAD_REQUEST, form, false, errors).await;
+        return render(&state, StatusCode::BAD_REQUEST, form, false, errors, None).await;
     }
     let (name, email, target) = (form.name.trim(), form.email.trim(), form.target.trim());
+    let mailer = &state.site.mailer;
+    if !mailer.ready() {
+        tracing::warn!("rights request refused: no mailer to confirm it");
+        let problem = format!(
+            "We cannot send the confirmation email at the moment. Please write to {RIGHTS_MAILBOX} instead."
+        );
+        let status = StatusCode::SERVICE_UNAVAILABLE;
+        return render(
+            &state,
+            status,
+            form,
+            false,
+            FieldErrors::default(),
+            Some(problem),
+        )
+        .await;
+    }
+    if let Err(wait) = state
+        .site
+        .limits
+        .confirm_emails
+        .check(&email.to_lowercase())
+    {
+        return too_many(
+            wait,
+            "Several requests have gone to this email address this hour.",
+        );
+    }
     let text_unit = match form.excerpt.parse::<Uuid>() {
         Ok(id) => match public_forms::serving_text_unit(&state.pool, id).await {
             Ok(true) => Some(id),
@@ -252,19 +295,151 @@ pub async fn request(
         },
         Err(_) => None,
     };
+    let token = match new_token() {
+        Ok(t) => t,
+        Err(e) => return server_error("making a confirmation token", &e),
+    };
+    let hash = token_hash(&token);
     let new = NewRequest {
         name: optional(name, 200).unwrap_or(name),
         email: optional(email, 320).unwrap_or(email),
         target: optional(target, 1000).unwrap_or(target),
         message: optional(&form.message, 4000),
         text_unit,
+        token_hash: &hash,
     };
-    match public_forms::request_removal(&state.pool, &new).await {
-        Ok(()) => {
-            tracing::info!("rights request stored");
-            Redirect::to("/rights?sent=1#sent").into_response()
+    if let Err(e) = public_forms::request_removal(&state.pool, &new).await {
+        return server_error("storing a rights request", &e);
+    }
+    let message = confirmation(new.email, &state.site.public_url, &token);
+    if let Err(e) = mailer.send(&message).await {
+        // The stored request stays unverified and is purged a week after its link expires.
+        tracing::error!(error = %e, "rights request: confirmation email not sent");
+        let problem = format!(
+            "We could not send the confirmation email. Please try again later, or write to {RIGHTS_MAILBOX}."
+        );
+        let status = StatusCode::SERVICE_UNAVAILABLE;
+        return render(
+            &state,
+            status,
+            form,
+            false,
+            FieldErrors::default(),
+            Some(problem),
+        )
+        .await;
+    }
+    tracing::info!("rights request stored; confirmation sent");
+    Redirect::to("/rights?sent=1#sent").into_response()
+}
+
+/// The confirmation email. It carries nothing the sender typed, so the form cannot be used to
+/// put someone else's words or links in front of whoever owns the address.
+pub fn confirmation(to: &str, public_url: &str, token: &str) -> Message {
+    Message {
+        to: to.to_owned(),
+        subject: "Confirm your removal request to Wheel Turning".to_owned(),
+        text: format!(
+            "Someone asked Wheel Turning to remove material, and gave this email address.\n\n\
+             If it was you, open this link within 24 hours and confirm the request:\n\
+             {public_url}/rights/confirm?token={token}\n\n\
+             Nothing is removed until you confirm. Within one business day of your confirming, \
+             the material you named stops appearing.\n\n\
+             If it was not you, ignore this email. The request lapses and nothing changes.\n\n\
+             Wheel Turning\n"
+        ),
+    }
+}
+
+/// The confirmation page and its outcome.
+#[derive(Template)]
+#[template(path = "rights_confirm.html")]
+struct ConfirmPage {
+    chrome: Chrome,
+    /// The token from the link, for the button's form; none when the link is incomplete.
+    token: Option<String>,
+    /// After the button: whether the request was confirmed.
+    outcome: Option<bool>,
+}
+
+/// `GET /rights/confirm` and `POST /rights/confirm` parameters.
+#[derive(Debug, Default, Deserialize)]
+pub struct ConfirmForm {
+    #[serde(default)]
+    token: String,
+}
+
+/// A token as the link carries it: 43 URL-safe base64 characters (32 bytes).
+fn well_formed(token: &str) -> bool {
+    token.len() == 43
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// `GET /rights/confirm?token=...`: a page with one button. Following the link changes nothing.
+pub async fn confirm_page(Query(q): Query<ConfirmForm>) -> Response {
+    let token = q.token.trim();
+    let ok = well_formed(token);
+    page(
+        if ok {
+            StatusCode::OK
+        } else {
+            StatusCode::BAD_REQUEST
+        },
+        &ConfirmPage {
+            chrome: Chrome::new("/rights/confirm", Current::Rights, None),
+            token: ok.then(|| token.to_owned()),
+            outcome: None,
+        },
+    )
+}
+
+/// `POST /rights/confirm`: confirms the request the token belongs to, once and within 24 hours.
+pub async fn confirm(
+    State(state): State<AppState>,
+    ClientAddress(address): ClientAddress,
+    Form(form): Form<ConfirmForm>,
+) -> Response {
+    if let Err(wait) = state.site.limits.public_forms.check(&address) {
+        return too_many(wait, "You have sent several requests this hour.");
+    }
+    let token = form.token.trim();
+    let confirmed = if well_formed(token) {
+        match public_forms::confirm_removal(&state.pool, &token_hash(token)).await {
+            Ok(c) => c,
+            Err(e) => return server_error("confirming a rights request", &e),
         }
-        Err(e) => server_error("storing a rights request", &e),
+    } else {
+        false
+    };
+    if confirmed {
+        tracing::info!("rights request confirmed");
+    }
+    page(
+        if confirmed {
+            StatusCode::OK
+        } else {
+            StatusCode::BAD_REQUEST
+        },
+        &ConfirmPage {
+            chrome: Chrome::new("/rights/confirm", Current::Rights, None),
+            token: None,
+            outcome: Some(confirmed),
+        },
+    )
+}
+
+/// Deletes unconfirmed requests a week after their link expired, once an hour.
+pub async fn purge_loop(pool: sqlx::PgPool) {
+    let mut every = tokio::time::interval(std::time::Duration::from_secs(3600));
+    loop {
+        every.tick().await;
+        match public_forms::purge_unverified(&pool).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(requests = n, "purged unconfirmed rights requests"),
+            Err(e) => tracing::warn!(error = %e, "purging unconfirmed rights requests"),
+        }
     }
 }
 
@@ -305,6 +480,27 @@ mod tests {
         ] {
             assert!(!plausible_email(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_confirmation_email_carries_the_link_and_nothing_the_sender_typed() {
+        let m = confirmation("holder@example.org", "https://wt.test", "tok");
+        assert_eq!(m.to, "holder@example.org");
+        assert!(
+            m.text
+                .contains("https://wt.test/rights/confirm?token=tok\n")
+        );
+        assert!(m.text.contains("Nothing is removed until you confirm."));
+        assert!(!m.text.contains("holder@example.org"));
+    }
+
+    #[test]
+    fn only_a_43_character_url_safe_token_is_well_formed() {
+        let good = "A".repeat(43);
+        assert!(well_formed(&good));
+        assert!(!well_formed(&"A".repeat(42)));
+        assert!(!well_formed(&format!("{}=", "A".repeat(42))));
+        assert!(!well_formed(""));
     }
 
     #[test]

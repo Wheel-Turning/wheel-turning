@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select purge_unverified_takedown_requests() as \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "65ccbec8f61ffd40e841bef6291bbf2b4080ab83418cce4842709021bf6ff274"
+}

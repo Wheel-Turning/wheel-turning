@@ -15,14 +15,14 @@
 
 <h2>How it works</h2>
 <ol>
-  <li>Within one business day of your request, the material you name stops appearing. We do this before checking who you are.</li>
+  <li>We email you a link to confirm the request. Within one business day of your confirming it, the material you name stops appearing. We do this before checking that you hold the rights.</li>
   <li>Then we delete the text and our stored copies, and we block the same material from being added again, even from a different web address.</li>
   <li>If it turns out you do not hold the rights, we may restore it, and we will tell you first.</li>
   <li>If you would rather give permission or set limits, such as leaving out certain talks or topics, tell us that instead. We will record it and follow it.</li>
 </ol>
 
 <h2 id="request">Ask for removal</h2>
-{% if sent %}<p class="status" role="status" tabindex="-1" id="sent">Thank you. We received your request. What you named stops appearing within one business day.</p>{% endif %}
+{% if sent %}<p class="status" role="status" tabindex="-1" id="sent">Thank you. Please check your email and open the link to confirm the request. Nothing is removed until you do.</p>{% endif %}
 {% if let Some(e) = error_summary %}<p class="error" role="alert">{{ e }}</p>{% endif %}
 <form method="post" action="/rights/request" novalidate>
   {% if let Some(x) = excerpt %}<input type="hidden" name="excerpt" value="{{ x }}">{% endif %}
@@ -34,7 +34,7 @@
   <div class="field">
     <label for="r-email">Email</label>
     <input id="r-email" name="email" type="email" required maxlength="320" autocomplete="email" aria-describedby="r-email-help{% if errors.email.is_some() %} r-email-error{% endif %}"{% if errors.email.is_some() %} aria-invalid="true"{% endif %} value="{{ form.email }}">
-    <p id="r-email-help" class="help">We use it to reply to you.</p>
+    <p id="r-email-help" class="help">We email you a link to confirm the request, and reply there.</p>
     {% if let Some(e) = errors.email %}<p id="r-email-error" class="error">{{ e }}</p>{% endif %}
   </div>
   <div class="field">
@@ -52,7 +52,7 @@
     <input id="r-website" name="website" type="text" tabindex="-1" autocomplete="off">
   </div>
   <button type="submit">Send request</button>
-  <p class="help">The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.</p>
+  <p class="help">The link works for 24 hours. We act on the request first and reply after.</p>
 </form>
 
 <h2>Student voices</h2>

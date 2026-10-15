@@ -82,6 +82,7 @@ module "iam" {
   db_master_secret_arn     = module.database.master_secret_arn
   ecr_repository_arn       = module.service.ecr_repository_arn
   log_group_arns           = module.observability.log_group_arns
+  mail_from                = var.mail_from
 }
 
 module "service" {
@@ -96,6 +97,7 @@ module "service" {
   migrate_image_tag      = var.migrate_image_tag
   web_cpu                = var.web_cpu
   web_memory             = var.web_memory
+  mail_from              = var.mail_from
 
   llm = {
     model           = var.llm_model

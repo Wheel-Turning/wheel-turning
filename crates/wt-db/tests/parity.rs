@@ -69,10 +69,13 @@ async fn a_takedown_on_one_side_only_is_unsafe_until_it_is_replayed() {
     // Divergence that serves nothing removed: a talk the PC worker found after the copy, and a
     // removal request that reached the beta's form only.
     keyed_talk(&pc.pool, "found-later", BO).await;
-    sqlx::query("insert into takedown_request (target, message) values ('a talk url', 'please')")
-        .execute(&rds.pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "insert into takedown_request (target, message, status, verified_at)
+         values ('a talk url', 'please', 'open', now())",
+    )
+    .execute(&rds.pool)
+    .await
+    .unwrap();
     let report = run(&pc.pool, &rds.pool, NAMES).await.unwrap();
     assert!(!report.failed(), "{:#?}", report.differences);
     let benign = found(&report);

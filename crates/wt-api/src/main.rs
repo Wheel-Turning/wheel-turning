@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
         pool.clone(),
         site.privacy.retention_days,
     ));
+    tokio::spawn(wt_api::rights::purge_loop(pool.clone()));
     let app = router(AppState {
         pool,
         site: Arc::new(site),

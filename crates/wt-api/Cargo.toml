@@ -15,6 +15,11 @@ anyhow.workspace = true
 askama = "0.14"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 async-trait = "0.1"
+# The SES client uses rustls on ring, already in the tree for sqlx, rather than the default
+# aws-lc, whose OpenSSL-licensed parts deny.toml does not allow.
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-sdk-sesv2 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
 axum.workspace = true
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

@@ -33,12 +33,18 @@ variable "permissions_boundary_arn" {
   type        = string
 }
 
+variable "mail_from" {
+  description = "The one address the web service may send email from through SES."
+  type        = string
+}
+
 variable "log_group_arns" {
   description = "Log group ARNs by purpose: web, admin, batch."
   type        = map(string)
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 locals {
   path = "/${var.name}/"
@@ -174,6 +180,18 @@ data "aws_iam_policy_document" "web_task" {
     sid       = "ReadModels"
     actions   = ["s3:GetObject"]
     resources = ["${var.bucket_arns["models"]}/*"]
+  }
+  # The link that confirms a removal request (Spec 08). Any identity, so recipients verified
+  # for the SES sandbox also match, but only from the one address.
+  statement {
+    sid       = "SendRightsMail"
+    actions   = ["ses:SendEmail"]
+    resources = ["arn:aws:ses:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:identity/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ses:FromAddress"
+      values   = [var.mail_from]
+    }
   }
 }
 

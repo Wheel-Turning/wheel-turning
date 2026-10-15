@@ -39,3 +39,9 @@ variable "cloudtrail_retention_days" {
   type        = number
   default     = 365
 }
+
+variable "mail_domain" {
+  description = "Domain the site sends email from through SES, as rights@<domain>."
+  type        = string
+  default     = "wheelturning.org"
+}
