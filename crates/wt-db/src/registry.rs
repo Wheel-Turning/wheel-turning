@@ -6,7 +6,7 @@ use wt_registry::{AliasMatcher, RegistryFile, SpeakerMatch};
 
 use crate::DbError;
 use crate::consent::try_clear;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::talk::TalkError;
 
 /// What an import changed.
@@ -147,13 +147,15 @@ pub async fn import(
                     .await?;
                     log_change(
                         &mut tx,
-                        "teacher",
-                        teacher_id,
-                        "alias",
-                        None,
-                        Some(serde_json::json!(alias)),
-                        actor,
-                        "registry import",
+                        &Change {
+                            entity: "teacher",
+                            entity_id: teacher_id,
+                            field: "alias",
+                            old_value: None,
+                            new_value: Some(serde_json::json!(alias)),
+                            actor,
+                            reason: "registry import",
+                        },
                     )
                     .await?;
                     report.aliases_added += 1;
@@ -273,13 +275,15 @@ pub async fn assign_speaker(
             .await?;
             log_change(
                 conn,
-                "talk",
-                talk_id.as_uuid(),
-                "teacher_id",
-                None,
-                Some(serde_json::json!({ "teacher_id": teacher, "alias": alias })),
-                actor,
-                "speaker resolved from alias",
+                &Change {
+                    entity: "talk",
+                    entity_id: talk_id.as_uuid(),
+                    field: "teacher_id",
+                    old_value: None,
+                    new_value: Some(serde_json::json!({ "teacher_id": teacher, "alias": alias })),
+                    actor,
+                    reason: "speaker resolved from alias",
+                },
             )
             .await?;
             clear_if_ready(conn, talk_id).await
@@ -347,14 +351,17 @@ pub async fn assign_speaker_by_hand(
     .await?;
     log_change(
         conn,
-        "talk",
-        talk_id.as_uuid(),
-        "teacher_id",
-        talk.teacher_id
-            .map(|t| serde_json::json!({ "teacher_id": t })),
-        Some(serde_json::json!({ "teacher_id": teacher, "sangha_id": sangha })),
-        actor,
-        "speaker assigned by hand",
+        &Change {
+            entity: "talk",
+            entity_id: talk_id.as_uuid(),
+            field: "teacher_id",
+            old_value: talk
+                .teacher_id
+                .map(|t| serde_json::json!({ "teacher_id": t })),
+            new_value: Some(serde_json::json!({ "teacher_id": teacher, "sangha_id": sangha })),
+            actor,
+            reason: "speaker assigned by hand",
+        },
     )
     .await?;
     clear_if_ready(conn, talk_id).await
@@ -444,13 +451,15 @@ pub async fn ensure_teachers(
         .await?;
         log_change(
             conn,
-            "teacher",
-            id,
-            "display_name",
-            None,
-            Some(serde_json::json!({ "display_name": name, "sangha": sangha })),
-            actor,
-            "speaker named by a mandated source",
+            &Change {
+                entity: "teacher",
+                entity_id: id,
+                field: "display_name",
+                old_value: None,
+                new_value: Some(serde_json::json!({ "display_name": name, "sangha": sangha })),
+                actor,
+                reason: "speaker named by a mandated source",
+            },
         )
         .await?;
         added.push(name.to_owned());
@@ -519,13 +528,15 @@ pub async fn set_citation(
         if old != new {
             log_change(
                 &mut tx,
-                "teacher",
-                id.as_uuid(),
-                field,
-                old.as_ref().map(|v| serde_json::json!(v)),
-                new.as_ref().map(|v| serde_json::json!(v)),
-                actor,
-                reason,
+                &Change {
+                    entity: "teacher",
+                    entity_id: id.as_uuid(),
+                    field,
+                    old_value: old.as_ref().map(|v| serde_json::json!(v)),
+                    new_value: new.as_ref().map(|v| serde_json::json!(v)),
+                    actor,
+                    reason,
+                },
             )
             .await?;
             changed = true;

@@ -1023,14 +1023,16 @@ async fn load_answer(
         Err(e) => return Err(Box::new(server_error("loading citations", &e))),
     };
     let mut view = view::assemble(
-        answer,
-        &stored.payload,
-        &served,
-        &excerpts,
-        &cited,
-        named.as_deref(),
+        &view::AnswerRows {
+            answer,
+            payload: &stored.payload,
+            served: &served,
+            excerpts: &excerpts,
+            cited: &cited,
+            named_teacher: named.as_deref(),
+            accessed: stored.created_at.date_naive(),
+        },
         state.site.retrieval.answer.link_lead_in_ms,
-        stored.created_at.date_naive(),
     );
     view.summary = stored
         .payload

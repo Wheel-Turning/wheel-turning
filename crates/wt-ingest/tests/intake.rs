@@ -207,11 +207,14 @@ async fn refresh_is_a_no_op_when_unchanged_and_diffs_a_change_before_applying() 
                 &objects,
                 &FakeEmbedder::new("fake"),
                 &fetcher,
-                None,
-                &codes,
                 edition,
-                apply,
-                "owner",
+                &wt_ingest::texts::ImportOptions {
+                    allowed_codes: &codes,
+                    actor: "owner",
+                    apply,
+                    force: true,
+                    pdf_env: None,
+                },
             )
             .await
             .unwrap()

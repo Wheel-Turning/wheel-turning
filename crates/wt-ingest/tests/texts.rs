@@ -187,10 +187,13 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        false,
-        None,
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: false,
+            force: false,
+            pdf_env: None,
+        },
     )
     .await
     .unwrap();
@@ -208,10 +211,13 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        None,
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: None,
+        },
     )
     .await
     .unwrap();
@@ -253,10 +259,13 @@ async fn a_dry_run_reports_and_an_apply_writes_once() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        None,
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: None,
+        },
     )
     .await
     .unwrap();
@@ -290,10 +299,13 @@ async fn evidence_must_exist_be_approved_and_carry_an_allowed_code() {
             &fx.objects,
             &embedder,
             &manifest,
-            &allowed(),
-            "o",
-            true,
-            None,
+            &texts::ImportOptions {
+                allowed_codes: &allowed(),
+                actor: "o",
+                apply: true,
+                force: false,
+                pdf_env: None,
+            },
         )
         .await
         .unwrap_err();
@@ -316,10 +328,13 @@ async fn include_sections_restores_an_excluded_section() {
         &fx.objects,
         &FakeEmbedder::new("fake"),
         &manifest,
-        &allowed(),
-        "o",
-        false,
-        None,
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "o",
+            apply: false,
+            force: false,
+            pdf_env: None,
+        },
     )
     .await
     .unwrap();
@@ -339,10 +354,13 @@ async fn reembed_renews_stale_vectors_from_stored_text_and_then_does_nothing() {
         &fx.objects,
         &embedder,
         &manifest,
-        &allowed(),
-        "owner",
-        true,
-        None,
+        &texts::ImportOptions {
+            allowed_codes: &allowed(),
+            actor: "owner",
+            apply: true,
+            force: false,
+            pdf_env: None,
+        },
     )
     .await
     .unwrap();

@@ -102,10 +102,13 @@ label_template = "{{work}}, paragraph {{n}}"
             &self.objects,
             &FakeEmbedder::new("fake"),
             manifest,
-            &LicenseSettings::default().allowed_license_codes,
-            "owner",
-            true,
-            None,
+            &texts::ImportOptions {
+                allowed_codes: &LicenseSettings::default().allowed_license_codes,
+                actor: "owner",
+                apply: true,
+                force: false,
+                pdf_env: None,
+            },
         )
         .await
     }

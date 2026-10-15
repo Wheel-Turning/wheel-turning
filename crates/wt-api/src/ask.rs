@@ -203,6 +203,12 @@ pub async fn answer_framed(
     progress: &Sink,
 ) -> Result<Gated, AskError> {
     let started = Instant::now();
+    let question = Question {
+        tester,
+        text,
+        framing: &framing,
+        started,
+    };
     let mut timings = StageTimings::default();
 
     let stage = Instant::now();
@@ -252,7 +258,7 @@ pub async fn answer_framed(
                 t = &mut gate => {
                     let t = joined(t);
                     if let Some(stop) = stop(&framing, &t) {
-                        return stopped(pool, site, tester, text, &framing, stop, t, started).await;
+                        return stopped(pool, site, &question, stop, t).await;
                     }
                     (retrieval.await?, t)
                 }
@@ -261,7 +267,7 @@ pub async fn answer_framed(
         }
     };
     if let Some(stop) = stop(&framing, &triaged) {
-        return stopped(pool, site, tester, text, &framing, stop, triaged, started).await;
+        return stopped(pool, site, &question, stop, triaged).await;
     }
     let level = triaged.raise(framing.level);
     timings.embed_ms = found.timings.embed_ms;
@@ -452,20 +458,36 @@ async fn kept(
     Ok((kept, privacy_mode))
 }
 
+/// One question in [`answer_framed`]: who asked it, its words, how it was framed and when it
+/// started, for the log row of a question the gate stops.
+#[derive(Debug, Clone, Copy)]
+struct Question<'a> {
+    /// The tester who asked.
+    tester: TesterId,
+    /// The question as typed.
+    text: &'a str,
+    /// How it reached the query path.
+    framing: &'a Framing,
+    /// When the question started, for its latency.
+    started: Instant,
+}
+
 /// Logs a question the gate stopped: counts only for `acute` and `out_of_scope`, and for
 /// `unrelated` a row without an answer, kept as the privacy mode says. A logging failure is
 /// reported and the page shows anyway, since the notice matters more than the count.
-#[allow(clippy::too_many_arguments)]
 async fn stopped(
     pool: &PgPool,
     site: &Site,
-    tester: TesterId,
-    text: &str,
-    framing: &Framing,
+    question: &Question<'_>,
     stop: Stop,
     triaged: Triaged,
-    started: Instant,
 ) -> Result<Gated, AskError> {
+    let Question {
+        tester,
+        text,
+        framing,
+        started,
+    } = *question;
     let latency_ms = i32::try_from(millis(started)).unwrap_or(i32::MAX);
     let logged = match stop {
         Stop::CountsOnly(level) => {

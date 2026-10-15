@@ -482,10 +482,13 @@ pub async fn walk(
         objects,
         embedder,
         &manifest_path,
-        env.allowed_codes,
-        "intake",
-        false,
-        env.pdf_env,
+        &super::ImportOptions {
+            allowed_codes: env.allowed_codes,
+            actor: "intake",
+            apply: false,
+            force: false,
+            pdf_env: env.pdf_env,
+        },
     )
     .await?;
     prompt.say(&format!(
@@ -523,10 +526,13 @@ pub async fn walk(
         objects,
         embedder,
         &manifest_path,
-        env.allowed_codes,
-        "intake",
-        true,
-        env.pdf_env,
+        &super::ImportOptions {
+            allowed_codes: env.allowed_codes,
+            actor: "intake",
+            apply: true,
+            force: false,
+            pdf_env: env.pdf_env,
+        },
     )
     .await?;
     if !applied.applied && !applied.unchanged {

@@ -7,7 +7,7 @@ use sqlx::PgConnection;
 use wt_core::ids::TalkId;
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::registry::{RegistryDbError, find_teacher};
 
 /// A display level, from narrowest to widest by [`DisplayLevel::rank`].
@@ -251,13 +251,15 @@ pub async fn set_level(
         };
         log_change(
             &mut tx,
-            entity,
-            entity_id,
-            "display_level",
-            Some(serde_json::json!(from.as_str())),
-            Some(serde_json::json!(to.as_str())),
-            actor,
-            &why,
+            &Change {
+                entity,
+                entity_id,
+                field: "display_level",
+                old_value: Some(serde_json::json!(from.as_str())),
+                new_value: Some(serde_json::json!(to.as_str())),
+                actor,
+                reason: &why,
+            },
         )
         .await?;
     }
@@ -304,13 +306,15 @@ pub async fn mark_takedown_level(
         .await?;
         log_change(
             &mut tx,
-            "teacher",
-            id.as_uuid(),
-            "display_level",
-            Some(serde_json::json!(from.as_str())),
-            Some(serde_json::json!(to.as_str())),
-            actor,
-            reason,
+            &Change {
+                entity: "teacher",
+                entity_id: id.as_uuid(),
+                field: "display_level",
+                old_value: Some(serde_json::json!(from.as_str())),
+                new_value: Some(serde_json::json!(to.as_str())),
+                actor,
+                reason,
+            },
         )
         .await?;
     }

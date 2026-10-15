@@ -105,10 +105,13 @@ label_template = "{{work}}, paragraph {{n}}"
             &self.objects,
             &FakeEmbedder::new("fake"),
             &path,
-            &LicenseSettings::default().allowed_license_codes,
-            "owner",
-            apply,
-            None,
+            &texts::ImportOptions {
+                allowed_codes: &LicenseSettings::default().allowed_license_codes,
+                actor: "owner",
+                apply,
+                force: false,
+                pdf_env: None,
+            },
         )
         .await
         .unwrap()

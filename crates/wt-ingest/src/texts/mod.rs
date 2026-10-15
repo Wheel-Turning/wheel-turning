@@ -242,6 +242,7 @@ pub fn work_name_warnings(
 }
 
 /// How an import runs.
+#[derive(Clone, Copy)]
 pub struct ImportOptions<'a> {
     /// `[licenses] allowed_license_codes`.
     pub allowed_codes: &'a [String],
@@ -311,35 +312,6 @@ pub async fn reembed(
         tx.commit().await?;
         report.reembedded += stale.len();
     }
-}
-
-/// Runs an import. `allowed_codes` is `[licenses] allowed_license_codes`. Without `apply` it
-/// only reports. A PDF needs `pdf_env`.
-#[allow(clippy::too_many_arguments)]
-pub async fn import(
-    conn: &mut sqlx::PgConnection,
-    objects: &dyn ObjectStore,
-    embedder: &dyn Embedder,
-    manifest_path: &Path,
-    allowed_codes: &[String],
-    actor: &str,
-    apply: bool,
-    pdf_env: Option<&PdfEnv<'_>>,
-) -> Result<ImportReport, TextError> {
-    import_with(
-        conn,
-        objects,
-        embedder,
-        manifest_path,
-        &ImportOptions {
-            allowed_codes,
-            actor,
-            apply,
-            force: false,
-            pdf_env,
-        },
-    )
-    .await
 }
 
 /// Checks that evidence exists, is approved and carries an allowed code.
@@ -431,9 +403,10 @@ fn part_manifest(
     Ok(d)
 }
 
-/// Runs an import with options: a large PDF not yet read is queued as chunk jobs, a manifest
-/// with parts imports each part as its own edition, and anything else imports at once.
-pub async fn import_with(
+/// Runs an import as `opts` says: without `apply` it only reports, and a PDF needs `pdf_env`. A
+/// large PDF not yet read is queued as chunk jobs, a manifest with parts imports each part as its
+/// own edition, and anything else imports at once.
+pub async fn import(
     conn: &mut sqlx::PgConnection,
     objects: &dyn ObjectStore,
     embedder: &dyn Embedder,

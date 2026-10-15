@@ -7,7 +7,7 @@ use sqlx::PgConnection;
 use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use wt_core::ids::{SourceVideoId, TalkId};
 
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::ingest::IngestDbError;
 use crate::storage::StorageRef;
 
@@ -191,13 +191,15 @@ pub async fn set_match(
     .await?;
     log_change(
         conn,
-        "source_video",
-        episode.as_uuid(),
-        "match",
-        None,
-        Some(matched),
-        actor,
-        "feed episode matched to a Vimeo talk",
+        &Change {
+            entity: "source_video",
+            entity_id: episode.as_uuid(),
+            field: "match",
+            old_value: None,
+            new_value: Some(matched),
+            actor,
+            reason: "feed episode matched to a Vimeo talk",
+        },
     )
     .await?;
     Ok(())
@@ -590,16 +592,18 @@ pub async fn merge_upload(
     };
     log_change(
         conn,
-        "talk",
-        loser.as_uuid(),
-        "state",
-        Some(serde_json::json!({ "state": old.state, "reason": old.state_reason })),
-        Some(serde_json::json!({
-            "state": "excluded", "reason": DUPLICATE_UPLOAD, "duplicate_of": keeper,
-            "episode": episode,
-        })),
-        actor,
-        "another upload of one recording, shown by a feed episode",
+        &Change {
+            entity: "talk",
+            entity_id: loser.as_uuid(),
+            field: "state",
+            old_value: Some(serde_json::json!({ "state": old.state, "reason": old.state_reason })),
+            new_value: Some(serde_json::json!({
+                "state": "excluded", "reason": DUPLICATE_UPLOAD, "duplicate_of": keeper,
+                "episode": episode,
+            })),
+            actor,
+            reason: "another upload of one recording, shown by a feed episode",
+        },
     )
     .await?;
     Ok(true)

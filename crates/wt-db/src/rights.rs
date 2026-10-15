@@ -12,7 +12,7 @@ use sqlx::{PgConnection, PgPool};
 use wt_core::records::StoredRecord;
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::registry::{RegistryDbError, find_teacher};
 use crate::takedown::{self, Scope, TakedownError, TakedownReport};
 use wt_core::gate::ConsentStatus;
@@ -1052,13 +1052,15 @@ async fn clear_these(
         {
             log_change(
                 conn,
-                "talk",
-                id,
-                "state",
-                Some(serde_json::json!("awaiting_consent")),
-                Some(serde_json::json!("cleared")),
-                actor,
-                reason,
+                &Change {
+                    entity: "talk",
+                    entity_id: id,
+                    field: "state",
+                    old_value: Some(serde_json::json!("awaiting_consent")),
+                    new_value: Some(serde_json::json!("cleared")),
+                    actor,
+                    reason,
+                },
             )
             .await?;
             cleared.push(talk);

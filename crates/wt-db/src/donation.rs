@@ -8,7 +8,7 @@ use sqlx::types::chrono::{DateTime, Utc};
 use wt_core::ids::SanghaId;
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 
 /// One sangha's donation link as the registry holds it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -140,13 +140,15 @@ pub async fn verify(pool: &PgPool, name: &str, url: &str, by: &str) -> Result<Li
     .await?;
     log_change(
         &mut tx,
-        "sangha",
-        row.id,
-        "donation_verified",
-        Some(serde_json::json!(row.donation_verified)),
-        Some(serde_json::json!({ "verified": true, "url": url })),
-        by,
-        "a person opened the giving page and confirmed it takes gifts for the sangha",
+        &Change {
+            entity: "sangha",
+            entity_id: row.id,
+            field: "donation_verified",
+            old_value: Some(serde_json::json!(row.donation_verified)),
+            new_value: Some(serde_json::json!({ "verified": true, "url": url })),
+            actor: by,
+            reason: "a person opened the giving page and confirmed it takes gifts for the sangha",
+        },
     )
     .await?;
     tx.commit().await?;
@@ -179,13 +181,15 @@ pub async fn unverify(
     .await?;
     log_change(
         &mut tx,
-        "sangha",
-        row.id,
-        "donation_verified",
-        Some(serde_json::json!(row.donation_verified)),
-        Some(serde_json::json!(false)),
-        by,
-        reason,
+        &Change {
+            entity: "sangha",
+            entity_id: row.id,
+            field: "donation_verified",
+            old_value: Some(serde_json::json!(row.donation_verified)),
+            new_value: Some(serde_json::json!(false)),
+            actor: by,
+            reason,
+        },
     )
     .await?;
     tx.commit().await?;

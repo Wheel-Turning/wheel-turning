@@ -445,10 +445,13 @@ pub async fn import_text(
         &objects,
         embedder,
         manifest,
-        &licenses.allowed_license_codes,
-        by,
-        apply,
-        Some(&env),
+        &wt_ingest::texts::ImportOptions {
+            allowed_codes: &licenses.allowed_license_codes,
+            actor: by,
+            apply,
+            force: false,
+            pdf_env: Some(&env),
+        },
     )
     .await?;
     let citations = wt_ingest::config::CitationSettings::load(&config_dir.join("pipeline.toml"))?;
@@ -720,11 +723,14 @@ pub async fn refresh_text(
         &objects,
         embedder,
         &fetcher,
-        Some(&env),
-        &licenses.allowed_license_codes,
         edition,
-        apply,
-        by,
+        &wt_ingest::texts::ImportOptions {
+            allowed_codes: &licenses.allowed_license_codes,
+            actor: by,
+            apply,
+            force: true,
+            pdf_env: Some(&env),
+        },
     )
     .await?)
 }
@@ -921,10 +927,12 @@ pub async fn reocr(
         &embedder,
         &env,
         &licenses.allowed_license_codes,
-        edition,
-        range,
-        dpi,
-        by,
+        &wt_ingest::texts::large::ReocrRequest {
+            edition,
+            pages: range,
+            dpi,
+            by,
+        },
     )
     .await?)
 }

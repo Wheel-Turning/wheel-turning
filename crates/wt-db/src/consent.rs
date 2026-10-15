@@ -6,7 +6,7 @@ use wt_core::gate::{ConsentStatus, GateError};
 use wt_core::ids::{TalkId, TeacherId};
 
 use crate::DbError;
-use crate::correction::log_change;
+use crate::correction::{Change, log_change};
 use crate::registry::{RegistryDbError, find_teacher};
 use crate::takedown::{self, Scope, TakedownError, TakedownReport};
 use crate::talk::{TalkError, TalkRepo};
@@ -275,13 +275,15 @@ async fn log_state(
 ) -> Result<(), DbError> {
     log_change(
         conn,
-        "talk",
-        talk,
-        "state",
-        Some(serde_json::json!(old)),
-        Some(serde_json::json!(new)),
-        actor,
-        reason,
+        &Change {
+            entity: "talk",
+            entity_id: talk,
+            field: "state",
+            old_value: Some(serde_json::json!(old)),
+            new_value: Some(serde_json::json!(new)),
+            actor,
+            reason,
+        },
     )
     .await
 }
@@ -386,13 +388,15 @@ pub async fn set_rights(
             .await?;
         log_change(
             &mut tx,
-            "talk",
-            id,
-            "rights_holder",
-            old.map(serde_json::Value::from),
-            Some(serde_json::Value::from(new)),
-            actor,
-            "set-rights",
+            &Change {
+                entity: "talk",
+                entity_id: id,
+                field: "rights_holder",
+                old_value: old.map(serde_json::Value::from),
+                new_value: Some(serde_json::Value::from(new)),
+                actor,
+                reason: "set-rights",
+            },
         )
         .await?;
         let state =
