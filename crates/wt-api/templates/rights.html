@@ -27,19 +27,21 @@
 <form method="post" action="/rights/request" novalidate>
   {% if let Some(x) = excerpt %}<input type="hidden" name="excerpt" value="{{ x }}">{% endif %}
   <div class="field">
-    <label for="r-name">Name (optional)</label>
-    <input id="r-name" name="name" type="text" maxlength="200" autocomplete="name" value="{{ form.name }}">
+    <label for="r-name">Name</label>
+    <input id="r-name" name="name" type="text" required maxlength="200" autocomplete="name"{% if errors.name.is_some() %} aria-describedby="r-name-error" aria-invalid="true"{% endif %} value="{{ form.name }}">
+    {% if let Some(e) = errors.name %}<p id="r-name-error" class="error">{{ e }}</p>{% endif %}
   </div>
   <div class="field">
-    <label for="r-email">Email (optional)</label>
-    <input id="r-email" name="email" type="email" maxlength="320" autocomplete="email" aria-describedby="r-email-help" value="{{ form.email }}">
-    <p id="r-email-help" class="help">We can only reply if you give a way to reach you.</p>
+    <label for="r-email">Email</label>
+    <input id="r-email" name="email" type="email" required maxlength="320" autocomplete="email" aria-describedby="r-email-help{% if errors.email.is_some() %} r-email-error{% endif %}"{% if errors.email.is_some() %} aria-invalid="true"{% endif %} value="{{ form.email }}">
+    <p id="r-email-help" class="help">We use it to reply to you.</p>
+    {% if let Some(e) = errors.email %}<p id="r-email-error" class="error">{{ e }}</p>{% endif %}
   </div>
   <div class="field">
     <label for="r-target">What should be removed?</label>
-    <input id="r-target" name="target" type="text" required maxlength="1000" aria-describedby="r-target-help{% if target_error.is_some() %} r-target-error{% endif %}"{% if target_error.is_some() %} aria-invalid="true"{% endif %} value="{{ form.target }}">
+    <input id="r-target" name="target" type="text" required maxlength="1000" aria-describedby="r-target-help{% if errors.target.is_some() %} r-target-error{% endif %}"{% if errors.target.is_some() %} aria-invalid="true"{% endif %} value="{{ form.target }}">
     <p id="r-target-help" class="help">A web address, a title, or the code shown next to an excerpt.</p>
-    {% if let Some(e) = target_error %}<p id="r-target-error" class="error">{{ e }}</p>{% endif %}
+    {% if let Some(e) = errors.target %}<p id="r-target-error" class="error">{{ e }}</p>{% endif %}
   </div>
   <div class="field">
     <label for="r-message">Message (optional)</label>

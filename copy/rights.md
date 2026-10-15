@@ -14,7 +14,7 @@ Our judgement that terms allow something is our own decision, not the rights hol
 3. If it turns out you do not hold the rights, we may restore it, and we will tell you first.
 4. If you would rather give permission or set limits, such as leaving out certain talks or topics, tell us that instead. We will record it and follow it.
 
-**Form.** Fields: Name (optional). Email (optional, but we can only reply if you give a way to reach you). What should be removed? (a web address, a title, or the code shown next to an excerpt). Message (optional). Button: Send request. Note under the button: The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.
+**Form.** Fields: Name. Email (help: We use it to reply to you.). Both are required (owner's decision of October 15, 2026); an empty name or email, or an address without one `@` and a dotted domain, is marked on its own field. What should be removed? (a web address, a title, or the code shown next to an excerpt). Message (optional). Button: Send request. Note under the button: The project cannot send email yet, so replies may take a few days. We act on the request first and reply after.
 
 **Student voices.** Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. The edit is made through a language model provider whose terms forbid training on what it receives and require deletion within 30 days. If you recognize your own question and want it removed, use the form below.
 
