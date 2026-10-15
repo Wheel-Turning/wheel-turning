@@ -214,7 +214,17 @@ jobs:
             --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=ENABLED}" \
             --query 'tasks[0].taskArn' --output text)"
           echo "migrate task: $task"
-          aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
+          # One waiter gives up after 10 minutes; building an index on RDS can take longer
+          # (0043, October 15, 2026), so wait up to 30.
+          for attempt in 1 2 3; do
+            if aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"; then
+              break
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "::error::the migrate task was still running after 30 minutes"
+              exit 1
+            fi
+          done
           exit_code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
             --query 'tasks[0].containers[0].exitCode' --output text)"
           aws logs get-log-events --log-group-name /wt-v1/admin \

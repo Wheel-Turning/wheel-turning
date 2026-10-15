@@ -13,9 +13,10 @@ use wt_extract::{
     ClaudeClient, ClaudeSettings, LlmClient, LogAlerter, PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_ml::{MlError, OnnxEmbedder, OnnxReranker, OnnxSettings, Reranker};
+use wt_retrieve::rank::LlmRanker;
 use wt_retrieve::sensitive::triage::LlmTriage;
 use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
-use wt_retrieve::{RetrievalConfig, Sensitivity, Triage};
+use wt_retrieve::{Ranker, RetrievalConfig, Sensitivity, Triage};
 
 use crate::Site;
 use crate::session::Keys;
@@ -72,19 +73,23 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
             Keys::random().map_err(err("generating a session key"))?
         }
     };
-    // Without the reranker export, answers run on the fused order and say so (Spec 05, step 4).
-    let mut rerank_settings = OnnxSettings::new(&config.model_dir, &config.rerank_model);
-    rerank_settings.runtime.clone_from(&config.ort_dylib);
-    let reranker: Option<Arc<dyn Reranker>> = match OnnxReranker::load_pool(
-        &rerank_settings,
-        retrieval.retrieval.rerank_sessions,
-    ) {
-        Ok(r) => Some(Arc::new(r)),
-        Err(MlError::Files(missing)) => {
-            tracing::warn!(model = %config.rerank_model, %missing, "no reranker loaded: relevance threshold off");
-            None
+    // The cross-encoder loads only when `[ranking]` asks for it: on the web service's CPUs it
+    // took longer than the whole answer may (owner's decision of October 15, 2026). Without the
+    // export, answers run on the fused order and say so (Spec 05, step 4).
+    let onnx: Option<Arc<dyn Reranker>> = match retrieval.ranking.ranker {
+        Ranker::Model => None,
+        Ranker::Onnx => {
+            let mut rerank_settings = OnnxSettings::new(&config.model_dir, &config.rerank_model);
+            rerank_settings.runtime.clone_from(&config.ort_dylib);
+            match OnnxReranker::load_pool(&rerank_settings, retrieval.retrieval.rerank_sessions) {
+                Ok(r) => Some(Arc::new(r)),
+                Err(MlError::Files(missing)) => {
+                    tracing::warn!(model = %config.rerank_model, %missing, "no reranker loaded: relevance threshold off");
+                    None
+                }
+                Err(e) => return Err(err("loading the reranker")(e)),
+            }
         }
-        Err(e) => return Err(err("loading the reranker")(e)),
     };
     let (llm, triage): (Arc<dyn LlmClient>, Option<Arc<dyn Triage>>) = match claude(
         config, &dir, pool,
@@ -99,6 +104,21 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
             (Arc::new(UnavailableLlm), None)
         }
     };
+    let reranker = match retrieval.ranking.ranker {
+        Ranker::Model if config.llm_real_data_ok && triage.is_some() => {
+            let ranker: Arc<dyn Reranker> = Arc::new(LlmRanker::new(
+                llm.clone(),
+                retrieval.ranking.batch,
+                retrieval.ranking.max_chars,
+            ));
+            Some(ranker)
+        }
+        Ranker::Model => {
+            tracing::warn!("no usable ranking model: answers run on the fused order");
+            None
+        }
+        Ranker::Onnx => onnx.clone(),
+    };
     let owner_name = std::env::var("WT_OWNER_NAME")
         .ok()
         .map(|n| n.trim().to_owned())
@@ -111,6 +131,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         trust_forwarded_for,
         embedder: Arc::new(embedder),
         reranker,
+        span_reranker: onnx,
         llm,
         real_data_ok: config.llm_real_data_ok,
         retrieval,
@@ -165,12 +186,24 @@ fn claude(
         }
         _ => tracing::warn!("no usable triage model: the gate is degraded"),
     }
-    // Excerpts fall back to the reranker and the trimmed passage without their model.
-    match config.llm_model_for(LlmStage::Excerpt) {
-        Ok(model) if licenses.require(model).is_ok() && prices.get(model).is_some() => {
-            models.insert(LlmStage::Excerpt.as_str(), model.to_owned());
+    // Excerpts fall back to the reranker and the trimmed passage without their model, and
+    // ranking to the fused order.
+    for (stage, missing) in [
+        (
+            LlmStage::Excerpt,
+            "no usable excerpt model: excerpts are chosen without it",
+        ),
+        (
+            LlmStage::Rank,
+            "no usable ranking model: the model ranker's calls fail",
+        ),
+    ] {
+        match config.llm_model_for(stage) {
+            Ok(model) if licenses.require(model).is_ok() && prices.get(model).is_some() => {
+                models.insert(stage.as_str(), model.to_owned());
+            }
+            _ => tracing::warn!("{missing}"),
         }
-        _ => tracing::warn!("no usable excerpt model: excerpts are chosen without it"),
     }
     tracing::info!(
         ?models,

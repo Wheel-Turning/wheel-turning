@@ -19,6 +19,42 @@ pub struct RetrievalConfig {
     pub synthesis: SynthesisConfig,
     /// `[excerpt]`.
     pub excerpt: ExcerptConfig,
+    /// `[ranking]`.
+    pub ranking: RankingConfig,
+}
+
+/// What scores the candidates (Spec 05, step 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ranker {
+    /// The bge-reranker cross-encoder on the server's CPU, which also scores excerpt spans.
+    #[default]
+    Onnx,
+    /// A Haiku-class language model ([`crate::rank::LlmRanker`]); excerpt spans fall back to the
+    /// trimmed passage when the excerpt model gives none.
+    Model,
+}
+
+/// `[ranking]`: which ranker the web service uses, and how the model ranker batches.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RankingConfig {
+    /// `onnx` or `model`.
+    pub ranker: Ranker,
+    /// Candidates in one model call; the calls run side by side.
+    pub batch: usize,
+    /// Characters of each candidate the model sees.
+    pub max_chars: usize,
+}
+
+impl Default for RankingConfig {
+    fn default() -> Self {
+        Self {
+            ranker: Ranker::Onnx,
+            batch: 10,
+            max_chars: 1500,
+        }
+    }
 }
 
 /// `[retrieval]`: search, fusion and reranking.
@@ -225,9 +261,10 @@ mod tests {
     fn the_shipped_file_matches_the_spec_defaults() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/retrieval.toml");
         let c = RetrievalConfig::load(&path).unwrap();
-        // Back at the spec's 40 with parallel reranker sessions (October 12, 2026): 20 dropped
-        // good passages. The question list stays short so it cannot crowd the reranker.
-        assert_eq!(c.retrieval.fuse_top_k, 40);
+        // 60 since the model ranker scores candidates in parallel batches (October 15, 2026);
+        // 20 dropped good passages. The question list stays short so it cannot crowd the ranker.
+        assert_eq!(c.retrieval.fuse_top_k, 60);
+        assert_eq!(c.ranking.ranker, Ranker::Model);
         assert!(c.retrieval.question_top_k <= 20);
         assert!(c.retrieval.rerank_sessions >= 1);
         assert_eq!(c.selection.target_teachers, 3);
@@ -237,7 +274,10 @@ mod tests {
         assert_eq!(c.synthesis.quote_max_words, 60);
         assert_eq!(c.synthesis.synthesis_timeout_s, 20);
         assert_eq!(c.excerpt.excerpt_min_words, 25);
-        assert_eq!(c.excerpt.excerpt_timeout_s, 5);
+        assert_eq!(
+            c.excerpt.excerpt_timeout_s, 3,
+            "the excerpt model step took 0.6 to 1.2 s on Gate A (October 15, 2026)"
+        );
         assert_eq!(c.excerpt.excerpt_max_spans, 8);
         assert!((c.excerpt.excerpt_keep_ratio - 0.9).abs() < f32::EPSILON);
     }

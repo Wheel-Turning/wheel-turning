@@ -136,6 +136,10 @@ pub struct Framing {
     pub gpc: bool,
     /// The tester pressed "Search the talks anyway": an `unrelated` verdict no longer stops it.
     pub anyway: bool,
+    /// Store the answer before its summary is written, and write the summary in the background
+    /// (owner's request of October 15, 2026: the page in under 5 seconds). The `/ask` route sets
+    /// it; `wt eval run` does not, so an evaluation still scores the summary it waited for.
+    pub defer_summary: bool,
 }
 
 /// Answers a normalized, ordinary question as `tester` and stores the answer with its log row,
@@ -289,16 +293,19 @@ pub async fn answer_framed(
     // them, and not for a sensitive question, whose page omits it. Any failure leaves the
     // answer without the summary and nothing else.
     let stage = Instant::now();
-    let synthesis = match found.mode {
-        Mode::Standard if level.shows_summary() && !framing.curated => {
+    let wants_summary =
+        matches!(found.mode, Mode::Standard) && level.shows_summary() && !framing.curated;
+    let deferred = wants_summary && framing.defer_summary;
+    let input = wants_summary.then(|| SummaryInput {
+        query: text.to_owned(),
+        excerpts: summary_excerpts(&served, &windows, &excerpts),
+    });
+    let synthesis = match &input {
+        Some(input) if !deferred => {
             progress.stage(Stage::Writing);
-            let input = SummaryInput {
-                query: text.to_owned(),
-                excerpts: summary_excerpts(&served, &windows, &excerpts),
-            };
             wt_synth::summarize(
                 site.llm.as_ref(),
-                &input,
+                input,
                 &alias_pairs,
                 &site.synthesis(),
                 DataClass::Real,
@@ -335,6 +342,7 @@ pub async fn answer_framed(
         notice_count,
         themes: Vec::new(),
         summary: synthesis.summary,
+        summary_pending: deferred,
         passage_ids: ids,
         rerank_degraded: found.rerank_degraded,
         curated: framing.curated,
@@ -366,6 +374,16 @@ pub async fn answer_framed(
         .map_err(AskError::Persist)?;
     timings.persist_ms = millis(stage);
     timings.total_ms = millis(started);
+    if deferred && let Some(input) = input {
+        tokio::spawn(write_summary(
+            pool.clone(),
+            site.llm.clone(),
+            site.synthesis(),
+            alias_pairs,
+            input,
+            answer_id,
+        ));
+    }
 
     tracing::info!(
         latency_ms = timings.total_ms,
@@ -386,6 +404,38 @@ pub async fn answer_framed(
         level,
         triaged,
     })))
+}
+
+/// Writes a deferred summary and stores it, or that there is none, on the answer. A failure
+/// leaves the answer without a summary, as an inline failure does; the page stops waiting.
+async fn write_summary(
+    pool: PgPool,
+    llm: std::sync::Arc<dyn wt_extract::LlmClient>,
+    settings: wt_synth::Settings,
+    aliases: Vec<(wt_core::ids::TeacherId, String)>,
+    input: SummaryInput,
+    answer: AnswerId,
+) {
+    let started = Instant::now();
+    let synthesis =
+        wt_synth::summarize(llm.as_ref(), &input, &aliases, &settings, DataClass::Real).await;
+    let stored = wt_db::answer::set_summary(
+        &pool,
+        answer,
+        synthesis.summary.as_ref(),
+        synthesis.shown(),
+        synthesis.dropped.len(),
+    )
+    .await;
+    match stored {
+        Ok(_) => tracing::info!(
+            synth_ms = millis(started),
+            shown = synthesis.shown(),
+            failed = synthesis.failure.is_some(),
+            "summary stored"
+        ),
+        Err(e) => tracing::error!(error = %e, "storing a deferred summary"),
+    }
 }
 
 /// Each served passage's excerpt as the summary sees it: the window it was cut from and its

@@ -1,0 +1,20 @@
+---
+source: crates/wt-api/tests/pages.rs
+expression: fragment
+---
+<ul class="excerpt-links">
+      <li><a href="https://www.youtube.com/watch?v=vid1&#38;t=63s" target="_blank" rel="noopener noreferrer" aria-label="Listen at 1:05 (opens the source in a new tab)">Listen</a></li>
+      
+      <li><a href="/talk/[id]/transcript#p0" aria-label="Read our transcript (made by machine, may contain errors)">Read</a></li>
+      <li class="cite-item"><details>
+        <summary aria-label="Cite this excerpt">Cite</summary>
+        <div class="cite-body">
+          <p class="mla" id="cite-p1">Ada Fixture. &#34;On anger.&#34; Dharma talk. <i>YouTube</i>, North Fixture Zendo, example.invalid/vid1. Accessed [accessed].</p>
+          <button type="button" class="small" data-copy="cite-p1" hidden>Copy citation</button>
+          <span class="copy-status small" role="status" aria-live="polite"></span>
+        </div>
+      </details></li>
+      
+      <li><a href="/rights?excerpt=[id]#request" aria-label="Report this excerpt">Report</a></li>
+    </ul>
+    <p class="credit">Talk by Ada Fixture, North Fixture Zendo. Used with permission of Ada Fixture.</p>

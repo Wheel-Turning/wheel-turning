@@ -20,6 +20,7 @@ pub mod session;
 pub mod site;
 pub mod summary;
 pub mod view;
+pub mod warm;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -49,8 +50,12 @@ use session::Keys;
 pub struct Site {
     /// Embeds questions.
     pub embedder: Arc<dyn Embedder>,
-    /// Scores candidates; `None` until the reranker model is installed.
+    /// Scores candidates: the language-model ranker or the cross-encoder, by `[ranking]`;
+    /// `None` when neither is available.
     pub reranker: Option<Arc<dyn Reranker>>,
+    /// Scores an excerpt's candidate spans (Spec 05, Answer assembly, rule 8): the
+    /// cross-encoder when it is loaded, never the model ranker.
+    pub span_reranker: Option<Arc<dyn Reranker>>,
     /// Drafts and verifies synthesis themes; [`UnavailableLlm`] when no model may be called,
     /// which leaves every answer without a synthesis line.
     pub llm: Arc<dyn LlmClient>,
@@ -119,6 +124,7 @@ impl Site {
             trust_forwarded_for: false,
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
+            span_reranker: None,
             llm: Arc::new(UnavailableLlm),
             real_data_ok: false,
             retrieval,
@@ -194,6 +200,7 @@ pub fn router(state: AppState) -> Router {
         .route("/ask", post(ask))
         .route("/ask/curated", post(ask_curated))
         .route("/a/{answer}", get(answer_page))
+        .route("/a/{answer}/summary", get(summary_fragment))
         .route("/a/{answer}/feedback", post(feedback::post))
         .route("/a/{answer}/dana", post(dana))
         .route("/give/{answer}/{target}", get(give))
@@ -714,6 +721,7 @@ async fn ask_with(
         curated: false,
         gpc: privacy::gpc(headers),
         anyway: form.anyway.is_some(),
+        defer_summary: true,
     };
     match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink).await {
         Ok(ask::Gated::Answered(asked)) => {
@@ -794,6 +802,7 @@ async fn ask_curated_with(
         curated: true,
         gpc: privacy::gpc(headers),
         anyway: false,
+        defer_summary: false,
     };
     let text = site.sensitivity.curated_query();
     sink.stage(progress::Stage::Reading);
@@ -884,8 +893,8 @@ fn unrelated_page(state: &AppState, s: &Session, question: String) -> Response {
 
 // ---- answer ---------------------------------------------------------------------------------
 
-/// The answer page (Spec 06): the question, its excerpts grouped by teacher, the References, the
-/// feedback controls and, when allowed, the summary line and the giving panel.
+/// The answer page (Spec 06): the question, the summary when allowed, its excerpts most relevant
+/// first, the References, the giving panel when allowed and one feedback control at the foot.
 #[derive(Template)]
 #[template(path = "answer.html")]
 struct AnswerPage {
@@ -895,6 +904,8 @@ struct AnswerPage {
     banner: Option<sensitive::Banner>,
     /// Whether the summary line may show.
     summary: bool,
+    /// The summary is still being written, so its place shows and the script fills it in.
+    summary_pending: bool,
     /// Whether the giving panel may show.
     giving: bool,
     question_label: &'static str,
@@ -904,10 +915,8 @@ struct AnswerPage {
     thanks: bool,
     /// A feedback control's status after a reload without the script.
     fb: Option<feedback::Status>,
-    /// The reasons each feedback control offers.
-    excerpt_reasons: &'static [(&'static str, &'static str)],
-    /// See `excerpt_reasons`.
-    summary_reasons: &'static [(&'static str, &'static str)],
+    /// The reasons the feedback control offers.
+    answer_reasons: &'static [(&'static str, &'static str)],
     /// The split, after "Show the split" without JavaScript.
     dana: Option<view::DanaView>,
     /// What the donor entered, kept in the fields.
@@ -921,14 +930,9 @@ struct AnswerPage {
 }
 
 impl AnswerPage {
-    /// The status of excerpt `n`'s feedback control, after a reload without the script.
-    fn excerpt_status(&self, n: &usize) -> Option<&feedback::Status> {
-        self.fb.as_ref().filter(|f| f.is_excerpt(n))
-    }
-
-    /// The status of the summary's feedback control.
-    fn summary_status(&self) -> Option<&feedback::Status> {
-        self.fb.as_ref().filter(|f| f.is_summary())
+    /// The status of the feedback control, after a reload without the script.
+    fn answer_status(&self) -> Option<&feedback::Status> {
+        self.fb.as_ref().filter(|f| f.is_answer())
     }
 }
 
@@ -1050,6 +1054,59 @@ async fn load_answer(
     }))
 }
 
+/// How long the page waits for a deferred summary. One still pending after this was lost, as
+/// when the server restarted while writing it, and the page shows the answer without it.
+const SUMMARY_WAIT: chrono::Duration = chrono::Duration::seconds(90);
+
+/// Whether a stored answer's summary is still being written.
+fn pending(stored: &wt_db::answer::Stored) -> bool {
+    stored.payload.summary_pending
+        && stored.payload.summary.is_none()
+        && chrono::Utc::now() - stored.created_at < SUMMARY_WAIT
+}
+
+/// The summary block alone, for the script that fills in a deferred summary.
+#[derive(Template)]
+#[template(path = "summary_fragment.html")]
+struct SummaryFragment {
+    s: summary::SummaryView,
+}
+
+/// `GET /a/{answer}/summary`: the answer's summary block when it is written (200), `202` while
+/// it is still being written, and `204` when there is none, for the answer's owner only.
+async fn summary_fragment(
+    State(state): State<AppState>,
+    s: Session,
+    Path(answer): Path<String>,
+) -> Response {
+    let Some(answer) = parse::<AnswerId>(&answer) else {
+        return not_found_page();
+    };
+    let loaded = match load_answer(&state, &s, answer).await {
+        Ok(Some(l)) => l,
+        Ok(None) => return not_found_page(),
+        Err(r) => return *r,
+    };
+    let no_store = [(header::CACHE_CONTROL, "no-store")];
+    let (shows, _) = sensitive::shows(
+        &loaded.stored.sensitive_category,
+        loaded.stored.payload.curated,
+    );
+    if !shows {
+        return (StatusCode::NO_CONTENT, no_store).into_response();
+    }
+    if let Some(view) = loaded.view.summary {
+        return match (SummaryFragment { s: view }).render() {
+            Ok(html) => (StatusCode::OK, no_store, Html(html)).into_response(),
+            Err(e) => server_error("rendering the summary", &e),
+        };
+    }
+    if pending(&loaded.stored) {
+        return (StatusCode::ACCEPTED, no_store).into_response();
+    }
+    (StatusCode::NO_CONTENT, no_store).into_response()
+}
+
 /// `GET /a/{answer}`: re-renders the answer through the serving view, for its owner only.
 async fn answer_page(
     State(state): State<AppState>,
@@ -1081,6 +1138,7 @@ async fn answer_page(
                 &loaded.stored.sensitive_category,
                 loaded.stored.payload.curated,
             ),
+            summary_pending: summary && pending(&loaded.stored),
             summary,
             giving,
             query: loaded.stored.query_text,
@@ -1090,8 +1148,7 @@ async fn answer_page(
             csrf: s.csrf(&state.site.keys),
             thanks: q.thanks.is_some(),
             fb: feedback::Status::from_query(q.fb.as_deref(), q.fbs.as_deref()),
-            excerpt_reasons: &feedback::EXCERPT_REASONS,
-            summary_reasons: &feedback::SUMMARY_REASONS,
+            answer_reasons: &feedback::ANSWER_REASONS,
             dana: None,
             dana_total: String::new(),
             dana_site: String::new(),
@@ -1245,6 +1302,7 @@ async fn dana(
                 &loaded.stored.sensitive_category,
                 loaded.stored.payload.curated,
             ),
+            summary_pending: summary && pending(&loaded.stored),
             summary,
             giving,
             query: loaded.stored.query_text,
@@ -1254,8 +1312,7 @@ async fn dana(
             csrf: s.csrf(&site.keys),
             thanks: false,
             fb: None,
-            excerpt_reasons: &feedback::EXCERPT_REASONS,
-            summary_reasons: &feedback::SUMMARY_REASONS,
+            answer_reasons: &feedback::ANSWER_REASONS,
             dana: Some(view),
             dana_total: form.total,
             dana_site: form.site,
@@ -1434,7 +1491,7 @@ async fn transcript_page(
         rows.push(Row {
             ordinal: p.ordinal,
             at: view::clock(i64::from(p.start_ms)),
-            text: p.text.clone(),
+            text: wt_core::entities::decode(&p.text).into_owned(),
             gap_before: last_end.is_some_and(|e| p.start_ms - e > GAP_MS),
             asked: question.is_none() && questions.asked.contains(&p.id),
             question,

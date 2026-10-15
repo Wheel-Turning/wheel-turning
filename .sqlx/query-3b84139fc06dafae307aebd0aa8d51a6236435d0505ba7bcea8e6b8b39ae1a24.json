@@ -1,21 +1,10 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select p.passage_id as \"anchor!\", n.passage_id as \"passage_id!\", n.text as \"text!\",\n                  n.ordinal as \"ordinal!\", n.start_ms as \"start_ms!\",\n                  n.sentence_starts as \"sentence_starts!\", n.sentence_start_ms as \"sentence_start_ms!\"\n           from servable_passage p\n           join servable_passage n\n             on n.talk_id = p.talk_id and n.segment_id = p.segment_id\n            and n.ordinal between p.ordinal - 1 and p.ordinal + 1\n           where p.passage_id = any($1)\n           order by p.passage_id, n.ordinal",
+  "query": "select passage_id as \"passage_id!\", talk_id as \"talk_id!\",\n                  segment_id as \"segment_id!\", text as \"text!\",\n                  ordinal as \"ordinal!\", start_ms as \"start_ms!\",\n                  sentence_starts as \"sentence_starts!\", sentence_start_ms as \"sentence_start_ms!\"\n           from servable_passage\n           where talk_id = any($1) and ordinal = any($2)\n           order by ordinal",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "anchor!",
-        "type_info": "Uuid",
-        "origin": {
-          "Table": {
-            "table": "servable_passage",
-            "name": "passage_id"
-          }
-        }
-      },
-      {
-        "ordinal": 1,
         "name": "passage_id!",
         "type_info": "Uuid",
         "origin": {
@@ -26,7 +15,29 @@
         }
       },
       {
+        "ordinal": 1,
+        "name": "talk_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_id"
+          }
+        }
+      },
+      {
         "ordinal": 2,
+        "name": "segment_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "segment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "text!",
         "type_info": "Text",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "ordinal!",
         "type_info": "Int4",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "start_ms!",
         "type_info": "Int4",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "sentence_starts!",
         "type_info": "Int4Array",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "sentence_start_ms!",
         "type_info": "Int4Array",
         "origin": {
@@ -83,7 +94,8 @@
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "UuidArray",
+        "Int4Array"
       ]
     },
     "nullable": [
@@ -93,8 +105,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "d115924cb024ca6ba637dae154bb742b9f06a0e18b22143cfe6fadafad4043dc"
+  "hash": "3b84139fc06dafae307aebd0aa8d51a6236435d0505ba7bcea8e6b8b39ae1a24"
 }

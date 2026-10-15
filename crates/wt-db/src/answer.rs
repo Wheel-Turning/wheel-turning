@@ -35,6 +35,10 @@ pub struct Payload {
     /// quotation spans they cite, never quoted text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<StoredSummary>,
+    /// The summary is still being written: the page shows its place and fills it in (owner's
+    /// request of October 15, 2026). [`set_summary`] clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub summary_pending: bool,
     /// Chosen passages, best first.
     pub passage_ids: Vec<PassageId>,
     /// The reranker was unavailable, so no relevance threshold applied.
@@ -166,6 +170,30 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     .await?;
     tx.commit().await?;
     Ok(AnswerId::from(answer))
+}
+
+/// Sets the summary of an answer stored with `summary_pending`, or records that it has none, with
+/// the query log's counts. False when the answer is gone or was not pending, so a summary is
+/// written once.
+pub async fn set_summary(
+    pool: &PgPool,
+    answer: AnswerId,
+    summary: Option<&StoredSummary>,
+    shown: usize,
+    dropped: usize,
+) -> Result<bool, DbError> {
+    let value = summary.and_then(|s| serde_json::to_value(s).ok());
+    let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
+    let set = sqlx::query_scalar!(
+        r#"select set_answer_summary($1, $2, $3, $4) as "set!""#,
+        answer.as_uuid(),
+        value,
+        small(shown),
+        small(dropped)
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(set)
 }
 
 /// Spec 05: an acute or out-of-scope question is logged as counts and its category only. No
@@ -414,25 +442,46 @@ pub async fn passages(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Served>, D
 /// passage that no longer serves has no window. Returned in the order of `ids`.
 pub async fn windows(pool: &PgPool, ids: &[PassageId]) -> Result<Vec<Window>, DbError> {
     let uuids: Vec<Uuid> = ids.iter().map(|p| p.as_uuid()).collect();
-    let rows = sqlx::query!(
-        r#"select p.passage_id as "anchor!", n.passage_id as "passage_id!", n.text as "text!",
-                  n.ordinal as "ordinal!", n.start_ms as "start_ms!",
-                  n.sentence_starts as "sentence_starts!", n.sentence_start_ms as "sentence_start_ms!"
-           from servable_passage p
-           join servable_passage n
-             on n.talk_id = p.talk_id and n.segment_id = p.segment_id
-            and n.ordinal between p.ordinal - 1 and p.ordinal + 1
-           where p.passage_id = any($1)
-           order by p.passage_id, n.ordinal"#,
+    // Two keyed reads. Joining the view to itself made the planner evaluate the whole serving
+    // view once per passage: 1.1 to 1.6 s on the beta for nine passages (October 15, 2026).
+    let anchors = sqlx::query!(
+        r#"select passage_id as "passage_id!", talk_id as "talk_id!",
+                  segment_id as "segment_id!", ordinal as "ordinal!"
+           from servable_passage where passage_id = any($1)"#,
         &uuids
+    )
+    .fetch_all(pool)
+    .await?;
+    let talks: Vec<Uuid> = anchors.iter().map(|a| a.talk_id).collect();
+    let ordinals: Vec<i32> = anchors
+        .iter()
+        .flat_map(|a| [a.ordinal - 1, a.ordinal, a.ordinal + 1])
+        .collect();
+    let rows = sqlx::query!(
+        r#"select passage_id as "passage_id!", talk_id as "talk_id!",
+                  segment_id as "segment_id!", text as "text!",
+                  ordinal as "ordinal!", start_ms as "start_ms!",
+                  sentence_starts as "sentence_starts!", sentence_start_ms as "sentence_start_ms!"
+           from servable_passage
+           where talk_id = any($1) and ordinal = any($2)
+           order by ordinal"#,
+        &talks,
+        &ordinals
     )
     .fetch_all(pool)
     .await?;
     let mut out = Vec::new();
     for id in ids {
+        let Some(a) = anchors.iter().find(|a| a.passage_id == id.as_uuid()) else {
+            continue;
+        };
         let passages: Vec<WindowPassage> = rows
             .iter()
-            .filter(|r| r.anchor == id.as_uuid())
+            .filter(|r| {
+                r.talk_id == a.talk_id
+                    && r.segment_id == a.segment_id
+                    && (a.ordinal - 1..=a.ordinal + 1).contains(&r.ordinal)
+            })
             .map(|r| WindowPassage {
                 id: PassageId::from(r.passage_id),
                 text: r.text.clone(),
@@ -525,6 +574,18 @@ pub const EXCERPT_REASONS: [&str; 6] = [
 pub const SUMMARY_REASONS: [&str; 5] =
     ["good", "unsupported", "misrepresents", "missing", "unclear"];
 
+/// Reasons a tester can give about the answer as a whole, from the one control at the foot of
+/// the page (owner's decision of October 15, 2026; Spec 06, Logging, rule 4).
+pub const ANSWER_REASONS: [&str; 7] = [
+    "good",
+    "not_relevant",
+    "unsupported",
+    "out_of_context",
+    "not_faithful",
+    "wrong_details",
+    "unclear",
+];
+
 /// What a feedback submission is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedbackTarget {
@@ -532,6 +593,8 @@ pub enum FeedbackTarget {
     Excerpt(PassageId),
     /// The synthesis at the top of the answer.
     Summary,
+    /// The answer as a whole: its summary and excerpts.
+    Answer,
 }
 
 impl FeedbackTarget {
@@ -540,6 +603,7 @@ impl FeedbackTarget {
         match self {
             Self::Excerpt(_) => "excerpt",
             Self::Summary => "summary",
+            Self::Answer => "answer",
         }
     }
 
@@ -548,6 +612,7 @@ impl FeedbackTarget {
         match self {
             Self::Excerpt(_) => &EXCERPT_REASONS,
             Self::Summary => &SUMMARY_REASONS,
+            Self::Answer => &ANSWER_REASONS,
         }
     }
 }
@@ -604,7 +669,7 @@ pub async fn submit_feedback(
             }
             Some(p.as_uuid())
         }
-        FeedbackTarget::Summary => None,
+        FeedbackTarget::Summary | FeedbackTarget::Answer => None,
     };
     let mut kinds: Vec<String> = Vec::new();
     for r in reasons {

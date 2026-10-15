@@ -1,5 +1,6 @@
-//! Feedback on an excerpt or on the summary, and "Flag this query" (Spec 06, Answer page
-//! structure, rule 6, and Logging, rule 4, as the owner decided on October 12, 2026). One
+//! Feedback on the answer, and "Flag this query" (Spec 06, Answer page structure, rule 6, and
+//! Logging, rule 4, as the owner decided on October 12 and 15, 2026). The page shows one control
+//! at its foot; the excerpt and summary targets still take a post from a page served before. One
 //! submission carries several reasons and an optional note. With the script the status comes
 //! back as text for the control's live region; without it the page reloads at the control.
 
@@ -31,6 +32,23 @@ pub const SUMMARY_REASONS: [(&str, &str); 5] = [
     ("unclear", "Unclear"),
 ];
 
+/// The reasons for the answer as a whole, the page's one control, with the words it shows.
+pub const ANSWER_REASONS: [(&str, &str); 7] = [
+    ("good", "Helpful"),
+    ("not_relevant", "Not relevant to my question"),
+    (
+        "unsupported",
+        "The summary is not supported by the excerpts",
+    ),
+    (
+        "out_of_context",
+        "An excerpt is cut off or missing its context",
+    ),
+    ("not_faithful", "Words look wrong (a transcription error)"),
+    ("wrong_details", "Wrong teacher, talk or date"),
+    ("unclear", "Hard to follow"),
+];
+
 /// The longest note, in characters.
 pub const NOTE_MAX: usize = 1000;
 
@@ -46,6 +64,8 @@ pub enum About {
     Excerpt(usize),
     /// The summary.
     Summary,
+    /// The answer as a whole.
+    Answer,
 }
 
 impl About {
@@ -54,6 +74,7 @@ impl About {
         match self {
             Self::Excerpt(n) => format!("fb-p{n}"),
             Self::Summary => "fb-summary".to_owned(),
+            Self::Answer => "fb-answer".to_owned(),
         }
     }
 
@@ -62,13 +83,16 @@ impl About {
         match self {
             Self::Excerpt(n) => format!("p{n}"),
             Self::Summary => "summary".to_owned(),
+            Self::Answer => "answer".to_owned(),
         }
     }
 
     /// Reads the `fb` query value.
     pub fn from_key(raw: &str) -> Option<Self> {
-        if raw == "summary" {
-            return Some(Self::Summary);
+        match raw {
+            "summary" => return Some(Self::Summary),
+            "answer" => return Some(Self::Answer),
+            _ => {}
         }
         raw.strip_prefix('p')
             .and_then(|n| n.parse().ok())
@@ -81,6 +105,7 @@ impl About {
         match self {
             Self::Excerpt(n) => format!("Thank you. Your feedback on excerpt {n} was recorded."),
             Self::Summary => "Thank you. Your feedback on the summary was recorded.".to_owned(),
+            Self::Answer => "Thank you. Your feedback on these answers was recorded.".to_owned(),
         }
     }
 }
@@ -122,6 +147,11 @@ impl Status {
     pub fn is_summary(&self) -> bool {
         self.about == About::Summary
     }
+
+    /// Whether this status belongs to the answer's control.
+    pub fn is_answer(&self) -> bool {
+        self.about == About::Answer
+    }
 }
 
 /// A submission read from the form.
@@ -153,6 +183,7 @@ pub fn read(pairs: &[(String, String)]) -> Submission {
     let number = one("n").and_then(|n| n.parse::<usize>().ok());
     let about = match target {
         Some("summary") => Some(About::Summary),
+        Some("answer") => Some(About::Answer),
         Some("excerpt") => number.filter(|n| (1..=999).contains(n)).map(About::Excerpt),
         _ => None,
     };
@@ -200,6 +231,7 @@ pub async fn post(
     };
     let target = match about {
         About::Summary => Some(FeedbackTarget::Summary),
+        About::Answer => Some(FeedbackTarget::Answer),
         About::Excerpt(_) => form.passage.map(FeedbackTarget::Excerpt),
     };
     let Some(target) = target else {
@@ -318,5 +350,22 @@ mod tests {
         assert_eq!(excerpt, wt_db::answer::EXCERPT_REASONS);
         let summary: Vec<&str> = SUMMARY_REASONS.iter().map(|(k, _)| *k).collect();
         assert_eq!(summary, wt_db::answer::SUMMARY_REASONS);
+        let answer: Vec<&str> = ANSWER_REASONS.iter().map(|(k, _)| *k).collect();
+        assert_eq!(answer, wt_db::answer::ANSWER_REASONS);
+    }
+
+    #[test]
+    fn the_answer_control_reads_and_thanks() {
+        assert_eq!(
+            read(&pairs(&[("target", "answer")])).about,
+            Some(About::Answer)
+        );
+        let ok = Status::from_query(Some("answer"), Some("ok")).unwrap();
+        assert!(ok.is_answer() && !ok.error);
+        assert_eq!(
+            ok.message,
+            "Thank you. Your feedback on these answers was recorded."
+        );
+        assert_eq!(About::Answer.anchor(), "fb-answer");
     }
 }

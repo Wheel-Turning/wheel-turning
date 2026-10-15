@@ -287,15 +287,56 @@ async fn an_over_long_citation_is_left_out_while_another_remains() {
     );
 }
 
+/// A draft that loses its headline is revised once, told why; a revision that keeps it gives
+/// the summary (October 15, 2026).
 #[tokio::test]
-async fn a_rejected_headline_leaves_no_summary() {
-    let llm = FakeLlm::new(vec![Ok(good_draft()), no("posture"), yes(), yes(), yes()]);
+async fn a_lost_headline_gets_one_revision_told_why() {
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        no("posture"),
+        yes(),
+        yes(),
+        yes(),
+        Ok(good_draft()),
+        yes(),
+        yes(),
+        yes(),
+        yes(),
+    ]);
     let out = run(&llm).await;
-    assert!(out.summary.is_none());
+    assert!(out.summary.is_some(), "{:?}", out.dropped);
     assert_eq!(out.failure, None);
+    assert_eq!(out.calls, 10);
     assert_eq!(out.dropped[0].reason, DropReason::Unsupported);
     assert_eq!(out.dropped[0].part, SummaryPart::Headline);
     assert_eq!(out.dropped[0].detail.as_deref(), Some("posture"));
+    let seen = llm.seen.lock().unwrap();
+    let revision = &seen[5].0.user;
+    assert!(
+        revision.contains("Your first draft lost these sentences")
+            && revision.contains("the cited sentences do not say this"),
+        "{revision}"
+    );
+}
+
+#[tokio::test]
+async fn a_headline_lost_twice_leaves_no_summary() {
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        no("posture"),
+        yes(),
+        yes(),
+        yes(),
+        Ok(good_draft()),
+        no("posture"),
+        yes(),
+        yes(),
+        yes(),
+    ]);
+    let out = run(&llm).await;
+    assert!(out.summary.is_none());
+    assert_eq!(out.failure, None);
+    assert_eq!(out.calls, 10, "one revision only");
 }
 
 #[tokio::test]
