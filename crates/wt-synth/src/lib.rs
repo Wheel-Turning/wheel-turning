@@ -222,6 +222,46 @@ impl DropReason {
     }
 }
 
+impl DropReason {
+    /// What the revision request tells the model about a sentence dropped for this reason.
+    fn explain(self) -> &'static str {
+        match self {
+            DropReason::OverLimit => "the section already had as many sentences as it takes",
+            DropReason::NoCitation => "it cited no excerpt",
+            DropReason::UnknownRef => {
+                "a citation named an excerpt or sentence number that does not exist"
+            }
+            DropReason::QuoteTooLong => {
+                "its cited sentences ran over 60 words; cite one short sentence"
+            }
+            DropReason::OneTeacher => {
+                "it is an agree or differ sentence but every excerpt it cites is by the same teacher; \
+                 see the teacher list, and put it in another part or cite two teachers"
+            }
+            DropReason::NotOneSentence => "it was not exactly one sentence",
+            DropReason::TooLong => "it was over 40 words",
+            DropReason::QuotationMark => "it used quotation marks",
+            DropReason::PassageLabel => "it wrote an excerpt label such as E2 in the sentence",
+            DropReason::Misattributed => {
+                "it named a teacher who gave none of the excerpts it cites"
+            }
+            DropReason::WrongYear => "it gave a year that none of the cited talks is from",
+            DropReason::BeliefWord => {
+                "it said what a teacher believes or thinks instead of what a talk says"
+            }
+            DropReason::AddressesReader => {
+                "it spoke to the reader with you or your; report what a talk says instead"
+            }
+            DropReason::Ungrounded => {
+                "its words are not the excerpts' words; use the teachers' own key words"
+            }
+            DropReason::Unsupported => {
+                "the cited sentences do not say this; report only what they say, as a talk or teacher saying it"
+            }
+        }
+    }
+}
+
 /// A dropped sentence, as the integrity audit reads it from the log.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dropped {
@@ -321,50 +361,19 @@ pub async fn summarize(
         return out;
     }
 
-    out.calls += 1;
-    let request = LlmRequest {
-        stage: LlmStage::Synth,
-        system: SUMMARIZE_PROMPT.to_owned(),
-        user: generation_message(input),
-        max_tokens: 2000,
-    };
-    let drafted = match tokio::time::timeout(
-        settings.timeout,
-        complete_json::<SummaryDraft>(llm, &request, class),
-    )
-    .await
-    {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => return fail(out, "synth", e),
-        Err(_) => return timed_out(out, "synth", settings.timeout),
-    };
-
     let names = filter::name_words(aliases);
-    let candidates = filter_draft(drafted, input, &names, settings, &mut out.dropped);
-
-    out.calls += candidates.len();
-    let verdicts = join_all(
-        candidates
-            .iter()
-            .map(|c| verify(llm, c, input, settings, class)),
-    )
-    .await;
-    let mut kept = Vec::new();
-    for (candidate, verdict) in candidates.into_iter().zip(verdicts) {
-        match verdict {
-            Ok(v) if v.supported => kept.push(candidate),
-            Ok(v) => out.dropped.push(Dropped {
-                part: candidate.part,
-                reason: DropReason::Unsupported,
-                text: candidate.text,
-                refs: candidate.refs,
-                detail: v.unsupported_part,
-            }),
-            Err(failure) => {
-                out.failure = Some(failure);
-                log(&out);
-                return out;
-            }
+    let mut kept = match round(llm, input, &names, settings, class, None, &mut out).await {
+        Ok(k) => k,
+        Err(done) => return done,
+    };
+    // A draft that loses its headline gets one revision that is told why each sentence went
+    // (October 15, 2026: on the beta every summary was lost this way). The summary is written
+    // after the page is shown, so the second call costs the reader no wait.
+    if !kept.iter().any(|c| c.part == SummaryPart::Headline) && !out.dropped.is_empty() {
+        let first = out.dropped.clone();
+        match round(llm, input, &names, settings, class, Some(&first), &mut out).await {
+            Ok(k) => kept = k,
+            Err(done) => return done,
         }
     }
     let summary = StoredSummary {
@@ -390,6 +399,67 @@ pub async fn summarize(
     out.summary = summary.has_headline().then_some(summary);
     log(&out);
     out
+}
+
+/// One draft: generation, the filters and the verifier. The sentences the verifier kept, or the
+/// finished synthesis when a call failed. `revise` holds the drops a revision is told about.
+async fn round(
+    llm: &dyn LlmClient,
+    input: &SummaryInput,
+    names: &[(TeacherId, String)],
+    settings: &Settings,
+    class: DataClass,
+    revise: Option<&[Dropped]>,
+    out: &mut Synthesis,
+) -> Result<Vec<Candidate>, Synthesis> {
+    out.calls += 1;
+    let request = LlmRequest {
+        stage: LlmStage::Synth,
+        system: SUMMARIZE_PROMPT.to_owned(),
+        user: match revise {
+            Some(dropped) => revision_message(input, dropped),
+            None => generation_message(input),
+        },
+        max_tokens: 2000,
+    };
+    let drafted = match tokio::time::timeout(
+        settings.timeout,
+        complete_json::<SummaryDraft>(llm, &request, class),
+    )
+    .await
+    {
+        Ok(Ok(o)) => o,
+        Ok(Err(e)) => return Err(fail(std::mem::take(out), "synth", e)),
+        Err(_) => return Err(timed_out(std::mem::take(out), "synth", settings.timeout)),
+    };
+    let candidates = filter_draft(drafted, input, names, settings, &mut out.dropped);
+    out.calls += candidates.len();
+    let verdicts = join_all(
+        candidates
+            .iter()
+            .map(|c| verify(llm, c, input, settings, class)),
+    )
+    .await;
+    let mut kept = Vec::new();
+    for (candidate, verdict) in candidates.into_iter().zip(verdicts) {
+        match verdict {
+            Ok(v) if v.supported => kept.push(candidate),
+            Ok(v) => out.dropped.push(Dropped {
+                part: candidate.part,
+                reason: DropReason::Unsupported,
+                text: candidate.text,
+                refs: candidate.refs,
+                detail: v.unsupported_part,
+            }),
+            Err(failure) => {
+                let mut done = std::mem::take(out);
+                done.failure = Some(failure);
+                log(&done);
+                return Err(done);
+            }
+        }
+    }
+    Ok(kept)
 }
 
 /// Records a failed model call on the synthesis and logs it; a spend cap that stopped the call is
@@ -436,6 +506,13 @@ fn position(r: &str, offered: usize) -> Option<usize> {
 /// sentences and their word counts, which the draft cites by number.
 fn generation_message(input: &SummaryInput) -> String {
     let mut text = format!("Question: {}\n\nExcerpts:\n", input.query);
+    let mut teachers: Vec<(TeacherId, &str, Vec<String>)> = Vec::new();
+    for (i, x) in input.excerpts.iter().enumerate() {
+        match teachers.iter_mut().find(|(t, _, _)| *t == x.teacher_id) {
+            Some((_, _, labels)) => labels.push(label(i)),
+            None => teachers.push((x.teacher_id, &x.teacher, vec![label(i)])),
+        }
+    }
     for (i, x) in input.excerpts.iter().enumerate() {
         text.push_str(&format!("\n{}\n", x.header(&label(i))));
         for (n, (s, e)) in x.sentences().into_iter().enumerate() {
@@ -446,6 +523,29 @@ fn generation_message(input: &SummaryInput) -> String {
                 x.window.text(s, e)
             ));
         }
+    }
+    text.push_str("\nTeachers (an agree or differ sentence cites excerpts of two of them):\n");
+    for (_, name, labels) in &teachers {
+        text.push_str(&format!("- {name}: {}\n", labels.join(", ")));
+    }
+    text
+}
+
+/// The revision request: the first draft's message, then each sentence that was dropped and
+/// why, so the second draft can keep to the rules.
+fn revision_message(input: &SummaryInput, dropped: &[Dropped]) -> String {
+    let mut text = generation_message(input);
+    text.push_str(
+        "\nYour first draft lost these sentences, and without a headline there is no summary. \
+         Write the whole summary again, keeping every rule:\n",
+    );
+    for d in dropped {
+        text.push_str(&format!(
+            "- {:?}: {} Dropped because {}.\n",
+            d.part,
+            d.text.trim(),
+            d.reason.explain()
+        ));
     }
     text
 }

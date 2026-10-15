@@ -382,7 +382,10 @@ async fn a_medical_answer_has_its_banner_and_keeps_the_giving_panel() {
     assert!(banner < main.find("Your question").unwrap());
     assert!(main.contains("<a href=\"tel:911\">call 911</a>"));
     assert!(!page.body.contains("id=\"summary\""));
-    assert!(page.body.contains("Give to North Fixture Zendo"));
+    assert!(
+        page.body
+            .contains("Give to this sangha, North Fixture Zendo")
+    );
     assert!(llm.seen.lock().unwrap().is_empty());
     assert!(page.body.contains("id=\"dana\""), "the dana panel stays");
 }
@@ -392,7 +395,10 @@ async fn an_ordinary_question_has_no_banner_and_keeps_both() {
     let fx = start(site(themes())).await;
     let page = fx.answer("How do I work with anger?").await;
     assert!(!page.body.contains("support-h"));
-    assert!(page.body.contains("Give to North Fixture Zendo"));
+    assert!(
+        page.body
+            .contains("Give to this sangha, North Fixture Zendo")
+    );
 }
 
 #[tokio::test]

@@ -305,8 +305,8 @@ async fn standard_vector_search_walks_the_hnsw_index() {
     assert!(plain.contains("Sort"), "expected a sort, got:\n{plain}");
     let plan = vector_plan(&fx.pool, true).await;
     assert!(
-        plan.contains("passage_embedding_hnsw") && !plan.contains("Sort"),
-        "expected an index scan on passage_embedding_hnsw, got:\n{plan}"
+        plan.contains("passage_embedding_half_hnsw") && !plan.contains("Sort"),
+        "expected an index scan on passage_embedding_half_hnsw, got:\n{plan}"
     );
 }
 

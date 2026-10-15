@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select passage_id as \"passage_id!\", talk_id as \"talk_id!\",\n                  segment_id as \"segment_id!\", ordinal as \"ordinal!\"\n           from servable_passage where passage_id = any($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passage_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "passage_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "talk_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "talk_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "segment_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "segment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ordinal!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "servable_passage",
+            "name": "ordinal"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2668d51bb6d18a5c86b458925046704ad1cfdf64f5e60caecc4cc109986652f2"
+}

@@ -278,6 +278,8 @@ const STOPWORDS: &[&str] = &[
     "your",
     "yet",
     // How a sentence refers to the passages, the talks and their relation.
+    "address",
+    "addresses",
     "agree",
     "agrees",
     "alike",
@@ -327,6 +329,19 @@ const STOPWORDS: &[&str] = &[
     "treats",
     "view",
     "views",
+    "discuss",
+    "discusses",
+    "mention",
+    "mentions",
+    "multiple",
+    "note",
+    "notes",
+    "offer",
+    "offers",
+    "several",
+    "suggest",
+    "suggests",
+    "various",
     "whilst",
 ];
 

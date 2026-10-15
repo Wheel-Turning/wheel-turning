@@ -5,6 +5,7 @@
 
 pub mod answer;
 pub mod config;
+pub mod entities;
 pub mod excerpt;
 pub mod gate;
 pub mod ids;

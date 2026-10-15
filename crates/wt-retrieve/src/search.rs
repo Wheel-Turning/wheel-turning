@@ -68,12 +68,14 @@ pub async fn full_text(
     Ok(rows.into_iter().map(PassageId::from).collect())
 }
 
-/// The SQL of the standard-mode vector search, public so a test can check its plan.
+/// The SQL of the standard-mode vector search, public so a test can check its plan. It orders
+/// by the half-precision cast that `passage_embedding_half_hnsw` indexes (migration 0043): a
+/// third of the full index's size, so it stays in the database's cache, at the same recall.
 pub const VECTOR_SQL: &str = "select passage_id from servable_passage
-                              order by embedding <=> $1::text::vector
+                              order by embedding::halfvec(1024) <=> $1::text::halfvec(1024)
                               limit $2";
 
-/// Settings that put the standard-mode vector search on `passage_embedding_hnsw`, for the
+/// Settings that put the standard-mode vector search on `passage_embedding_half_hnsw`, for the
 /// current transaction only. The view's rights filter makes the planner expect a handful of
 /// servable rows (16 against 136,520 on October 12, 2026), so left alone it joins the whole
 /// view and sorts every served passage, 2 to 4 s. With sorting off it walks the index

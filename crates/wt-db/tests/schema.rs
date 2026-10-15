@@ -373,14 +373,15 @@ async fn a_vector_query_on_servable_passage_uses_the_hnsw_index() {
 
     let plan: Vec<String> = sqlx::query_scalar(
         "explain select passage_id from servable_passage
-         order by embedding <=> (select embedding from passage limit 1) limit 10",
+         order by embedding::halfvec(1024) <=> (select embedding::halfvec(1024) from passage limit 1)
+         limit 10",
     )
     .fetch_all(&fx.pool)
     .await
     .unwrap();
     let plan = plan.join("\n");
     assert!(
-        plan.contains("passage_embedding_hnsw"),
-        "expected an index scan on passage_embedding_hnsw, got:\n{plan}"
+        plan.contains("passage_embedding_half_hnsw"),
+        "expected an index scan on passage_embedding_half_hnsw, got:\n{plan}"
     );
 }

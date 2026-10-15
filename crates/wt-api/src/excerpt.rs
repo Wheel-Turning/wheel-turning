@@ -1,5 +1,5 @@
 //! Cutting each chosen passage's excerpt for the question (Spec 05, Answer assembly, rule 8):
-//! the model step, then the reranker step, then the trimmed passage. Every passage of an answer
+//! the model step, then the cross-encoder step when it is loaded, then the trimmed passage. Every passage of an answer
 //! runs at once, each step under `excerpt_timeout_s`. Model calls count against the spend cap
 //! through the client, and a real talk's text goes to the model only when
 //! `WT_LLM_REAL_DATA_OK` is true.
@@ -45,7 +45,7 @@ async fn choose_one(site: &Site, query: &str, window: &Window) -> Excerpt {
             Err(miss) => tracing::info!(reason = miss.as_str(), "excerpt model step gave no run"),
         }
     }
-    if let Some(reranker) = site.reranker.as_deref() {
+    if let Some(reranker) = site.span_reranker.as_deref() {
         let step = wt_retrieve::excerpt::choose(
             reranker,
             query,

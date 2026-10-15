@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select set_answer_summary($1, $2, $3, $4) as \"set!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "set!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fb9673f1b6e63dba07035d35f153c90328dba7b053a08cb19c0ec9251fddbb6c"
+}
