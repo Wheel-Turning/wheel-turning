@@ -41,5 +41,5 @@ The summary is grounded, but it puts the teachers' paraphrase in the Buddha's mo
 
 - Build the Spec 08 texts path: `TextRetriever`, the `[texts]` settings and the "From the texts" section.
 - Load an excerptable Dhammapada edition under a recorded license or mandate.
-- Product question for the owner: should "Shakyamuni", "the Buddha" and "the historical Buddha" act as an author alias for texts attributed to the Buddha (the Dhammapada and the Pali suttas), even though Spec 08 attributes such works to the work itself? This needs a spec change, so it is not decided here.
+- Attribute works given as the Buddha's words to Shakyamuni Buddha, with an alias list for his names, and keep a summary from naming him as the speaker. Decided by the owner on October 15, 2026, and specced in Spec 08, Traditional attribution (branch `spec/buddha-attribution`).
 - Install the reranker on the beta.
