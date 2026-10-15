@@ -16,6 +16,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B8](#b8-no-placeholder-research-search-page-for-priests) | 2026-10-15 | No placeholder research search page for priests | open |
 | [B9](#b9-the-privacy-line-is-not-fully-accurate) | 2026-10-15 | The privacy line is not fully accurate | open |
 | [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open |
+| [B11](#b11-source-texts-are-not-in-search-answers-or-excerpt-references) | 2026-10-15 | Source texts are not in search, answers or excerpt references | open |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -76,7 +77,7 @@ Not diagnosed. The bar is shown and hidden by an `IntersectionObserver` in `crat
 
 ### Expected
 
-The question names a source text. The answer should lead with excerpts from the Pali Canon, which is loaded from SuttaCentral, in the "From the texts" section. Teachers who speak about it can follow.
+The question names a source text. The answer should lead with excerpts from the Pali Canon, which the owner reports is available from SuttaCentral, in the "From the texts" section. SuttaCentral is not named anywhere in `config/` or the specs on `main`, so whether it is loaded on the beta is not checked. Teachers who speak about it can follow.
 
 ### Actual
 
@@ -226,3 +227,33 @@ Point 4 sets two ways to fix this against each other. One is to serve fewer exce
 - Change the top line to "\<x> teachers, \<y> teachings, \<z> excerpts" in Spec 09 and `result_line`.
 - Settle the open question, then change selection, the prompt or both.
 - Pull the stored draft for this answer to see whether agree and differ were written and dropped.
+
+## B11. Source texts are not in search, answers or excerpt references
+
+- Reported: October 15, 2026, by the owner. Related: [B1](#b1-a-question-about-shakyamuni-returns-talks-not-texts) and [B3](#b3-a-question-about-the-pali-canon-returns-talks-not-suttacentral-texts), which are symptoms of this entry.
+- Sources in scope: SuttaCentral and Terebess.
+
+### Expected
+
+Source texts take part in the app in three ways:
+
+1. Search. Text units are searched alongside talks, so a question about a text or its teaching can return passages from the text itself.
+2. Answers, with the work as a teacher. A work and its purported or historical author can stand as a teacher: a question that names the Buddha, the Pali Canon or a sutta returns that text's own words. Text excerpts appear in their own section, never mixed into the teacher groups.
+3. References in an excerpt. When a teacher's excerpt refers to a text, the excerpt links to that text at its source. Second priority (P2): link to the place in the source where we think the quoted or referenced passage appears.
+
+### Actual
+
+None of the three works on the beta. Answers contain talk excerpts only.
+
+### Cause
+
+Mostly specced, not built.
+
+1. Search and the separate section: Spec 08, Retrieval and answer changes, specs a `TextRetriever` over `servable_text_unit`, `[texts]` settings and a "From the texts" section. None of it is on `main` (B1, cause 1).
+2. The work or historical author as a teacher: Spec 08 specs named-author mode, which matches `person_alias` for authors of ready works, and Traditional attribution (#167) attributes works given as the Buddha's words to Shakyamuni Buddha. A question that names a work or a canon rather than a person, such as "the Pali Canon", has no matching rule yet (B3). Not built.
+3. References in an excerpt: work-level citations are built through resolution, and their footnote rendering is unticked in Spec 08 ("With the answer page in M5"). Verified inline excerpts (Quoted passages inline) are specced and not built. Linking to the place in the source is covered for hand-listed locators with a `link_out_url`. A place found by a quotation match alone has no link rule.
+4. Sources: Terebess is specced as a mandated aggregator (Spec 08, Mandated sources). SuttaCentral is named nowhere in `config/` or the specs on `main`. Its rights basis, edition and import path need a spec entry, and what is loaded on the beta is not checked.
+
+### Fix
+
+To be ordered in the build plan once the register is complete. In outline: spec SuttaCentral as a source; build the texts retrieval path and section; add a rule for questions that name a work or canon; render work-level footnotes and the link to the source; then, as P2, link to the likely place in the source.
