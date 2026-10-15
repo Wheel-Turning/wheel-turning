@@ -192,7 +192,7 @@ async fn a_report_link_prefills_the_form_and_the_form_stores_a_request() {
             "/rights/request",
             None,
             &format!(
-                "name=A+Holder&email=&target={}&message=Mine&website=&excerpt={excerpt}",
+                "name=A+Holder&email=holder%40example.org&target={}&message=Mine&website=&excerpt={excerpt}",
                 encode(&format!("Excerpt {excerpt}"))
             ),
         ),
@@ -200,21 +200,21 @@ async fn a_report_link_prefills_the_form_and_the_form_stores_a_request() {
     .await;
     assert_eq!(r.status, StatusCode::SEE_OTHER);
     assert_eq!(r.headers[header::LOCATION], "/rights?sent=1#sent");
-    let (target, name, email): (String, Option<String>, Option<String>) =
+    let (target, name, email): (String, String, String) =
         sqlx::query_as("select target, requester_name, requester_email from takedown_request")
             .fetch_one(&fx.pool)
             .await
             .unwrap();
     assert_eq!(target, format!("Excerpt {excerpt}"));
-    assert_eq!(name.as_deref(), Some("A Holder"));
-    assert_eq!(email, None);
+    assert_eq!(name, "A Holder");
+    assert_eq!(email, "holder@example.org");
 
     let thanks = send(&fx.app, get("/rights?sent=1", None)).await;
     assert!(thanks.body.contains("role=\"status\""));
 }
 
 #[tokio::test]
-async fn the_rights_form_rejects_a_honeypot_an_empty_target_and_a_sixth_request_an_hour() {
+async fn the_rights_form_rejects_a_honeypot_missing_fields_and_a_sixth_request_an_hour() {
     let fx = start_with(Site {
         trust_forwarded_for: true,
         ..Site::with_fakes("fake-embed")
@@ -236,25 +236,67 @@ async fn the_rights_form_rejects_a_honeypot_an_empty_target_and_a_sixth_request_
     );
     assert_eq!(count(&fx.pool, "takedown_request").await, 0);
 
-    let empty = send(&fx.app, post("/rights/request", None, "target=+&website=")).await;
+    let empty = send(
+        &fx.app,
+        post(
+            "/rights/request",
+            None,
+            "name=A+Holder&email=a%40b.org&target=+&website=",
+        ),
+    )
+    .await;
     assert_eq!(empty.status, StatusCode::BAD_REQUEST);
     assert!(empty.body.contains("aria-invalid=\"true\""));
     assert!(empty.body.contains("id=\"r-target-error\""));
     assert!(empty.body.contains("r-target-help r-target-error"));
+    assert!(empty.body.contains("Please fix the field marked below."));
+    assert!(!empty.body.contains("id=\"r-name-error\""));
 
-    for i in 0..3 {
+    let anonymous = send(
+        &fx.app,
+        post(
+            "/rights/request",
+            None,
+            "name=+&email=nobody&target=x&website=",
+        ),
+    )
+    .await;
+    assert_eq!(anonymous.status, StatusCode::BAD_REQUEST);
+    assert!(anonymous.body.contains("id=\"r-name-error\""));
+    assert!(anonymous.body.contains("r-email-help r-email-error"));
+    assert!(anonymous.body.contains("name@example.org"));
+    assert!(
+        anonymous
+            .body
+            .contains("Please fix the fields marked below.")
+    );
+    assert!(
+        anonymous.body.contains("value=\"x\""),
+        "the form keeps what was typed"
+    );
+    assert_eq!(count(&fx.pool, "takedown_request").await, 0);
+
+    for i in 0..2 {
         let r = send(
             &fx.app,
-            post("/rights/request", None, &format!("target=t{i}")),
+            post(
+                "/rights/request",
+                None,
+                &format!("name=N&email=n%40b.org&target=t{i}"),
+            ),
         )
         .await;
         assert_eq!(r.status, StatusCode::SEE_OTHER);
     }
-    let sixth = send(&fx.app, post("/rights/request", None, "target=t6")).await;
+    let sixth = send(
+        &fx.app,
+        post("/rights/request", None, "name=N&email=n%40b.org&target=t6"),
+    )
+    .await;
     assert_eq!(sixth.status, StatusCode::TOO_MANY_REQUESTS);
     assert!(sixth.body.contains("Please try again in"));
     assert!(sixth.headers.contains_key(header::RETRY_AFTER));
-    assert_eq!(count(&fx.pool, "takedown_request").await, 3);
+    assert_eq!(count(&fx.pool, "takedown_request").await, 2);
 }
 
 #[tokio::test]

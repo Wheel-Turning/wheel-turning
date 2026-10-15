@@ -74,10 +74,10 @@ pub async fn serving_text_unit(pool: &PgPool, id: Uuid) -> Result<bool, DbError>
 /// A removal or report request from `/rights`.
 #[derive(Debug, Clone, Default)]
 pub struct NewRequest<'a> {
-    /// Their name, if given.
-    pub name: Option<&'a str>,
-    /// Their email, if given.
-    pub email: Option<&'a str>,
+    /// Their name.
+    pub name: &'a str,
+    /// Their email address.
+    pub email: &'a str,
     /// What should be removed: a URL, a title or an excerpt code.
     pub target: &'a str,
     /// Their message.

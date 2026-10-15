@@ -91,7 +91,61 @@ struct RightsPage {
     excerpt: Option<String>,
     sent: bool,
     error_summary: Option<&'static str>,
-    target_error: Option<&'static str>,
+    errors: FieldErrors,
+}
+
+/// What is wrong with each field of a submitted form, if anything.
+#[derive(Debug, Default)]
+pub struct FieldErrors {
+    name: Option<&'static str>,
+    email: Option<&'static str>,
+    target: Option<&'static str>,
+}
+
+impl FieldErrors {
+    /// How many fields are marked.
+    fn count(&self) -> usize {
+        [self.name, self.email, self.target]
+            .iter()
+            .filter(|e| e.is_some())
+            .count()
+    }
+}
+
+/// Whether `s` looks like an email address: one `@` with something before it, and a domain
+/// with a dot that is not at either end. Delivery is the real check.
+pub fn plausible_email(s: &str) -> bool {
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.contains('@')
+        && !s.chars().any(char::is_whitespace)
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+}
+
+/// Checks the required fields: a name, an email address and what should be removed.
+fn check(form: &RequestForm) -> FieldErrors {
+    let email = form.email.trim();
+    FieldErrors {
+        name: form
+            .name
+            .trim()
+            .is_empty()
+            .then_some("Please give your name."),
+        email: if email.is_empty() {
+            Some("Please give your email address, so we can reply.")
+        } else if !plausible_email(email) {
+            Some("Please give an email address in the form name@example.org.")
+        } else {
+            None
+        },
+        target: form.target.trim().is_empty().then_some(
+            "Please say what should be removed: a web address, a title or an excerpt code.",
+        ),
+    }
 }
 
 /// `GET /rights` parameters.
@@ -108,7 +162,7 @@ async fn render(
     status: StatusCode,
     form: RequestForm,
     sent: bool,
-    target_error: Option<&'static str>,
+    errors: FieldErrors,
 ) -> Response {
     let sources = match public_forms::source_statuses(&state.pool).await {
         Ok(s) => s,
@@ -130,8 +184,12 @@ async fn render(
             sources,
             excerpt,
             sent,
-            error_summary: target_error.map(|_| "Please fix the field marked below."),
-            target_error,
+            error_summary: match errors.count() {
+                0 => None,
+                1 => Some("Please fix the field marked below."),
+                _ => Some("Please fix the fields marked below."),
+            },
+            errors,
             form,
         },
     )
@@ -147,7 +205,14 @@ pub async fn rights_page(State(state): State<AppState>, Query(q): Query<RightsQu
     } else if let Some(id) = q.talk.as_deref().and_then(|x| x.parse::<Uuid>().ok()) {
         form.target = format!("Transcript of talk {id}");
     }
-    render(&state, StatusCode::OK, form, q.sent.is_some(), None).await
+    render(
+        &state,
+        StatusCode::OK,
+        form,
+        q.sent.is_some(),
+        FieldErrors::default(),
+    )
+    .await
 }
 
 /// A form field trimmed and cut to `max` characters, or none when empty.
@@ -159,8 +224,9 @@ fn optional(s: &str, max: usize) -> Option<&str> {
     })
 }
 
-/// `POST /rights/request`: stores a request, at most 5 an hour from one address. A filled
-/// honeypot gets the same thank-you and stores nothing.
+/// `POST /rights/request`: stores a request, at most 5 an hour from one address. Name, email and
+/// what to remove are required (owner's decision of October 15, 2026). A filled honeypot gets the
+/// same thank-you and stores nothing.
 pub async fn request(
     State(state): State<AppState>,
     ClientAddress(address): ClientAddress,
@@ -173,17 +239,11 @@ pub async fn request(
         tracing::info!("rights request: honeypot filled, nothing stored");
         return Redirect::to("/rights?sent=1#sent").into_response();
     }
-    let target = form.target.trim();
-    if target.is_empty() {
-        return render(
-            &state,
-            StatusCode::BAD_REQUEST,
-            form,
-            false,
-            Some("Please say what should be removed: a web address, a title or an excerpt code."),
-        )
-        .await;
+    let errors = check(&form);
+    if errors.count() > 0 {
+        return render(&state, StatusCode::BAD_REQUEST, form, false, errors).await;
     }
+    let (name, email, target) = (form.name.trim(), form.email.trim(), form.target.trim());
     let text_unit = match form.excerpt.parse::<Uuid>() {
         Ok(id) => match public_forms::serving_text_unit(&state.pool, id).await {
             Ok(true) => Some(id),
@@ -193,8 +253,8 @@ pub async fn request(
         Err(_) => None,
     };
     let new = NewRequest {
-        name: optional(&form.name, 200),
-        email: optional(&form.email, 320),
+        name: optional(name, 200).unwrap_or(name),
+        email: optional(email, 320).unwrap_or(email),
         target: optional(target, 1000).unwrap_or(target),
         message: optional(&form.message, 4000),
         text_unit,
@@ -225,6 +285,47 @@ mod tests {
             license_recorded_on: None,
             removal_requested: false,
         }
+    }
+
+    #[test]
+    fn an_email_address_needs_one_at_and_a_dotted_domain() {
+        for ok in ["a@b.org", "first.last+tag@mail.example.co.uk"] {
+            assert!(plausible_email(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "a",
+            "a@",
+            "@b.org",
+            "a@b",
+            "a@.org",
+            "a@b.",
+            "a@b@c.org",
+            "a b@c.org",
+        ] {
+            assert!(!plausible_email(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn name_email_and_target_are_each_required() {
+        let empty = check(&RequestForm::default());
+        assert!(empty.name.is_some() && empty.email.is_some() && empty.target.is_some());
+        let full = check(&RequestForm {
+            name: "A Holder".into(),
+            email: "holder@example.org".into(),
+            target: "Excerpt 1".into(),
+            ..RequestForm::default()
+        });
+        assert_eq!(full.count(), 0);
+        let bad = check(&RequestForm {
+            name: " ".into(),
+            email: "holder".into(),
+            target: "t".into(),
+            ..RequestForm::default()
+        });
+        assert_eq!(bad.count(), 2);
+        assert!(bad.email.is_some_and(|e| e.contains("name@example.org")));
     }
 
     #[test]
