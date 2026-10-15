@@ -244,11 +244,12 @@ Source texts take part in the app in three ways:
 Owner's decision of October 15, 2026, on references: a quotation or a work's name in an excerpt is a link to the work, and nothing more. No excerpt of the text is shown inline. The link goes to the first of these that has the work:
 
 1. The text on this site, when we hold rights to serve it.
-2. Bookshop.org.
-3. The publisher's page.
-4. Amazon.
+2. A free official edition at the publisher, such as a BDK America PDF.
+3. Bookshop.org.
+4. The publisher's page.
+5. Amazon.
 
-This replaces the collapsed inline excerpt in Spec 08, Quoted passages inline, and the order of October 9 for `wt text link-out` (the publisher's page first, non-profit publishers preferred). Open point: whether a free official edition at the publisher, such as a BDK America PDF that is not served on this site, goes before Bookshop.org.
+This replaces the collapsed inline excerpt in Spec 08, Quoted passages inline, and the order of October 9 for `wt text link-out` (the publisher's page first, non-profit publishers preferred).
 
 ### Actual
 
