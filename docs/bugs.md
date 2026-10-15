@@ -241,6 +241,15 @@ Source texts take part in the app in three ways:
 2. Answers, with the work as a teacher. A work and its purported or historical author can stand as a teacher: a question that names the Buddha, the Pali Canon or a sutta returns that text's own words. Text excerpts appear in their own section, never mixed into the teacher groups.
 3. References in an excerpt. When a teacher's excerpt refers to a text, the excerpt links to that text at its source. Second priority (P2): link to the place in the source where we think the quoted or referenced passage appears.
 
+Owner's decision of October 15, 2026, on references: a quotation or a work's name in an excerpt is a link to the work, and nothing more. No excerpt of the text is shown inline. The link goes to the first of these that has the work:
+
+1. The text on this site, when we hold rights to serve it.
+2. Bookshop.org.
+3. The publisher's page.
+4. Amazon.
+
+This replaces the collapsed inline excerpt in Spec 08, Quoted passages inline, and the order of October 9 for `wt text link-out` (the publisher's page first, non-profit publishers preferred). Open point: whether a free official edition at the publisher, such as a BDK America PDF that is not served on this site, goes before Bookshop.org.
+
 ### Actual
 
 None of the three works on the beta. Answers contain talk excerpts only.
@@ -252,8 +261,9 @@ Mostly specced, not built.
 1. Search and the separate section: Spec 08, Retrieval and answer changes, specs a `TextRetriever` over `servable_text_unit`, `[texts]` settings and a "From the texts" section. None of it is on `main` (B1, cause 1).
 2. The work or historical author as a teacher: Spec 08 specs named-author mode, which matches `person_alias` for authors of ready works, and Traditional attribution (#167) attributes works given as the Buddha's words to Shakyamuni Buddha. A question that names a work or a canon rather than a person, such as "the Pali Canon", has no matching rule yet (B3). Not built.
 3. References in an excerpt: work-level citations are built through resolution, and their footnote rendering is unticked in Spec 08 ("With the answer page in M5"). Verified inline excerpts (Quoted passages inline) are specced and not built. Linking to the place in the source is covered for hand-listed locators with a `link_out_url`. A place found by a quotation match alone has no link rule.
-4. Sources: Terebess is specced as a mandated aggregator (Spec 08, Mandated sources). SuttaCentral is named nowhere in `config/` or the specs on `main`. Its rights basis, edition and import path need a spec entry, and what is loaded on the beta is not checked.
+4. Sources: Terebess is specced as a mandated aggregator (Spec 08, Mandated sources). SuttaCentral is named nowhere in `config/` or the specs on `main`. Its texts are released under CC0 (owner, October 15, 2026), so its rights basis is a license and it needs no mandate; the license should be confirmed per translation when it is recorded, since SuttaCentral lists the license of each one. Its edition choice and import path need a spec entry, and what is loaded on the beta is not checked.
+5. Inline quotations: Spec 08, Quoted passages inline, and the link-out order differ from the owner's decision above, so both need a spec change.
 
 ### Fix
 
-To be ordered in the build plan once the register is complete. In outline: spec SuttaCentral as a source; build the texts retrieval path and section; add a rule for questions that name a work or canon; render work-level footnotes and the link to the source; then, as P2, link to the likely place in the source.
+To be ordered in the build plan once the register is complete. In outline: spec SuttaCentral as a CC0 source; change Spec 08 for the owner's link order and drop the inline excerpt; add Bookshop.org and Amazon links to `wt text link-out`; build the texts retrieval path and section; add a rule for questions that name a work or canon; render work-level footnotes and the link to the source; then, as P2, link to the likely place in the source, on this site or at the source.
