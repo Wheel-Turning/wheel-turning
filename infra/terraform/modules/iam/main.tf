@@ -128,6 +128,8 @@ data "aws_iam_policy_document" "admin_exec" {
       var.secret_arns["db_wt_owner_login"],
       var.secret_arns["db_wt_web_login"],
       var.secret_arns["db_wt_pipeline_login"],
+      # The eval task asks questions through the language model, as the site does.
+      var.secret_arns["anthropic_api_key"],
     ]
   }
 }
@@ -186,6 +188,33 @@ resource "aws_iam_role_policy" "web_task" {
   name   = "web-task"
   role   = aws_iam_role.web_task.id
   policy = data.aws_iam_policy_document.web_task.json
+}
+
+# ---------------------------------------------------------------------------------------------
+# Eval task role: the evaluation runs on the site's models and writes its review page, which
+# quotes transcripts, under eval-reviews/ in the transcripts bucket and nowhere else.
+# ---------------------------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "eval_task" {
+  source_policy_documents = [data.aws_iam_policy_document.web_task.json]
+  statement {
+    sid       = "WriteReviewPages"
+    actions   = ["s3:PutObject"]
+    resources = ["${var.bucket_arns["transcripts"]}/eval-reviews/*"]
+  }
+}
+
+resource "aws_iam_role" "eval_task" {
+  name                 = "${var.name}-eval-task"
+  path                 = local.path
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_trust.json
+}
+
+resource "aws_iam_role_policy" "eval_task" {
+  name   = "eval-task"
+  role   = aws_iam_role.eval_task.id
+  policy = data.aws_iam_policy_document.eval_task.json
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -266,6 +295,10 @@ output "admin_exec_role_arn" {
 
 output "web_task_role_arn" {
   value = aws_iam_role.web_task.arn
+}
+
+output "eval_task_role_arn" {
+  value = aws_iam_role.eval_task.arn
 }
 
 output "batch_instance_profile_name" {

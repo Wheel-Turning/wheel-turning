@@ -107,6 +107,7 @@ module "service" {
   web_exec_role_arn   = module.iam.web_exec_role_arn
   admin_exec_role_arn = module.iam.admin_exec_role_arn
   web_task_role_arn   = module.iam.web_task_role_arn
+  eval_task_role_arn  = module.iam.eval_task_role_arn
   log_group_names     = module.observability.log_group_names
   secret_arns         = module.secrets.arns
   bucket_names        = module.storage.bucket_names

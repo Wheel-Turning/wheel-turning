@@ -33,6 +33,8 @@ COPY --from=ort /ort/libonnxruntime.so /usr/local/lib/libonnxruntime.so
 WORKDIR /app
 COPY config/ /app/config/
 COPY docs/model-licenses.md /app/docs/model-licenses.md
+# Evaluation question sets, for wt eval load and wt eval gate in the eval task.
+COPY eval/ /app/eval/
 ENV WT_ORT_DYLIB=/usr/local/lib/libonnxruntime.so WT_MODEL_DIR=/models
 USER nonroot
 EXPOSE 8080
