@@ -307,6 +307,17 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   wt tester invite --label "<name>" --base-url https://app.wheelturning.org
   ```
 
+- Evaluation on the live stack: the `wt-v1-eval` task runs `wt` on the deployed image with the
+  site's models, config and RDS, as `wt_owner_login`. Give it the command as an override:
+
+  ```bash
+  aws ecs run-task --cluster wt-v1 --task-definition wt-v1-eval --launch-type FARGATE     --network-configuration "awsvpcConfiguration={subnets=[<public subnets>],securityGroups=[<web sg>],assignPublicIp=ENABLED}"     --overrides '{"containerOverrides":[{"name":"eval","command":["wt","eval","run","--set","practitioner@2"]}]}'
+  ```
+
+  Its output is in the `/wt-v1/admin` log group under `eval/eval/<task id>`. For the review page,
+  pass `["wt","eval","export-review","--run","<id>","--out","/out/<id>/review.html"]`; the task
+  copies `/out` to `s3://wt-v1-transcripts-904883674947/eval-reviews/`, and the owner downloads it
+  with `aws s3 cp` (the page quotes transcripts: never share it by public link).
 - Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
   about $30). Scale the service to 0 tasks between test rounds to save the task's share.
 
