@@ -24,8 +24,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(wt_api::warm::keep_warm(
         pool.clone(),
         site.embedder.clone(),
-        site.retrieval.retrieval.hnsw_ef_search,
-        site.retrieval.retrieval.vector_top_k,
+        site.retrieval.retrieval.clone(),
     ));
     let app = router(AppState {
         pool,

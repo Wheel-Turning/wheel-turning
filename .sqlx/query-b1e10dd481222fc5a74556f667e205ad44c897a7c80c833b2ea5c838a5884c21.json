@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select passage_id as \"passage_id!\" from servable_passage\n           where tsv @@ to_tsquery('english', $1)\n             and ($2::uuid is null or teacher_id = $2)\n           order by ts_rank_cd(tsv, to_tsquery('english', $1)) desc, passage_id\n           limit $3",
+  "query": "select passage_id as \"passage_id!\" from servable_passage\n           where tsv @@ to_tsquery('simple', $1)\n             and ($2::uuid is null or teacher_id = $2)\n           order by ts_rank_cd(tsv, to_tsquery('simple', $1)) desc, passage_id\n           limit $3",
   "describe": {
     "columns": [
       {
@@ -26,5 +26,5 @@
       true
     ]
   },
-  "hash": "216f647591d5e1fe4464851f15437426e8a382750113ed3fcf3289a7f592ecde"
+  "hash": "b1e10dd481222fc5a74556f667e205ad44c897a7c80c833b2ea5c838a5884c21"
 }

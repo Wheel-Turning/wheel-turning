@@ -238,6 +238,33 @@ fn ids(r: &Retrieved) -> BTreeSet<PassageId> {
     r.chosen.iter().map(|c| c.id).collect()
 }
 
+/// The common-lexeme function reads the statistics ANALYZE keeps, and returns nothing while the
+/// collection is smaller than its minimum, so a small collection keeps every word (0045).
+#[tokio::test]
+async fn common_lexemes_come_from_the_statistics_and_wait_for_a_large_collection() {
+    let fx = start().await;
+    corpus(&fx.pool).await;
+    sqlx::raw_sql("analyze passage")
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let small: Vec<String> = sqlx::query_scalar("select lexeme from common_lexemes(0.0, $1)")
+        .bind(search::COMMON_MIN_ROWS)
+        .fetch_all(&fx.pool)
+        .await
+        .unwrap();
+    assert!(small.is_empty(), "{small:?}");
+    let all: Vec<(String, f32)> =
+        sqlx::query_as("select lexeme, share from common_lexemes(0.0, 0)")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert!(
+        all.iter().all(|(l, s)| !l.is_empty() && *s > 0.0),
+        "{all:?}"
+    );
+}
+
 #[tokio::test]
 async fn full_text_vector_and_fused_retrieval_find_the_planted_passages() {
     let fx = start().await;
@@ -245,7 +272,7 @@ async fn full_text_vector_and_fused_retrieval_find_the_planted_passages() {
     let mut conn = fx.pool.acquire().await.unwrap();
 
     let q = search::or_query("How do I work with anger?").unwrap();
-    let fts: BTreeSet<_> = search::full_text(&mut conn, &q, None, 60)
+    let fts: BTreeSet<_> = search::full_text(&mut conn, &q, None, 60, 0.10)
         .await
         .unwrap()
         .into_iter()
@@ -508,7 +535,7 @@ async fn a_query_matching_only_a_student_question_returns_the_teachers_answer() 
         .remove(0);
     let mut conn = fx.pool.acquire().await.unwrap();
     assert!(
-        search::full_text(&mut conn, "loneliness | long | retreats", None, 60)
+        search::full_text(&mut conn, "loneliness | long | retreats", None, 60, 0.10)
             .await
             .unwrap()
             .is_empty(),

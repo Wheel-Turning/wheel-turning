@@ -163,7 +163,14 @@ pub async fn retrieve_reporting(
             match &tsquery {
                 Some(q) => {
                     let mut conn = pool.acquire().await?;
-                    search::full_text(&mut conn, q, named, cfg.retrieval.fts_top_k).await
+                    search::full_text(
+                        &mut conn,
+                        q,
+                        named,
+                        cfg.retrieval.fts_top_k,
+                        cfg.retrieval.fts_max_lexeme_share,
+                    )
+                    .await
                 }
                 None => Ok(Vec::new()),
             }

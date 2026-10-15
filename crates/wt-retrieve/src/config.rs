@@ -63,6 +63,9 @@ impl Default for RankingConfig {
 pub struct SearchConfig {
     /// Full-text candidates.
     pub fts_top_k: i64,
+    /// Lexemes in more than this share of passages are left out of the full-text query; 1 keeps
+    /// every word (owner's request of October 15, 2026).
+    pub fts_max_lexeme_share: f32,
     /// Vector candidates.
     pub vector_top_k: i64,
     /// Student-question hits fused as a third list. Kept short: a hit stands for the passage
@@ -88,6 +91,7 @@ impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             fts_top_k: 60,
+            fts_max_lexeme_share: 0.10,
             vector_top_k: 60,
             question_top_k: 10,
             rrf_k: 60.0,

@@ -65,7 +65,7 @@ v1 is a private demonstration for SSZ members and a few invited teachers, built 
 Three kinds of material feed it:
 
 - Talks. SSZ talks, about 262 distinct talks and 163 hours on Vimeo after removing duplicates and non-talks (inventory of October 5, 2026, which includes 5 talks from early 2023 that the SSZ site embeds but the account's public list hides), plus 14 recordings to review, all published on Vimeo, with only some on Apple Podcasts and Spotify. Recorded talks of other Soto sanghas join from sources the owner adds, whether under a license or on the owner's mandate. Teachers who have not replied are included unless they opt out, subject to Kanshin's view.
-- Texts. Foundational works such as the Platform Sutra and the Dhammapada, loaded from URLs or files, run through OCR where needed, and searchable in their own section. BDK America and Terebess are the first mandated sources, alongside open-license texts.
+- Texts. Foundational works such as the Platform Sutra and the Dhammapada, loaded from URLs or files, run through OCR where needed, and searchable in their own section. Works that present themselves as the Buddha's words, such as the Dhammapada, are attributed to Shakyamuni Buddha, so a question about what the Buddha said finds them under any of his common names (owner's decision of October 15, 2026). BDK America and Terebess are the first mandated sources, alongside open-license texts.
 - Reference assets. Glossaries, alias lists, lineage charts and locator lists. The pipeline uses them and the page never shows them.
 
 **In scope**

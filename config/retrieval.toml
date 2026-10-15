@@ -5,6 +5,7 @@
 
 [retrieval]
 fts_top_k = 60
+fts_max_lexeme_share = 0.10 # lexemes in more than 10% of passages leave the full-text query: 13% more 7+ candidates over 40 questions judged by the ranker, p50 115 ms against 479 (Oct 15, 2026)
 vector_top_k = 60
 question_top_k = 10        # student-question hits fused as a third list; a long list crowded out direct passage matches
 rrf_k = 60

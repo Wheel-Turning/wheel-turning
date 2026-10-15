@@ -9,7 +9,7 @@ Implements milestone M4b, which runs after M4 and in parallel with Gate A, and i
 
 Rules:
 
-1. A text is never a teacher. The `teacher` registry holds people whose talks are in the corpus. An author such as Huineng or Dogen is a `person`, and a work with an unknown or collective author is attributed to the work itself. Single-author attribution is displayed but never counts toward the three-teacher rule and never earns a give button.
+1. A text is never a teacher. The `teacher` registry holds people whose talks are in the corpus. An author such as Huineng or Dogen is a `person`, and a work with an unknown or collective author is attributed to the work itself. The one exception is a work that presents itself as the Buddha's own words, such as the Dhammapada. It is traditionally attributed to Shakyamuni Buddha, a `person` of kind `figure`, and the page says so (Traditional attribution, owner's decision of October 15, 2026). Single-author attribution is displayed but never counts toward the three-teacher rule and never earns a give button.
 2. Rights attach to the edition, not the work. A public-domain text can have a copyrighted translation, so each edition needs its own license evidence, with the translator named.
 3. The gate is the same as for talks. An edition is indexed only when its license evidence is approved by a person and its license code is on the allowed list. Otherwise the work stays a link-out in the `work` table, which keeps citation resolution working without storing text.
 4. Texts and talks never mix in retrieval. They live in separate tables behind separate serving views and are searched separately. The answer assembler combines them only as two distinct sections, so a text cannot change which talks are returned or in what order.
@@ -176,6 +176,7 @@ role = "corpus"
 [work]
 title = "Dhammapada"
 author = "REPLACE_ME"              # a person display name, or omit for an anonymous work
+attribution = "author"             # or "traditional" for a work given as the Buddha's words
 tradition = "theravada"
 
 [edition]
@@ -411,6 +412,46 @@ Footnotes. When a citation has `text_unit_id`, its footnote links to `/text/<uni
 New route: `GET /text/{unit_id}` (session required) shows the unit with at most two neighbors on each side, read through `servable_text_unit`, each with its license notice. There is no whole-work view, in keeping with the PRD's short-passages rule.
 
 Texts are not passed to the synthesizer in v1, because themes describe how teachers approach a question. Evaluation exports list text hits in their own labeled block so the reviewer can rate them separately.
+
+## Traditional attribution
+
+People ask what the Buddha said, and the answer belongs in the texts that present themselves as his words. Before this section the Dhammapada, a collective work, was attributed to the work itself, so no question could find texts by naming him (bug B1 in `docs/bugs.md`; owner's decision of October 15, 2026).
+
+1. The figure. Shakyamuni Buddha is a `person` with `kind = 'figure'`, display name "Shakyamuni Buddha" and `era_note` "c. 5th century BCE". He is never a teacher, and never counts toward the three-teacher rule, the source ceiling or the dana split.
+2. Which works. A work is attributed to him only when its manifest says so, and only when the text presents itself as the Buddha's words: the Dhammapada, the Sutta Nipāta and the suttas of the Pali Nikāyas, and Mahayana sutras where the Buddha is the main speaker, such as the Lotus and Diamond sutras. The Heart Sutra, spoken by Avalokiteśvara, and the Platform Sutra, by Huineng, are not. Nothing assigns this automatically.
+3. Schema. In the next free migration: `alter table work add column attribution text not null default 'author' check (attribution in ('author','traditional'));`, and `alter table person_alias add column generic boolean not null default false;`. A `traditional` work must have an `author_person_id`. The manifest sets it with `attribution = "traditional"` under `[work]`.
+4. Display. The credit line of a `traditional` work reads "Attributed to Shakyamuni Buddha" where an author's name would go, on the text hit, the unit page and the footnote. The word author is not used for him.
+5. The alias list. The founder compiles it, so it needs no license evidence (rule 6). It is imported with `wt reference import` as an `alias_list`, with a `generic` column. Matching folds case and diacritics and treats hyphens as spaces, so "Śākyamuni" matches "Sakyamuni" and "Sabbaññū" matches "Sabbannu".
+
+   Specific aliases name him wherever they appear:
+
+   | Alias | Source |
+   | --- | --- |
+   | Shakyamuni Buddha, Shakyamuni, Śākyamuni, Sakyamuni | English and Sanskrit |
+   | Shakamuni Butsu, Shakamuni | Soto liturgy, Japanese |
+   | Honshi, Our Original Teacher | Soto dedications (ekō) |
+   | Siddhartha Gautama, Siddhattha Gotama, Siddhartha, Gotama, Gautama | Personal and clan names |
+   | Sabbaññū | Pali, "the All-Knowing" |
+   | Aṅgīrasa | Pali verse |
+   | Ukkādhāro Manussānaṁ | Pali, "Torchbearer of Mankind" |
+
+   Generic aliases also name other buddhas or ideas, so they count only in context (point 6):
+
+   | Alias | Why generic |
+   | --- | --- |
+   | The Buddha, Buddha | Buddha nature, Buddha hall, any buddha |
+   | Tathagata, Thus Come One, Nyorai | Amida Nyorai, Yakushi Nyorai |
+   | The World-Honored One, World-Honored One, Bhagavan, Bhagavant, Blessed One | Also used of other buddhas in Mahayana sutras |
+   | The Great Sage, Great Sage, Mahesi | Also used of ancestors |
+   | Lokanātha | Also an epithet of Avalokiteśvara |
+
+   A phrase that contains a specific alias, such as "Shakyamuni Buddha, myriad Nirmanakaya", is already covered by that alias and needs no row of its own.
+6. Generic aliases in queries. The named-author automaton (Retrieval and answer changes, point 3) counts a generic alias only when both hold:
+   - The query asks what he said or taught: a word from `[texts] author_speech_words` in `config/retrieval.toml` (say, says, said, teach, teaches, taught, teaching, teachings, preach, preached, words, according to) appears in the query.
+   - The alias is not part of another name or term: the word before it is not in `author_alias_stop_before` (Amida, Amitabha, Yakushi, Medicine, Dainichi, Vairocana, Maitreya, Miroku, Kannon, Avalokiteshvara, Manjushri), and the word after it is not in `author_alias_stop_after` (nature, natures, mind, hall, land, field, body, bodies, realm, seed, way, statue, image).
+
+   So "What does the Buddha say about suffering?" runs named-author mode, and "What is Buddha nature?" and "Amida Nyorai's vow" run standard mode. Specific aliases follow the usual length and common-word rules and need no context. The matched alias, and a following "Buddha" when the alias is a name such as Shakyamuni, are removed from the talk query as for any named author, so talk passages are not favored for merely saying "Buddha".
+7. Summaries. Texts are not passed to the synthesizer, so a summary has no grounds to say what the Buddha said. In B1 the summary turned a teacher's paraphrase into "Shakyamuni Buddha taught that...". The summary filters (Spec 05, Summary filters) gain one rule: a sentence that contains one of his specific aliases, or a generic alias that a speech word follows within five words, is dropped. A sentence may still say what a teacher says about the Buddha's teaching without naming him as the speaker.
 
 ## Work-level citations
 
@@ -900,6 +941,9 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text". (The link is done and tested in `wt-ingest/tests/reference.rs`; the footnote renders with the answer page in M5.)
 - [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present.
 - [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search.
+- [ ] An alias list for Shakyamuni Buddha imports its specific and generic aliases, and a work imported with `attribution = "traditional"` is credited "Attributed to Shakyamuni Buddha". A traditional work with no author person is refused.
+- [ ] "What does Shakyamuni buddha say about suffering?", "What did the Buddha teach about anger?" and "What does the Tathagata say about craving?" run named-author mode for the Buddha. "What is Buddha nature?", "Amida Nyorai's vow" and "Who was the great sage of India?" run standard mode.
+- [ ] A summary sentence that names the Buddha as speaking is dropped, and one that says what a teacher says about his teaching passes.
 - [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
 - [x] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end. (`wt-ingest/tests/intake.rs`, with scripted answers.)
 - [x] `wt text link-out` creates a `work` and locators with no text rows. (`wt-ingest/tests/reference.rs`.)
