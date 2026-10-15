@@ -406,7 +406,20 @@ async fn ask(fx: &Fx, question: &str) -> Reply {
     .await;
     assert_eq!(asked.status, StatusCode::SEE_OTHER, "{}", asked.body);
     let permalink = asked.headers[header::LOCATION].to_str().unwrap().to_owned();
+    settled(fx, &permalink, &cookie).await;
     send(&fx.app, get(&permalink, Some(&cookie))).await
+}
+
+/// Waits, as the page's script does, until the answer's summary is no longer being written.
+async fn settled(fx: &Fx, permalink: &str, cookie: &str) {
+    for _ in 0..100 {
+        let r = send(&fx.app, get(&format!("{permalink}/summary"), Some(cookie))).await;
+        if r.status != StatusCode::ACCEPTED {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("the summary was still pending after 10 s");
 }
 
 async fn theme_counts(pool: &PgPool) -> (i32, i32) {
@@ -452,8 +465,8 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
         "an empty section is left out"
     );
     assert!(
-        section.contains("id=\"fb-summary\"") && section.contains("Feedback on this summary"),
-        "the summary's feedback control sits inside its container"
+        !section.contains("Feedback on"),
+        "the summary has no control of its own; one control closes the page"
     );
     // Each marker points to a quoted line the code took verbatim from the excerpt.
     assert!(section.contains("href=\"#sq-1\"") && section.contains("href=\"#sq-2\""));
@@ -568,6 +581,67 @@ async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_summary
     assert_eq!(page.status, StatusCode::OK);
     assert!(!page.body.contains("id=\"summary\""));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
+}
+
+/// The page comes back before the summary is written: its place shows at the top, and the
+/// summary route answers 202 until the summary is stored, then 200 with the section
+/// (owner's request of October 15, 2026).
+#[tokio::test]
+async fn the_page_comes_back_before_its_summary_and_the_summary_fills_in() {
+    let mut site = site_with(Arc::new(Slow));
+    site.retrieval.synthesis.synthesis_timeout_s = 10;
+    let fx = start_with(site, true).await;
+    let cookie = join(&fx, "owner").await;
+    let token = csrf(&send(&fx.app, get("/", Some(&cookie))).await.body);
+    let asked = send(
+        &fx.app,
+        post("/ask", &cookie, &format!("q=anger&csrf={}", encode(&token))),
+    )
+    .await;
+    let permalink = asked.headers[header::LOCATION].to_str().unwrap().to_owned();
+    let first = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    assert!(
+        first.body.contains("data-summary=\"") && first.body.contains("Writing a summary"),
+        "{}",
+        first.body
+    );
+    assert_eq!(
+        first.body.matches("<blockquote>").count(),
+        2,
+        "the excerpts are ready"
+    );
+    let pending = send(&fx.app, get(&format!("{permalink}/summary"), Some(&cookie))).await;
+    assert_eq!(pending.status, StatusCode::ACCEPTED);
+    settled(&fx, &permalink, &cookie).await;
+    let ready = send(&fx.app, get(&format!("{permalink}/summary"), Some(&cookie))).await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert!(
+        ready.body.contains("<section id=\"summary\""),
+        "{}",
+        ready.body
+    );
+    let after = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    assert!(!after.body.contains("data-summary=\""));
+    assert!(after.body.contains("<section id=\"summary\""));
+}
+
+/// A model that answers after a second, as a real one does.
+struct Slow;
+
+#[async_trait::async_trait]
+impl LlmClient for Slow {
+    async fn complete_value(
+        &self,
+        req: &LlmRequest,
+        _: &serde_json::Value,
+        _: DataClass,
+    ) -> Result<serde_json::Value, LlmError> {
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        Ok(match req.stage {
+            wt_core::config::LlmStage::Verify => verdict(true),
+            _ => summary_reply(),
+        })
+    }
 }
 
 #[tokio::test]
@@ -1067,11 +1141,11 @@ async fn the_dana_script_is_served_from_the_site() {
     assert!(!r.body.contains("http"), "no external host");
 }
 
-/// The answer page's excerpt footer and feedback control (Spec 06, Answer page structure,
-/// rules 2, 5 and 6, owner's decision of October 12, 2026), with ids, the token and the access
-/// date replaced so the snapshot is stable.
+/// The answer page's excerpt footer (Spec 06, Answer page structure, rules 2 and 5, owner's
+/// decisions of October 12 and 15, 2026), with ids, the token and the access date replaced so the
+/// snapshot is stable.
 #[tokio::test]
-async fn the_excerpt_footer_reads_listen_cite_report_with_one_feedback_form() {
+async fn the_excerpt_footer_reads_listen_read_cite_give_report() {
     let fx = start().await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
@@ -1085,7 +1159,7 @@ async fn the_excerpt_footer_reads_listen_cite_report_with_one_feedback_form() {
         "the sticky copy is hidden from assistive technology and starts hidden"
     );
     let start = body.find("<ul class=\"excerpt-links\">").unwrap();
-    let end = body[start..].find("</details>\n  </article>").unwrap() + start;
+    let end = body[start..].find("</article>").unwrap() + start;
     let mut fragment = body[start..end].to_owned();
     let uuid =
         regex::Regex::new("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap();
@@ -1128,6 +1202,8 @@ async fn feedback_rows(pool: &PgPool) -> i64 {
         .unwrap()
 }
 
+/// The page shows one control now; a post from an excerpt control on a page served before still
+/// records.
 #[tokio::test]
 async fn excerpt_feedback_takes_several_reasons_and_a_note_in_one_submission() {
     let fx = start().await;
@@ -1173,15 +1249,6 @@ async fn excerpt_feedback_takes_several_reasons_and_a_note_in_one_submission() {
         .await
         .unwrap();
     assert_eq!(submissions, 1);
-
-    // Without the script the page comes back with the control open and the status in it.
-    let back = to.split('#').next().unwrap();
-    let page = send(&fx.app, get(back, Some(&cookie))).await;
-    assert!(page.body.contains("id=\"fb-p1\" open>"), "{}", page.body);
-    assert!(
-        page.body
-            .contains("Thank you. Your feedback on excerpt 1 was recorded.</p>")
-    );
 
     // With the script the status comes back as text for the live region.
     let r = send(
@@ -1246,6 +1313,70 @@ async fn excerpt_feedback_takes_several_reasons_and_a_note_in_one_submission() {
     .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     assert_eq!(feedback_rows(&fx.pool).await, before);
+}
+
+#[tokio::test]
+async fn one_feedback_control_on_these_answers_closes_the_page() {
+    let fx = start().await;
+    let (cookie, token, permalink, _) = asked(&fx).await;
+    let page = send(&fx.app, get(&permalink, Some(&cookie))).await;
+    let body = &page.body;
+    assert_eq!(body.matches("<details class=\"fb\"").count(), 1, "{body}");
+    assert!(!body.contains("Feedback on excerpt"), "{body}");
+    let control = body
+        .find("<summary>Feedback on these answers</summary>")
+        .unwrap();
+    let last_excerpt = body.rfind("<article class=\"passage\"").unwrap();
+    assert!(control > last_excerpt, "the control follows the excerpts");
+    assert!(body.contains("name=\"target\" value=\"answer\""));
+
+    let fb = format!("{permalink}/feedback");
+    let base = format!("csrf={}&target=answer", encode(&token));
+    let r = send(
+        &fx.app,
+        post(
+            &fb,
+            &cookie,
+            &format!("{base}&reason=not_relevant&reason=unsupported&note=thin"),
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    let to = r.headers[header::LOCATION].to_str().unwrap().to_owned();
+    assert_eq!(to, format!("{permalink}?fb=answer&fbs=ok#fb-answer"));
+    let rows: Vec<(String, String, Option<Uuid>)> =
+        sqlx::query_as("select kind, target, passage_id from feedback order by kind")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("note".to_owned(), "answer".to_owned(), None),
+            ("not_relevant".to_owned(), "answer".to_owned(), None),
+            ("unsupported".to_owned(), "answer".to_owned(), None),
+        ]
+    );
+
+    // Without the script the page comes back with the control open and the status in it.
+    let back = to.split('#').next().unwrap();
+    let page = send(&fx.app, get(back, Some(&cookie))).await;
+    assert!(
+        page.body.contains("id=\"fb-answer\" open>"),
+        "{}",
+        page.body
+    );
+    assert!(
+        page.body
+            .contains("Thank you. Your feedback on these answers was recorded.</p>")
+    );
+    // A summary-only reason is not an answer reason.
+    let r = send(
+        &fx.app,
+        hx(&fb, &cookie, &format!("{base}&reason=misrepresents")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 #[tokio::test]

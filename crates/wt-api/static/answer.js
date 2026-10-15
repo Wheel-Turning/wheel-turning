@@ -31,6 +31,42 @@
   }
   pad();
 
+  // Rule 4: a summary still being written (owner's request of October 15, 2026). The page came
+  // back with the excerpts; this asks for the summary every second for up to 90 seconds and puts
+  // it in its place, or removes the place when there is none. Focus is never moved.
+  var pending = document.querySelector("[data-summary]");
+  var announce = document.querySelector("[data-summary-announce]");
+  if (pending && window.fetch) {
+    var tries = 0;
+    var poll = function () {
+      tries += 1;
+      fetch(pending.getAttribute("data-summary"), { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) {
+          if (r.status === 200) {
+            return r.text().then(function (html) {
+              pending.insertAdjacentHTML("beforebegin", html);
+              pending.parentNode.removeChild(pending);
+              if (announce) {
+                announce.textContent = "The summary is ready, above the excerpts.";
+              }
+            });
+          }
+          if (r.status === 202 && tries < 90) {
+            window.setTimeout(poll, 1000);
+            return null;
+          }
+          pending.parentNode.removeChild(pending);
+          return null;
+        })
+        .catch(function () {
+          if (tries < 90) {
+            window.setTimeout(poll, 2000);
+          }
+        });
+    };
+    window.setTimeout(poll, 1000);
+  }
+
   // Rule 5: "Copy citation" inside each Cite.
   Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (button) {
     if (!navigator.clipboard) {

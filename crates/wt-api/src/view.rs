@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{Datelike, NaiveDate};
+use wt_core::entities::decode;
 use wt_core::excerpt::{Excerpt, ExcerptPart};
 use wt_core::ids::{AnswerId, PassageId, TalkId};
 use wt_db::answer::{CitedWork, Payload, Served, TalkCard};
@@ -235,7 +236,7 @@ pub fn attach_questions(view: &mut AnswerView, questions: &[wt_db::questions::Sh
         p.question = questions
             .iter()
             .find(|q| q.passage_id == p.id)
-            .map(|q| q.text.clone());
+            .map(|q| decode(&q.text).into_owned());
     }
 }
 
@@ -270,7 +271,7 @@ pub struct AnswerView {
     pub themes: Vec<ThemeLine>,
     /// The summary block (Spec 05, Summary and verifier), set by [`crate::summary::build`].
     pub summary: Option<crate::summary::SummaryView>,
-    /// Teacher groups, ordered by their best passage.
+    /// Runs of consecutive passages from one teacher, in relevance order.
     pub groups: Vec<Group>,
     /// Passages that no longer serve.
     pub withdrawn: usize,
@@ -299,8 +300,9 @@ pub struct AnswerRows<'a> {
     pub accessed: NaiveDate,
 }
 
-/// Groups the served passages by teacher in payload order, which is best first, so groups
-/// are ordered by their best passage and passages inside a group by score (rule 1). Each shows
+/// Lays the served passages out in payload order, which is best first (rule 1, as the owner
+/// decided on October 15, 2026), under their teacher's name: consecutive passages from one
+/// teacher share a heading. Each shows
 /// its excerpt; "Listen at" and the transcript anchor follow the excerpt's first word (rule 8),
 /// starting `lead_in_ms` early.
 pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
@@ -355,12 +357,14 @@ pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
             meta: meta(card),
             reference: 0,
             cite,
-            links: source_links(card, text, start_ms, ordinal, lead_in_ms),
+            links: source_links(card, &decode(text), start_ms, ordinal, lead_in_ms),
             give_href: gives(card).then(|| format!("/give/{answer}/{}", card.sangha_id)),
             credit: credit_line(card),
             question: None,
         };
-        match groups.iter_mut().find(|g| g.teacher == card.teacher_name) {
+        // Passages keep the payload's order, most relevant first (owner's decision of October
+        // 15, 2026); a teacher's heading repeats wherever another teacher came between.
+        match groups.last_mut().filter(|g| g.teacher == card.teacher_name) {
             Some(g) => g.passages.push(view),
             None => groups.push(Group {
                 teacher: card.teacher_name.clone(),
@@ -427,7 +431,11 @@ pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
             })
         })
         .collect();
-    let teachers = groups.len();
+    let teachers = groups
+        .iter()
+        .map(|g| g.teacher.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     let result_line = match teachers {
         0 => "No excerpts found".to_owned(),
         1 => "Passages from 1 teacher".to_owned(),
@@ -678,7 +686,7 @@ fn split_runs(text: &str, marks: impl Iterator<Item = (usize, Marker)>) -> Vec<T
     for (offset, marker) in marks {
         let take = offset.saturating_sub(at);
         runs.push(TextRun {
-            text: chars.by_ref().take(take).collect(),
+            text: decode(&chars.by_ref().take(take).collect::<String>()).into_owned(),
             marker: Some(marker),
         });
         at += take;
@@ -686,7 +694,7 @@ fn split_runs(text: &str, marks: impl Iterator<Item = (usize, Marker)>) -> Vec<T
     let tail: String = chars.collect();
     if !tail.is_empty() || runs.is_empty() {
         runs.push(TextRun {
-            text: tail,
+            text: decode(&tail).into_owned(),
             marker: None,
         });
     }
@@ -987,6 +995,76 @@ mod tests {
             ..c
         };
         assert_eq!(text_entry(&whole).plain(), "Fixture Sutra.");
+    }
+
+    #[test]
+    fn runs_decode_character_references_after_splitting() {
+        let m = Marker {
+            number: 1,
+            reference: 1,
+        };
+        // The offset counts the stored text, references included.
+        let text = "he said &ldquo;sit&rdquo; and left";
+        let runs = split_runs(text, [(25, m)].into_iter());
+        let texts: Vec<_> = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["he said \u{201C}sit\u{201D}", " and left"]);
+    }
+
+    #[test]
+    fn passages_keep_relevance_order_and_a_teacher_heading_repeats() {
+        let teacher = |n: u128, name: &str| {
+            let mut c = card("youtube", "speaker_consent");
+            c.id = TalkId::from_uuid(Uuid::from_u128(10 + n));
+            c.teacher_id = TeacherId::from_uuid(Uuid::from_u128(20 + n));
+            c.teacher_name = name.into();
+            c
+        };
+        let served: Vec<Served> = [(1, "Ada"), (2, "Bo"), (1, "Ada"), (1, "Ada")]
+            .into_iter()
+            .zip(100u128..)
+            .map(|((t, name), id)| Served {
+                id: PassageId::from_uuid(Uuid::from_u128(id)),
+                text: "Sit.".into(),
+                ordinal: 0,
+                start_ms: 0,
+                end_ms: 1000,
+                talk: teacher(t, name),
+            })
+            .collect();
+        let payload = Payload {
+            mode: "standard".into(),
+            named_teacher_id: None,
+            notice: None,
+            notice_count: None,
+            themes: Vec::new(),
+            summary: None,
+            summary_pending: false,
+            passage_ids: served.iter().map(|s| s.id).collect(),
+            rerank_degraded: false,
+            curated: false,
+            spans: Vec::new(),
+        };
+        let view = assemble(
+            &AnswerRows {
+                answer: AnswerId::from_uuid(Uuid::from_u128(9)),
+                payload: &payload,
+                served: &served,
+                excerpts: &BTreeMap::new(),
+                cited: &[],
+                named_teacher: None,
+                accessed: NaiveDate::from_ymd_opt(2026, 10, 15).unwrap(),
+            },
+            0,
+        );
+        let headings: Vec<_> = view.groups.iter().map(|g| g.teacher.as_str()).collect();
+        assert_eq!(headings, ["Ada", "Bo", "Ada"]);
+        let order: Vec<PassageId> = view
+            .groups
+            .iter()
+            .flat_map(|g| g.passages.iter().map(|p| p.id))
+            .collect();
+        assert_eq!(order, payload.passage_ids);
+        assert_eq!(view.result_line, "Passages from 2 teachers");
     }
 
     #[test]

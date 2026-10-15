@@ -8,17 +8,23 @@
 <h1 class="question">{{ query }}</h1>
 <p class="result">{{ view.result_line }}</p>
 {% if let Some(n) = view.notice %}<section class="notice" aria-labelledby="notice-h"><h2 id="notice-h" class="visually-hidden">Notice</h2><p>{{ n }}</p></section>{% endif %}
-{% if view.degraded %}<p class="muted small">Alpha: excerpts are ordered by search match only; the relevance check is not installed yet.</p>{% endif %}
+{% if view.degraded %}<p class="muted small">The relevance check did not finish for this question, so these excerpts are in search order.</p>{% endif %}
 {% if thanks %}<p class="status" role="status">Thank you. Your feedback was recorded.</p>{% endif %}
 {% if summary %}{% if let Some(s) = view.summary %}
 {% include "summary.html" %}
+{% else if summary_pending %}
+<p class="visually-hidden" role="status" aria-live="polite" data-summary-announce></p>
+<section id="summary" class="answer-summary pending" aria-labelledby="summary-h" data-summary="/a/{{ answer_id }}/summary">
+  <h2 id="summary-h">Summary</h2>
+  <p class="muted">Writing a summary of these excerpts. It appears here in a few seconds; the excerpts below are ready now.</p>
+  <noscript><p class="muted small">Reload the page in a few seconds to see it.</p></noscript>
+</section>
 {% else if !view.themes.is_empty() %}
 <section class="themes" aria-labelledby="themes-h">
   <h2 id="themes-h">How approaches differ</h2>
   <ul>
     {% for t in view.themes %}<li>{{ t.description }}{% for n in t.chips %} <a class="chip" href="#p{{ n }}" aria-label="Excerpt {{ n }}">{{ n }}</a>{% endfor %}</li>{% endfor %}
   </ul>
-  {% include "summary_feedback.html" %}
 </section>
 {% endif %}{% endif %}
 {% for g in view.groups %}
@@ -33,7 +39,7 @@
       {% if let Some(l) = p.links.listen %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Listen</a></li>{% endif %}
       {% if let Some(s) = p.links.starts_at %}<li class="muted small">{{ s }}</li>{% endif %}
       {% if let Some(l) = p.links.read %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Read</a></li>{% endif %}
-      <li class="cite"><details>
+      <li class="cite-item"><details>
         <summary aria-label="Cite this excerpt">Cite</summary>
         <div class="cite-body">
           <p class="mla" id="cite-p{{ p.number }}">{% for r in view.references %}{% if r.number == p.reference %}{{ r.before }}<i>{{ r.italic }}</i>{{ r.after }}{% endif %}{% endfor %}</p>
@@ -41,30 +47,10 @@
           <span class="copy-status small" role="status" aria-live="polite"></span>
         </div>
       </details></li>
-      {% if giving %}{% if let Some(gv) = p.give_href %}<li><a href="{{ gv }}" aria-label="Give to {{ g.sangha }}">Give</a></li>{% endif %}{% endif %}
+      {% if giving %}{% if let Some(gv) = p.give_href %}<li><a href="{{ gv }}" aria-label="Give to this sangha, {{ g.sangha }}">Give to this sangha</a></li>{% endif %}{% endif %}
       <li><a href="/rights?excerpt={{ p.id }}#request" aria-label="Report this excerpt">Report</a></li>
     </ul>
     <p class="credit">{{ p.credit }}</p>
-    {% let st = self.excerpt_status(p.number) %}
-    <details class="fb" id="fb-p{{ p.number }}"{% if st.is_some() %} open{% endif %}>
-      <summary>Feedback on excerpt {{ p.number }}</summary>
-      <form method="post" action="/a/{{ answer_id }}/feedback" data-feedback>
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="target" value="excerpt">
-        <input type="hidden" name="passage" value="{{ p.id }}">
-        <input type="hidden" name="n" value="{{ p.number }}">
-        <fieldset>
-          <legend>What do you think of this excerpt? Choose any that apply.</legend>
-          {% for (k, label) in excerpt_reasons %}<div class="check"><input type="checkbox" id="f{{ p.number }}-{{ k }}" name="reason" value="{{ k }}"><label for="f{{ p.number }}-{{ k }}">{{ label }}</label></div>
-          {% endfor %}
-        </fieldset>
-        <label for="f{{ p.number }}-note">Anything else? (optional)</label>
-        <textarea id="f{{ p.number }}-note" name="note" rows="2" maxlength="1000" aria-describedby="f{{ p.number }}-help"></textarea>
-        <p id="f{{ p.number }}-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
-        <button type="submit" class="secondary">Send feedback</button>
-        <p class="fb-status{% if let Some(f) = st %}{% if f.error %} error{% endif %}{% endif %}" role="status" aria-live="polite">{% if let Some(f) = st %}{{ f.message }}{% endif %}</p>
-      </form>
-    </details>
   </article>
   {% endfor %}
 </section>
@@ -97,6 +83,24 @@
   <div id="dana-result" role="status" aria-live="polite">{% if let Some(d) = dana %}{% include "dana_split.html" %}{% endif %}</div>
 </section>
 {% endif %}
+{% let st = self.answer_status() %}
+<details class="fb" id="fb-answer"{% if st.is_some() %} open{% endif %}>
+  <summary>Feedback on these answers</summary>
+  <form method="post" action="/a/{{ answer_id }}/feedback" data-feedback>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="target" value="answer">
+    <fieldset>
+      <legend>What do you think of these answers? Choose any that apply.</legend>
+      {% for (k, label) in answer_reasons %}<div class="check"><input type="checkbox" id="fa-{{ k }}" name="reason" value="{{ k }}"><label for="fa-{{ k }}">{{ label }}</label></div>
+      {% endfor %}
+    </fieldset>
+    <label for="fa-note">Anything else? (optional)</label>
+    <textarea id="fa-note" name="note" rows="2" maxlength="1000" aria-describedby="fa-note-help"></textarea>
+    <p id="fa-note-help" class="help small">Notes are read by the project. Your question is not shown with them unless you flag it.</p>
+    <button type="submit" class="secondary">Send feedback</button>
+    <p class="fb-status{% if let Some(f) = st %}{% if f.error %} error{% endif %}{% endif %}" role="status" aria-live="polite">{% if let Some(f) = st %}{{ f.message }}{% endif %}</p>
+  </form>
+</details>
 <script src="/static/dana.js" defer></script>
 <script src="/static/answer.js" defer></script>
 <section aria-labelledby="flag-h" class="flag">

@@ -199,7 +199,7 @@ impl Reranker for Counting {
 fn site(replies: Vec<serde_json::Value>, reranker: Option<Counting>, real: bool) -> Site {
     Site {
         llm: Arc::new(FakeLlm::new(replies.into_iter().map(Ok).collect())),
-        reranker: reranker.map(|r| Arc::new(r) as Arc<dyn Reranker>),
+        span_reranker: reranker.map(|r| Arc::new(r) as Arc<dyn Reranker>),
         real_data_ok: real,
         ..Site::with_fakes(MODEL)
     }

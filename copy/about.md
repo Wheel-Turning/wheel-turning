@@ -1,6 +1,6 @@
 **Summary.** Wheel Turning helps you find what Zen teachers and foundational texts have said about the questions that come up in practice. Every answer is made of short excerpts, each with its source, and the site writes none of the excerpts itself.
 
-**What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows them grouped by teacher, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
+**What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows the closest matches first, each under its teacher's name, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
 
 **How answers are chosen.** Excerpts are ranked by how well they match your question and by nothing else. Who gave the talk, which sangha it came from, and whether a sangha has a giving page do not change the order. A sangha is a community that practices together. When an answer opens with a summary, a language model writes it from the excerpts below it, and each sentence is checked against the excerpts it cites before you see it. Each number in the summary leads to the exact words it rests on, and the excerpts themselves are always shown in full.
 

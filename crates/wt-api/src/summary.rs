@@ -137,7 +137,9 @@ pub fn build(
             let Some(card) = served.iter().find(|p| p.id == c.passage_id) else {
                 continue;
             };
-            let Some(text) = Excerpt::rebuild(&c.quote, rows).map(|e| e.text) else {
+            let Some(text) = Excerpt::rebuild(&c.quote, rows)
+                .map(|e| wt_core::entities::decode(&e.text).into_owned())
+            else {
                 continue;
             };
             let key = (

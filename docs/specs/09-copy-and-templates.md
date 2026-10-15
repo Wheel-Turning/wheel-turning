@@ -20,7 +20,7 @@ File: `copy/about.md`. The page opens with a two-sentence summary, then short se
 
 **Summary.** Wheel Turning helps you find what Zen teachers and foundational texts have said about the questions that come up in practice. Every answer is made of short excerpts, each with its source, and the site writes none of the excerpts itself.
 
-**What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows them grouped by teacher, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
+**What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows the closest matches first, each under its teacher's name, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
 
 **How answers are chosen.** Excerpts are ranked by how well they match your question and by nothing else. Who gave the talk, which sangha it came from, and whether a sangha has a giving page do not change the order. A sangha is a community that practices together. When an answer opens with a summary, a language model writes it from the excerpts below it, and each sentence is checked against the excerpts it cites before you see it. Each number in the summary leads to the exact words it rests on, and the excerpts themselves are always shown in full.
 
@@ -141,21 +141,18 @@ Owner's decision of October 12, 2026 (Spec 05, Answer assembly, rules 2 and 5).
 
 ## Excerpt footer and feedback
 
-Owner's decision of October 12, 2026 (Spec 06, Answer page structure, rules 5 and 6, and Logging, rule 4).
+Owner's decisions of October 12 and 15, 2026 (Spec 06, Answer page structure, rules 5 and 6, and Logging, rule 4).
 
-- Footer row, in order: Listen, Read, Cite, Give, Report. Accessible names: Listen at \[h:mm:ss] (opens the source in a new tab). Read the talk's transcript at \[source] (opens their page in a new tab), or Read our transcript (made by machine, may contain errors). Cite this excerpt. Give to \[sangha]. Report this excerpt.
+- Footer row, in order: Listen, Read, Cite, Give to this sangha, Report. Accessible names: Listen at \[h:mm:ss] (opens the source in a new tab). Read the talk's transcript at \[source] (opens their page in a new tab), or Read our transcript (made by machine, may contain errors). Cite this excerpt. Give to this sangha, \[sangha]. Report this excerpt.
 - Inside Cite: the MLA entry, then the button Copy citation. After copying: Citation copied.
 - Sticky question: the question text only, no label.
-- Excerpt control summary: Feedback on excerpt \[n]
-- Excerpt question: What do you think of this excerpt? Choose any that apply.
-- Excerpt reasons: Helpful. Not relevant to my question. Cut off or missing its context. Words look wrong (a transcription error). Wrong teacher, talk or date. Hard to follow.
-- Summary control summary: Feedback on this summary
-- Summary question: What do you think of this summary? Choose any that apply.
-- Summary reasons: Helpful. Not supported by the excerpts. Misrepresents a teacher. Missing something important. Unclear.
+- Control summary, once at the foot of the page: Feedback on these answers
+- Question: What do you think of these answers? Choose any that apply.
+- Reasons: Helpful. Not relevant to my question. The summary is not supported by the excerpts. An excerpt is cut off or missing its context. Words look wrong (a transcription error). Wrong teacher, talk or date. Hard to follow.
 - Note label: Anything else? (optional)
 - Note help: Notes are read by the project. Your question is not shown with them unless you flag it.
 - Button: Send feedback
-- Status after sending: Thank you. Your feedback on excerpt \[n] was recorded. For the summary: Thank you. Your feedback on the summary was recorded.
+- Status after sending: Thank you. Your feedback on these answers was recorded.
 - Nothing chosen: Choose at least one reason or write a note.
 - Note too long: Please keep the note under 1,000 characters.
 

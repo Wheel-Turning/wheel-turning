@@ -288,7 +288,8 @@ impl Config {
             | LlmStage::Classify
             | LlmStage::Question
             | LlmStage::Sensitive
-            | LlmStage::Excerpt => &self.llm_stage_models.extract,
+            | LlmStage::Excerpt
+            | LlmStage::Rank => &self.llm_stage_models.extract,
             LlmStage::Synth => &self.llm_stage_models.synth,
             LlmStage::Verify => &self.llm_stage_models.verify,
             LlmStage::Vision => &self.llm_stage_models.vision,
@@ -405,6 +406,10 @@ pub enum LlmStage {
     /// Choosing an answer excerpt's sentences (Spec 05, Answer assembly, rule 8). Uses the
     /// extraction model, Haiku-class.
     Excerpt,
+    /// Scoring retrieval candidates for relevance, in place of the cross-encoder on the web
+    /// service (Spec 05, step 4, owner's decision of October 15, 2026). Uses the extraction
+    /// model, Haiku-class.
+    Rank,
     /// Answer synthesis.
     Synth,
     /// Theme verification.
@@ -422,6 +427,7 @@ impl LlmStage {
             LlmStage::Question => "question",
             LlmStage::Sensitive => "sensitive",
             LlmStage::Excerpt => "excerpt",
+            LlmStage::Rank => "rank",
             LlmStage::Synth => "synth",
             LlmStage::Verify => "verify",
             LlmStage::Vision => "vision",
@@ -435,7 +441,8 @@ impl LlmStage {
             | LlmStage::Classify
             | LlmStage::Question
             | LlmStage::Sensitive
-            | LlmStage::Excerpt => "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL",
+            | LlmStage::Excerpt
+            | LlmStage::Rank => "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL",
             LlmStage::Synth => "WT_LLM_MODEL_SYNTH or WT_LLM_MODEL",
             LlmStage::Verify => "WT_LLM_MODEL_VERIFY or WT_LLM_MODEL",
             LlmStage::Vision => "WT_LLM_MODEL_VISION or WT_LLM_MODEL",

@@ -264,7 +264,8 @@ async fn a_streamed_ask_reports_each_stage_and_closes_with_the_permalink() {
             "shortlisted 1",
             "stage choosing",
             "selected 1",
-            "stage writing",
+            // The summary is written after the answer is stored, so the stream closes first
+            // (owner's request of October 15, 2026).
             "done",
         ],
         "{}",

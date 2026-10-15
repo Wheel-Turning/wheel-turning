@@ -148,7 +148,7 @@ test("the announcements name each stage once", async ({ page }) => {
     "Searching the talks",
     "Weighing excerpts",
     "Choosing excerpts",
-    "Writing the summary",
+    // The summary is written after the answer opens (owner's request of October 15, 2026).
     "Opening the answer",
   ]);
 });

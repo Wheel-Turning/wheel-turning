@@ -14,6 +14,7 @@ pub mod excerpt;
 pub mod fuse;
 pub mod progress;
 pub mod query;
+pub mod rank;
 pub mod search;
 pub mod select;
 pub mod sensitive;
@@ -25,7 +26,7 @@ use sqlx::PgPool;
 use wt_core::ids::{PassageId, TeacherId};
 use wt_ml::{Embedder, MlError, Reranker};
 
-pub use config::{ExcerptConfig, RetrievalConfig};
+pub use config::{ExcerptConfig, Ranker, RankingConfig, RetrievalConfig};
 pub use progress::{Progress, Silent, Step};
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
@@ -219,10 +220,13 @@ pub async fn retrieve_reporting(
     progress.step(Step::Choosing {
         shortlisted: inputs.len(),
     });
-    let chosen = match named {
+    let mut chosen = match named {
         Some(t) => select::named(&only(inputs, t), &cfg.selection),
         None => select::standard(&inputs, &cfg.selection),
     };
+    // Selection decides which passages; the page shows them most relevant first (owner's
+    // decision of October 15, 2026). The sort is stable, so equal scores keep selection order.
+    chosen.sort_by(|a, b| b.score.total_cmp(&a.score));
     timings.select_ms = millis(started.elapsed());
 
     let teacher_count = select::teacher_count(&chosen);

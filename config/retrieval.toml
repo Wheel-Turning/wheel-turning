@@ -8,10 +8,10 @@ fts_top_k = 60
 vector_top_k = 60
 question_top_k = 10        # student-question hits fused as a third list; a long list crowded out direct passage matches
 rrf_k = 60
-fuse_top_k = 40            # candidates sent to the reranker, as the Gate A notebook did; 20 dropped good passages
-hnsw_ef_search = 1000      # recall@60 vs exact 0.995 mean, 0.967 worst on the Gate A questions, ~70-95 ms; 100 gave 0.88 (Oct 12, 2026)
-rerank_min_score = 0.15    # sigmoid of the reranker logit; 0.30 cut on-topic passages
-rerank_timeout_s = 20      # 20 pairs took 5 to 8 s, and past 10 s when the CPU was shared
+fuse_top_k = 60            # candidates sent to the ranker; 40 with the cross-encoder (20 dropped good passages), 60 since the model ranker scores them in parallel batches (Oct 15, 2026)
+hnsw_ef_search = 1000      # halfvec index (0043): recall@60 vs exact 0.984 mean over 119 eval questions, warm p50 72 ms; ef 400 gave 0.961 (Oct 15, 2026)
+rerank_min_score = 0.35    # the model ranker's score / 10: keeps 4 ("related but indirect") and up. The cross-encoder used 0.15; 0.30 cut on-topic passages
+rerank_timeout_s = 5       # the model ranker's batches run side by side; the cross-encoder needed 20 and still timed out on the web service
 rerank_sessions = 4        # reranker sessions side by side; each pair still runs alone, so scores do not change
 
 [selection]
@@ -33,11 +33,16 @@ ask_rate_per_hour = 30     # per tester, in-memory token bucket (Spec 06)
 max_themes = 3            # sentences in each of the summary's agree and differ sections
 summary_max_words = 40
 quote_max_words = 60       # the quotation behind one citation marker
-min_grounding_ratio = 0.4  # tuned on the claim audit; a coarse guard against drift
+min_grounding_ratio = 0.2  # a coarse guard against drift; the verifier checks meaning. 0.4 dropped every sentence of honest paraphrases on the beta (Oct 15, 2026)
 synthesis_timeout_s = 20   # per generation or verifier call
 
 [excerpt]                  # Spec 05, Answer assembly, rule 8
 excerpt_min_words = 25
-excerpt_timeout_s = 5      # the model step, then the reranker step, for all of an answer's passages at once
+excerpt_timeout_s = 3      # the model step, then the cross-encoder step when loaded, for all of an answer's passages at once
 excerpt_max_spans = 8      # candidate spans the reranker step scores per passage
 excerpt_keep_ratio = 0.9   # the shortest span scoring at least this share of the best wins
+
+[ranking]                  # Spec 05, step 4 (owner's decision of October 15, 2026)
+ranker = "model"           # "model": a Haiku-class model scores the candidates; "onnx": the cross-encoder on the CPU
+batch = 10                 # candidates per model call; the calls run side by side (15 took 2.3 to 4.0 s on Gate A, Oct 15)
+max_chars = 1500           # of each candidate the model sees
