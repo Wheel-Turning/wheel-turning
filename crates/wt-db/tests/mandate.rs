@@ -477,3 +477,55 @@ async fn a_declined_talks_source_takes_its_talks_down() {
     .unwrap();
     assert_eq!(scopes, ["content", "prefix"]);
 }
+
+/// Owner's decision of October 14, 2026: a sangha's written yes for its talks source is
+/// permission for those talks. The talk keeps serving on its own basis, and the view names the
+/// publisher so the page can say "Used with permission of".
+#[tokio::test]
+async fn a_grant_on_a_talks_source_names_its_publisher_as_permission() {
+    let fx = common::start().await;
+    talks_source(&fx.pool).await;
+    set_talks_basis(&fx.pool, "mandate", "Owner Fixture")
+        .await
+        .unwrap();
+    let ada = mandated_talk(&fx.pool, ADA).await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    clear_waiting(&mut conn, SOURCE, ACTOR).await.unwrap();
+    drop(conn);
+    make_ready(&fx.pool, ada).await;
+    let served = |pool: PgPool| async move {
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "select rights_basis::text, permission_of from servable_passage where talk_id = $1",
+        )
+        .bind(ada.as_uuid())
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(
+        served(fx.pool.clone()).await,
+        Some(("mandate".to_owned(), None)),
+        "on the mandate alone, no permission"
+    );
+
+    rights::grant(
+        &fx.pool,
+        SOURCE,
+        &record("Our board is glad for the zendo's talks to be shared."),
+        "Fixture Zendo board",
+        chrono::NaiveDate::from_ymd_opt(2026, 10, 13).unwrap(),
+        "all of the zendo's talks",
+        "Owner Fixture",
+    )
+    .await
+    .unwrap();
+    let (basis, permission_of) = served(fx.pool.clone()).await.unwrap();
+    assert_eq!(basis, "mandate", "the talk keeps serving on its own basis");
+    let publisher: String =
+        sqlx::query_scalar("select publisher from source_policy where key = $1")
+            .bind(SOURCE)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(permission_of, Some(publisher));
+}

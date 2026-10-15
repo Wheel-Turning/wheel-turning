@@ -214,7 +214,7 @@ This table is the single list of what every page must show, including everything
 
 The credit line follows the rights basis and never claims more than exists:
 
-- Permission: "Used with permission of \<name>."
+- Permission: "Used with permission of \<name>." For talks, \<name> is the teacher who consented, or the sangha whose written yes covers the talk's source (owner's decision of October 14, 2026).
 - License: the license name with a link to its text.
 - Mandate, texts: the attribution line stored with the mandate, such as "Excerpted with attribution from \<title>, \<publisher>. Free to download at the source: \<url>."
 - Mandate, talks: "Talk by \<teacher>, \<sangha>." with the source link.

@@ -149,7 +149,7 @@ Sources are used by default on the project owner's decision, each rights holder 
 
 **Three bases for use**
 
-- Permission. A teacher's consent or a publisher's written yes. The page says the material is used with permission.
+- Permission. A teacher's consent, a publisher's written yes, or, for talks, the sangha's written yes. Talks are given to the sangha, and sharing them is the sangha's decision rather than the individual teacher's, so a sangha's yes for its talks is permission (owner's decision of October 14, 2026). The page says the material is used with permission.
 - License. The source states a license on the project's allow-list: public domain, CC0, CC BY or CC BY-SA. A person reads and approves each one. Noncommercial and no-derivatives licenses wait on counsel.
 - Mandate. The owner relies on a source with no license or permission, as a recorded decision. The page names the source and never claims permission.
 

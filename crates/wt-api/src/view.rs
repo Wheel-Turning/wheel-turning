@@ -160,11 +160,17 @@ pub fn source_links(
     }
 }
 
-/// Spec 09, Attribution lines, for talks. A mandate line never says permission or licensed.
+/// Spec 09, Attribution lines, for talks. A mandate line never says permission or licensed,
+/// unless the talk's sangha gave written permission for its talks source (owner's decision of
+/// October 14, 2026): talks are given to the sangha, so its yes is permission.
 pub fn credit_line(card: &TalkCard) -> String {
     let base = format!("Talk by {}, {}.", card.teacher_name, card.sangha_name);
     match card.rights_basis.as_deref() {
         Some("speaker_consent") => format!("{base} Used with permission of {}.", card.teacher_name),
+        Some("mandate") => match &card.permission_of {
+            Some(sangha) => format!("{base} Used with permission of {sangha}."),
+            None => base,
+        },
         Some("license") => match &card.display_notice {
             Some(notice) => format!("{} {notice}", card.title),
             None => base,
@@ -798,6 +804,7 @@ mod tests {
             donation_verified: false,
             rights_basis: Some(basis.into()),
             display_notice: None,
+            permission_of: None,
             display_level: "full".into(),
             transcript_from_source: false,
             transcript_url: None,
@@ -984,6 +991,16 @@ mod tests {
         assert_eq!(line, "Talk by Ada Fixture, North Fixture Zendo.");
         assert!(!line.contains("permission") && !line.contains("licensed"));
         assert!(credit_line(&card("youtube", "speaker_consent")).contains("Used with permission"));
+    }
+
+    #[test]
+    fn a_sangha_grant_for_its_talks_is_permission() {
+        let mut c = card("vimeo", "mandate");
+        c.permission_of = Some("Seattle Soto Zen".into());
+        assert_eq!(
+            credit_line(&c),
+            "Talk by Ada Fixture, North Fixture Zendo. Used with permission of Seattle Soto Zen."
+        );
     }
 
     #[test]
