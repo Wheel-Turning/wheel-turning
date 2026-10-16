@@ -1,5 +1,6 @@
 # Spec 01 iam: least privilege per the Secrets, IAM and network rules.
-# - web task role: reads the models bucket; cannot write transcripts or scratch
+# - web task role: reads the models bucket; cannot write transcripts or scratch; publishes to the
+#   alert topic only
 # - batch host role: reads and writes transcripts and scratch, reads models, reads the database,
 #   Anthropic and YouTube secrets, and is reachable through SSM only
 # - execution roles: pull the image, write logs, and inject the secrets each task needs at start
@@ -35,6 +36,11 @@ variable "permissions_boundary_arn" {
 
 variable "mail_from" {
   description = "The one address the web service may send email from through SES."
+  type        = string
+}
+
+variable "alert_topic_arn" {
+  description = "The one SNS topic the web and batch roles may publish to (WT_ALERT_TOPIC_ARN)."
   type        = string
 }
 
@@ -193,6 +199,12 @@ data "aws_iam_policy_document" "web_task" {
       values   = [var.mail_from]
     }
   }
+  # Alerts to the owner (Spec 11, PB4.2): this topic and nothing else in SNS.
+  statement {
+    sid       = "PublishAlerts"
+    actions   = ["sns:Publish"]
+    resources = [var.alert_topic_arn]
+  }
 }
 
 resource "aws_iam_role" "web_task" {
@@ -275,6 +287,11 @@ data "aws_iam_policy_document" "batch" {
     sid       = "WriteLogs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
     resources = ["${var.log_group_arns["batch"]}:*"]
+  }
+  statement {
+    sid       = "PublishAlerts"
+    actions   = ["sns:Publish"]
+    resources = [var.alert_topic_arn]
   }
 }
 

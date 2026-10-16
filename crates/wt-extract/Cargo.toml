@@ -15,6 +15,10 @@ wt-core.workspace = true
 wt-db.workspace = true
 wt-segment.workspace = true
 async-trait = "0.1"
+# The SNS client uses rustls on ring, as wt-api's SES client does, rather than the default aws-lc.
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-sdk-sns = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 schemars = "1"
@@ -29,4 +33,5 @@ tracing.workspace = true
 [dev-dependencies]
 wt-db = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
+tracing-subscriber.workspace = true
 wiremock = "0.6"

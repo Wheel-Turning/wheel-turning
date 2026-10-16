@@ -22,6 +22,18 @@ variable "alert_email" {
   default     = "alexandercowen@gmail.com"
 }
 
+variable "second_alert_email" {
+  description = "A second address for alarms and alerts (Spec 11, PB4.2), confirmed by its own AWS email. Empty until the owner names one."
+  type        = string
+  default     = ""
+}
+
+variable "maintenance" {
+  description = "true makes the load balancer answer every path with the fixed maintenance page (runbook 13). Set it for an outage or planned work, then false."
+  type        = bool
+  default     = false
+}
+
 variable "image_tag" {
   description = "Image tag the web service runs. Empty until the first image is pushed."
   type        = string
