@@ -140,6 +140,8 @@ const PASSAGE_READERS: &[&str] = &[
     "crates/wt-index/",
     "crates/wt-db/src/takedown.rs",
     "crates/wt-db/src/audit.rs",
+    // The one-time PC-to-RDS copy of pipeline rows (Spec 11, PB1.1), which serves nothing.
+    "crates/wt-db/src/catch_up.rs",
 ];
 
 /// The SQL in `text` that names the `passage` table itself, not a view or table whose name only

@@ -7,10 +7,14 @@
 #
 # The machine is one the owner rented or launched, reached by SSH with the owner's key. This
 # script copies the repository's committed files to it, runs setup.sh, sends the Hugging Face
-# token over SSH into a file only the owner can read, and runs work.sh with a reverse tunnel so
-# the machine reaches the PC's database on its own localhost:55433; the database is never
-# exposed. Every two minutes, and at the end, it copies new and changed transcripts back into
-# data/objects, each replaced whole (see sync_objects).
+# token and the database URL over SSH into files only the owner can read, and runs work.sh with a
+# reverse tunnel so the machine reaches the database through the PC (Spec 11, PB1.1). The
+# database is RDS, reached on the PC through the batch-host forward on localhost:5433 (runbook
+# §1); the machine sees it on its own localhost:5433, and the database is never exposed. The URL
+# is the PC's WT_GPU_DATABASE_URL, or DATABASE_URL in .env, as wt_pipeline_login with
+# sslmode=require, and WT_DATABASE_NAME (rds-v1) goes with it so the workers refuse any other
+# database. WT_GPU_DB_PORT changes the port. Every two minutes, and at the end, it copies new
+# and changed transcripts back into data/objects, each replaced whole (see sync_objects).
 # Delete the machine afterwards: it is billed by the hour.
 set -euo pipefail
 HOST=${1:?usage: run.sh user@host [workers] [hours]}
@@ -73,6 +77,23 @@ fi
 step "token"
 grep '^HF_TOKEN=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n' |
   "${SSH[@]}" "$HOST" 'umask 077 && cat > ~/.wt-hf-token'
+step "database"
+DB_PORT=${WT_GPU_DB_PORT:-5433}
+DB_URL=${WT_GPU_DATABASE_URL:-$(grep '^DATABASE_URL=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n')}
+DB_NAME=${WT_DATABASE_NAME:-$(grep '^WT_DATABASE_NAME=' "$MAIN/.env" | cut -d= -f2- | tr -d '\r\n')}
+case "$DB_URL" in
+  *"@localhost:$DB_PORT/"* | *"@127.0.0.1:$DB_PORT/"*) ;;
+  *)
+    echo "the database URL must name localhost:$DB_PORT, the PC's forward to RDS"
+    exit 2
+    ;;
+esac
+[ -n "$DB_NAME" ] || {
+  echo "WT_DATABASE_NAME is unset; set it to the database's name (rds-v1)"
+  exit 2
+}
+printf 'DATABASE_URL=%s\nWT_DATABASE_NAME=%s\n' "$DB_URL" "$DB_NAME" |
+  "${SSH[@]}" "$HOST" 'umask 077 && cat > ~/.wt-database'
 
 # Each sync unpacks into a staging folder of its own, and only then moves new or changed files
 # into data/objects, each with a rename. Unpacking straight into data/objects rewrote every
@@ -101,16 +122,16 @@ SYNC=$!
 trap 'kill $SYNC 2> /dev/null || true' EXIT
 
 step "clear what an earlier round left"
-# A killed round can leave workers, the sidecar on 8090 and its tunnel's listener on 55433 behind:
+# A killed round can leave workers, the sidecar on 8090 and its tunnel's listener behind:
 # they hold GPU memory, and the tunnel below would fail to bind. The brackets keep pkill from
 # matching this command line itself.
 "${SSH[@]}" "$HOST" "pkill -f 'wt [w]orker'; pkill -f 'uvicorn [a]pp:app'; \
-  sudo fuser -k 55433/tcp 8090/tcp; true" > /dev/null 2>&1 || true
+  sudo fuser -k /tcp 8090/tcp; true" > /dev/null 2>&1 || true
 
 step "work: $WORKERS workers"
 LIMIT=()
 [ "$HOURS" != 0 ] && LIMIT=(timeout "${HOURS}h")
-"${LIMIT[@]}" "${SSH[@]}" -o ExitOnForwardFailure=yes -R 55433:localhost:55433 "$HOST" \
+"${LIMIT[@]}" "${SSH[@]}" -o ExitOnForwardFailure=yes -R "" "$HOST" \
   "bash ~/wt/infra/gpu-worker/work.sh $WORKERS" || echo "work.sh ended with an error"
 step "copy transcripts back"
 sync_objects

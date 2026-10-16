@@ -522,6 +522,54 @@ async fn the_worker_drains_classify_jobs_and_the_report_lists_them() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Spec 11, PB1.1: the worker reads the database's name at start, prints it, and refuses a
+/// database other than the one WT_DATABASE_NAME names, either way round.
+#[tokio::test]
+async fn the_worker_refuses_a_database_named_otherwise_than_wt_database_name() {
+    let dir = config_dir();
+    let dir_arg = dir.to_str().unwrap();
+    let args = [
+        "worker",
+        "--kinds",
+        "classify",
+        "--drain",
+        "--config-dir",
+        dir_arg,
+    ];
+    for (named, expected) in [("pc", "rds-v1"), ("rds-v1", "pc")] {
+        let fx = start().await;
+        wt_db::identity::set(&fx.pool, named).await.unwrap();
+        let out = fx.wt_env(&args, &[("WT_DATABASE_NAME", expected)], &[]);
+        assert!(!out.status.success(), "ran against {named}");
+        assert!(
+            stderr(&out).contains(&format!("this database is \"{named}\"")),
+            "{}",
+            stderr(&out)
+        );
+        let ok = fx.wt_env(&args, &[("WT_DATABASE_NAME", named)], &[]);
+        assert!(ok.status.success(), "{}", stderr(&ok));
+        assert!(
+            stderr(&ok).contains(&format!("database: {named}")),
+            "{}",
+            stderr(&ok)
+        );
+    }
+
+    // An unnamed database fails a set key, and `wt db identity` prints the name once set.
+    let fx = start().await;
+    let out = fx.wt_env(&args, &[("WT_DATABASE_NAME", "rds-v1")], &[]);
+    assert!(!out.status.success());
+    assert!(stderr(&out).contains("no name"), "{}", stderr(&out));
+    assert_eq!(stdout(&fx.wt(&["db", "identity"])).trim(), "unnamed");
+    let set = fx.wt(&["db", "set-identity", "--name", "rds-v1"]);
+    assert!(set.status.success(), "{}", stderr(&set));
+    assert!(
+        !fx.wt(&["db", "set-identity", "--name", "pc"])
+            .status
+            .success()
+    );
+    assert_eq!(stdout(&fx.wt(&["db", "identity"])).trim(), "rds-v1");
+}
 #[tokio::test]
 async fn resolve_feed_prints_the_address_and_saves_it_only_with_yes() {
     use wiremock::matchers::{method, path, query_param};

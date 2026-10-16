@@ -13,6 +13,7 @@ use wt_core::Secret;
 
 pub mod answer;
 pub mod audit;
+pub mod catch_up;
 pub mod consent;
 pub mod correction;
 pub mod display;
@@ -20,6 +21,7 @@ pub mod donation;
 pub mod export;
 pub mod feed;
 pub mod glossary;
+pub mod identity;
 pub mod ingest;
 pub mod job;
 pub mod license;

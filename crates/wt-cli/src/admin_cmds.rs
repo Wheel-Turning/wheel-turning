@@ -2,6 +2,7 @@
 //! `wt accessibility`: the owner's administrative commands (Spec 02, Spec 03, Spec 06).
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Context;
 use clap::Subcommand;
@@ -28,6 +29,42 @@ pub(crate) enum DbCommand {
         /// Manager. The password is never accepted as an argument.
         #[arg(long)]
         password_env: String,
+    },
+    /// Name this database, once: `rds-v1` on RDS, `pc` on the PC (Spec 11, PB1.1). The worker,
+    /// the pipeline, the rights commands and takedown refuse a database whose name differs from
+    /// WT_DATABASE_NAME. Naming it again with the same name changes nothing.
+    SetIdentity {
+        /// The name: lowercase letters, digits and hyphens.
+        #[arg(long)]
+        name: String,
+    },
+    /// Print this database's name, or `unnamed`.
+    Identity,
+    /// The one-time copy of pipeline rows from the PC to RDS (Spec 11, PB1.1): talks changed on
+    /// the source after --since, with their transcripts, segments, passages, citations and
+    /// student questions, and the text units of editions imported after it. Never writes
+    /// testers, logs, feedback, removal requests, the rights ledger or any table the web service
+    /// writes, and skips talks withdrawn, quarantined, excluded, taken down or opted out on the
+    /// target. With --apply it replays the target's takedowns first. Always ends with `wt rights
+    /// parity`, and exits 1 on any unsafe difference or failed copy. Prints a JSON report. A dry
+    /// run unless --apply.
+    CatchUp {
+        /// The source database (the PC). Prefer the environment variable, which keeps the
+        /// password out of shell history.
+        #[arg(long, env = "WT_CATCH_UP_FROM", hide_env_values = true)]
+        from: String,
+        /// The target database (RDS), connecting as the owner login.
+        #[arg(long, env = "WT_CATCH_UP_TO", hide_env_values = true)]
+        to: String,
+        /// Rows changed on the source after this time are copied: the October 13 load.
+        #[arg(long, default_value = "2026-10-13T00:00:00Z")]
+        since: chrono::DateTime<chrono::Utc>,
+        /// Write the copy. Without it each talk's changes are rolled back.
+        #[arg(long)]
+        apply: bool,
+        /// Who runs it, for the takedown replay's records.
+        #[arg(long)]
+        actor: String,
     },
 }
 
@@ -237,8 +274,43 @@ pub(crate) enum ReportsCommand {
 }
 
 /// `wt db`: migrations and the login roles (Spec 02).
-pub(crate) async fn db(ctx: &Ctx, command: DbCommand) -> anyhow::Result<()> {
+pub(crate) async fn db(ctx: &Ctx, command: DbCommand) -> anyhow::Result<ExitCode> {
     match command {
+        DbCommand::SetIdentity { name } => {
+            wt_db::identity::set(&ctx.pool().await?, &name).await?;
+            println!("{name}");
+        }
+        DbCommand::Identity => {
+            let name = wt_db::identity::read(&ctx.pool().await?).await?;
+            println!("{}", name.as_deref().unwrap_or("unnamed"));
+        }
+        DbCommand::CatchUp {
+            from,
+            to,
+            since,
+            apply,
+            actor,
+        } => {
+            let source = wt_db::connect(&wt_core::Secret::new(from))
+                .await
+                .context("connecting to the source database")?;
+            let target = wt_db::connect(&wt_core::Secret::new(to))
+                .await
+                .context("connecting to the target database")?;
+            let store = crate::stages::objects(&ctx.config)?;
+            let options = wt_db::catch_up::Options {
+                since,
+                apply,
+                actor,
+            };
+            let report = wt_db::catch_up::run(&source, &target, &store, &options)
+                .await
+                .context("catching up")?;
+            commands::print_json(&report)?;
+            if report.failed() {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         DbCommand::Migrate => {
             let report = wt_db::migrate(&ctx.pool().await?)
                 .await
@@ -266,7 +338,7 @@ pub(crate) async fn db(ctx: &Ctx, command: DbCommand) -> anyhow::Result<()> {
             tracing::info!(login = %login, role = %role, outcome = ?outcome, "login ready");
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `wt registry`: imports the teacher registry file (Spec 03).

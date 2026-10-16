@@ -337,6 +337,13 @@ async fn snapshot(pool: &PgPool) -> Vec<(String, i64, String)> {
 #[tokio::test]
 async fn a_synthetic_talk_goes_from_cleared_to_ready_and_rerunning_every_stage_changes_nothing() {
     let fx = start().await;
+    // Spec 11, PB1.1: the worker runs against a database named `rds-v1`, checked as `wt worker`
+    // checks it at start in prod.
+    wt_db::identity::set(&fx.pool, "rds-v1").await.unwrap();
+    let name = wt_db::identity::verify(&fx.pool, Some("rds-v1"), wt_core::Env::Prod)
+        .await
+        .unwrap();
+    assert_eq!(name, "rds-v1");
     let mut conn = fx.pool.acquire().await.unwrap();
     let queued = audio::advance_cleared(&mut conn).await.unwrap();
     assert_eq!(queued, vec![fx.talk]);

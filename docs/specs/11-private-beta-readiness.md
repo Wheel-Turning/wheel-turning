@@ -81,9 +81,9 @@ User stories:
 5. **Runbook updates.** §1 and §12 point every pipeline and rights command at RDS. The "Rights actions on both databases" and "Reloading RDS from the PC" sections are retired when PB1.2 is also done.
 
 **Acceptance.**
-- [ ] A synthetic talk advances from cleared to ready through a worker pointed at a test database named `rds-v1`.
-- [ ] A worker with `WT_DATABASE_NAME=rds-v1` refuses to start against a database named `pc`, and the reverse.
-- [ ] Catch-up on two test databases copies a talk changed on the source, leaves the target's `tester`, `query_log`, `feedback` and `takedown_request` row counts unchanged, and skips a talk withdrawn on the target.
+- [x] A synthetic talk advances from cleared to ready through a worker pointed at a test database named `rds-v1`. (`wt-ingest/tests/pipeline.rs`.)
+- [x] A worker with `WT_DATABASE_NAME=rds-v1` refuses to start against a database named `pc`, and the reverse. (`wt-cli/tests/commands.rs`, `wt-db/src/identity.rs`.)
+- [x] Catch-up on two test databases copies a talk changed on the source, leaves the target's `tester`, `query_log`, `feedback` and `takedown_request` row counts unchanged, and skips a talk withdrawn on the target. (`wt-db/tests/catch_up.rs`.)
 - [ ] After the real catch-up, `wt rights parity` reports no unsafe difference, and the PC database refuses writes.
 
 ### PB1.2 Objects and records move to S3 (B19, WA H1)
