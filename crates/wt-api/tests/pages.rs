@@ -539,7 +539,8 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
         "no one-sangha note (Spec 11, PB2.3)"
     );
     assert!(
-        page.body.contains("<p class=\"result\">2 teachers, 2 teachings, 2 excerpts</p>"),
+        page.body
+            .contains("<p class=\"result\">2 teachers, 2 teachings, 2 excerpts</p>"),
         "{}",
         page.body
     );
