@@ -35,7 +35,7 @@ locals {
 
 resource "aws_wafv2_web_acl" "this" {
   name        = var.name
-  description = "Edge protection for the ${var.name} load balancer (Spec 11, PB3.6)."
+  description = "Edge protection for the ${var.name} load balancer, Spec 11 PB3.6"
   scope       = "REGIONAL"
 
   default_action {
