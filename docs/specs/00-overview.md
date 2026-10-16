@@ -118,6 +118,7 @@ Each spec below is a tab here and a file under `docs/specs/` in the repository. 
 | 08 Texts and reference | Foundational texts, reference assets, the rights ledger | M3R, M4b |
 | 09 Copy and templates | Public page copy, notices, attribution lines, the answer page's labels | M5, M7 |
 | 10 Cost and summary latency | Model cost per question, ranking and excerpt options, a summary that is always shown within 5 seconds | P1, after the MVP test pass |
+| 11 Private beta readiness | Rights on one database, trustworthy answers, honest data handling, alerts and the beta report: every story before the private beta | Private beta |
 
 ## Blockers outside the code
 

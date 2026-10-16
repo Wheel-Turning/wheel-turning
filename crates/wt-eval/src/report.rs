@@ -9,6 +9,7 @@ use std::fmt::Write as _;
 use serde::Serialize;
 use sqlx::PgPool;
 use sqlx::types::Uuid;
+use wt_core::answer::SummaryStatus;
 
 use crate::EvalError;
 use crate::run::{self, RunAnswer};
@@ -133,6 +134,9 @@ pub struct Report {
     pub rerank_degraded: usize,
     /// Answers whose synthesis failed or timed out.
     pub synthesis_failed: usize,
+    /// Answers by how their summary settled (Spec 11, PB2.4); `unrecorded` for answers stored
+    /// before statuses.
+    pub summary_statuses: BTreeMap<String, usize>,
     /// Themes shown across the run.
     pub themes_shown: usize,
     /// Themes dropped by the filters and verifier.
@@ -373,6 +377,7 @@ pub async fn build(pool: &PgPool, run: Uuid, pass_ratio: f64) -> Result<Report, 
         thin_coverage: answers.iter().filter(|a| a.thin_coverage).count(),
         rerank_degraded: outcomes().filter(|o| o.rerank_degraded).count(),
         synthesis_failed: outcomes().filter(|o| o.synthesis_failed).count(),
+        summary_statuses: summary_statuses(&answers),
         themes_shown: outcomes().map(|o| o.theme_count).sum(),
         themes_dropped: outcomes().map(|o| o.themes_dropped).sum(),
         named: named(&answers),
@@ -381,6 +386,36 @@ pub async fn build(pool: &PgPool, run: Uuid, pass_ratio: f64) -> Result<Report, 
         excerpts: excerpt_stats(pool, &answers).await?,
         questions,
     })
+}
+
+/// Answers by summary status.
+fn summary_statuses(answers: &[RunAnswer]) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for a in answers {
+        let status = a.summary_status.as_deref().unwrap_or(UNRECORDED);
+        *out.entry(status.to_owned()).or_insert(0) += 1;
+    }
+    out
+}
+
+/// The status of an answer stored before `answer.summary_status`.
+const UNRECORDED: &str = "unrecorded";
+
+/// The summary-status counts as one line, in the order of [`SummaryStatus::ALL`]; statuses with
+/// no answers are left out.
+fn status_line(counts: &BTreeMap<String, usize>) -> String {
+    let names = SummaryStatus::ALL
+        .iter()
+        .map(|s| s.as_str())
+        .chain(std::iter::once(UNRECORDED));
+    let parts: Vec<String> = names
+        .filter_map(|n| counts.get(n).map(|c| format!("{n} {c}")))
+        .collect();
+    if parts.is_empty() {
+        "none".to_owned()
+    } else {
+        parts.join(", ")
+    }
 }
 
 /// The report's lines for named-teacher questions: those tagged `named_teacher` or answered in that
@@ -511,6 +546,11 @@ pub fn render(r: &Report) -> String {
         s,
         "  Themes shown {}, dropped by filters and verifier {}, synthesis failed on {} answers",
         r.themes_shown, r.themes_dropped, r.synthesis_failed
+    );
+    let _ = writeln!(
+        s,
+        "  Summary status by answer: {}",
+        status_line(&r.summary_statuses)
     );
     let _ = writeln!(
         s,
