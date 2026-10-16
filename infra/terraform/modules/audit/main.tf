@@ -350,7 +350,7 @@ resource "aws_cloudwatch_event_target" "audit_failed" {
       exit   = "$.detail.containers[0].exitCode"
       reason = "$.detail.stoppedReason"
     }
-    input_template = "\"The nightly audit (${local.family}) stopped with exit code <exit>: <reason>. Task <task>. Its report is in the ${var.log_group_name} log group under audit/audit/<task id>. Exit 1 means a check has findings; see the runbook's audit alarm entry.\""
+    input_template = "\"The nightly audit (${local.family}) stopped with exit code <exit>: <reason>. Task <task>. Its report is in the ${var.log_group_name} log group under audit/audit/<task id>. Exit 1 means a check has findings; see runbook section 13, The nightly audit failed.\""
   }
 }
 

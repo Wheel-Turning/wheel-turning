@@ -578,6 +578,36 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
   and find and revoke the credentials that made it.
 - **Scale to zero:** only if the change widened access to data or secrets.
 
+#### The nightly audit failed (EventBridge rule `wt-v1-audit-failed`)
+
+Not a CloudWatch alarm: an EventBridge rule that emails the topic when a `wt-v1-audit` task stops
+with a nonzero exit code or fails to start (Spec 11, PB1.4; §12, "Nightly audit").
+
+- **Means:** exit 1 is a finding: the audit runs with `--fail-on warning`, so any check with
+  findings, fail or warn, raises it. Another code, or "failed to start", means the task itself
+  broke: a missing secret, a refused database login, or an image that will not pull.
+- **First check:** the report in `/wt-v1/admin` under `audit/audit/<task id>` (the email names
+  the task). Each check with `findings > 0` lists up to 20 examples.
+- **Fix:** a fail check (`consent_drift`, `serving_parity`, `opted_out_served`,
+  `takedown_completeness` and the rest in Spec 07) is a rights incident: follow the incident
+  procedure below. A warning is upkeep: `takedown_request_overdue` is procedure 3,
+  `pc_backup_stale` is §10 (the PC's 03:00 backup has not run), `crisis_link_dead` means a help
+  link on the support page needs correcting in `support_text.html`, and the rest are in Spec 07.
+  A broken task: `aws ecs describe-tasks` for its `stoppedReason`, and `wt db create-login --role
+  wt_audit` (§12) if the login was refused.
+- **Scale to zero:** only for a fail check showing that something which must not be served is
+  being served.
+
+#### `wt-v1-audit-not-started`
+
+- **Means:** the `wt-v1-audit-nightly` schedule could not start the audit task, so no audit ran
+  and no task event was sent.
+- **First check:** the schedule's target in the EventBridge Scheduler console, and whether the
+  `wt-v1-audit` task definition is active and its scheduler role can still run it and pass its
+  roles.
+- **Fix:** reapply Terraform, then run the audit once by hand (§12) to see it pass.
+- **Scale to zero:** no.
+
 ### Incident procedure
 
 1. Note the time and the alarm in a new `docs/incidents/<date>-<slug>.md` from `TEMPLATE.md`.
