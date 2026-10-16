@@ -177,8 +177,8 @@ Build this only if PB1.1 cannot land before the beta.
 2. **Keep the internal target.** The one-business-day target stays in Spec 08 as an internal reminder, with its alert and audit check.
 
 **Acceptance.**
-- [ ] A test fails if any public template or `copy/` file contains "business day", or "within" followed by a number and a unit of time.
-- [ ] `takedown_request_overdue` still fires in the audit test.
+- [x] A test fails if any public template or `copy/` file contains "business day", or "within" followed by a number and a unit of time. (`wt-api/tests/copy_checks.rs`, which also scans `site/`, `templates/` and the confirmation email.)
+- [x] `takedown_request_overdue` still fires in the audit test. (`wt-db/tests/audit.rs`, unchanged.)
 
 ## PB2. Answers testers can trust
 
@@ -281,7 +281,7 @@ This is blocked on open question 2: serve fewer excerpts, require the summary to
 2. **Key lines carry no note.** Spec 10's extractive "key lines", when built, are verbatim and carry no model note.
 
 **Acceptance.**
-- [ ] A page test finds the note on every answer that shows a summary, and not on one without.
+- [x] A page test finds the note on every answer that shows a summary, and not on one without. (`wt-api/tests/pages.rs`.)
 
 ### PB2.6 Gate A (Spec 00)
 
@@ -313,7 +313,7 @@ User stories:
 3. **Suggested draft for the owner:** "Your questions are kept for 180 days with emails and phone numbers removed, unless you choose counts only. They are sent to a language model provider to find and summarize passages. You can delete them at any time."
 
 **Acceptance.**
-- [ ] A copy-consistency test passes.
+- [x] A copy-consistency test passes. (`wt-api/tests/copy_checks.rs` and the home page in `pages.rs`.)
 - [ ] The owner approves the wording in the PR.
 
 ### PB3.2 A complete privacy page (L4)
@@ -344,7 +344,7 @@ User stories:
 
 **Acceptance.**
 - [ ] Counsel's answer is recorded in `docs/strategy-research.md` (L3).
-- [ ] A test shows a `distress` question stored count-only under `share` mode.
+- [x] A test shows a `distress` question stored count-only under `share` mode. (`wt-api/tests/sensitive.rs`, with `medical` too.)
 
 ### PB3.4 Crisis help is correct (L7)
 
@@ -357,9 +357,9 @@ User stories:
 3. **Keep acute questions out of storage.** The eval's sensitive-route scoring keeps its acute set, and a test asserts that no acute question's text reaches `query_log` or the logs.
 
 **Acceptance.**
-- [ ] The not-counseling line is shown on the support page.
+- [x] The not-counseling line is shown on the support page. (`support_text.html` already carried it; `wt-api/tests/sensitive.rs` holds it.)
 - [ ] The link check reports a planted dead link.
-- [ ] The acute storage test passes.
+- [x] The acute storage test passes. (`wt-api/tests/log_scrubber.rs` and `sensitive.rs`.)
 
 ### PB3.5 Security headers (WA SEC09-BP02)
 
