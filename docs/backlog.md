@@ -1,6 +1,6 @@
 # Backlog
 
-Prioritized October 15, 2026, from three sources:
+Prioritized October 15, 2026, from three sources. `docs/roadmap.md` now orders this work by launch increment, feature and story; this file stays the flat index.
 
 - The bug log, `docs/bugs.md`: B1 to B14 from using the app, B15 to B23 from the tech debt audit of `main` at d95de08.
 - The architecture review of `main` at d95de08: items A1 to A9 below, which are not in the bug log.
