@@ -244,8 +244,13 @@ pub async fn delete(
     }
 }
 
+/// How long a deferred summary may stay pending before the purge marks it lost (Spec 11,
+/// PB2.4). Writing one takes at most four model calls of 20 seconds each.
+pub const SUMMARY_LOST_AFTER: Duration = Duration::from_secs(600);
+
 /// The purge, every hour from start-up. Expiry is to the hour; Spec 06 asks for at least
-/// nightly.
+/// nightly. It also marks deferred summaries still pending after [`SUMMARY_LOST_AFTER`] as
+/// lost, so no answer stays pending (Spec 11, PB2.4).
 pub async fn purge_loop(pool: PgPool, retention_days: u32) {
     let mut every = tokio::time::interval(Duration::from_secs(3600));
     loop {
@@ -255,6 +260,20 @@ pub async fn purge_loop(pool: PgPool, retention_days: u32) {
             Ok(n) => tracing::info!(questions = n, "purged expired question text"),
             Err(e) => tracing::warn!(error = %e, "purging expired question text"),
         }
+        settle_lost_summaries(&pool).await;
+    }
+}
+
+/// Marks deferred summaries pending past [`SUMMARY_LOST_AFTER`] as `deferred_lost`, with one
+/// `summary_settled` event each.
+pub async fn settle_lost_summaries(pool: &PgPool) {
+    match wt_db::answer::settle_lost_summaries(pool, SUMMARY_LOST_AFTER).await {
+        Ok(lost) => {
+            for answer in lost {
+                crate::ask::settled(answer, wt_core::answer::SummaryStatus::DeferredLost);
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "marking lost summaries"),
     }
 }
 

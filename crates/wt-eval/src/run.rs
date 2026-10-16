@@ -215,6 +215,8 @@ pub struct RunAnswer {
     pub named_teacher: Option<String>,
     /// From `query_log`.
     pub thin_coverage: bool,
+    /// `answer.summary_status`; `None` for an answer stored before statuses (Spec 11, PB2.4).
+    pub summary_status: Option<String>,
 }
 
 impl RunAnswer {
@@ -258,7 +260,8 @@ pub async fn find(pool: &PgPool, run: Uuid) -> Result<StoredRun, EvalError> {
 pub async fn results(pool: &PgPool, run: Uuid) -> Result<Vec<RunAnswer>, EvalError> {
     let rows = sqlx::query!(
         r#"select q.id as question_id, q.ordinal, q.text, q.tags, r.answer_id, a.payload,
-                  r.timings, r.outcome, l.thin_coverage, te.display_name as "named_teacher?"
+                  r.timings, r.outcome, l.thin_coverage, te.display_name as "named_teacher?",
+                  a.summary_status
            from eval_result r
            join eval_question q on q.id = r.question_id
            join answer a on a.id = r.answer_id
@@ -284,6 +287,7 @@ pub async fn results(pool: &PgPool, run: Uuid) -> Result<Vec<RunAnswer>, EvalErr
                 outcome: serde_json::from_value(r.outcome).ok(),
                 named_teacher: r.named_teacher,
                 thin_coverage: r.thin_coverage,
+                summary_status: r.summary_status,
             })
         })
         .collect()

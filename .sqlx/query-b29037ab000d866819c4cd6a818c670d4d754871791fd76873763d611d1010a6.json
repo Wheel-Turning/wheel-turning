@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select settle_lost_summaries(make_interval(secs => $1)) as \"id!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b29037ab000d866819c4cd6a818c670d4d754871791fd76873763d611d1010a6"
+}
