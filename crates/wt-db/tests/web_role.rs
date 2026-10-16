@@ -60,6 +60,7 @@ fn new_answer(tester: TesterId, passages: &[PassageId]) -> NewAnswer<'static> {
         privacy_mode: "share",
         text_expires_at: None,
         summary_status: wt_core::answer::SummaryStatus::Shown,
+        measures: Default::default(),
     }
 }
 
@@ -344,4 +345,59 @@ async fn the_web_role_stores_removal_requests_unverified_and_confirms_them_only_
         .await
         .unwrap();
     assert_eq!(left, 1, "the confirmed request stays");
+}
+
+/// Spec 10 E1, pulled forward by Spec 11 PB4.6: the answer's model calls, recorded with its id
+/// before it is stored, sum into its log row's cost, and the deferred summary's calls are added
+/// when it settles. All as the web role.
+#[tokio::test]
+async fn the_web_role_stores_the_sum_of_an_answers_model_calls() {
+    let fx = common::start().await;
+    let (_, p) = served(&fx.pool, ADA).await;
+    let alice = tester(&fx.pool, "alice").await;
+    let web = web_login(&fx).await;
+    let id = AnswerId::random();
+    let call = |stage: &'static str, usd: f64, answer: Option<AnswerId>| wt_db::llm::Usage {
+        stage,
+        model: "claude-haiku-5-5",
+        input_tokens: 1000,
+        output_tokens: 100,
+        est_cost_usd: usd,
+        answer_id: answer.map(|a| a.as_uuid()),
+    };
+    let mut conn = web.acquire().await.unwrap();
+    for usage in [
+        call("sensitive", 0.00026, Some(id)),
+        call("rank", 0.0025, Some(id)),
+        call("extract", 1.0, None),
+    ] {
+        wt_db::llm::record(&mut conn, &usage).await.unwrap();
+    }
+    let mut new = new_answer(alice, &[p]);
+    new.measures = answer::Measures {
+        answer_id: Some(id),
+        first_progress_ms: Some(40),
+        page_ms: Some(3100),
+    };
+    assert_eq!(answer::persist(&web, &new).await.unwrap(), id);
+    let stored = |pool: PgPool| async move {
+        sqlx::query_as::<_, (f64, Option<i32>, Option<i32>)>(
+            "select q.llm_cost_usd::float8, q.first_progress_ms, q.page_ms
+             from query_log q join answer a on a.query_log_id = q.id where a.id = $1",
+        )
+        .bind(id.as_uuid())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    let (cost, first, page) = stored(fx.pool.clone()).await;
+    assert!((cost - 0.00276).abs() < 1e-9, "{cost}");
+    assert_eq!((first, page), (Some(40), Some(3100)));
+
+    wt_db::llm::record(&mut conn, &call("synth", 0.0016, Some(id)))
+        .await
+        .unwrap();
+    answer::settle_cost(&web, id).await.unwrap();
+    let (cost, _, _) = stored(fx.pool.clone()).await;
+    assert!((cost - 0.00436).abs() < 1e-9, "{cost}");
 }

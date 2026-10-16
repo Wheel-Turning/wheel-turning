@@ -203,8 +203,24 @@ pub fn gated(level: Level, triaged: &Triaged) -> Option<Stop> {
 /// (Spec 05, Sensitive questions, layer 3): its verdict raises the level before synthesis, and a
 /// verdict that stops the question discards whatever retrieval found and stores counts only,
 /// or for `unrelated` a log row without an answer. Each stage is reported to `progress` as it
-/// starts (Spec 06, Live progress while a question runs).
+/// starts (Spec 06, Live progress while a question runs). Its model calls are recorded against
+/// the answer id the caller's [`wt_extract::for_answer`] set, or a new one (Spec 10 E1).
 pub async fn answer_framed(
+    pool: &PgPool,
+    site: &Site,
+    tester: TesterId,
+    text: &str,
+    framing: Framing,
+    gate: Option<JoinHandle<Triaged>>,
+    progress: &Sink,
+) -> Result<Gated, AskError> {
+    let id = wt_extract::current_answer().unwrap_or_else(AnswerId::random);
+    let scoped = answer_scoped(pool, site, tester, text, framing, gate, progress);
+    wt_extract::for_answer(id, scoped).await
+}
+
+/// [`answer_framed`] inside its answer's scope.
+async fn answer_scoped(
     pool: &PgPool,
     site: &Site,
     tester: TesterId,
@@ -381,6 +397,13 @@ pub async fn answer_framed(
         relevance: triaged.relevance().map(Relevance::as_str),
         triage_degraded: triaged.degraded,
         summary_status,
+        measures: wt_db::answer::Measures {
+            answer_id: wt_extract::current_answer(),
+            first_progress_ms: progress
+                .first_event_ms()
+                .map(|ms| i32::try_from(ms).unwrap_or(i32::MAX)),
+            page_ms: Some(i32::try_from(progress.elapsed_ms()).unwrap_or(i32::MAX)),
+        },
     };
     let answer_id = wt_db::answer::persist(pool, &new)
         .await
@@ -393,13 +416,16 @@ pub async fn answer_framed(
         settled(answer_id, summary_status);
     }
     if deferred && let Some(input) = input {
-        tokio::spawn(write_summary(
-            pool.clone(),
-            site.llm.clone(),
-            site.synthesis(),
-            alias_pairs,
-            input,
+        tokio::spawn(wt_extract::for_answer(
             answer_id,
+            write_summary(
+                pool.clone(),
+                site.llm.clone(),
+                site.synthesis(),
+                alias_pairs,
+                input,
+                answer_id,
+            ),
         ));
     }
 
@@ -504,6 +530,9 @@ async fn write_summary(
             "a deferred summary settled after it was marked lost"
         ),
         Err(e) => tracing::error!(error = %e, "storing a deferred summary"),
+    }
+    if let Err(e) = wt_db::answer::settle_cost(&pool, answer).await {
+        tracing::error!(error = %e, "storing an answer's model cost");
     }
 }
 

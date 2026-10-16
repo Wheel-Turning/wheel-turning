@@ -718,13 +718,17 @@ async fn ask_with(
     // Spec 05: never part of ranking. The triage gate starts first and runs alongside the
     // embedding check and search; an acute rule match needs nothing else.
     let started = std::time::Instant::now();
+    // The gate's call is recorded against the answer it runs for (Spec 10 E1).
+    let answer = wt_core::ids::AnswerId::random();
     let gate = (site.sensitivity.rules_level(&text) != Level::Acute).then(|| {
         let (gate, settings, q) = (
             site.triage.clone(),
             site.sensitivity.triage_settings(),
             text.clone(),
         );
-        tokio::spawn(async move { triage::run(gate.as_deref(), settings, &q).await })
+        tokio::spawn(wt_extract::for_answer(answer, async move {
+            triage::run(gate.as_deref(), settings, &q).await
+        }))
     });
     let sensitive = site
         .sensitivity
@@ -761,7 +765,8 @@ async fn ask_with(
         anyway: form.anyway.is_some(),
         defer_summary: true,
     };
-    match ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink).await {
+    let asked = ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink);
+    match wt_extract::for_answer(answer, asked).await {
         Ok(ask::Gated::Answered(asked)) => {
             tally(asked.triaged, asked.level).await;
             Redirect::to(&format!("/a/{}", asked.answer_id)).into_response()

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select settle_answer_cost($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "settle_answer_cost",
+        "type_info": "Void",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "07bd87ef4034b78cd3e9a26fedd890bb9a7d163fb322a9dbd3947322088a6875"
+}

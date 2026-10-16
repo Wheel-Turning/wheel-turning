@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into query_log (id, tester_id, query_text, mode, named_teacher_id, teacher_count,\n                                sangha_count, passage_count, thin_coverage, latency_ms,\n                                theme_count, themes_dropped, sensitive_category, privacy_mode,\n                                text_expires_at, relevance, triage_degraded, first_progress_ms,\n                                page_ms, llm_cost_usd)\n         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,\n                 $19, (select coalesce(sum(est_cost_usd), 0) from llm_usage\n                        where answer_id = $20))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Text",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4b4ac8b70640ef478b1d2b01be49fa33c685d4fc38813761f635d255fd0ae8fe"
+}

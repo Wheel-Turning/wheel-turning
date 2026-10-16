@@ -281,6 +281,26 @@ impl ModelPrice {
     }
 }
 
+tokio::task_local! {
+    /// The answer whose query path is running on this task, so each call it makes is recorded
+    /// against it (Spec 10 E1).
+    static ANSWER: wt_core::ids::AnswerId;
+}
+
+/// Runs `fut` with every model call it makes on its own task recorded against `answer`. A task
+/// it spawns must be wrapped again.
+pub async fn for_answer<F: std::future::Future>(
+    answer: wt_core::ids::AnswerId,
+    fut: F,
+) -> F::Output {
+    ANSWER.scope(answer, fut).await
+}
+
+/// The answer [`for_answer`] set on this task, if any.
+pub fn current_answer() -> Option<wt_core::ids::AnswerId> {
+    ANSWER.try_with(|a| *a).ok()
+}
+
 /// Where usage is recorded and the cap is read.
 #[async_trait]
 pub trait Ledger: Send + Sync {
@@ -355,6 +375,7 @@ impl Ledger for PgLedger {
                 input_tokens: input,
                 output_tokens: output,
                 est_cost_usd: usd,
+                answer_id: current_answer().map(|a| a.as_uuid()),
             },
         )
         .await

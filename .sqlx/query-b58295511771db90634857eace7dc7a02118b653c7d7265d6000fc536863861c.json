@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into llm_usage (stage, model, input_tokens, output_tokens, est_cost_usd,\n                                answer_id)\n         values ($1, $2, $3, $4, round($5::float8::numeric, 8), $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Int4",
+        "Float8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b58295511771db90634857eace7dc7a02118b653c7d7265d6000fc536863861c"
+}

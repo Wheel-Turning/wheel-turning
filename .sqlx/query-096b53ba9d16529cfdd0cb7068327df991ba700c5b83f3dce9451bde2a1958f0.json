@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select submissions as \"submissions!\", helpful as \"helpful!\" from beta_feedback($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "submissions!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "helpful!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "096b53ba9d16529cfdd0cb7068327df991ba700c5b83f3dce9451bde2a1958f0"
+}

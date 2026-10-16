@@ -612,6 +612,30 @@ async fn usage_rows_in_postgres_sum_to_the_month_so_far() {
     assert!((month - sum).abs() < 1e-9, "{month} vs {sum}");
     assert!((sum - 3.0 * 0.001514).abs() < 1e-4);
 
+    // Spec 10 E1: a call made inside an answer's scope carries its id; the others carry none.
+    let answer = wt_core::ids::AnswerId::random();
+    let _: Label = wt_extract::for_answer(
+        answer,
+        complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic),
+    )
+    .await
+    .unwrap();
+    let tagged: Vec<(Option<sqlx::types::Uuid>, f64)> = sqlx::query_as(
+        "select answer_id, est_cost_usd::float8 from llm_usage where stage = 'classify'
+         order by answer_id nulls first",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(tagged.len(), 4);
+    assert!(tagged[..3].iter().all(|(a, _)| a.is_none()));
+    assert_eq!(tagged[3].0, Some(answer.as_uuid()));
+    assert!(
+        (tagged[3].1 - 0.001514).abs() < 1e-9,
+        "kept to eight places: {}",
+        tagged[3].1
+    );
+
     // The owner's cap overrides the default and releases capped jobs.
     let mut conn = pool.acquire().await.unwrap();
     assert_eq!(wt_db::llm::cap(&mut conn, 25.0).await.unwrap(), 25.0);

@@ -19,6 +19,8 @@ pub struct Usage<'a> {
     pub output_tokens: i32,
     /// Estimated cost from the price table.
     pub est_cost_usd: f64,
+    /// The answer the call was made for, when it was made on the query path (Spec 10 E1).
+    pub answer_id: Option<uuid::Uuid>,
 }
 
 /// The first day of `at`'s month.
@@ -44,13 +46,15 @@ pub fn next_month(at: DateTime<Utc>) -> DateTime<Utc> {
 /// Records one call.
 pub async fn record(conn: &mut PgConnection, usage: &Usage<'_>) -> Result<(), DbError> {
     sqlx::query!(
-        "insert into llm_usage (stage, model, input_tokens, output_tokens, est_cost_usd)
-         values ($1, $2, $3, $4, round($5::float8::numeric, 4))",
+        "insert into llm_usage (stage, model, input_tokens, output_tokens, est_cost_usd,
+                                answer_id)
+         values ($1, $2, $3, $4, round($5::float8::numeric, 8), $6)",
         usage.stage,
         usage.model,
         usage.input_tokens,
         usage.output_tokens,
-        usage.est_cost_usd
+        usage.est_cost_usd,
+        usage.answer_id
     )
     .execute(&mut *conn)
     .await?;

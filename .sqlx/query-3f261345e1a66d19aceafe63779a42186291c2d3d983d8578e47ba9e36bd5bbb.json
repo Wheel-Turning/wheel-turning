@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select tester as \"tester!\", answered as \"answered!\", llm_cost_usd,\n                  first_progress_ms, page_ms, link_clicks as \"link_clicks!\"\n           from beta_questions($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tester!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "answered!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "llm_cost_usd",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "first_progress_ms",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "page_ms",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "link_clicks!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3f261345e1a66d19aceafe63779a42186291c2d3d983d8578e47ba9e36bd5bbb"
+}

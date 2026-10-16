@@ -1,6 +1,71 @@
 # Cost guardrails
 
-What watches the AWS bill, where to see it, and the steps only the root user can take. Values below were read from the account on 2026-10-05. The budget and anomaly subscription are managed in `infra/terraform/account/`; the AWS-created monitor and its default subscription are not.
+What a question and a month cost (the cost model), what watches the AWS bill, where to see it, and the steps only the root user can take. Values below were read from the account on 2026-10-05. The budget and anomaly subscription are managed in `infra/terraform/account/`; the AWS-created monitor and its default subscription are not.
+
+## Cost model (Spec 11 PB4.7)
+
+What a question costs, what the site costs before anyone asks one, and the monthly ceiling. Written on 2026-10-16. Model figures are estimates from `config/llm_prices.toml`; AWS figures are us-east-2 list prices for what `infra/terraform/envs/v1` deploys, over a 730-hour month. Replace the model rows with measured figures from `wt report beta` (its `cost` section) once the private beta has a week of answers, and the AWS rows with Cost Explorer's monthly totals by service.
+
+### Model cost per question, by stage
+
+"Before" is Spec 10's baseline on the live stack (October 15, 2026, Claude Haiku 4.5 at $1 and $5 per million input and output tokens). "After" assumes every stage moves to Claude Haiku 5.5 ($0.10 and $0.50, a tenth of the price) and uses about 30% more tokens for the same work, so each stage costs about 0.13 of what it did. Only stages that pass their rule in PB2.0 move; a stage that stays on Haiku 4.5 keeps its "before" figure. The session evaluating PB2.0 replaces "after" with its measured eval runs.
+
+| Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | After (Haiku 5.5, estimate) |
+| --- | --- | --- | --- |
+| Triage gate (`sensitive`) | 1 | $0.002 | $0.0003 |
+| Ranking (`rank`) | 6 | $0.019 | $0.0025 |
+| Excerpt cutting (`excerpt`) | 8 to 10 | $0.013 | $0.0017 |
+| Summary (`synth`) | 1 to 2 | $0.012 | $0.0016 |
+| Verifier (`verify`) | 4 to 12 | $0.008 | $0.0010 |
+| **Mean per question** | 20 to 30 | **$0.054** | **$0.0070** |
+| 95th percentile | | $0.061 | about $0.008 |
+
+The after-mean is within Spec 10's target of $0.010. Its workstreams (a cheaper ranker, excerpts without a model call, one verifier call) would lower it further and are not counted here.
+
+How it is measured: every model call made for an answer carries the answer's id in `llm_usage.answer_id`, and `query_log.llm_cost_usd` is their sum, written when the answer is stored and again when its deferred summary is. `wt report beta` prints the mean and 95th percentile; cost by stage is `select stage, sum(est_cost_usd) from llm_usage where answer_id is not null and created_at >= now() - interval '7 days' group by stage`, as the owner login. A question the triage gate stops stores no answer, so its one gate call is in the spend ledger but not in the per-question figure.
+
+### Fixed AWS cost by service
+
+What runs whether or not anyone asks a question.
+
+| Service | What | Per month |
+| --- | --- | --- |
+| ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on | $85 |
+| ECS Fargate | The nightly audit and occasional migrate and eval tasks, 0.25 vCPU and 0.5 GB, minutes each | under $1 |
+| RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups (free up to the storage size) | $50 |
+| Elastic Load Balancing | One application load balancer, with its few load balancer capacity units at beta traffic | $18 |
+| Public IPv4 addresses | Two on the load balancer, one on the web task (there is no NAT gateway) | $11 |
+| AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | $9 |
+| CloudWatch | Logs, about 12 alarms, the Route 53 health check, the CloudTrail security metric filter | $4 |
+| Secrets Manager | About 8 secrets at $0.40 each | $3 |
+| GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6), at this account's event volume | $3 |
+| ECR, S3, SES, SNS, CloudTrail | Images, transcripts and records buckets, removal emails, alerts, the one free trail | $2 |
+| **Total** | | **about $186** |
+
+Spec 10 measured about $170 before WAF and detection were added. Domain and DNS are at Cloudflare and are not in this bill.
+
+### Totals by daily questions
+
+A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.medium` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $50 more), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
+
+| Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 100 | 3,000 | $162 | $21 | $186 | **$348** | **$207** | $0.069 |
+| 1,000 | 30,000 | $1,620 | $210 | $186 | **$1,806** | **$396** | $0.013 |
+| 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
+
+Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 110 to about 900 questions a day.
+
+### Monthly ceiling and the actions at 80% and 100%
+
+During the private beta the ceiling is **$260 a month**: the account budget's $200 for AWS (`monthly_budget_usd` in `infra/terraform/account/`) and the model cap's $60 (`llm_monthly_cap_usd` in `infra/terraform/envs/v1`, which sets `WT_LLM_MONTHLY_CAP_USD`; `wt llm cap set` overrides it). The $60 cap covers about 8,500 questions a month after the switch, or about 1,100 before it. Raise either only with a week of `wt report beta` figures in hand.
+
+| Reached | What happens by itself | What the owner does |
+| --- | --- | --- |
+| Model spend at 80% of the cap ($48) | The client sends one alert for the month through the owner alert (SNS once PB4.2 is deployed, otherwise a log line), recorded in `llm_alert` so it is sent once | Read `wt report beta --since 7d`: if questions per tester or cost per question jumped, look for one tester or a looping client and revoke them (`wt tester revoke`). If the use is real, decide before the month ends whether to raise the cap with `wt llm cap set` |
+| Model spend at 100% of the cap ($60) | The client refuses every further model call until the month ends. Answers still serve: excerpts in fused order with the "relevance check did not finish" line, no summary, and the triage gate marked degraded, so the rules and the embedding check still route sensitive questions. Ingestion jobs that need a model wait for next month | Tell testers the summaries are paused if it is more than a week to the month's end. Raise the cap only after the 80% review; otherwise wait for the month to roll over |
+| AWS spend at 80% of the budget ($160, actual) | The budget emails the owner | Check Cost Explorer by service against the fixed table above. A line well above it (a forgotten batch host, an RDS snapshot, a GPU instance, a second task) is stopped or deleted per the runbook |
+| AWS spend forecast at 100% of the budget ($200) | The budget emails the owner. Nothing is turned off: AWS budgets do not stop services | If the overrun is an idle resource, remove it. If it is traffic, either raise `monthly_budget_usd` to the next row of the totals table or scale the web service to zero per the runbook and post the tester notice (PB4.4) |
 
 ## Monthly budget
 
@@ -8,10 +73,10 @@ What watches the AWS bill, where to see it, and the steps only the root user can
 |---|---|
 | Name | `dharma-gates-monthly` (keeps its old name; see [naming.md](naming.md)) |
 | Type and period | Cost, monthly |
-| Limit | 75.00 USD for the whole account |
-| Alert at 50% | Actual spend over 37.50 USD, email to `alexandercowen@gmail.com` |
-| Alert at 80% | Actual spend over 60.00 USD, email to `alexandercowen@gmail.com` |
-| Alert at 100% forecast | Forecast spend over 75.00 USD, email to `alexandercowen@gmail.com` |
+| Limit | 200.00 USD for the whole account (raised from 75 on 2026-10-13) |
+| Alert at 50% | Actual spend over 100.00 USD, email to `alexandercowen@gmail.com` |
+| Alert at 80% | Actual spend over 160.00 USD, email to `alexandercowen@gmail.com` |
+| Alert at 100% forecast | Forecast spend over 200.00 USD, email to `alexandercowen@gmail.com` |
 
 Budget emails arrive only when a threshold is crossed; there is no confirmation email. AWS evaluates budgets a few times a day, so an alert can lag spending by hours.
 

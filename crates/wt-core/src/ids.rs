@@ -110,6 +110,14 @@ define_ids! {
     ClaimAuditId,
 }
 
+impl AnswerId {
+    /// A new id, made before the answer is stored so its model calls can be recorded against it
+    /// (Spec 10 E1).
+    pub fn random() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

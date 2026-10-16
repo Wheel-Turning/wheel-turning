@@ -2,6 +2,8 @@
 //! role may read: the aggregate views and `flagged_queries()`. Run them on a pool connected as
 //! `wt_analyst`, which cannot read an unflagged query's text at all.
 
+use std::collections::BTreeMap;
+
 use sqlx::PgPool;
 use sqlx::types::chrono::{DateTime, Utc};
 
@@ -442,4 +444,309 @@ pub async fn feedback_notes(
             note: r.note,
         })
         .collect())
+}
+
+/// One question in the beta report's period, without its text or its tester's id, from
+/// `beta_questions()`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BetaQuestion {
+    /// The tester, numbered within one report only.
+    pub tester: i32,
+    /// An answer was stored, whether or not the purge has removed it since.
+    pub answered: bool,
+    /// The answer's model cost, when recorded.
+    pub llm_cost_usd: Option<f64>,
+    /// Milliseconds to the first progress event, for a streamed ask.
+    pub first_progress_ms: Option<i32>,
+    /// Milliseconds to the stored answer behind the page.
+    pub page_ms: Option<i32>,
+    /// Dana link clicks on the answer while it is kept.
+    pub link_clicks: i32,
+}
+
+/// What `wt report beta` reads, before it is summed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BetaInputs {
+    /// The period's questions.
+    pub questions: Vec<BetaQuestion>,
+    /// Testers who asked in two or more distinct weeks since the beta began.
+    pub returning_testers: i64,
+    /// Dana link clicks in the period, those on purged answers included.
+    pub link_clicks: i64,
+    /// Feedback submissions in the period.
+    pub feedback_submissions: i64,
+    /// Of those, submissions that marked the answer helpful.
+    pub feedback_helpful: i64,
+    /// Submissions per reason.
+    pub feedback_reasons: BTreeMap<String, i64>,
+}
+
+/// Testers in the period.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaTesters {
+    /// Testers with at least one question in the period.
+    pub active: i64,
+    /// Testers with questions in two or more distinct weeks since the beta began.
+    pub returning: i64,
+}
+
+/// Questions in the period.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaQuestions {
+    /// Questions asked, count-only and stopped ones included.
+    pub asked: i64,
+    /// Of those, answered.
+    pub answered: i64,
+    /// The median of questions per active tester.
+    pub median_per_active_tester: f64,
+}
+
+/// Feedback in the period.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaFeedback {
+    /// Submissions.
+    pub submissions: i64,
+    /// Submissions that marked the answer helpful.
+    pub helpful: i64,
+    /// `helpful` over `submissions`.
+    pub helpful_share: f64,
+    /// Submissions per reason.
+    pub reasons: BTreeMap<String, i64>,
+}
+
+/// Dana click-through in the period. With a small group, a floor test, not a conversion rate.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaDana {
+    /// Link clicks.
+    pub link_clicks: i64,
+    /// Link clicks over answers.
+    pub clicks_per_answer: f64,
+    /// Active testers with at least one click on an answer still kept.
+    pub testers_with_click: i64,
+    /// `testers_with_click` over active testers.
+    pub share_of_testers_with_click: f64,
+}
+
+/// Model cost per answered question, over the answers whose cost was recorded.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaCost {
+    /// Answers with a recorded cost.
+    pub answers: i64,
+    /// Mean, in US dollars.
+    pub mean_usd: f64,
+    /// 95th percentile, in US dollars.
+    pub p95_usd: f64,
+}
+
+/// Times from the request, in milliseconds.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaSpeed {
+    /// Streamed asks timed to their first progress event.
+    pub streamed: i64,
+    /// Median time to the first progress event.
+    pub first_progress_p50_ms: f64,
+    /// 95th percentile time to the first progress event.
+    pub first_progress_p95_ms: f64,
+    /// Answers timed to their page.
+    pub pages: i64,
+    /// Median time to the page.
+    pub page_p50_ms: f64,
+    /// 95th percentile time to the page.
+    pub page_p95_ms: f64,
+}
+
+/// `wt report beta` (Spec 11 PB4.6): totals only, never question text.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct BetaReport {
+    /// The start of the period.
+    pub since: DateTime<Utc>,
+    /// Active and returning testers.
+    pub testers: BetaTesters,
+    /// Questions.
+    pub questions: BetaQuestions,
+    /// Feedback.
+    pub feedback: BetaFeedback,
+    /// Dana click-through.
+    pub dana: BetaDana,
+    /// Model cost per question.
+    pub cost: BetaCost,
+    /// Time to the first progress event and to the page.
+    pub speed: BetaSpeed,
+}
+
+/// The `p` percentile of `values` by nearest rank, zero when there are none.
+fn percentile(values: &[f64], p: f64) -> f64 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = sorted.len();
+    // Nearest rank: the smallest value with at least `p` of the values at or below it.
+    let rank = (p * n as f64).ceil() as usize;
+    sorted
+        .get(rank.clamp(1, n.max(1)) - 1)
+        .copied()
+        .unwrap_or(0.0)
+}
+
+/// The median of `values`, the mean of the middle two when their number is even.
+fn median(values: &[f64]) -> f64 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = sorted.len();
+    let mid = |i: usize| sorted.get(i).copied().unwrap_or(0.0);
+    if n % 2 == 1 {
+        mid(n / 2)
+    } else if n == 0 {
+        0.0
+    } else {
+        (mid(n / 2 - 1) + mid(n / 2)) / 2.0
+    }
+}
+
+/// The mean of `values`, zero when there are none.
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
+    }
+}
+
+/// A length as a count.
+fn count(n: usize) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+impl BetaReport {
+    /// Sums the period's rows.
+    pub fn from_inputs(since: DateTime<Utc>, inputs: &BetaInputs) -> Self {
+        // Questions and link clicks per tester.
+        let mut per_tester: BTreeMap<i32, (i64, i64)> = BTreeMap::new();
+        for q in &inputs.questions {
+            let entry = per_tester.entry(q.tester).or_default();
+            entry.0 += 1;
+            entry.1 += i64::from(q.link_clicks);
+        }
+        let active = count(per_tester.len());
+        let per_active: Vec<f64> = per_tester.values().map(|(n, _)| *n as f64).collect();
+        let with_click = count(per_tester.values().filter(|(_, c)| *c > 0).count());
+        let answered: Vec<&BetaQuestion> = inputs.questions.iter().filter(|q| q.answered).collect();
+        let costs: Vec<f64> = answered.iter().filter_map(|q| q.llm_cost_usd).collect();
+        let firsts: Vec<f64> = answered
+            .iter()
+            .filter_map(|q| q.first_progress_ms.map(f64::from))
+            .collect();
+        let pages: Vec<f64> = answered
+            .iter()
+            .filter_map(|q| q.page_ms.map(f64::from))
+            .collect();
+        Self {
+            since,
+            testers: BetaTesters {
+                active,
+                returning: inputs.returning_testers,
+            },
+            questions: BetaQuestions {
+                asked: count(inputs.questions.len()),
+                answered: count(answered.len()),
+                median_per_active_tester: median(&per_active),
+            },
+            feedback: BetaFeedback {
+                submissions: inputs.feedback_submissions,
+                helpful: inputs.feedback_helpful,
+                helpful_share: rate(inputs.feedback_helpful, inputs.feedback_submissions),
+                reasons: inputs.feedback_reasons.clone(),
+            },
+            dana: BetaDana {
+                link_clicks: inputs.link_clicks,
+                clicks_per_answer: rate(inputs.link_clicks, count(answered.len())),
+                testers_with_click: with_click,
+                share_of_testers_with_click: rate(with_click, active),
+            },
+            cost: BetaCost {
+                answers: count(costs.len()),
+                mean_usd: mean(&costs),
+                p95_usd: percentile(&costs, 0.95),
+            },
+            speed: BetaSpeed {
+                streamed: count(firsts.len()),
+                first_progress_p50_ms: percentile(&firsts, 0.5),
+                first_progress_p95_ms: percentile(&firsts, 0.95),
+                pages: count(pages.len()),
+                page_p50_ms: percentile(&pages, 0.5),
+                page_p95_ms: percentile(&pages, 0.95),
+            },
+        }
+    }
+}
+
+/// `wt report beta` since `since`, through the `beta_*` functions `wt_analyst` may run.
+pub async fn beta(pool: &PgPool, since: DateTime<Utc>) -> Result<BetaReport, DbError> {
+    let questions = sqlx::query!(
+        r#"select tester as "tester!", answered as "answered!", llm_cost_usd,
+                  first_progress_ms, page_ms, link_clicks as "link_clicks!"
+           from beta_questions($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|r| BetaQuestion {
+        tester: r.tester,
+        answered: r.answered,
+        llm_cost_usd: r.llm_cost_usd,
+        first_progress_ms: r.first_progress_ms,
+        page_ms: r.page_ms,
+        link_clicks: r.link_clicks,
+    })
+    .collect();
+    let returning_testers = sqlx::query_scalar!(r#"select beta_returning_testers() as "n!""#)
+        .fetch_one(pool)
+        .await?;
+    let link_clicks = sqlx::query_scalar!(r#"select beta_link_clicks($1) as "n!""#, since)
+        .fetch_one(pool)
+        .await?;
+    let feedback = sqlx::query!(
+        r#"select submissions as "submissions!", helpful as "helpful!" from beta_feedback($1)"#,
+        since
+    )
+    .fetch_one(pool)
+    .await?;
+    let feedback_reasons = sqlx::query!(
+        r#"select kind as "kind!", submissions as "submissions!"
+           from beta_feedback_reasons($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|r| (r.kind, r.submissions))
+    .collect();
+    Ok(BetaReport::from_inputs(
+        since,
+        &BetaInputs {
+            questions,
+            returning_testers,
+            link_clicks,
+            feedback_submissions: feedback.submissions,
+            feedback_helpful: feedback.helpful,
+            feedback_reasons,
+        },
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn percentiles_use_the_nearest_rank() {
+        let v: Vec<f64> = (1..=20).map(f64::from).collect();
+        assert_eq!(percentile(&v, 0.95), 19.0);
+        assert_eq!(percentile(&v, 0.5), 10.0);
+        assert_eq!(percentile(&[7.0], 0.95), 7.0);
+        assert_eq!(percentile(&[], 0.95), 0.0);
+        assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
+        assert_eq!(median(&[4.0, 1.0, 2.0, 3.0]), 2.5);
+        assert_eq!(median(&[]), 0.0);
+    }
 }
