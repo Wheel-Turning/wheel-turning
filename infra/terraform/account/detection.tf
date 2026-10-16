@@ -43,6 +43,11 @@ resource "aws_guardduty_detector_feature" "off" {
   detector_id = aws_guardduty_detector.this.id
   name        = each.key
   status      = "DISABLED"
+
+  # AWS fills in each feature's sub-settings as disabled; they would show as a diff on every plan.
+  lifecycle {
+    ignore_changes = [additional_configuration]
+  }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -123,14 +128,14 @@ locals {
     }
     "iam-policy-change" = {
       description = "An IAM policy was created, changed, attached or detached. Expected during a Terraform apply; otherwise check who made it in CloudTrail."
-      pattern = join(" || ", [for name in [
+      pattern = format("{ %s }", join(" || ", [for name in [
         "DeleteGroupPolicy", "DeleteRolePolicy", "DeleteUserPolicy",
         "PutGroupPolicy", "PutRolePolicy", "PutUserPolicy",
         "CreatePolicy", "DeletePolicy", "CreatePolicyVersion", "DeletePolicyVersion",
         "SetDefaultPolicyVersion",
         "AttachRolePolicy", "DetachRolePolicy", "AttachUserPolicy", "DetachUserPolicy",
         "AttachGroupPolicy", "DetachGroupPolicy",
-      ] : "($.eventName = ${name})"])
+      ] : "($.eventName = ${name})"]))
     }
   }
 }
