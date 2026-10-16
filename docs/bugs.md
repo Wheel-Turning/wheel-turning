@@ -357,10 +357,10 @@ The promise is set in the PRD and specs:
 
 Retention periods (24 hours, 180 days, the provider's 30 days) are not promises to act and are not affected.
 
-### Open point
+### Decision
 
-Whether the internal target stays: the alert and the audit check for a request open more than one business day are not public promises. They can stay as an internal reminder, be relaxed, or go.
+The internal target stays (owner, October 15, 2026). The alert and the audit check for a request open more than one business day remain as a private reminder to the owner. Only the public promise goes.
 
 ### Fix
 
-To be ordered in the build plan once the register is complete. Change the PRD success criterion and principle 4, and Specs 03, 08 and 09, then the Rights page and its confirmation. The copy can still say requests are handled in the order they arrive and that material is suspended before the requester's identity is checked, if that practice stays.
+To be ordered in the build plan once the register is complete. Change the PRD (principle 4, the success criterion, the risk row and the scope table) and Specs 03 and 09 so no public text states a time, and reword Spec 08's handling and alert sections so one business day is an internal target, not a promise. Then change the Rights page and its confirmation. The copy can still say requests are handled in the order they arrive and that material is suspended before the requester's identity is checked, if that practice stays.
