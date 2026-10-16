@@ -51,3 +51,8 @@ output "image_tag" {
 output "batch_host_instance_id" {
   value = module.batch_host.instance_id
 }
+
+output "alert_topic_arn" {
+  description = "WT_ALERT_TOPIC_ARN, for `wt alerts test` and the batch host."
+  value       = module.observability.alarm_topic_arn
+}

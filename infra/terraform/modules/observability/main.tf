@@ -2,7 +2,10 @@
 # balancer 5xx rate, database CPU and free storage, and a scratch bucket that is not empty after
 # 24 hours, plus two alarms that fire with no traffic at all: no healthy web task behind the load
 # balancer, and a Route 53 health check that cannot reach /healthz over HTTPS from outside AWS.
-# Alarms email the alert address through one SNS topic per region.
+# Alarms on the answer path read the web service's JSON log events (Spec 11, PB4.3). Alarms
+# email the alert address, and the second address when set, through one SNS topic per region;
+# the code's own alerts (WT_ALERT_TOPIC_ARN) use the us-east-2 topic. Runbook procedure 13 has an
+# entry per alarm, and crates/wt-core/tests/runbook_alarms.rs keeps the two lists equal.
 #
 # Route 53 publishes health check metrics only in us-east-1, so that alarm and its topic live
 # there, through the aws.us_east_1 provider.
@@ -13,6 +16,12 @@ variable "name" {
 
 variable "alert_email" {
   type = string
+}
+
+variable "second_alert_email" {
+  description = "A second recipient of every alarm and alert (Spec 11, PB4.2). Empty adds none."
+  type        = string
+  default     = ""
 }
 
 variable "log_retention_days" {
@@ -62,6 +71,13 @@ resource "aws_sns_topic_subscription" "email" {
   topic_arn = aws_sns_topic.alarms.arn
   protocol  = "email"
   endpoint  = var.alert_email
+}
+
+resource "aws_sns_topic_subscription" "second_email" {
+  count     = var.second_alert_email == "" ? 0 : 1
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = var.second_alert_email
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_5xx_rate" {
@@ -213,6 +229,14 @@ resource "aws_sns_topic_subscription" "email_us_east_1" {
   endpoint  = var.alert_email
 }
 
+resource "aws_sns_topic_subscription" "second_email_us_east_1" {
+  count     = var.second_alert_email == "" ? 0 : 1
+  provider  = aws.us_east_1
+  topic_arn = aws_sns_topic.alarms_us_east_1.arn
+  protocol  = "email"
+  endpoint  = var.second_alert_email
+}
+
 resource "aws_cloudwatch_metric_alarm" "healthz_unreachable" {
   provider            = aws.us_east_1
   alarm_name          = "${var.name}-healthz-unreachable"
@@ -229,6 +253,174 @@ resource "aws_cloudwatch_metric_alarm" "healthz_unreachable" {
   treat_missing_data  = "breaching"
   alarm_actions       = [aws_sns_topic.alarms_us_east_1.arn]
   ok_actions          = [aws_sns_topic.alarms_us_east_1.arn]
+}
+
+# ---------------------------------------------------------------------------------------------
+# Spec 11, PB4.3: alarms on the answer path, from the web service's structured log events. Logs
+# are one JSON object per line with the fields at the top level, and no event carries question
+# text. A metric gets a datapoint only when an event matches, so a quiet hour is missing data,
+# which counts as not breaching.
+# ---------------------------------------------------------------------------------------------
+
+locals {
+  answer_namespace = "WheelTurning/${var.name}"
+
+  # Metric name => filter pattern; each matching line adds 1, or its `ms` for AskMilliseconds.
+  answer_metrics = {
+    LlmCalls        = "{ ($.event = \"llm_call_succeeded\") || ($.event = \"llm_call_failed\") }"
+    LlmCallFailures = "{ $.event = \"llm_call_failed\" }"
+    LlmCapReached   = "{ $.event = \"llm_cap_reached\" }"
+    AskMilliseconds = "{ $.event = \"ask_completed\" }"
+    # PB2.4 and PB2.1's events: one summary_settled and one ranker_served per answer.
+    SummariesSettled = "{ $.event = \"summary_settled\" }"
+    SummariesFailed  = "{ ($.event = \"summary_settled\") && ($.summary_status != \"shown\") && ($.summary_status != \"not_attempted\") }"
+    RankerFallback   = "{ ($.event = \"ranker_served\") && ($.ranker = \"none (fallback)\") }"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "answer" {
+  for_each       = local.answer_metrics
+  name           = "${var.name}-${each.key}"
+  log_group_name = aws_cloudwatch_log_group.this["web"].name
+  pattern        = each.value
+
+  metric_transformation {
+    name      = each.key
+    namespace = local.answer_namespace
+    value     = each.key == "AskMilliseconds" ? "$.ms" : "1"
+    unit      = each.key == "AskMilliseconds" ? "Milliseconds" : "Count"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "model_failures" {
+  alarm_name          = "${var.name}-model-failures"
+  alarm_description   = "More than 20% of language-model calls failed in 15 minutes, with at least 5 calls. Runbook 13."
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 20
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  metric_query {
+    id          = "rate"
+    expression  = "IF(calls >= 5, 100 * FILL(failures, 0) / calls, 0)"
+    label       = "Failed calls percent"
+    return_data = true
+  }
+
+  metric_query {
+    id = "calls"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "LlmCalls"
+      period      = 900
+      stat        = "Sum"
+    }
+  }
+
+  metric_query {
+    id = "failures"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "LlmCallFailures"
+      period      = 900
+      stat        = "Sum"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
+}
+
+resource "aws_cloudwatch_metric_alarm" "cap_reached" {
+  alarm_name          = "${var.name}-cap-reached"
+  alarm_description   = "The monthly language-model spend cap refused a call. Runbook 13."
+  namespace           = local.answer_namespace
+  metric_name         = "LlmCapReached"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
+}
+
+resource "aws_cloudwatch_metric_alarm" "summaries" {
+  alarm_name          = "${var.name}-summaries"
+  alarm_description   = "More than 30% of answers in an hour ended with a summary status other than shown or not_attempted, with at least 5 answers. Runbook 13."
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 30
+  evaluation_periods  = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  metric_query {
+    id          = "rate"
+    expression  = "IF(settled >= 5, 100 * FILL(failed, 0) / settled, 0)"
+    label       = "Summaries not shown percent"
+    return_data = true
+  }
+
+  metric_query {
+    id = "settled"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "SummariesSettled"
+      period      = 3600
+      stat        = "Sum"
+    }
+  }
+
+  metric_query {
+    id = "failed"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "SummariesFailed"
+      period      = 3600
+      stat        = "Sum"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
+}
+
+resource "aws_cloudwatch_metric_alarm" "ranker_fallback" {
+  alarm_name          = "${var.name}-ranker-fallback"
+  alarm_description   = "An answer in the last hour was served without the relevance check (ranker none (fallback)). Runbook 13."
+  namespace           = local.answer_namespace
+  metric_name         = "RankerFallback"
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
+}
+
+resource "aws_cloudwatch_metric_alarm" "slow_answers" {
+  alarm_name          = "${var.name}-slow-answers"
+  alarm_description   = "p95 time to the answer page above 8 seconds over an hour. Runbook 13."
+  namespace           = local.answer_namespace
+  metric_name         = "AskMilliseconds"
+  extended_statistic  = "p95"
+  period              = 3600
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 8000
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
 }
 
 output "log_group_names" {

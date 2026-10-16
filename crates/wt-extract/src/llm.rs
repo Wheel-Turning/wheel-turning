@@ -96,6 +96,25 @@ pub enum LlmError {
     Prices(String),
 }
 
+impl LlmError {
+    /// A short fixed name for the error, for logs and metrics.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            LlmError::RealDataRefused => "real_data_refused",
+            LlmError::CapReached { .. } => "cap_reached",
+            LlmError::NoModel(_) => "no_model",
+            LlmError::UnknownModel(_) => "unknown_model",
+            LlmError::Http(_) => "http",
+            LlmError::Status { .. } => "status",
+            LlmError::Refusal => "refusal",
+            LlmError::Truncated => "truncated",
+            LlmError::Parse(_) => "parse",
+            LlmError::Ledger(_) => "ledger",
+            LlmError::Prices(_) => "prices",
+        }
+    }
+}
+
 /// The client every stage uses. `complete_value` is object safe; `complete_json` adds the type.
 #[async_trait]
 pub trait LlmClient: Send + Sync {
@@ -334,11 +353,11 @@ impl Ledger for PgLedger {
     }
 }
 
-/// Alerts to the owner. SNS (`WT_ALERT_TOPIC_ARN`) arrives with the project's AWS client; until
-/// then [`LogAlerter`] writes a warning.
+/// Alerts to the owner: [`SnsAlerter`] when `WT_ALERT_TOPIC_ARN` is set, [`LogAlerter`] otherwise.
 #[async_trait]
 pub trait Alerter: Send + Sync {
-    /// Sends one alert.
+    /// Sends one alert. A failure to deliver is logged, never returned: an alert must not stop
+    /// the work that raised it.
     async fn send(&self, subject: &str, body: &str);
 }
 
@@ -350,6 +369,172 @@ pub struct LogAlerter;
 impl Alerter for LogAlerter {
     async fn send(&self, subject: &str, body: &str) {
         tracing::warn!(alert = subject, detail = body, "owner alert");
+    }
+}
+
+/// Why an alert could not be published.
+#[derive(Debug, thiserror::Error)]
+pub enum AlertError {
+    /// SNS refused or could not be reached.
+    #[error("publishing to SNS: {0}")]
+    Publish(String),
+}
+
+/// Publishes to one SNS topic. [`AwsSns`] in service, [`FakeSns`] in tests.
+#[async_trait]
+pub trait SnsPublisher: Send + Sync {
+    /// Publishes one message and returns its message ID.
+    async fn publish(
+        &self,
+        topic_arn: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<String, AlertError>;
+}
+
+/// Amazon SNS, with credentials and region from the environment (the task or instance role and
+/// `AWS_REGION`, or the owner's profile for `wt alerts test`).
+pub struct AwsSns {
+    /// The SNS client.
+    client: aws_sdk_sns::Client,
+}
+
+impl AwsSns {
+    /// A client from the environment.
+    pub async fn from_env() -> Self {
+        use aws_smithy_http_client::tls::{Provider, rustls_provider::CryptoMode};
+        let http = aws_smithy_http_client::Builder::new()
+            .tls_provider(Provider::Rustls(CryptoMode::Ring))
+            .build_https();
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .http_client(http)
+            .load()
+            .await;
+        Self {
+            client: aws_sdk_sns::Client::new(&config),
+        }
+    }
+}
+
+#[async_trait]
+impl SnsPublisher for AwsSns {
+    async fn publish(
+        &self,
+        topic_arn: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<String, AlertError> {
+        let out = self
+            .client
+            .publish()
+            .topic_arn(topic_arn)
+            .subject(subject)
+            .message(body)
+            .send()
+            .await
+            .map_err(|e| {
+                AlertError::Publish(aws_sdk_sns::error::DisplayErrorContext(e).to_string())
+            })?;
+        Ok(out.message_id().unwrap_or_default().to_owned())
+    }
+}
+
+/// An SNS stand-in for tests: keeps every message, or fails every publish.
+#[derive(Debug, Default)]
+pub struct FakeSns {
+    /// Each message as (topic ARN, subject, body).
+    pub published: Mutex<Vec<(String, String, String)>>,
+    /// Fail every publish, as when SNS is unreachable.
+    fail: bool,
+}
+
+impl FakeSns {
+    /// A fake whose every publish fails.
+    pub fn failing() -> Self {
+        Self {
+            published: Mutex::new(Vec::new()),
+            fail: true,
+        }
+    }
+
+    /// The messages published so far.
+    pub fn messages(&self) -> Vec<(String, String, String)> {
+        self.published.lock().map(|m| m.clone()).unwrap_or_default()
+    }
+}
+
+#[async_trait]
+impl SnsPublisher for FakeSns {
+    async fn publish(
+        &self,
+        topic_arn: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<String, AlertError> {
+        if self.fail {
+            return Err(AlertError::Publish("the fake fails every publish".into()));
+        }
+        let mut published = self
+            .published
+            .lock()
+            .map_err(|e| AlertError::Publish(e.to_string()))?;
+        published.push((topic_arn.to_owned(), subject.to_owned(), body.to_owned()));
+        Ok(format!("fake-{}", published.len()))
+    }
+}
+
+/// Alerts through the SNS topic `WT_ALERT_TOPIC_ARN`, which emails its subscribers (PB4.2).
+pub struct SnsAlerter {
+    /// Who publishes.
+    publisher: Arc<dyn SnsPublisher>,
+    /// `WT_ALERT_TOPIC_ARN`.
+    topic_arn: String,
+}
+
+/// SNS rejects a subject over 100 characters or with a line break.
+const SUBJECT_MAX: usize = 100;
+
+impl SnsAlerter {
+    /// An alerter publishing to `topic_arn` through `publisher`.
+    pub fn new(publisher: Arc<dyn SnsPublisher>, topic_arn: impl Into<String>) -> Self {
+        Self {
+            publisher,
+            topic_arn: topic_arn.into(),
+        }
+    }
+
+    /// Publishes one alert and returns the SNS message ID. `wt alerts test` reports the error;
+    /// [`Alerter::send`] logs it.
+    pub async fn publish(&self, subject: &str, body: &str) -> Result<String, AlertError> {
+        let subject: String = format!("Wheel Turning: {subject}")
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .take(SUBJECT_MAX)
+            .collect();
+        self.publisher
+            .publish(&self.topic_arn, &subject, body)
+            .await
+    }
+}
+
+#[async_trait]
+impl Alerter for SnsAlerter {
+    async fn send(&self, subject: &str, body: &str) {
+        tracing::warn!(alert = subject, detail = body, "owner alert");
+        if let Err(e) = self.publish(subject, body).await {
+            tracing::error!(event = "alert_failed", error = %e, "owner alert not delivered");
+        }
+    }
+}
+
+/// The alerter for a service: SNS when `topic_arn` is set, logs otherwise.
+pub async fn alerter(topic_arn: Option<&str>) -> Arc<dyn Alerter> {
+    match topic_arn {
+        Some(arn) if !arn.trim().is_empty() => Arc::new(SnsAlerter::new(
+            Arc::new(AwsSns::from_env().await),
+            arn.trim(),
+        )),
+        _ => Arc::new(LogAlerter),
     }
 }
 
@@ -462,11 +647,9 @@ impl ClaudeClient {
             return Ok(value);
         }
     }
-}
 
-#[async_trait]
-impl LlmClient for ClaudeClient {
-    async fn complete_value(
+    /// One call: the cap check, the request, the ledger row and the parsed reply.
+    async fn call(
         &self,
         req: &LlmRequest,
         schema: &Value,
@@ -545,6 +728,42 @@ impl LlmClient for ClaudeClient {
             })
             .unwrap_or_default();
         serde_json::from_str(&text).map_err(|e| LlmError::Parse(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl LlmClient for ClaudeClient {
+    /// Logs one event per call for the PB4.3 alarms, carrying the stage and never the text:
+    /// `llm_call_succeeded`, `llm_call_failed` with the error's kind, or `llm_cap_reached`.
+    async fn complete_value(
+        &self,
+        req: &LlmRequest,
+        schema: &Value,
+        class: DataClass,
+    ) -> Result<Value, LlmError> {
+        let stage = req.stage.as_str();
+        let result = self.call(req, schema, class).await;
+        match &result {
+            Ok(_) => tracing::info!(
+                event = "llm_call_succeeded",
+                stage,
+                "language-model call ok"
+            ),
+            Err(LlmError::CapReached { .. }) => {
+                tracing::warn!(
+                    event = "llm_cap_reached",
+                    stage,
+                    "language-model cap reached"
+                )
+            }
+            Err(e) => tracing::warn!(
+                event = "llm_call_failed",
+                stage,
+                error = e.kind(),
+                "language-model call failed"
+            ),
+        }
+        result
     }
 }
 

@@ -14,6 +14,7 @@ pub use labeler::LlmLabeler;
 pub use question::LlmQuestionEditor;
 
 pub use llm::{
-    Alerter, ClaudeClient, ClaudeSettings, DataClass, FakeLlm, Ledger, LlmClient, LlmError,
-    LlmRequest, LogAlerter, PgLedger, PriceTable, UnavailableLlm, api_schema, complete_json,
+    AlertError, Alerter, AwsSns, ClaudeClient, ClaudeSettings, DataClass, FakeLlm, FakeSns, Ledger,
+    LlmClient, LlmError, LlmRequest, LogAlerter, PgLedger, PriceTable, SnsAlerter, SnsPublisher,
+    UnavailableLlm, alerter, api_schema, complete_json,
 };
