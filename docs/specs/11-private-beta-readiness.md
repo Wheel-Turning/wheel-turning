@@ -138,7 +138,7 @@ Build this only if PB1.1 cannot land before the beta.
 **Acceptance.**
 - [ ] The scheduled task runs nightly and writes its report to the log group.
 - [ ] A one-off run with a command that exits 1 produces an SNS email.
-- [ ] `wt audit --fail-on warning` exits non-zero on a planted warning in a test database.
+- [x] `wt audit --fail-on warning` exits non-zero on a planted warning in a test database. (`audit_fail_on_warning_exits_one_on_a_planted_warning`.)
 
 ### PB1.5 Removal emails reach anyone (WA REL01-BP04, #165)
 
@@ -358,7 +358,7 @@ User stories:
 
 **Acceptance.**
 - [x] The not-counseling line is shown on the support page. (`support_text.html` already carried it; `wt-api/tests/sensitive.rs` holds it.)
-- [ ] The link check reports a planted dead link.
+- [x] The link check reports a planted dead link. (`the_link_check_reports_a_planted_dead_link`, with a fake probe; the live check runs only in the `wt-v1-audit` task.)
 - [x] The acute storage test passes. (`wt-api/tests/log_scrubber.rs` and `sensitive.rs`.)
 
 ### PB3.5 Security headers (WA SEC09-BP02)
