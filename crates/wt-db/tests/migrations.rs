@@ -91,7 +91,16 @@ async fn migrations_create_the_spec_objects() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(roles, ["wt_analyst", "wt_owner", "wt_pipeline", "wt_web"]);
+    assert_eq!(
+        roles,
+        [
+            "wt_analyst",
+            "wt_audit",
+            "wt_owner",
+            "wt_pipeline",
+            "wt_web"
+        ]
+    );
 
     let foreign_owned: Vec<String> = sqlx::query_scalar(
         "select c.relname::text from pg_class c join pg_namespace n on n.oid = c.relnamespace
