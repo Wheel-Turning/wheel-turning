@@ -380,7 +380,7 @@ change, with the owner's profile:
 WT_ALERT_TOPIC_ARN=$(terraform -chdir=infra/terraform/envs/v1 output -raw alert_topic_arn) wt alerts test
 ```
 
-The web task and the batch host publish with their own roles, which may publish to this topic
+`wt` loads its whole configuration first, so `DATABASE_URL` must be set (the PC's `.env` has it), though this command never connects. The web task and the batch host publish with their own roles, which may publish to this topic
 and nothing else in SNS. A worker on the batch host or the PC needs `WT_ALERT_TOPIC_ARN` in its
 environment to publish; without it the alert is only a log line.
 

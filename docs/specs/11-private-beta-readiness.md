@@ -423,9 +423,9 @@ User stories:
 5. **Tick the Spec 01 items** this covers.
 
 **Acceptance.**
-- [ ] `wt alerts test` reaches both subscribers.
-- [ ] The cap alert's 80% message reaches SNS in a test with the fake.
-- [ ] IAM simulation denies publishing to another topic.
+- [ ] `wt alerts test` reaches both subscribers. (October 16, 2026: published to the one confirmed subscriber, the owner's address; the second address is not named yet, `second_alert_email`.)
+- [x] The cap alert's 80% message reaches SNS in a test with the fake. (`the_eighty_percent_alert_reaches_sns`, PR 182.)
+- [x] IAM simulation denies publishing to another topic. (October 16, 2026: the web, eval and batch roles are allowed `sns:Publish` on `wt-v1-alarms` and implicitly denied on any other topic and every other SNS action. The workload boundary needed the same grant.)
 
 ### PB4.3 Alarms on the answer path (A3, WA OPS04-BP04)
 
@@ -448,8 +448,8 @@ User stories:
    | Slow answers | p95 ask time above 8 seconds over an hour |
 
 **Acceptance.**
-- [ ] Each event is emitted in a test with a fake.
-- [ ] Each alarm exists in Terraform with a runbook entry (PB4.4).
+- [x] Each event is emitted in a test with a fake. (`llm_call_failed`, `llm_cap_reached` and `ask_completed` in PR 182; `summary_settled` and `ranker_served` in `crates/wt-api/tests/pages.rs` with PB2.4 and PB2.1.)
+- [x] Each alarm exists in Terraform with a runbook entry (PB4.4). (Applied October 16, 2026.)
 
 ### PB4.4 Runbook, incident procedure and tester notice (WA M8, OPS10-BP01, OPS10-BP05, OPS11-BP02, SEC10-BP01)
 
@@ -462,8 +462,8 @@ User stories:
 5. **An email template** for telling testers about an outage.
 
 **Acceptance.**
-- [ ] The runbook names every alarm in Terraform. A test compares the two lists.
-- [ ] Setting `maintenance = true` in a plan shows the fixed response.
+- [x] The runbook names every alarm in Terraform. A test compares the two lists. (`crates/wt-core/tests/runbook_alarms.rs`.)
+- [x] Setting `maintenance = true` in a plan shows the fixed response. (`infra/terraform/modules/service/tests/maintenance.tftest.hcl`, run in CI.)
 
 ### PB4.5 Recovery and availability targets (WA M4)
 
