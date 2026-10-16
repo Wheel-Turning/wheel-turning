@@ -20,7 +20,7 @@ use std::time::Duration;
 use futures_util::future::join_all;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use wt_core::answer::{StoredCite, StoredSentence, StoredSummary, SummaryPart};
+use wt_core::answer::{StoredCite, StoredSentence, StoredSummary, SummaryPart, SummaryStatus};
 use wt_core::config::LlmStage;
 use wt_core::excerpt::{Chooser, Window};
 use wt_core::ids::{PassageId, TeacherId};
@@ -282,7 +282,17 @@ pub struct Dropped {
 pub enum Failure {
     /// The month's language-model cap is reached (Spec 04, `cap_reached`).
     CapReached,
-    /// A generation or verifier call failed or ran past the timeout (`synthesis_failed`).
+    /// No model may be called: none is configured, or real text is not allowed.
+    NoModel {
+        /// `synth` or `verify`.
+        stage: &'static str,
+    },
+    /// A generation or verifier call ran past the timeout.
+    TimedOut {
+        /// `synth` or `verify`.
+        stage: &'static str,
+    },
+    /// A generation or verifier call failed (`synthesis_failed`).
     Failed {
         /// `synth` or `verify`.
         stage: &'static str,
@@ -296,7 +306,31 @@ impl Failure {
     pub fn as_str(&self) -> &'static str {
         match self {
             Failure::CapReached => "cap_reached",
-            Failure::Failed { .. } => "synthesis_failed",
+            Failure::NoModel { .. } | Failure::TimedOut { .. } | Failure::Failed { .. } => {
+                "synthesis_failed"
+            }
+        }
+    }
+
+    /// The answer's summary status for this failure (Spec 11, PB2.4).
+    pub fn status(&self) -> SummaryStatus {
+        match self {
+            Failure::CapReached => SummaryStatus::CapReached,
+            Failure::NoModel { .. } => SummaryStatus::NoKey,
+            Failure::TimedOut { .. } => SummaryStatus::Timeout,
+            Failure::Failed { .. } => SummaryStatus::ModelError,
+        }
+    }
+
+    /// A failed call's error as a failure of `stage`.
+    fn of(stage: &'static str, e: LlmError) -> Failure {
+        match e {
+            LlmError::CapReached { .. } => Failure::CapReached,
+            LlmError::NoModel(_) | LlmError::RealDataRefused => Failure::NoModel { stage },
+            other => Failure::Failed {
+                stage,
+                error: other.to_string(),
+            },
         }
     }
 }
@@ -319,6 +353,17 @@ impl Synthesis {
     /// Sentences shown.
     pub fn shown(&self) -> usize {
         self.summary.as_ref().map_or(0, |s| s.sentences.len())
+    }
+
+    /// How the summary settled (Spec 11, PB2.4). No call at all, as for an answer without
+    /// excerpts, is `not_attempted`; calls that left no headline are `all_sentences_rejected`.
+    pub fn status(&self) -> SummaryStatus {
+        match (&self.summary, &self.failure) {
+            (Some(_), _) => SummaryStatus::Shown,
+            (None, Some(f)) => f.status(),
+            (None, None) if self.calls == 0 => SummaryStatus::NotAttempted,
+            (None, None) => SummaryStatus::AllSentencesRejected,
+        }
     }
 }
 
@@ -430,7 +475,7 @@ async fn round(
     {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => return Err(fail(std::mem::take(out), "synth", e)),
-        Err(_) => return Err(timed_out(std::mem::take(out), "synth", settings.timeout)),
+        Err(_) => return Err(timed_out(std::mem::take(out), "synth")),
     };
     let candidates = filter_draft(drafted, input, names, settings, &mut out.dropped);
     out.calls += candidates.len();
@@ -465,23 +510,14 @@ async fn round(
 /// Records a failed model call on the synthesis and logs it; a spend cap that stopped the call is
 /// reported as such, not as a failure.
 fn fail(mut out: Synthesis, stage: &'static str, e: LlmError) -> Synthesis {
-    out.failure = Some(match e {
-        LlmError::CapReached { .. } => Failure::CapReached,
-        other => Failure::Failed {
-            stage,
-            error: other.to_string(),
-        },
-    });
+    out.failure = Some(Failure::of(stage, e));
     log(&out);
     out
 }
 
 /// Records a model call that did not answer in time, and logs it.
-fn timed_out(mut out: Synthesis, stage: &'static str, after: Duration) -> Synthesis {
-    out.failure = Some(Failure::Failed {
-        stage,
-        error: format!("no reply within {} s", after.as_secs_f32()),
-    });
+fn timed_out(mut out: Synthesis, stage: &'static str) -> Synthesis {
+    out.failure = Some(Failure::TimedOut { stage });
     log(&out);
     out
 }
@@ -763,15 +799,8 @@ async fn verify(
     .await
     {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(LlmError::CapReached { .. })) => Err(Failure::CapReached),
-        Ok(Err(e)) => Err(Failure::Failed {
-            stage: "verify",
-            error: e.to_string(),
-        }),
-        Err(_) => Err(Failure::Failed {
-            stage: "verify",
-            error: format!("no reply within {} s", settings.timeout.as_secs_f32()),
-        }),
+        Ok(Err(e)) => Err(Failure::of("verify", e)),
+        Err(_) => Err(Failure::TimedOut { stage: "verify" }),
     }
 }
 
@@ -798,6 +827,20 @@ fn log(out: &Synthesis) {
             outcome = "synthesis_failed",
             stage,
             error = %error,
+            "summary omitted"
+        ),
+        Some(Failure::TimedOut { stage }) => tracing::warn!(
+            target: "wt_synth",
+            outcome = "synthesis_failed",
+            stage,
+            error = "timed out",
+            "summary omitted"
+        ),
+        Some(Failure::NoModel { stage }) => tracing::warn!(
+            target: "wt_synth",
+            outcome = "synthesis_failed",
+            stage,
+            error = "no model may be called",
             "summary omitted"
         ),
         Some(Failure::CapReached) => tracing::warn!(

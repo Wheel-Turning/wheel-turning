@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select summary_status from answer where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "summary_status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "answer",
+            "name": "summary_status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "96b1d306a7ca5867ca1cef3315f9f2e29af378b30777266e134eb105554b09ff"
+}

@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use sqlx::types::Uuid;
-use wt_core::answer::{StoredSummary, StoredTheme};
+use wt_core::answer::{StoredSummary, StoredTheme, SummaryStatus};
 use wt_core::excerpt::{ExcerptSpan, Window, WindowPassage};
 use wt_core::ids::{AnswerId, PassageId, SanghaId, TalkId, TeacherId, TesterId};
 
@@ -92,6 +92,8 @@ pub struct NewAnswer<'a> {
     pub privacy_mode: &'a str,
     /// When the purge removes the text and the answer.
     pub text_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// How the summary settled, or `pending` while a deferred one is written (Spec 11, PB2.4).
+    pub summary_status: SummaryStatus,
 }
 
 /// Spec 06, Logging, rule 1: the query log, the answer and its passages in one transaction, so
@@ -153,10 +155,11 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     let payload = serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null);
     let answer = Uuid::new_v4();
     sqlx::query!(
-        "insert into answer (id, query_log_id, payload) values ($1, $2, $3)",
+        "insert into answer (id, query_log_id, payload, summary_status) values ($1, $2, $3, $4)",
         answer,
         log,
-        payload
+        payload,
+        a.summary_status.as_str()
     )
     .execute(&mut *tx)
     .await?;
@@ -172,28 +175,62 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     Ok(AnswerId::from(answer))
 }
 
-/// Sets the summary of an answer stored with `summary_pending`, or records that it has none, with
-/// the query log's counts. False when the answer is gone or was not pending, so a summary is
-/// written once.
+/// Sets the summary of an answer stored as `pending`, or records that it has none, with how it
+/// settled and the query log's counts. False when the answer is gone or no longer pending, so a
+/// summary settles once.
 pub async fn set_summary(
     pool: &PgPool,
     answer: AnswerId,
     summary: Option<&StoredSummary>,
     shown: usize,
     dropped: usize,
+    status: SummaryStatus,
 ) -> Result<bool, DbError> {
     let value = summary.and_then(|s| serde_json::to_value(s).ok());
     let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     let set = sqlx::query_scalar!(
-        r#"select set_answer_summary($1, $2, $3, $4) as "set!""#,
+        r#"select set_answer_summary_status($1, $2, $3, $4, $5) as "set!""#,
         answer.as_uuid(),
         value,
         small(shown),
-        small(dropped)
+        small(dropped),
+        status.as_str()
     )
     .fetch_one(pool)
     .await?;
     Ok(set)
+}
+
+/// Marks every answer whose summary is still pending after `after` as `deferred_lost`, and
+/// returns them (Spec 11, PB2.4: run by the hourly purge).
+pub async fn settle_lost_summaries(
+    pool: &PgPool,
+    after: std::time::Duration,
+) -> Result<Vec<AnswerId>, DbError> {
+    let secs = i32::try_from(after.as_secs()).unwrap_or(i32::MAX);
+    let ids = sqlx::query_scalar!(
+        r#"select settle_lost_summaries(make_interval(secs => $1)) as "id!""#,
+        f64::from(secs)
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(ids.into_iter().map(AnswerId::from).collect())
+}
+
+/// An answer's summary status; `None` for an answer stored before statuses or not found. The
+/// web role cannot read `answer`; tests and the command line call this.
+pub async fn summary_status(
+    pool: &PgPool,
+    answer: AnswerId,
+) -> Result<Option<SummaryStatus>, DbError> {
+    let s = sqlx::query_scalar!(
+        "select summary_status from answer where id = $1",
+        answer.as_uuid()
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    Ok(s.as_deref().and_then(SummaryStatus::parse))
 }
 
 /// Spec 05: an acute or out-of-scope question is logged as counts and its category only. No
