@@ -317,6 +317,26 @@ async fn a_streamed_ask_stores_what_a_plain_post_stores() {
     .unwrap();
     assert_eq!(rows.len(), 2, "one answer and one log row each");
     assert_eq!(rows[0], rows[1]);
+
+    // Spec 11 PB4.6: both are timed to the page, and only the streamed one to its first event.
+    let times: Vec<(Option<i32>, Option<i32>, Option<f64>)> = sqlx::query_as(
+        "select first_progress_ms, page_ms, llm_cost_usd::float8 from query_log
+         order by created_at",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert!(times[0].0.is_none(), "a plain post sends no progress event");
+    assert!(
+        times[1].0.is_some(),
+        "the streamed ask is timed to its first event"
+    );
+    assert!(times.iter().all(|(_, page, _)| page.is_some()));
+    assert!(times.iter().all(|(first, page, _)| first <= page));
+    assert!(
+        times.iter().all(|(_, _, cost)| cost.is_some()),
+        "every answer records its model cost, zero without a priced model"
+    );
 }
 
 #[tokio::test]
