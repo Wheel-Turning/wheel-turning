@@ -114,11 +114,11 @@ Thresholds are proposals for the owner to confirm before the beta opens to teste
 | Dimension | Pass when |
 | --- | --- |
 | Feature maturity | All PB1 to PB4 stories done. Gate A passed. The 50-question set rated mostly faithful and relevant. A 20-answer claim audit with no invented claim. The nightly audit clean for 14 nights in a row. WA H1 closed |
-| Customer feedback | At least 15 active testers and 3 teachers who reviewed answers from their own talks. At least 60% of excerpt feedback "helpful". No unresolved complaint from a rights holder. PB5.2 interviews done |
+| Customer feedback | At least 10 active testers and 2 teachers who reviewed answers from their own talks. At least 60% of provided feedback "helpful". No unresolved complaint from a rights holder. PB5.2 interviews done |
 | Market insights | Strategy research refreshed (C5), including a hands-on chatbot comparison. V4 answered: at least 2 of 3 sanghas say yes to transcripts for permission |
 | Usage data | At least half the testers ask in two or more separate weeks (V1). A median of at least 5 questions per active tester over the beta. Dana click-through measured and above zero (V3, the PRD v1 hypothesis) |
-| Finances | Cost per question known and within the F1 model. Monthly spend within the AWS budget and the model cap. A fiscal sponsor or entity in place (F2) |
-| Rights and legal | Counsel's written answers on L1, L2 and L6. Health-data handling (L3) done. Every public page true to practice (B9, B14), including the accessibility statement (L16) |
+| Finances | Cost per question known and within the F1 model. Monthly spend within the AWS budget and the model cap.  (F2) |
+| Rights and legal | Every public page true to practice (B9, B14), including the accessibility statement (L16) |
 
 ## Increment 2: Public beta
 

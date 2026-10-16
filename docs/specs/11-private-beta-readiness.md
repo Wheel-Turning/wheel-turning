@@ -473,7 +473,7 @@ Spec 01 gains targets for the private beta. Proposed:
 - Data loss: 15 minutes. RDS point-in-time recovery allows this; it was 24 hours while the PC held pipeline data.
 - Availability: 99% a month, measured by the external health check.
 
-The owner confirms these (open question 8).
+The owner set these in the tiered targets table below (open question 8): the database and site are Tier 1. Note: 99.9% availability is not reachable on one database instance in one availability zone and one web task. The private beta records availability against 99.9% and reports the gap. Two zones and two tasks (UB3.3) are the fix.
 
 ### PB4.6 The weekly beta report (V-A1, F1, WA OPS04-BP01, OPS04-BP03)
 
@@ -532,17 +532,40 @@ New migrations take the next numbers after 0046. They are forward-only, as alway
 
 ## Open questions
 
-| # | Question | Who | Blocking |
-| --- | --- | --- | --- |
-| 1 | Replacement wording for the removed time promise | Owner | PB1.7 |
-| 2 | B10: serve fewer excerpts, require the summary to use each, or both (recommended) | Owner | PB2.2 |
-| 3 | Records in their own bucket, or a prefix in the transcripts bucket | Engineering | PB1.2 |
-| 4 | May S3 code be tested against a local MinIO container (like Postgres), or only through the fake | Owner, engineering | PB1.2 |
-| 5 | A dedicated read-only audit role, or the owner login for the nightly audit | Engineering | PB1.4 |
-| 6 | Who may read kept question text in `share` mode, and when | Owner | PB3.1 |
-| 7 | Must the privacy page name the language-model provider, given the rule against naming it in public copy | Legal | PB3.2 |
-| 8 | Recovery time, data loss and availability targets | Owner | PB4.5 |
-| 9 | Gate 1 thresholds in `docs/roadmap.md` | Owner | Gate 1 |
+| # | Question | Who | Blocking | Answer |
+| --- | --- | --- | --- | --- |
+| 1 | Replacement wording for the removed time promise | Owner | PB1.7 | Removal request are addressed in the order. Please note this site is maintained as a side project by one person, so timelines may vary, but are approached with the intention to be as timely as possible |
+| 2 | B10: serve fewer excerpts, require the summary to use each, or both (recommended) | Owner | PB2.2 | Both |
+| 3 | Records in their own bucket, or a prefix in the transcripts bucket | Engineering | PB1.2 | Their own versioned bucket: records survive takedown while transcripts are deleted, so their rules differ |
+| 4 | May S3 code be tested against a local MinIO container (like Postgres), or only through the fake | Owner, engineering | PB1.2 | Code can be tested in a local container, as long as it's very cheap |
+| 5 | A dedicated read-only audit role, or the owner login for the nightly audit | Engineering | PB1.4 | A dedicated read-only `wt_audit_login` |
+| 6 | Who may read kept question text in `share` mode, and when | Owner | PB3.1 | Who: Site code, owner, any approved team members. When: whenever requesting access. How: SQL queries, or a simple dashboard  |
+| 7 | Must the privacy page name the language-model provider, given the rule against naming it in public copy | Legal | PB3.2 | No, as the model provider can change over time |
+| 8 | Recovery time, data loss and availability targets | Owner | PB4.5 | See section below |
+| 9 | Gate 1 thresholds in `docs/roadmap.md` | Owner | Gate 1 | Revised and approved |
+
+
+## Tiered Targets Table
+Based off of recommended standards for small non-profits
+| Tier / Criticality | Systems Included | Recovery Time (RTO)<br>_“How long can we be down?”_ | Data Loss (RPO)<br>_“How much data can we lose?”_ | Availability Target<br>_“Uptime Standard”_ |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: Mission-Critical** | • Core systems (databases, chat, site availability) • Core email & chat (Google Workspace/M365)<br>• | **4 to 24 hours** | **24 hours** <br>*(Daily backup minimum)* | **99.9%**<br>*(~9 hours of downtime / year)* |
+| **Tier 2: Operational** | • Shared files and cloud drives<br>• Internal project tracking tools<br>•| **24 to 48 hours** | **24 to 48 hours** | **99.0%**<br>*(~3.6 days of downtime / year)* |
+| **Tier 3: Low-Priority** | • Archived historical program records<br>• Past marketing materials<br>• Inactive volunteer files etc. | **3 to 7 days** | **1 week** | **95.0%**<br>*(Best effort)* |
+
+### Key Implementation Practices
+
+#### 1. Avoid the "Cloud Myth"
+Many small non-profits mistakenly assume that because they use Google Workspace or Microsoft 365, their data is fully backed up. These platforms guarantee **system availability** (uptime), but they do not protect against data loss from human error, malicious deletion, or ransomware. An independent cloud-to-cloud backup tool is highly recommended to secure a separate copy of donor and financial records.
+
+### 2. Follow the 3-2-1 Backup Rule
+To reliably meet your RPO targets, your backup strategy should follow this industry standard:
+* Maintain **3** total copies of your data.
+* Store them on **2** different types of media (e.g., local server/hard drive and cloud).
+* Keep **1** copy completely offsite or in an immutable cloud repository.
+
+### 3. Test Twice a Year
+A recovery target is just a guess until it is tested. Non-profits should conduct a simple data restoration test at least **twice a year**. Have a staff member or IT partner attempt to restore a randomly selected donor folder or financial spreadsheet from a backup to ensure the process works and fits within your targeted RTO.
 
 ## Order
 
