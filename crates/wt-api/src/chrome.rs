@@ -14,8 +14,23 @@ const FAVICON: &str = include_str!("../static/brand/favicon.svg");
 /// The menu script: Esc and the backdrop close the menu, and focus returns to its button.
 const MENU_JS: &str = include_str!("../static/menu.js");
 
-/// The disclosure line in the footer (Spec 06, Privacy modes, which replaces Logging, rule 5).
-pub const LOGGING_LINE: &str = "You choose whether your questions are kept. Only totals are read, and one question is opened only if you flag it.";
+/// The privacy line's one source (Spec 11, PB3.1; Spec 09, Home page): the footer, the home page
+/// and the invitation all read it, so they cannot drift apart.
+const PRIVACY_LINE_SOURCE: &str = include_str!("../../../copy/privacy_line.md");
+
+/// The privacy line, as the footer, the home page and the invitation show it.
+pub fn privacy_line() -> &'static str {
+    PRIVACY_LINE_SOURCE.trim()
+}
+
+/// The note `wt tester invite` prints under the link: the invitation, with the privacy line.
+pub fn invitation(link: &str) -> String {
+    format!(
+        "You are invited to try Wheel Turning, a private test of a search tool for what Zen \
+         teachers have said. Open this link to start: {link}\n\n{}",
+        privacy_line()
+    )
+}
 
 /// The mark as an SVG `<symbol>` that the header and footer `<use>`. Its dots are
 /// colored through `--logo-accent` by the stylesheet, since a presentation attribute cannot
@@ -109,9 +124,9 @@ impl Chrome {
         }
     }
 
-    /// The footer's disclosure line.
+    /// The footer's privacy line.
     pub fn logging_line(&self) -> &'static str {
-        LOGGING_LINE
+        privacy_line()
     }
 }
 

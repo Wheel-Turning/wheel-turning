@@ -10,7 +10,7 @@ Here is what it holds. A written transcript of each talk, made from the recordin
 
 Here is what you can do.
 
-1. Leave at any time. Reply to this message, or use the form at wheelturning.org/rights. Within one business day your talks stop appearing, with no reason needed. Then I delete the transcripts and block the same material from being added again.
+1. Leave at any time. Reply to this message, or use the form at wheelturning.org/rights. Your talks stop appearing, with no reason needed. I handle requests in the order they arrive. I run the site alone as a side project, so timing can vary, but I handle each one as promptly as I can. Then I delete the transcripts and block the same material from being added again.
 2. Set limits. Tell me which talks, or which kinds of talk, to leave out, and I will follow it. You can also choose excerpts only with no full transcript, or nothing shown publicly, with a copy of your transcripts for your own use if you want one.
 3. Say yes in writing. I will record it, and the pages will then say your talks are used with your permission.
 

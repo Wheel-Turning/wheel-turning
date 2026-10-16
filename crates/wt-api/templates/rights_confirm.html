@@ -5,7 +5,7 @@
 {% match outcome %}
 {% when Some(true) %}
 <h1>Request confirmed</h1>
-<p class="status" role="status">Thank you. What you named stops appearing within one business day.</p>
+<p class="status" role="status">Thank you. Requests are handled in the order they arrive, as promptly as possible.</p>
 <p>We act on the request first and reply after, by email.</p>
 {% when Some(false) %}
 <h1>This link no longer works</h1>
@@ -14,7 +14,7 @@
 {% when None %}
 {% if let Some(t) = token %}
 <h1>Confirm your removal request</h1>
-<p>Nothing is removed until you confirm. Within one business day of confirming, the material you named stops appearing.</p>
+<p>Nothing is removed until you confirm. Once you confirm, we stop showing the material you named. Requests are handled in the order they arrive. The site is run by one person as a side project, so timing can vary, but each request is handled as promptly as possible.</p>
 <form method="post" action="/rights/confirm">
   <input type="hidden" name="token" value="{{ t }}">
   <button type="submit">Confirm request</button>

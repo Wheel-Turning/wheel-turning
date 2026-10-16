@@ -278,6 +278,8 @@ async fn an_acute_question_gets_the_notice_page_and_stores_counts_only() {
         "<a href=\"https://findahelpline.com/\">findahelpline.com</a>",
         "Show teachings on facing difficult feelings",
         "<a href=\"/\">Ask something else</a>",
+        // Spec 11, PB3.4: the support page says the site is not counseling.
+        "It is not counseling, medical advice or emergency help.",
     ] {
         assert!(main.contains(link), "{link} in {main}");
     }
@@ -336,6 +338,34 @@ async fn the_database_refuses_acute_text_and_analysis_never_sees_acute_or_distre
             .execute(&fx.pool)
             .await;
     assert!(refused.is_err(), "an acute row can never hold text");
+}
+
+/// Spec 11, PB3.3: a question the triage marks `medical` or `distress` is stored count-only,
+/// whatever the tester's mode; an ordinary one follows the mode.
+#[tokio::test]
+async fn medical_and_distress_questions_are_stored_count_only_under_share_mode() {
+    let fx = start(site(themes())).await;
+    fx.answer(DISTRESS).await;
+    fx.answer(MEDICAL).await;
+    fx.answer("How do I work with anger?").await;
+
+    let stored: Vec<(String, String, bool)> = sqlx::query_as(
+        "select sensitive_category, privacy_mode, text_expires_at < now() + interval '2 days'
+         from query_log order by created_at",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    let row = |c: &str, m: &str, short: bool| (c.to_owned(), m.to_owned(), short);
+    assert_eq!(
+        stored,
+        [
+            row("distress", "count_only", true),
+            row("medical", "count_only", true),
+            row("none", "share", false),
+        ],
+        "the tester never chose, so share applies to the ordinary question only"
+    );
 }
 
 #[tokio::test]

@@ -159,7 +159,7 @@ async fn the_rights_page_needs_no_session_and_states_each_source_in_plain_words(
     );
     assert!(
         r.body
-            .contains("Within one business day of your confirming it")
+            .contains("Requests are handled in the order they arrive.")
     );
     let line = |name: &str| {
         let at = r.body.find(name).unwrap();

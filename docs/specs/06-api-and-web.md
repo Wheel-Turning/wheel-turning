@@ -208,7 +208,7 @@ This table is the single list of what every page must show, including everything
 | Text unit | The unit, up to two neighbors on each side, the credit line, the source link and the report link. Never a whole work |
 | Talk card | Title, teacher, sangha, date, series, part and source link: the source's own transcript when the source made it, otherwise the recording and, at display level `full`, "Read our transcript" |
 | Transcript | Only for talks whose transcript the project made (Spec 03, Display levels, rule 2). At the top: title, date, teacher, sangha, the credit line for the talk's basis, the source link, "Give to \<sangha>" when a verified donation link exists, "Report this transcript", and a line saying the text was transcribed by machine and may contain errors, or that it was reviewed and by whom. Then the teacher's words passage by passage, each with an anchor `p{ordinal}` and "Listen at h:mm:ss", with each student question before its teacher answer, as "Student:" and the lightly edited question with the line "Question lightly edited by machine; names and identifying details removed.", or "A student asked a question" where none is stored (owner's decision of October 10, 2026), and a marked gap wherever time passes between passages, since the page reads only servable passages and the spans live in the transcript file. A passage under 40 characters, left out at indexing, is missing here; the review file has every word. No unedited student words or student names, ever |
-| Rights and removal | The plain promise, the status of every source in plain words, the removal form (name and email required since October 15, 2026, what to remove, a message, a hidden honeypot), and the statement that named material is suspended within one business day |
+| Rights and removal | The plain promise, the status of every source in plain words, the removal form (name and email required since October 15, 2026, what to remove, a message, a hidden honeypot), and the statement that named material is suspended in the order requests arrive, with no promised time (Spec 11, PB1.7) |
 | About | What the demo is, how excerpts are chosen, the logging policy, how credit lines work, how to leave, and a link to `/rights` |
 | Error pages | Plain friendly text with no stack trace or database message |
 
@@ -254,6 +254,8 @@ Choice and defaults:
 - A switch labeled "Keep my questions to help improve Wheel Turning" sits on the home page and in About. It saves to `tester.privacy_mode` and applies to the next question. The default is `share` while the demo is private, with disclosure on the home page and in the invitation. `WT_PRIVACY_DEFAULT` sets the default and is `count_only` before any public launch, with the switch worded as an invitation to help.
 - A request that carries `Sec-GPC: 1` from a tester who has never chosen is treated as `count_only`.
 - Flagging a question is a deliberate act. A flagged question keeps its text for the full retention period even in count-only mode.
+- A question the triage marks `medical` or `distress` is stored count-only, whatever the tester's mode, so its text is deleted after `WT_COUNT_ONLY_TTL_HOURS` (Spec 11, PB3.3). Acute and out-of-scope questions already store counts only.
+- The privacy line has one source, `copy/privacy_line.md`. The footer, the home page and the invitation that `wt tester invite` prints all read it, and a test fails if they differ (Spec 11, PB3.1).
 
 Expiry and deletion:
 

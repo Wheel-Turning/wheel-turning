@@ -226,6 +226,13 @@ async fn an_invite_sets_the_session_and_a_bad_token_gets_the_generic_404() {
     let home = send(&fx.app, get("/", Some(&cookie))).await;
     assert_eq!(home.status, StatusCode::OK);
     assert!(home.body.contains("What have Zen teachers said"));
+    // Spec 11, PB3.1: the home page and the footer show the one privacy line.
+    assert_eq!(
+        home.body.matches(wt_api::chrome::privacy_line()).count(),
+        2,
+        "{}",
+        home.body
+    );
 
     wt_db::tester::revoke(&fx.pool, "owner").await.unwrap();
     let revoked = send(&fx.app, get("/", Some(&cookie))).await;
@@ -468,6 +475,10 @@ async fn theme_counts(pool: &PgPool) -> (i32, i32) {
         .unwrap()
 }
 
+/// The line under every summary (Spec 11, PB2.5).
+const MODEL_NOTE: &str = "Written by a language model from the excerpts on this page and checked \
+                          against them. The teachers have not reviewed it.";
+
 /// The summary section of a page.
 fn summary_of(body: &str) -> &str {
     let start = body.find("<section id=\"summary\"").unwrap();
@@ -522,6 +533,8 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
         section.contains("Drawn from 2 talks by 2 teachers."),
         "{section}"
     );
+    assert_eq!(page.body.matches(MODEL_NOTE).count(), 1, "one model note");
+    assert!(section.contains(MODEL_NOTE), "{section}");
     assert!(
         section.contains("Only 2 talks in this collection matched this question closely."),
         "{section}"
@@ -581,6 +594,7 @@ async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
     assert!(!page.body.contains(HEADLINE) && !page.body.contains(AGREE));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
     assert_eq!(theme_counts(&fx.pool).await, (0, 1));
+    assert!(!page.body.contains(MODEL_NOTE), "no note without a summary");
 }
 
 #[tokio::test]
@@ -651,6 +665,10 @@ async fn the_page_comes_back_before_its_summary_and_the_summary_fills_in() {
     );
     let pending = send(&fx.app, get(&format!("{permalink}/summary"), Some(&cookie))).await;
     assert_eq!(pending.status, StatusCode::ACCEPTED);
+    assert!(
+        !first.body.contains(MODEL_NOTE),
+        "no note before the summary"
+    );
     settled(&fx, &permalink, &cookie).await;
     let ready = send(&fx.app, get(&format!("{permalink}/summary"), Some(&cookie))).await;
     assert_eq!(ready.status, StatusCode::OK);
@@ -662,6 +680,7 @@ async fn the_page_comes_back_before_its_summary_and_the_summary_fills_in() {
     let after = send(&fx.app, get(&permalink, Some(&cookie))).await;
     assert!(!after.body.contains("data-summary=\""));
     assert!(after.body.contains("<section id=\"summary\""));
+    assert!(ready.body.contains(MODEL_NOTE) && after.body.contains(MODEL_NOTE));
 }
 
 /// A model that answers after a second, as a real one does.
@@ -694,6 +713,7 @@ async fn named_mode_makes_no_summary_call() {
         llm.seen.lock().unwrap().is_empty(),
         "no model call in named mode"
     );
+    assert!(!page.body.contains(MODEL_NOTE));
 }
 
 /// Spec 04, Student questions, step 5: the transcript and answer pages show the student's

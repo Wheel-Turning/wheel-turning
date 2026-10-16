@@ -362,8 +362,13 @@ pub(crate) async fn tester(ctx: &Ctx, command: TesterCommand) -> anyhow::Result<
             wt_db::tester::invite(&pool, &label, &wt_api::session::token_hash(&token))
                 .await
                 .context("recording the tester")?;
-            println!("{}/join/{token}", base_url.trim_end_matches('/'));
-            eprintln!("This link is shown once. Send it to {label} privately.");
+            let link = format!("{}/join/{token}", base_url.trim_end_matches('/'));
+            println!("{link}");
+            // The invitation carries the privacy line from its one source (Spec 11, PB3.1).
+            println!("\n{}", wt_api::chrome::invitation(&link));
+            eprintln!(
+                "This link is shown once. Send it to {label} privately, with the invitation."
+            );
         }
         TesterCommand::List => {
             commands::print_json(&wt_db::tester::list(&pool).await?)?;

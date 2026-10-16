@@ -353,7 +353,7 @@ pub async fn answer_framed(
     };
     let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
     let stage = Instant::now();
-    let (kept, privacy_mode) = kept(pool, site, tester, text, &framing).await?;
+    let (kept, privacy_mode) = kept(pool, site, tester, text, &framing, level).await?;
     let new = wt_db::answer::NewAnswer {
         tester,
         query_text: &kept,
@@ -490,18 +490,24 @@ fn summary_excerpts(
         .collect()
 }
 
-/// The question's text as the tester's privacy mode keeps it, and that mode.
+/// The question's text as the tester's privacy mode keeps it, and that mode. A question the
+/// triage marks `medical` or `distress` is kept count-only whatever the mode (Spec 11, PB3.3).
 async fn kept(
     pool: &PgPool,
     site: &Site,
     tester: TesterId,
     text: &str,
     framing: &Framing,
+    level: Level,
 ) -> Result<(String, &'static str), AskError> {
-    let choice = wt_db::privacy::choice(pool, tester)
-        .await
-        .map_err(AskError::Persist)?;
-    let privacy_mode = site.privacy.effective(choice.as_ref(), framing.gpc);
+    let privacy_mode = if matches!(level, Level::Medical | Level::Distress) {
+        wt_db::privacy::COUNT_ONLY
+    } else {
+        let choice = wt_db::privacy::choice(pool, tester)
+            .await
+            .map_err(AskError::Persist)?;
+        site.privacy.effective(choice.as_ref(), framing.gpc)
+    };
     // Keep mode stores the text with obvious personal details removed; count-only keeps it as
     // asked, for a day.
     let kept = if privacy_mode == wt_db::privacy::SHARE {
@@ -556,7 +562,7 @@ async fn stopped(
             .await
         }
         Stop::Unrelated => {
-            let (kept, privacy_mode) = kept(pool, site, tester, text, framing).await?;
+            let (kept, privacy_mode) = kept(pool, site, tester, text, framing, Level::None).await?;
             wt_db::answer::log_unrelated(
                 pool,
                 &wt_db::answer::Unanswered {

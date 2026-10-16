@@ -32,6 +32,8 @@ sangha = "North Fixture Zendo"
 const MODEL: &str = "fake-embed";
 /// A query no code path would print by accident.
 const QUERY: &str = "How does zazen meet the quokkaflux of anger";
+/// An acute question with a word no code path would print (Spec 11, PB3.4).
+const ACUTE: &str = "I want to end my life because of the zembrolt anger";
 const PASSAGE: &str = "When anger arises, notice the quokkaflux warmth and breathe with it.";
 
 #[derive(Clone, Default)]
@@ -250,6 +252,32 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     )
     .await;
 
+    // An acute question: its notice page, and neither its text in `query_log` nor in the logs.
+    let (status, _, notice) = send(
+        &app,
+        form(
+            "/ask",
+            &cookie,
+            format!("q={}&csrf={}", encode(ACUTE), encode(&token_field)),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(notice.contains("Please reach out for help now"));
+    let acute: Vec<Option<String>> =
+        sqlx::query_scalar("select query_text from query_log where sensitive_category = 'acute'")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(acute, [None], "one acute row, with no text");
+    let anywhere: i64 =
+        sqlx::query_scalar("select count(*) from query_log where query_text like $1")
+            .bind("%zembrolt%")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(anywhere, 0);
+
     let logs = captured.text();
     assert!(
         logs.contains("answer stored") && logs.contains("retrieved"),
@@ -266,6 +294,7 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     for (what, secret) in [
         ("query text", "quokkaflux"),
         ("query text", QUERY),
+        ("acute question text", "zembrolt"),
         ("passage text", PASSAGE),
         ("invite token", token.as_str()),
         ("session cookie", cookie.as_str()),
