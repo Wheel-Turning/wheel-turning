@@ -325,6 +325,35 @@ The PC keeps its own database: the transcription worker still writes to `wt-m3-s
 talks reach the beta only when they are loaded again (or once the PC switches to RDS, which is
 the owner's call).
 
+### Email: removal confirmations, bounces and complaints
+
+SES sends one kind of email, the link confirming a removal request, from `WT_MAIL_FROM`
+(`rights@wheelturning.org`). The web server refuses to start in prod without `WT_MAIL_FROM` and
+`WT_PUBLIC_URL` (Spec 11, PB1.6). The identity, the MAIL FROM domain and the feedback topic live
+in `infra/terraform/account/email.tf`.
+
+- Sender authentication: Easy DKIM signs as `wheelturning.org` (three CNAMEs,
+  `terraform output ses_dkim_records_for_cloudflare`), the MAIL FROM domain
+  `mail.wheelturning.org` carries SPF for SES (`terraform output
+  ses_mail_from_records_for_cloudflare`), and `_dmarc.wheelturning.org` holds the DMARC policy.
+  All are DNS-only records at Cloudflare. To check a message, open it in Gmail, choose "Show
+  original", and look for `DKIM: 'PASS'`, `SPF: 'PASS'` and `DMARC: 'PASS'`.
+- Bounces and complaints go to the SNS topic `wt-ses-feedback`, which emails the owner (confirm
+  the subscription link AWS sends once). Each notice is JSON: `notificationType` is `Bounce` or
+  `Complaint`; for a bounce, `bounce.bounceType` is `Permanent` (the address does not exist) or
+  `Transient` (a full mailbox, try later), and `bounce.bouncedRecipients[].diagnosticCode` says
+  why; for a complaint, `complaint.complainedRecipients[].emailAddress` marked the mail as spam.
+  `mail.commonHeaders.subject` and `mail.timestamp` identify the message.
+- What to do: SES adds every permanent bounce and complaint to the account's suppression list,
+  so nothing more is sent there. For a bounce on a removal request, the requester never got
+  their link: find the unconfirmed request in `takedown_request` by its time, and if the
+  address looks mistyped, answer from the rights mailbox. For a complaint, check that the request was really
+  made from /rights; repeated complaints from addresses nobody typed point to form abuse.
+  `aws sesv2 get-suppressed-destination --email-address <address>` shows why an address is
+  suppressed, and `aws sesv2 delete-suppressed-destination` lifts it once it is known good.
+- Keep the bounce rate under 5% and the complaint rate under 0.1%: SES reviews an account above
+  them. The SES console's "Reputation metrics" page shows both.
+
 ### Rights actions on both databases
 
 Until one database is the single source of truth, both hold real data, and every `wt` command

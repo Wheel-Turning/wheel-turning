@@ -29,3 +29,25 @@ output "security_alarm_names" {
 output "guardduty_detector_id" {
   value = aws_guardduty_detector.this.id
 }
+
+output "ses_mail_from_records_for_cloudflare" {
+  description = "Create both at Cloudflare (DNS-only) so SES sends from the custom MAIL FROM domain and SPF aligns."
+  value = [
+    {
+      name     = aws_sesv2_email_identity_mail_from_attributes.mail.mail_from_domain
+      type     = "MX"
+      priority = 10
+      value    = "feedback-smtp.${var.region}.amazonses.com"
+    },
+    {
+      name  = aws_sesv2_email_identity_mail_from_attributes.mail.mail_from_domain
+      type  = "TXT"
+      value = "v=spf1 include:amazonses.com ~all"
+    },
+  ]
+}
+
+output "ses_feedback_topic_arn" {
+  description = "SNS topic receiving SES bounce and complaint notices."
+  value       = aws_sns_topic.ses_feedback.arn
+}
