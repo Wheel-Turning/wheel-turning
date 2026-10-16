@@ -20,6 +20,15 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B12](#b12-feedback-is-one-thin-form-not-a-structured-review-of-the-answer) | 2026-10-15 | Feedback is one thin form, not a structured review of the answer | open (backlog) |
 | [B13](#b13-every-excerpt-has-a-report-link) | 2026-10-15 | Every excerpt has a Report link | open |
 | [B14](#b14-public-copy-promises-a-time-for-acting-on-requests) | 2026-10-15 | Public copy promises a time for acting on requests | open |
+| [B15](#b15-rights-actions-run-by-hand-on-two-databases) | 2026-10-15 | Rights actions run by hand on two databases | open (debt) |
+| [B16](#b16-alerts-and-teardown-are-not-verified) | 2026-10-15 | Alerts and teardown are not verified | open (debt) |
+| [B17](#b17-the-web-server-reads-configuration-outside-the-loader) | 2026-10-15 | The web server reads configuration outside the loader | open (debt) |
+| [B18](#b18-spec-acceptance-items-do-not-match-the-code) | 2026-10-15 | Spec acceptance items do not match the code | open (debt) |
+| [B19](#b19-the-pc-and-rds-are-both-sources-of-truth) | 2026-10-15 | The PC and RDS are both sources of truth | open (debt) |
+| [B20](#b20-major-dependency-updates-wait-unmerged) | 2026-10-15 | Major dependency updates wait unmerged | open (debt) |
+| [B21](#b21-the-gpu-worker-and-alpha-server-live-outside-the-repo) | 2026-10-15 | The GPU worker and alpha server live outside the repo | open (debt) |
+| [B22](#b22-thin-tests-for-the-cli-and-ml-crates-and-timing-based-tests) | 2026-10-15 | Thin tests for the CLI and ML crates, and timing-based tests | open (debt) |
+| [B23](#b23-very-large-modules) | 2026-10-15 | Very large modules | open (debt) |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -364,3 +373,187 @@ The internal target stays (owner, October 15, 2026). The alert and the audit che
 ### Fix
 
 To be ordered in the build plan once the register is complete. Change the PRD (principle 4, the success criterion, the risk row and the scope table) and Specs 03 and 09 so no public text states a time, and reword Spec 08's handling and alert sections so one business day is an internal target, not a promise. Then change the Rights page and its confirmation. The copy can still say requests are handled in the order they arrive and that material is suspended before the requester's identity is checked, if that practice stays.
+
+## Tech debt audit, October 15, 2026
+
+B15 to B23 come from a tech debt audit of `main` at d95de08 (#165), not from using the app. Each carries a priority score, (impact + risk) × (6 − effort), with each factor from 1 to 5. A higher score goes earlier. The scores are inputs to the build plan, not its order.
+
+## B15. Rights actions run by hand on two databases
+
+- Found: October 15, 2026, by the tech debt audit. Priority 40 (impact 5, risk 5, effort 2).
+
+### Expected
+
+A takedown, opt-out or display change is recorded once and stops the material being served everywhere it could be served.
+
+### Actual
+
+The PC's `wt-m3-ssz` and the beta's RDS both hold real data. `docs/runbook.md` (§3, and §12 "Rights actions on both databases") has the owner run every rights action twice, once per `DATABASE_URL`, then run `wt rights parity`. In the runbook's words, a takedown run on one side only leaves the talk served from the other. Removal requests reach RDS only, and objects live only on the PC.
+
+### Cause
+
+Every `wt` command acts on the one database `DATABASE_URL` names. The second database arrived with the beta on October 13, and the procedure was written around the command rather than the command changed.
+
+### Fix
+
+Give the rights commands (takedown, opt-out, exclusion, display level, `talks_basis`) a second database URL, apply the action to both in one command, and run the parity check at its end, failing on any `"unsafe": true` difference. Stop-gap until [B19](#b19-the-pc-and-rds-are-both-sources-of-truth) removes the second database.
+
+## B16. Alerts and teardown are not verified
+
+- Found: October 15, 2026, by the tech debt audit. Priority 30 (impact 2, risk 4, effort 1).
+
+### Expected
+
+The beta's alerts are known to reach the owner, and the stack can be built and destroyed from an empty account.
+
+### Actual
+
+Spec 01 leaves three acceptance items open: a `wt alerts test` message reaching the owner after the subscription is confirmed, the web role publishing to the alert topic and nothing else in SNS, and `terraform apply` then `terraform destroy` from an empty account. The beta is live, so an alert that never arrives would go unnoticed.
+
+### Cause
+
+Not run since the stack went up.
+
+### Fix
+
+Confirm the SNS subscription, send `wt alerts test`, check the web role's SNS policy, and tick the items. The empty-account apply and destroy can wait for a spare account.
+
+## B17. The web server reads configuration outside the loader
+
+- Found: October 15, 2026, by the tech debt audit. Priority 28 (impact 3, risk 4, effort 2).
+
+### Expected
+
+Every key is read and checked once at startup by `wt_core::config`, as its module comment says, and a missing key that a live feature needs stops startup.
+
+### Actual
+
+`wt-api` reads `WT_MAIL_FROM`, `WT_PUBLIC_URL`, `WT_OWNER_NAME`, `WT_TRUST_FORWARDED_FOR`, `WT_CONFIG_DIR` and the privacy keys straight from the environment (`crates/wt-api/src/site.rs`, `crates/wt-api/src/privacy.rs`). Without `WT_MAIL_FROM` or `WT_PUBLIC_URL`, `mailer()` logs a warning and the site starts with removal requests unconfirmed by email (#165). `WT_CONFIG_DIR` is missing from `.env.example`, and `WT_OWNER_NAME`, `WT_TRUST_FORWARDED_FOR`, `WT_POPPLER_BIN`, `WT_TESSERACT` and `WT_CONFIG_DIR` are missing from Spec 01.
+
+### Cause
+
+Keys added with later features were read where they were used.
+
+### Fix
+
+Move the keys into `Config`, list every key in `.env.example` and Spec 01, and fail startup when `WT_PUBLIC_URL` is set without `WT_MAIL_FROM` (or the reverse).
+
+## B18. Spec acceptance items do not match the code
+
+- Found: October 15, 2026, by the tech debt audit. Priority 28 (impact 3, risk 4, effort 2).
+
+### Expected
+
+CLAUDE.md rule 11: a milestone ends with its acceptance items ticked, so a ticked item means verified and an open one means not done.
+
+### Actual
+
+About 100 items are open across the specs (Spec 08: 28, Spec 06: 21, Spec 03: 19, Spec 01: 8). Some are done and unticked: `.gitattributes` exists, but its Spec 01 item is open. Some name things that no longer exist: 22 references to the `dg_*` roles, renamed to `wt_*` in migration 0010. Some may be genuinely unchecked, such as Spec 06's "A failed log insert produces an error page and no answer".
+
+### Cause
+
+Items were not ticked as work merged, and renames did not reach the acceptance lists.
+
+### Fix
+
+One pass over every open item: tick it with the test or check that proves it, rewrite it if it names something renamed, or mark it a known gap. The gaps then go into the build plan.
+
+## B19. The PC and RDS are both sources of truth
+
+- Found: October 15, 2026, by the tech debt audit. Priority 30 (impact 5, risk 5, effort 3).
+
+### Expected
+
+One database and one object store hold the real data.
+
+### Actual
+
+The transcription worker writes to the PC's database, so new talks reach the beta only by reloading RDS from the PC. Since October 13 some rows exist only on RDS (`tester`, `query_log`, `feedback`, `takedown_request`, and any rights action run there), and the runbook warns that a reload overwrites them. Objects live only on the PC, which keeps the local backups of runbook §10 in use.
+
+### Cause
+
+The beta was loaded from the PC on October 13 while the worker stayed on the PC. Moving it is the owner's call (runbook §12).
+
+### Fix
+
+Point the worker and downstream stages at RDS (already planned for SSZ), move `objects/` and `records/` to S3, then retire the PC database, the parity check, runbook §10 and the dual-database parts of §12. Removes [B15](#b15-rights-actions-run-by-hand-on-two-databases).
+
+## B20. Major dependency updates wait unmerged
+
+- Found: October 15, 2026, by the tech debt audit. Priority 20 (impact 2, risk 3, effort 2).
+
+### Expected
+
+Dependabot updates are merged, or closed with a reason, within a week or two.
+
+### Actual
+
+Major updates open since October 12: `zip` 2 to 9 (#107, used by `wt-ingest` on downloaded archives), `askama` 0.14 to 0.16 (#108), `fs4` 0.13 to 1.1 (#109) and `toml_edit` 0.23 to 0.25 (#110), plus the grouped minor update #172 and the actions and a11y updates #130 and #131. `Cargo.lock` holds 24 crates at two versions each. `deny.toml` ignores RUSTSEC-2024-0436 (`paste`, through `tokenizers`).
+
+### Cause
+
+Major versions need code changes, and the beta push came first.
+
+### Fix
+
+One update per PR, `zip` first. Recheck the `paste` ignore when `tokenizers` moves.
+
+## B21. The GPU worker and alpha server live outside the repo
+
+- Found: October 15, 2026, by the tech debt audit. Priority 18 (impact 3, risk 3, effort 3).
+
+### Expected
+
+Machines that run the pipeline or serve the app are set up from the repo, and idle machines stop on their own.
+
+### Actual
+
+The Lambda GPU worker runs from the shell scripts in `infra/gpu-worker/`. Shutting idle machines down and staying under the spend cap are done by hand. The alpha server's `serve.sh` and `data/alpha/config` are untracked, and that config is a copy of `config/` that can drift from it.
+
+### Cause
+
+Both were set up quickly for runs and the alpha, and the beta on AWS has since taken over serving testers.
+
+### Fix
+
+Have the worker terminate its machine when the queue is empty and refuse to start past the cap. Retire the alpha server, or track its script and have it read `config/` rather than a copy.
+
+## B22. Thin tests for the CLI and ML crates, and timing-based tests
+
+- Found: October 15, 2026, by the tech debt audit. Priority 15 (impact 2, risk 3, effort 3).
+
+### Expected
+
+Each crate's main paths are tested, and no test depends on wall-clock timing.
+
+### Actual
+
+`wt-cli` has about 9,700 lines and 21 tests, and `wt-ml` has 8. Some tests sleep and assert on elapsed time, such as the 700 ms sleep in `crates/wt-db/tests/job.rs`. #168 fixed a CI failure of this kind.
+
+### Cause
+
+The CLI is tested mostly through the library crates it calls.
+
+### Fix
+
+Add tests as each command is touched, starting with the rights and takedown commands. Replace sleeps with paused tokio time or an explicit signal.
+
+## B23. Very large modules
+
+- Found: October 15, 2026, by the tech debt audit. Priority 9 (impact 2, risk 1, effort 3).
+
+### Expected
+
+Modules small enough to read and review in one sitting.
+
+### Actual
+
+`crates/wt-api/src/lib.rs` is 1,541 lines and holds every route and handler. `crates/wt-db/src/rights.rs` is 1,399 lines and `crates/wt-ingest/src/texts/mod.rs` is 1,226.
+
+### Cause
+
+Growth by feature.
+
+### Fix
+
+Split each when it is next changed, for example the `wt-api` handlers by page. Not worth a change of its own.
