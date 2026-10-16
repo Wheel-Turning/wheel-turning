@@ -97,15 +97,21 @@ Not differentiators, and not worth chasing for parity: guided meditation, course
 
 The PRD rules out ads, paid tiers and selling data, and keeps the site's own dana optional. CLAUDE.md rule 7 keeps payment code out of the product. Money must therefore arrive outside the app: through a fiscal sponsor's or nonprofit's donation page, and through grants.
 
-**The cost to cover.** About $170 a month for AWS, plus the language model at about $0.054 a question (October 15 measurement):
+**The cost to cover.** About $170 a month for AWS, plus the language model. On Claude Haiku 4.5 that is about $0.054 a question (October 15 measurement).
 
-| Daily questions | Model cost per month | Total with AWS |
-| --- | --- | --- |
-| 100 | about $160 | about $330 |
-| 1,000 | about $1,620 | about $1,790, plus Multi-AZ and a second task (about $135) |
-| 10,000 | about $16,200 | needs Spec 10's cost work first |
+**Prices changed.** The October 15 Claude price list puts Claude Haiku 5.5 at $0.10 per million input tokens and $0.50 per million output tokens, for prompts up to 100,000 tokens. Haiku 4.5 is $1 and $5, so Haiku 5.5 is a tenth of the price. Every prompt here is far under 100,000 tokens. Haiku 5.5 uses the newer tokenizer, which the price list says produces about 30% more tokens for the same text. The net saving is therefore about sevenfold: roughly $0.007 a question with no other change. Spec 10's removal of the ranking and excerpt calls would bring it to roughly $0.003.
 
-Model cost per question decides whether a public launch is affordable. Spec 10's cost work is a finance item as much as a performance item.
+| Daily questions | Haiku 4.5 today | Haiku 5.5 | Haiku 5.5 plus Spec 10 |
+| --- | --- | --- | --- |
+| 100 | about $160 a month | about $21 | about $9 |
+| 1,000 | about $1,620 | about $210 | about $90 |
+| 10,000 | about $16,200 | about $2,100 | about $900 |
+
+Add AWS: about $170 a month now, and about $135 more for two availability zones and a second task at the public beta.
+
+These estimates scale the measured baseline by price and tokenizer. They hold only if Haiku 5.5 keeps quality on each stage, which roadmap story PB2.0 tests. A cheaper model from a second provider is no longer needed for cost, which avoids its data-handling and privacy changes.
+
+With the model this cheap, fixed AWS cost becomes the larger bill until about 1,000 questions a day. The AWS levers matter as much as model work: scale to zero between rounds, a tunnel instead of the load balancer, ARM, and a Savings Plan once steady.
 
 ### Recommended mix, in order
 
@@ -125,7 +131,7 @@ Model cost per question decides whether a public launch is affordable. Spec 10's
 | F4 | Pilot "sponsor a sangha's archive" with one sangha and one donor | Public beta |
 | F5 | Apply to two grant programs with the beta results as evidence | Public beta |
 | F6 | Decide whether archive services to sanghas may recover costs (a PRD principle 8 decision) | Public beta gate |
-| F7 | Hit a cost-per-question target (Spec 10) that keeps 1,000 questions a day within a funded budget | Before the full launch |
+| F7 | Move eligible stages to Claude Haiku 5.5 (PB2.0), then hit a cost-per-question target (Spec 10) that keeps 1,000 questions a day within a funded budget | Private beta, then before the full launch |
 | F8 | Have 12 months of projected costs covered by committed gifts and grants | Full launch gate |
 
 ## 3. Legal: high-risk, high-value elements by increment

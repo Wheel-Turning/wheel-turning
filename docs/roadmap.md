@@ -49,7 +49,7 @@ Marketable to teachers: "your removal or opt-out takes effect everywhere, and we
 | --- | --- | --- | --- |
 | PB1.1 | Point the transcription worker and every downstream stage at RDS, so new talks and every rights action live in one database | B19, WA H1, A2 | L |
 | PB1.2 | Move objects and records to S3 and teach takedown about them, so a removal empties every store from AWS | B19, WA H1 | M |
-| PB1.3 | Only if PB1.1 slips: apply rights commands to both databases in one command that ends with the parity check, so no takedown can miss a database | B15 | M |
+| PB1.3 | Only if PB1.1 slips: apply rights commands to both databases in one command that ends with the parity check, export the rows that exist only on RDS nightly, and alarm when the PC backup goes stale, so no takedown can miss a database and no tester data is lost | B15, WA REL09-BP01, REL09-BP03 | M |
 | PB1.4 | Run `wt audit` and the parity check nightly against RDS as a scheduled task with an alarm, so drift and overdue removal requests surface within a day | A1, WA H1 interim | S |
 | PB1.5 | Get SES out of the sandbox (owner: the open support case), so removal confirmation emails reach any rights holder and not only verified addresses | WA REL01-BP04, #165 | S, Owner |
 | PB1.6 | Refuse to start without the mail settings, so removal requests are never silently left unconfirmed | B17 | S |
@@ -61,6 +61,7 @@ Marketable to practitioners: "every excerpt is on point, and the summary says so
 
 | # | Story | Sources | Size |
 | --- | --- | --- | --- |
+| PB2.0 | Run the eval set and claim audit with Claude Haiku 5.5 on every model stage, against Haiku 4.5, and switch each stage that holds its quality. Add the model to `config/llm_prices.toml` and test whether it accepts sampling settings. This way the B10 prompt work is tuned once, on the model that ships, and model cost per question falls about sevenfold | Pricing of October 15, Spec 10 | M |
 | PB2.1 | Confirm the relevance ranker is live on the beta, so excerpts that only mention a word are dropped | B1 (cause 4), B10 | S |
 | PB2.2 | Settle B10's open question, then change selection, the prompt or both, so every served excerpt is either drawn on by the summary or not served | B10 | M, Owner decision |
 | PB2.3 | Ban em dashes, drop the sangha-count note, and show "x teachers, y teachings, z excerpts", so the page reads cleanly and its counts agree | B10 | S |
@@ -79,7 +80,7 @@ Marketable to practitioners: "what we say about your questions is exactly what h
 | PB3.3 | Get counsel's view on Washington's health-data law and apply it (a notice, consent, deletion, minimal retention of sensitive questions), so Seattle testers' mental-health signals are lawfully handled | L3 | M, Owner and counsel |
 | PB3.4 | Review the support page's crisis resources and add a "not a substitute for care" notice, so a tester in crisis is pointed to real help | L7 | S |
 | PB3.5 | Add HSTS, `frame-ancestors 'none'` and Permissions-Policy headers, so the pages cannot be framed or downgraded | WA SEC09-BP02 | S |
-| PB3.6 | Put a WAF with managed rules and a rate rule in front of the site, and turn on GuardDuty, Access Analyzer and a root or IAM-change alarm, so the public forms cannot be abused and an intrusion is noticed | WA M1, M2 | S |
+| PB3.6 | Put a WAF with managed rules and a rate rule in front of the site, and turn on GuardDuty, Access Analyzer and a root or IAM-change alarm, so the public forms cannot be abused and an intrusion is noticed | WA M1, M2, SEC03-BP04 | S |
 
 ### PB4. The owner can learn from the beta
 
@@ -90,9 +91,9 @@ Marketable to the owner and to the gate: "we can say what testers did, what fail
 | PB4.1 | Add the analyst login on RDS and deploy the single feedback form (#164), so tester feedback can be read at all | B12 (part) | S |
 | PB4.2 | Confirm alerts reach the owner and add a second recipient, so an outage is never missed | B16, WA OPS10-BP04 | S |
 | PB4.3 | Alarm on model errors, the spend cap, dropped summaries and slow answers, so a broken answer path shows up before testers report it | A3, WA OPS04-BP04 | S |
-| PB4.4 | Write one runbook entry per alarm and a ten-line incident procedure, so each alert has a known first step | WA M8, OPS10-BP01 | S |
+| PB4.4 | Write one runbook entry per alarm, a ten-line incident procedure with an incident record template, a security contacts list, and a short outage notice for testers, so each alert has a known first step and testers hear when the site is down | WA M8, OPS10-BP01, OPS10-BP05, OPS11-BP02, SEC10-BP01 | S |
 | PB4.5 | Write the recovery-time, data-loss and availability targets into Spec 01, so later reliability work has a target | WA M4 | S, Owner |
-| PB4.6 | Produce a weekly beta report from totals: active testers, testers asking in two or more weeks, questions per tester, feedback reasons, dana click-through and cost per question, so each gate criterion has data | V-A1, F1, WA OPS04-BP01 | M |
+| PB4.6 | Produce a weekly beta report from totals: active testers, testers asking in two or more weeks, questions per tester, feedback reasons, dana click-through, cost per question and time to the first progress event, so each gate criterion has data | V-A1, F1, WA OPS04-BP01, OPS04-BP03 | M |
 | PB4.7 | Model cost at 10 and 100 times current use, so the public beta has a budget ceiling | F1, WA COST05-BP06 | S |
 
 ### PB5. Evidence for the next increment
@@ -117,7 +118,7 @@ Thresholds are proposals for the owner to confirm before the beta opens to teste
 | Market insights | Strategy research refreshed (C5), including a hands-on chatbot comparison. V4 answered: at least 2 of 3 sanghas say yes to transcripts for permission |
 | Usage data | At least half the testers ask in two or more separate weeks (V1). A median of at least 5 questions per active tester over the beta. Dana click-through measured and above zero (V3, the PRD v1 hypothesis) |
 | Finances | Cost per question known and within the F1 model. Monthly spend within the AWS budget and the model cap. A fiscal sponsor or entity in place (F2) |
-| Rights and legal | Counsel's written answers on L1, L2 and L6. Health-data handling (L3) done. Every public page true to practice (B9, B14) |
+| Rights and legal | Counsel's written answers on L1, L2 and L6. Health-data handling (L3) done. Every public page true to practice (B9, B14), including the accessibility statement (L16) |
 
 ## Increment 2: Public beta
 
@@ -156,16 +157,20 @@ Marketable to everyone: "it is up, fast and safe." The reliability findings of t
 
 | # | Story | Sources | Size |
 | --- | --- | --- | --- |
-| UB3.1 | Resolve Spec 10's open decisions and meet its summary-latency and cost targets, so answers are fast and affordable at public volume | Spec 10, F7 | M |
+| UB3.1 | Resolve Spec 10's open decisions and meet its summary-latency and cost targets, including the answer cache and prompt caching, so answers are fast and affordable at public volume | Spec 10 (workstreams A to E), F7, WA PERF03-BP05 | M |
 | UB3.2 | Load-test the ask path at 10 and 20 concurrent users, so web sizing is measured, not guessed | WA M7 | S |
 | UB3.3 | Run the database in two availability zones with two web tasks, and move rate limits into the database or the WAF, so one failure does not take the site down | WA M5, A4, WA REL05-BP02 | M |
 | UB3.4 | Reserve model spend before each call, so concurrent calls cannot pass the cap | A2 | S |
-| UB3.5 | Restore a snapshot, replay takedowns, audit and time it, so recovery is proven against PB4.5's targets | WA M6 | S |
+| UB3.5 | Script restore, takedown replay and audit as one runbook step, then run it and time it, so recovery is proven against PB4.5's targets and repeatable | WA M6, REL13-BP05 | S |
 | UB3.6 | Stand up a short-lived staging environment from the same modules, so changes are tried before the public sees them | WA M12 | M |
 | UB3.7 | Write a one-page threat model and playbooks for a leaked key or a data exposure, so security incidents have a plan | WA M9, M10 | S |
-| UB3.8 | Replace the backup user's long-lived key, write a handover page, and give one trusted person scale-to-zero access, so the project survives the owner's absence | WA M3, M11 | S |
-| UB3.9 | Apply the batched Terraform hygiene (egress to 443 and 5432, ALB access logs, a dashboard, a task-memory alarm, Performance Insights, storage autoscaling, base images pinned by digest), so operations are visible and tight | WA delegate batch, A6 | S |
+| UB3.8 | Replace the backup user's long-lived key, write a handover page and an offline break-glass note, set a 90-day secret rotation calendar, subscribe to RustSec and AWS security bulletins, and give one trusted person scale-to-zero access, so the project survives the owner's absence | WA M3, M11, SEC03-BP03, SEC02-BP05, SEC01-BP04 | S |
+| UB3.9 | Apply the batched Terraform hygiene (egress to 443 and 5432, ALB access logs, a dashboard, a task-memory alarm, Performance Insights, storage autoscaling, base images pinned by digest, cost allocation tags, recorded Fargate and SES quotas), and bring the hand-applied infrastructure into the plan-and-apply flow, so operations are visible and tight | WA SEC05-BP02, SEC04-BP01, OPS08-BP05, REL06-BP01, PERF03-BP03, SUS04-BP04, OPS05-BP05, COST03-BP02, REL01-BP01, OPS05-BP10, A6 | S |
 | UB3.10 | Commission a light external penetration test, so the public site is checked by someone other than its builder | WA SEC11-BP03 | M, Owner |
+| UB3.11 | Shorten the model timeout on the request path (the client allows 600 s), so one slow model call cannot hold a web connection | WA REL05-BP05 | S |
+| UB3.12 | Decide whether the summary is written only when the reader asks for it, so the summary and verifier cost is paid only by readers who want it | Cost review of October 15 | S, Owner decision |
+| UB3.13 | Trial a Cloudflare Tunnel in place of the load balancer and its public addresses, so about $35 to $40 a month is saved and Cloudflare's free protection backs up the WAF | Cost review of October 15, WA M1 | M |
+| UB3.14 | Benchmark the web task on ARM, and schedule scale-to-zero between test rounds and overnight, so fixed AWS cost falls without slowing answers | WA SUS05-BP02, COST04-BP04 | S |
 
 ### UB4. Feedback that teaches us
 
@@ -186,7 +191,7 @@ Marketable to teachers and sanghas: "readers are sent to you."
 | UB5.1 | Fill Listen links for every source with a public audio page, so readers can hear any talk, not only SSZ's | B6 | S |
 | UB5.2 | Link each teacher group to the sangha's own page, so practitioners can find a living teacher | V-A5 | S |
 | UB5.3 | Add the site's own optional dana line through the fiscal sponsor's page, kept apart from the sangha panel, so readers can support the commons | F3, PRD principle 8 | S |
-| UB5.4 | Mark the current page in the navigation with `aria-current`, so screen-reader users know where they are | B7 | S |
+| UB5.4 | Mark the current page in the navigation with `aria-current`, and update the public accessibility statement for every new page, so screen-reader users know where they are and the conformance claim stays true | B7, L16 | S |
 | UB5.5 | Say on the site and answer page "teachers' own words, never an imitation of a teacher", so the difference from chatbots is plain | C1 | S |
 
 ### UB6. Findable
@@ -207,7 +212,7 @@ Marketable to sanghas: "join, and your archive is handled with care."
 
 | # | Story | Sources | Size |
 | --- | --- | --- | --- |
-| UB7.1 | Make the GPU worker stop its machine when the queue is empty and refuse to start past the spend cap, so ingestion runs cannot overspend | B21 | S |
+| UB7.1 | Make the GPU worker stop its machine when the queue is empty and refuse to start past the spend cap, and pin the GPU host's SSH key before connecting, so ingestion runs cannot overspend or connect to the wrong machine | B21, WA SEC09-BP03 | S |
 | UB7.2 | Merge `zip` 2 to 9, so the dependency that opens downloaded archives is current | B20 | S |
 | UB7.3 | Test the rights and takedown commands in `wt-cli`, so the commands that keep the rights promise are covered | B22 | M |
 | UB7.4 | Tick, rewrite or log as a gap every open spec acceptance item, so "done" means verified | B18 | M |
@@ -224,7 +229,7 @@ Marketable to sanghas: "join, and your archive is handled with care."
 | Market insights | Strategy research refreshed, with the chatbot comparison repeated. V5 (research search) and V6 (text links) answered. A decision on the sangha-archive pillar (V-A3) |
 | Usage data | Weekly active users growing for 8 weeks. At least 25% of new users return within 4 weeks. Organic search impressions recorded in Search Console. Dana click-through holding or rising |
 | Finances | Cost per question at the Spec 10 target. 1,000 questions a day fits the funded budget (F7). At least 6 months of projected cost committed. F6 decided |
-| Rights and legal | Counsel's answers on L1, L2, L8 and L11 applied. Trademark search done (L15). Any EU decision (L6) implemented |
+| Rights and legal | Counsel's answers on L1, L2, L8 and L11 applied. Trademark search done (L15). Any EU decision (L6) implemented. The accessibility statement current (L16) |
 
 ## Increment 3: Public full launch
 
@@ -292,10 +297,10 @@ Launch when FL4 and FL5 are done and every Gate 2 dimension still holds. FL1 to 
 | Item | Sources |
 | --- | --- |
 | Move `LlmClient` into its own crate | A5 |
-| Split the large modules | B23 |
+| Split the large modules, and the texts subsystem out of `wt-ingest` | B23, A7 |
 | Retrieval tuning without an image deploy | A8 |
 | Prune branches and worktrees | A9 |
-| Tracing, chaos testing, image signing, AWS Config rules, Graviton, customer-managed keys, an answer cache | WA deferred |
+| Tracing, chaos testing, image signing, AWS Config rules, customer-managed keys | WA deferred (OPS04-BP05, REL12-BP04, SEC06-BP04, SEC04-BP04, SEC08-BP01) |
 | Liturgy and chant guidance | PRD backlog |
 | Practice companion, journaling or daily-reading features | Set aside in strategy section 4 |
 
