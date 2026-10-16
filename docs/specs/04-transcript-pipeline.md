@@ -418,7 +418,7 @@ Acceptance criteria (M4T):
 
 ## Language-model spend cap
 
-The language model is the one metered cost in the system, so v1 caps it. Settings: `WT_LLM_MONTHLY_CAP_USD` (default 25), the per-stage models `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_VISION` (each falls back to `WT_LLM_MODEL`), and a hand-edited price table in `config/llm_prices.toml` with input and output dollars per million tokens for each model and a `checked_on` date.
+The language model is the one metered cost in the system, so v1 caps it. Settings: `WT_LLM_MONTHLY_CAP_USD` (default 25), the per-stage models `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY`, `WT_LLM_MODEL_VISION`, `WT_LLM_MODEL_TRIAGE`, `WT_LLM_MODEL_EXCERPT` and `WT_LLM_MODEL_RANK` (each falls back to `WT_LLM_MODEL`; Spec 11, PB2.0), and a hand-edited price table in `config/llm_prices.toml` with input and output dollars per million tokens for each model and a `checked_on` date. A model whose price holds only up to a prompt size has `max_prompt_tokens`, and the client refuses a longer prompt rather than send it unpriced; a request body under that many bytes cannot be over, so only a larger one is counted first through the API's token-counting endpoint.
 
 Mechanism:
 

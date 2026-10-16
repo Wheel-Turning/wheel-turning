@@ -7,7 +7,8 @@
 //! accepting sampling settings (decisions of October 5, 2026). A `Real` request is refused unless
 //! `WT_LLM_REAL_DATA_OK=true`. Logs carry the stage, model, token counts and a hash of the
 //! request, never its text. 429, 529 and 5xx responses retry with backoff up to three times. A
-//! reply that does not match the type gets one repair attempt.
+//! reply that does not match the type gets one repair attempt. A model whose price holds only up
+//! to a prompt size (`max_prompt_tokens`) is never sent a longer prompt (Spec 11, PB2.0).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -94,6 +95,16 @@ pub enum LlmError {
     /// The price table could not be read.
     #[error("{0}")]
     Prices(String),
+    /// The prompt is longer than the model's price holds for.
+    #[error("the prompt is {tokens} tokens, over the {max} that {model}'s price covers")]
+    PromptTooLong {
+        /// The model.
+        model: String,
+        /// The prompt's tokens, as the API counted them.
+        tokens: u64,
+        /// The model's `max_prompt_tokens`.
+        max: u64,
+    },
 }
 
 /// The client every stage uses. `complete_value` is object safe; `complete_json` adds the type.
@@ -211,6 +222,10 @@ pub struct ModelPrice {
     pub output_per_mtok: f64,
     /// Whether the model accepts sampling settings such as temperature.
     pub sampling: bool,
+    /// The longest prompt, in tokens, the price holds for: a longer one is priced higher, and
+    /// the table has no price for it, so the client refuses it. `None` is no limit.
+    #[serde(default)]
+    pub max_prompt_tokens: Option<u64>,
 }
 
 /// `config/llm_prices.toml`.
@@ -414,15 +429,16 @@ impl ClaudeClient {
         self
     }
 
-    /// Posts one Messages API request, retrying a 429 or a server error up to three times with
-    /// exponential backoff from `retry_base`.
-    async fn send(&self, body: &Value) -> Result<Value, LlmError> {
+    /// Posts one Messages API request to `endpoint` (`messages` or `messages/count_tokens`),
+    /// retrying a 429 or a server error up to three times with exponential backoff from
+    /// `retry_base`.
+    async fn send(&self, endpoint: &str, body: &Value) -> Result<Value, LlmError> {
         let mut attempt = 0u32;
         loop {
             let mut request = self
                 .http
                 .post(format!(
-                    "{}/v1/messages",
+                    "{}/v1/{endpoint}",
                     self.settings.base_url.trim_end_matches('/')
                 ))
                 .header("x-api-key", self.settings.api_key.expose())
@@ -461,6 +477,42 @@ impl ClaudeClient {
             }
             return Ok(value);
         }
+    }
+}
+
+impl ClaudeClient {
+    /// Refuses a prompt over `max` tokens. A token never covers less than one byte, so a request
+    /// body well under `max` bytes cannot be over; only a larger one is counted by the API's free
+    /// token-counting endpoint, which leaves the usual prompt without an extra call.
+    async fn check_prompt_size(
+        &self,
+        body: &Value,
+        bytes: usize,
+        model: &str,
+        max: u64,
+    ) -> Result<(), LlmError> {
+        // The API adds its own instructions for structured outputs, which the body does not hold.
+        const OVERHEAD: u64 = 2_000;
+        if (bytes as u64).saturating_add(OVERHEAD) <= max {
+            return Ok(());
+        }
+        let count = json!({
+            "model": body["model"],
+            "system": body["system"],
+            "messages": body["messages"],
+        });
+        let counted = self.send("messages/count_tokens", &count).await?;
+        let tokens = counted["input_tokens"]
+            .as_u64()
+            .ok_or_else(|| LlmError::Http("count_tokens returned no input_tokens".into()))?;
+        if tokens.saturating_add(OVERHEAD) > max {
+            return Err(LlmError::PromptTooLong {
+                model: model.to_owned(),
+                tokens,
+                max,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -516,8 +568,13 @@ impl LlmClient for ClaudeClient {
         if price.sampling {
             body["temperature"] = json!(0);
         }
-        let request_hash = sha256_hex(body.to_string().as_bytes());
-        let reply = self.send(&body).await?;
+        let text = body.to_string();
+        if let Some(max) = price.max_prompt_tokens {
+            self.check_prompt_size(&body, text.len(), model, max)
+                .await?;
+        }
+        let request_hash = sha256_hex(text.as_bytes());
+        let reply = self.send("messages", &body).await?;
 
         let input = reply["usage"]["input_tokens"].as_i64().unwrap_or(0);
         let output = reply["usage"]["output_tokens"].as_i64().unwrap_or(0);

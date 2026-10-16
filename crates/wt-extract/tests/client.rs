@@ -86,12 +86,21 @@ fn prices() -> PriceTable {
                 input_per_mtok: 1.0,
                 output_per_mtok: 5.0,
                 sampling: true,
+                max_prompt_tokens: None,
             },
             ModelPrice {
                 id: "claude-sonnet-5-5".into(),
                 input_per_mtok: 2.0,
                 output_per_mtok: 10.0,
                 sampling: false,
+                max_prompt_tokens: None,
+            },
+            ModelPrice {
+                id: "claude-haiku-5-5".into(),
+                input_per_mtok: 0.10,
+                output_per_mtok: 0.50,
+                sampling: false,
+                max_prompt_tokens: Some(100_000),
             },
         ],
     }
@@ -106,6 +115,7 @@ fn client(
     let models: BTreeMap<&'static str, String> = [
         ("classify", "claude-haiku-4-5".to_owned()),
         ("synth", "claude-sonnet-5-5".to_owned()),
+        ("rank", "claude-haiku-5-5".to_owned()),
     ]
     .into_iter()
     .collect();
@@ -195,6 +205,101 @@ async fn requests_use_structured_outputs_and_temperature_only_where_accepted() {
         ("classify", 1000, 100)
     );
     assert!((rows[0].4 - 0.0015).abs() < 1e-9);
+}
+
+/// Spec 11, PB2.0: Haiku 5.5's price holds for prompts up to 100,000 tokens, so a longer one is
+/// refused before it is sent. A short body needs no count; a long one is counted first.
+#[tokio::test]
+async fn a_prompt_over_the_priced_limit_is_counted_and_refused() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(reply(r#"{"label":"talk","reason":"fixture"}"#, 1000, 100))
+        .mount(&server)
+        .await;
+    let ledger = Arc::new(MemoryLedger {
+        cap: 25.0,
+        ..Default::default()
+    });
+    let c = client(&server, ledger.clone(), Arc::default(), false);
+
+    // A short prompt goes straight to the API, at Haiku 5.5's price and without temperature.
+    let _: Label = complete_json(&c, &req(LlmStage::Rank), DataClass::Synthetic)
+        .await
+        .unwrap();
+    let seen = server.received_requests().await.unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].url.path(), "/v1/messages");
+    assert!(body(&seen[0]).get("temperature").is_none());
+    let rows = ledger.rows.lock().unwrap().clone();
+    assert!((rows[0].4 - 0.00015).abs() < 1e-12, "{}", rows[0].4);
+
+    // A body over 100,000 bytes is counted; under the limit it is sent.
+    let long = LlmRequest {
+        user: "fixture words ".repeat(8_000),
+        ..req(LlmStage::Rank)
+    };
+    Mock::given(method("POST"))
+        .and(path("/v1/messages/count_tokens"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "input_tokens": 16_100 })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    let _: Label = complete_json(&c, &long, DataClass::Synthetic)
+        .await
+        .unwrap();
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert_eq!(
+        paths,
+        ["/v1/messages", "/v1/messages/count_tokens", "/v1/messages"]
+    );
+    let counted = body(&server.received_requests().await.unwrap()[1]);
+    assert_eq!(counted["model"], "claude-haiku-5-5");
+    assert!(counted.get("max_tokens").is_none());
+
+    // Over the limit, nothing is sent and nothing is spent.
+    Mock::given(method("POST"))
+        .and(path("/v1/messages/count_tokens"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "input_tokens": 120_000 })))
+        .mount(&server)
+        .await;
+    let err = complete_json::<Label>(&c, &long, DataClass::Synthetic)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            LlmError::PromptTooLong {
+                tokens: 120_000,
+                max: 100_000,
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 4);
+    assert_eq!(ledger.rows.lock().unwrap().len(), 2);
+
+    // A model without a limit is never counted, however long the prompt.
+    let _: Label = complete_json(
+        &c,
+        &LlmRequest {
+            stage: LlmStage::Classify,
+            ..long
+        },
+        DataClass::Synthetic,
+    )
+    .await
+    .unwrap();
+    let last = server.received_requests().await.unwrap();
+    assert_eq!(last.len(), 5);
+    assert_eq!(last[4].url.path(), "/v1/messages");
 }
 
 #[tokio::test]

@@ -88,7 +88,15 @@ variable "mail_from" {
 variable "llm" {
   description = "Language model settings for synthesis, verification and triage (Specs 04 and 05). The API key comes from Secrets Manager."
   type = object({
-    model           = string
+    model = string
+    # Per-stage models; an empty one is left unset, so the stage falls back to `model`.
+    stage_models = object({
+      synth   = string
+      verify  = string
+      triage  = string
+      excerpt = string
+      rank    = string
+    })
     workspace_id    = string
     real_data_ok    = bool
     monthly_cap_usd = number
@@ -172,6 +180,12 @@ locals {
     { name = "WT_ENV", value = "prod" },
     { name = "WT_LOG", value = "info" },
     { name = "WT_TRANSCRIPT_BUCKET", value = var.bucket_names["transcripts"] },
+  ]
+  # WT_LLM_MODEL_<STAGE> for each stage given its own model (Spec 11, PB2.0); the rest fall
+  # back to WT_LLM_MODEL.
+  llm_stage_env = [
+    for stage, model in var.llm.stage_models :
+    { name = "WT_LLM_MODEL_${upper(stage)}", value = model } if model != ""
   ]
 }
 
@@ -266,7 +280,7 @@ resource "aws_ecs_task_definition" "web" {
       portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
       dependsOn    = [{ containerName = "models", condition = "SUCCESS" }]
       mountPoints  = [{ sourceVolume = "models", containerPath = "/models", readOnly = true }]
-      environment = concat(local.common_env, local.db_env, [
+      environment = concat(local.common_env, local.db_env, local.llm_stage_env, [
         { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
         { name = "WT_DB_USER", value = "wt_web_login" },
         { name = "WT_MODEL_DIR", value = "/models" },
@@ -362,7 +376,7 @@ resource "aws_ecs_task_definition" "eval" {
         { sourceVolume = "models", containerPath = "/models", readOnly = true },
         { sourceVolume = "out", containerPath = "/out" },
       ]
-      environment = concat(local.common_env, local.db_env, [
+      environment = concat(local.common_env, local.db_env, local.llm_stage_env, [
         { name = "WT_DB_USER", value = "wt_owner_login" },
         { name = "WT_MODEL_DIR", value = "/models" },
         { name = "WT_EMBED_MODEL", value = var.models.embed },

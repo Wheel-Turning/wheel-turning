@@ -64,10 +64,13 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_ORT_DYLIB` | unset | ONNX Runtime library, 1.22 or newer, loaded at run time (unset: `ORT_DYLIB_PATH` or the search path) |
 | `WT_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
 | `WT_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
-| `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction. See Spec 04. |
+| `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction, window labeling (`classify`) and the student-question edit (`question`). See Spec 04. |
 | `WT_LLM_MODEL_SYNTH` | `WT_LLM_MODEL` | Model for synthesis. See Spec 05. |
 | `WT_LLM_MODEL_VERIFY` | `WT_LLM_MODEL` | Model for the synthesis verifier. See Spec 05. |
 | `WT_LLM_MODEL_VISION` | `WT_LLM_MODEL` | Model for the vision re-read of poorly read OCR pages. See Spec 08. |
+| `WT_LLM_MODEL_TRIAGE` | `WT_LLM_MODEL` | Model for the triage gate's model layer (`llm_usage.stage` `sensitive`). See Spec 05 and Spec 11, PB2.0. |
+| `WT_LLM_MODEL_EXCERPT` | `WT_LLM_MODEL` | Model that chooses an excerpt's sentences. See Spec 05 and Spec 11, PB2.0. |
+| `WT_LLM_MODEL_RANK` | `WT_LLM_MODEL` | Model that scores retrieval candidates. See Spec 05 and Spec 11, PB2.0. |
 | `WT_LLM_MONTHLY_CAP_USD` | `25` | Monthly spending cap for language model calls. See Spec 04. |
 | `ANTHROPIC_API_KEY` | none | API credential, secret |
 | `ANTHROPIC_WORKSPACE_ID` | none | Sent as the `anthropic-workspace-id` header, which the API requires for a key that is not scoped to a workspace |

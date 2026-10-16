@@ -64,6 +64,18 @@ variable "llm_model" {
   default     = "claude-haiku-4-5"
 }
 
+variable "llm_stage_models" {
+  description = "Per-stage models for the web service and the eval task (Spec 11, PB2.0): WT_LLM_MODEL_<STAGE>. A stage left out or empty falls back to llm_model."
+  type = object({
+    synth   = optional(string, "")
+    verify  = optional(string, "")
+    triage  = optional(string, "")
+    excerpt = optional(string, "")
+    rank    = optional(string, "")
+  })
+  default = {}
+}
+
 variable "anthropic_workspace_id" {
   description = "ANTHROPIC_WORKSPACE_ID. Not a secret; the API key is in Secrets Manager."
   type        = string
