@@ -18,6 +18,8 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open |
 | [B11](#b11-source-texts-are-not-in-search-answers-or-excerpt-references) | 2026-10-15 | Source texts are not in search, answers or excerpt references | open |
 | [B12](#b12-feedback-is-one-thin-form-not-a-structured-review-of-the-answer) | 2026-10-15 | Feedback is one thin form, not a structured review of the answer | open (backlog) |
+| [B13](#b13-every-excerpt-has-a-report-link) | 2026-10-15 | Every excerpt has a Report link | open |
+| [B14](#b14-public-copy-promises-a-time-for-acting-on-requests) | 2026-10-15 | Public copy promises a time for acting on requests | open |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -305,3 +307,60 @@ Not built. The current form follows Spec 06, Answer page structure, rule 6, and 
 ### Fix
 
 To be ordered in the build plan once the register is complete.
+
+## B13. Every excerpt has a Report link
+
+- Reported: October 15, 2026, by the owner.
+
+### Expected
+
+No Report link on any excerpt. A reader reports a problem with an excerpt through the answer's feedback ([B12](#b12-feedback-is-one-thin-form-not-a-structured-review-of-the-answer)). A rights holder asks for removal through the Rights and removal page, which stays linked in the footer of every page.
+
+### Actual
+
+Each excerpt's footer ends with "Report", which opens `/rights?excerpt=<id>#request` (`crates/wt-api/templates/answer.html`, line 51). Text units are specced to carry one too.
+
+### Cause
+
+Required by the PRD and the specs, so removing it is a decision that changes them:
+
+- PRD, answer page item 2 ("a 'Report this excerpt' link"), principle 4 (the link as one way to opt out) and the removal row of the scope table ("a report link on every passage").
+- Spec 06: the excerpt footer order (Listen, Read, Cite, Give, Report), the text unit route and page (`GET /text/{unit_id}` "and report link"), and the help and feedback rule.
+- Spec 08, Quoted passages inline ("Report this excerpt" under an inline excerpt), which B11 already drops.
+- Spec 09, Excerpt footer, and the reply template for "a removal or report request".
+- `crates/wt-api/src/rights.rs` takes the excerpt id the link passes, and `/rights/request` stores "a removal or report request".
+
+### Fix
+
+To be ordered in the build plan once the register is complete. Change the PRD and Specs 06, 08 and 09, remove the link from the answer and text pages, and keep the excerpt id field on the rights form only if the B12 feedback can hand a removal request to it.
+
+## B14. Public copy promises a time for acting on requests
+
+- Reported: October 15, 2026, by the owner. The project is run by one person, who cannot guarantee the time to act on feedback or removals by a deadline.
+
+### Expected
+
+No public page, email or form promises when feedback or a removal request will be acted on.
+
+### Actual
+
+The Rights and removal page promises "Within one business day of your request, the material you name stops appearing", and its confirmation says "What you named stops appearing within one business day" (`crates/wt-api/templates/rights.html`, lines 18 and 25; `copy/rights.md`; Spec 09).
+
+### Cause
+
+The promise is set in the PRD and specs:
+
+- PRD: principle 4, the rights handling success criterion, the risk row for a teacher who objects, and the removal row of the scope table.
+- Spec 03, Display levels, rule 4: a narrower level is honored "within one business day".
+- Spec 08: Mandated sources, handling ("suspend ... within one business day"); its acceptance item that fails the audit for a request open more than one business day; and Alerts to the founder, which alert on a request still open after one business day.
+- Spec 09: the Rights and removal copy.
+
+Retention periods (24 hours, 180 days, the provider's 30 days) are not promises to act and are not affected.
+
+### Open point
+
+Whether the internal target stays: the alert and the audit check for a request open more than one business day are not public promises. They can stay as an internal reminder, be relaxed, or go.
+
+### Fix
+
+To be ordered in the build plan once the register is complete. Change the PRD success criterion and principle 4, and Specs 03, 08 and 09, then the Rights page and its confirmation. The copy can still say requests are handled in the order they arrive and that material is suspended before the requester's identity is checked, if that practice stays.
