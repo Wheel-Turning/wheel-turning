@@ -90,13 +90,13 @@ variable "llm" {
   type = object({
     model = string
     # Per-stage models; an empty one is left unset, so the stage falls back to `model`.
-    stage_models = object({
-      synth   = string
-      verify  = string
-      triage  = string
-      excerpt = string
-      rank    = string
-    })
+    stage_models = optional(object({
+      synth   = optional(string, "")
+      verify  = optional(string, "")
+      triage  = optional(string, "")
+      excerpt = optional(string, "")
+      rank    = optional(string, "")
+    }), {})
     workspace_id    = string
     real_data_ok    = bool
     monthly_cap_usd = number
