@@ -18,3 +18,11 @@ output "ses_dkim_records_for_cloudflare" {
     value = "${token}.dkim.amazonses.com"
   }]
 }
+
+output "security_alarm_names" {
+  value = [for alarm in aws_cloudwatch_metric_alarm.security : alarm.alarm_name]
+}
+
+output "guardduty_detector_id" {
+  value = aws_guardduty_detector.this.id
+}
