@@ -149,7 +149,10 @@ async fn the_rights_page_needs_no_session_and_states_each_source_in_plain_words(
     sources(&fx.pool).await;
     let r = send(&fx.app, get("/rights", None)).await;
     assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.headers["content-security-policy"], "default-src 'self'");
+    assert_eq!(
+        r.headers["content-security-policy"],
+        "default-src 'self'; frame-ancestors 'none'"
+    );
     assert!(
         r.body
             .contains("If you hold rights in any talk or text shown here")

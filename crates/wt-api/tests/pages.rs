@@ -238,13 +238,52 @@ async fn pages_need_a_session_and_every_response_carries_the_headers() {
     for path in ["/", "/about", "/talk/00000000-0000-0000-0000-000000000000"] {
         let r = send(&fx.app, get(path, None)).await;
         assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
-        assert_eq!(r.headers["content-security-policy"], "default-src 'self'");
-        assert_eq!(r.headers["x-content-type-options"], "nosniff");
-        assert_eq!(r.headers["referrer-policy"], "no-referrer");
-        assert_eq!(r.headers["x-robots-tag"], "noindex");
+        assert_common_headers(&r.headers);
+        assert!(
+            r.headers.get("strict-transport-security").is_none(),
+            "dev must not pin HTTPS: {path}"
+        );
     }
     let robots = send(&fx.app, get("/robots.txt", None)).await;
     assert!(robots.body.contains("Disallow: /"));
+    assert_common_headers(&robots.headers);
+}
+
+#[tokio::test]
+async fn prod_adds_strict_transport_security() {
+    let site = Site {
+        hsts: true,
+        ..Site::with_fakes(MODEL)
+    };
+    let fx = start_with(site, false).await;
+    let cookie = join(&fx, "owner").await;
+    for (path, cookie) in [
+        ("/", Some(cookie.as_str())),
+        ("/", None),
+        ("/robots.txt", None),
+    ] {
+        let r = send(&fx.app, get(path, cookie)).await;
+        assert_common_headers(&r.headers);
+        assert_eq!(
+            r.headers["strict-transport-security"], "max-age=31536000",
+            "{path}"
+        );
+    }
+}
+
+/// The headers every response carries in every environment (Spec 06, Spec 11 PB3.5).
+fn assert_common_headers(h: &axum::http::HeaderMap) {
+    assert_eq!(
+        h["content-security-policy"],
+        "default-src 'self'; frame-ancestors 'none'"
+    );
+    assert_eq!(
+        h["permissions-policy"],
+        "camera=(), microphone=(), geolocation=(), browsing-topics=()"
+    );
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(h["referrer-policy"], "no-referrer");
+    assert_eq!(h["x-robots-tag"], "noindex");
 }
 
 #[tokio::test]
