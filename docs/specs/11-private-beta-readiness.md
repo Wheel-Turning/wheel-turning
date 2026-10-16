@@ -314,7 +314,7 @@ User stories:
 
 **Acceptance.**
 - [x] A copy-consistency test passes. (`wt-api/tests/copy_checks.rs` and the home page in `pages.rs`.)
-- [ ] The owner approves the wording in the PR.
+- [x] The owner approves the wording in the PR. (Approved October 16, 2026, with the provider-terms sentence on the privacy page, PR 185.)
 
 ### PB3.2 A complete privacy page (L4)
 
