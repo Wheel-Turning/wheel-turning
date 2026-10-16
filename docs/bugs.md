@@ -114,7 +114,17 @@ The summary did not load.
 
 ### Cause
 
-Not diagnosed. Check the beta logs and `llm_usage` for this answer.
+Diagnosed October 16, 2026, from the beta's logs (`/wt-v1/web`). The answer id is not in the logs, and `wt` has no command that reads an answer row from RDS. So the answer is matched by its outcome: on October 15 only two deferred summaries settled without a summary, and both failed the same way.
+
+1. **Every sentence was rejected.** At 23:19 UTC (a question on the Pali Canon and suffering) and at 00:21 UTC on October 16 (a question on the meaning of life), the draft and its one revision lost every sentence: 16 model calls each, 0 sentences kept, 8 and 10 dropped. No model call failed, timed out or reached the cap. At 23:19 there were 2 drafts and 14 verifier calls, all on `claude-haiku-4-5`.
+   - The drop reasons were `addresses_reader` (a headline with "you", taken from the question's own wording), `one_teacher` (agree or differ sentences citing two excerpts by one teacher), `unknown_ref` (sentence ranges past an excerpt's end, such as `E10[1-10]`), `wrong_year`, `quote_too_long`, and `unsupported` from the verifier. Without a headline there is no summary.
+2. **The page said nothing.** The summary route answered 204, and `answer.js` removed the "Writing a summary" placeholder without a word. To a reader it looked as if the summary never loaded.
+
+### Fix
+
+- PB2.4 (#180): `answer.summary_status` records `all_sentences_rejected` for this case. Each answer logs `summary_settled`, and the PB4.3 alarm fires when more than 30% of an hour's answers end without a summary.
+- PB2.2 tunes the prompt against the drop reasons above.
+- Open for the owner: whether the page should say that no summary could be written, instead of removing its place silently (Spec 09 copy).
 
 ## B5. Cite opens a pop-up instead of scrolling to the reference
 
@@ -225,8 +235,18 @@ Not fully diagnosed.
 1. Em dashes: the prompt (`crates/wt-synth/prompts/summarize.md`) does not forbid them and no code removes them.
 2. The sangha note is required by Spec 05, Summary and verifier, item 5, and written by `notes` in `crates/wt-api/src/summary.rs`. Removing it is a spec change, which the owner asked for in this report.
 3. The top line is `result_line` in `crates/wt-api/src/view.rs`, and it counts teachers only. "Drawn from" counts only the excerpts the shown summary sentences cite (Spec 05, item 7), so it is always smaller.
-4. Excerpts the summary does not use: the beta has no reranker ([B1](#b1-a-question-about-shakyamuni-returns-talks-not-texts), cause 4), so excerpts are ordered by search match and weak ones are served. The summary prompt says "Fewer true sentences are better than more", and the verifier drops any sentence whose words do not match the excerpts it cites, so a weak excerpt is left out rather than used. Whether the model wrote agree and differ sentences that the verifier then dropped is not checked. The stored draft and `llm_usage` for this answer would show it.
+4. Excerpts the summary does not use: the beta has no reranker ([B1](#b1-a-question-about-shakyamuni-returns-talks-not-texts), cause 4), so excerpts are ordered by search match and weak ones are served. The summary prompt says "Fewer true sentences are better than more", and the verifier drops any sentence whose words do not match the excerpts it cites, so a weak excerpt is left out rather than used. Checked October 16, 2026, in the beta's logs: the model did write them, and the filters dropped them before the verifier ever ran (see the note below).
 5. Thin content follows from 4: with agree and differ empty, only the headline, framing and sum-up remain, and the prompt keeps those close to the excerpts' own words.
+
+**The draft for this answer (beta logs, October 15, 23:27 UTC; matched by the question's subject, since logs carry no answer id).** The summary kept 3 sentences and dropped 16, across the draft and its revision. The model wrote 6 agree and 4 differ sentences; none reached the verifier:
+
+- `addresses_reader`: 6 sentences (the headline, a framing sentence, 2 agree and 2 differ), for "yourself" or "you" taken from the question's own words ("trying to improve yourself").
+- `one_teacher`: 4 (3 agree, 1 differ), each citing two excerpts by the same teacher.
+- `unknown_ref`: 4 (1 differ, 3 keep in mind), citing sentence ranges past an excerpt's end, such as `E10[1-10]` and `E9[1-9]`.
+- `misattributed`: 1 agree sentence, for naming Suzuki Roshi as the source of a teaching quoted by others.
+- `quote_too_long`: 1.
+
+So the thin summary comes from the filters, not the verifier. PB2.2 addresses this: the prompt must use each excerpt or say why not, and it is tuned against these drop reasons.
 
 ### Open question for the owner
 

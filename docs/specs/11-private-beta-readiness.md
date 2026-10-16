@@ -268,8 +268,8 @@ This is blocked on open question 2: serve fewer excerpts, require the summary to
 3. **Report it.** `wt eval report` and PB4.6's report count each status.
 
 **Acceptance.**
-- [ ] A test for each failure path stores its status.
-- [ ] No answer row stays pending past the purge.
+- [x] A test for each failure path stores its status. (#180: `wt-api/tests/pages.rs`, `wt-synth/tests/synth.rs`, `wt-db/tests/web_role.rs`.)
+- [x] No answer row stays pending past the purge. (#180: `wt-db/tests/web_role.rs`; B4's cause is recorded in `docs/bugs.md`.)
 
 ### PB2.5 Summaries are labeled (L9, L13, C1)
 
