@@ -123,7 +123,7 @@ pub struct Config {
     pub llm_stage_models: LlmStageModels,
     /// `WT_LLM_MONTHLY_CAP_USD`, default 25. `wt llm cap set` overrides it in the database.
     pub llm_monthly_cap_usd: f64,
-    /// `WT_ALERT_TOPIC_ARN`. Empty turns alerts off.
+    /// `WT_ALERT_TOPIC_ARN`. Empty logs alerts as warnings instead of publishing them.
     pub alert_topic_arn: Option<String>,
     /// `YOUTUBE_API_KEY`.
     pub youtube_api_key: Option<Secret>,

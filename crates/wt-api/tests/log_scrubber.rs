@@ -255,6 +255,14 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
         logs.contains("answer stored") && logs.contains("retrieved"),
         "the ask path's own lines were not captured"
     );
+    // Spec 11, PB4.3: the slow-answers alarm reads `ask_completed` and its milliseconds.
+    let completed: Vec<serde_json::Value> = logs
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "ask_completed")
+        .collect();
+    assert_eq!(completed.len(), 1, "one ask_completed per answer");
+    assert!(completed[0]["ms"].is_u64(), "ask_completed carries ms");
     for (what, secret) in [
         ("query text", "quokkaflux"),
         ("query text", QUERY),

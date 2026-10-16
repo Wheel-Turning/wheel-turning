@@ -19,7 +19,7 @@ use wt_core::scratch::Ffmpeg;
 use wt_db::job::{Job, JobKind};
 use wt_extract::{
     ClaudeClient, ClaudeSettings, DataClass, LlmClient, LlmError, LlmLabeler, LlmQuestionEditor,
-    LogAlerter, PgLedger, PriceTable, UnavailableLlm,
+    PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_index::ChunkSettings;
 use wt_ingest::audio::{self, AudioDeps, AudioError};
@@ -196,7 +196,12 @@ impl Stages {
         // Without an API key the worker still runs (owner's decision of October 7, 2026):
         // ambiguous windows get the rule fallback and extraction is staged as skipped.
         let llm = if needs_llm && config.anthropic_api_key.is_some() {
-            Some(claude(pool, config, config_dir)?)
+            Some(claude(
+                pool,
+                config,
+                config_dir,
+                wt_extract::alerter(config.alert_topic_arn.as_deref()).await,
+            )?)
         } else {
             if needs_llm {
                 tracing::warn!(
@@ -517,7 +522,12 @@ impl wt_segment::Diarizer for NoAudio {
 }
 
 /// The Claude client for the ingestion stages, refusing to start without a model or key.
-fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<ClaudeClient> {
+fn claude(
+    pool: &PgPool,
+    config: &Config,
+    config_dir: &Path,
+    alerter: Arc<dyn wt_extract::Alerter>,
+) -> anyhow::Result<ClaudeClient> {
     let api_key = config
         .anthropic_api_key
         .clone()
@@ -545,7 +555,7 @@ fn claude(pool: &PgPool, config: &Config, config_dir: &Path) -> anyhow::Result<C
         },
         prices,
         Arc::new(PgLedger::new(pool.clone(), config.llm_monthly_cap_usd)),
-        Arc::new(LogAlerter),
+        alerter,
     )?)
 }
 

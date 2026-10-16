@@ -17,8 +17,8 @@ use wt_core::Secret;
 use wt_core::config::LlmStage;
 use wt_extract::llm::{ModelPrice, PriceTable};
 use wt_extract::{
-    Alerter, ClaudeClient, ClaudeSettings, DataClass, Ledger, LlmError, LlmRequest, PgLedger,
-    complete_json,
+    Alerter, ClaudeClient, ClaudeSettings, DataClass, FakeSns, Ledger, LlmError, LlmRequest,
+    PgLedger, SnsAlerter, complete_json,
 };
 
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
@@ -109,7 +109,7 @@ fn prices() -> PriceTable {
 fn client(
     server: &MockServer,
     ledger: Arc<dyn Ledger>,
-    alerts: Arc<Alerts>,
+    alerts: Arc<dyn Alerter>,
     real_ok: bool,
 ) -> ClaudeClient {
     let models: BTreeMap<&'static str, String> = [
@@ -172,7 +172,7 @@ async fn requests_use_structured_outputs_and_temperature_only_where_accepted() {
         cap: 25.0,
         ..Default::default()
     });
-    let c = client(&server, ledger.clone(), Arc::default(), false);
+    let c = client(&server, ledger.clone(), Arc::new(Alerts::default()), false);
 
     let label: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
         .await
@@ -221,7 +221,7 @@ async fn a_prompt_over_the_priced_limit_is_counted_and_refused() {
         cap: 25.0,
         ..Default::default()
     });
-    let c = client(&server, ledger.clone(), Arc::default(), false);
+    let c = client(&server, ledger.clone(), Arc::new(Alerts::default()), false);
 
     // A short prompt goes straight to the API, at Haiku 5.5's price and without temperature.
     let _: Label = complete_json(&c, &req(LlmStage::Rank), DataClass::Synthetic)
@@ -311,7 +311,7 @@ async fn real_text_is_refused_until_allowed() {
             cap: 25.0,
             ..Default::default()
         }),
-        Arc::default(),
+        Arc::new(Alerts::default()),
         false,
     );
     let err = complete_json::<Label>(&c, &req(LlmStage::Classify), DataClass::Real)
@@ -358,6 +358,150 @@ async fn eighty_percent_alerts_once_and_the_cap_refuses() {
     );
 }
 
+/// Log lines written while the returned guard lives, as flattened JSON like production's.
+#[derive(Clone, Default)]
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Captured {
+    fn install(&self) -> tracing::subscriber::DefaultGuard {
+        let writer = self.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("trace"))
+            .with_writer(move || writer.clone())
+            .json()
+            .flatten_event(true)
+            .finish();
+        tracing::subscriber::set_default(subscriber)
+    }
+
+    /// The parsed lines whose `event` field is `name`.
+    fn events(&self, name: &str) -> Vec<Value> {
+        String::from_utf8_lossy(&self.0.lock().unwrap())
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["event"] == name)
+            .collect()
+    }
+}
+
+/// PB4.2: the 80 percent alert goes to the SNS topic, through the fake.
+#[tokio::test]
+async fn the_eighty_percent_alert_reaches_sns() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(reply(r#"{"label":"talk","reason":"fixture"}"#, 10, 1))
+        .mount(&server)
+        .await;
+    let ledger = Arc::new(MemoryLedger {
+        cap: 10.0,
+        spent: Mutex::new(8.5),
+        ..Default::default()
+    });
+    let sns = Arc::new(FakeSns::default());
+    let topic = "arn:aws:sns:us-east-2:000000000000:wt-v1-alarms";
+    let c = client(
+        &server,
+        ledger,
+        Arc::new(SnsAlerter::new(sns.clone(), topic)),
+        false,
+    );
+    let _: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
+        .await
+        .unwrap();
+    let messages = sns.messages();
+    assert_eq!(messages.len(), 1);
+    let (to, subject, body) = &messages[0];
+    assert_eq!(to, topic);
+    assert_eq!(subject, "Wheel Turning: Language-model spend at 80 percent");
+    assert!(body.contains("8.50 of 10.00 USD"), "{body}");
+}
+
+/// An alert that cannot be delivered is logged and does not fail the call.
+#[tokio::test]
+async fn an_undelivered_alert_does_not_fail_the_call() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(reply(r#"{"label":"talk","reason":"fixture"}"#, 10, 1))
+        .mount(&server)
+        .await;
+    let ledger = Arc::new(MemoryLedger {
+        cap: 10.0,
+        spent: Mutex::new(9.0),
+        ..Default::default()
+    });
+    let logs = Captured::default();
+    let _guard = logs.install();
+    let c = client(
+        &server,
+        ledger,
+        Arc::new(SnsAlerter::new(Arc::new(FakeSns::failing()), "arn:fixture")),
+        false,
+    );
+    let _: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
+        .await
+        .unwrap();
+    assert_eq!(logs.events("alert_failed").len(), 1);
+}
+
+/// PB4.3: each call logs one event with its stage and no request text.
+#[tokio::test]
+async fn calls_log_succeeded_failed_and_cap_reached_events() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(reply(r#"{"label":"talk","reason":"fixture"}"#, 10, 1))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(
+            json!({"type":"error","error":{"type":"invalid_request_error","message":"bad"}}),
+        ))
+        .mount(&server)
+        .await;
+    let ledger = Arc::new(MemoryLedger {
+        cap: 10.0,
+        ..Default::default()
+    });
+    let logs = Captured::default();
+    let _guard = logs.install();
+    let c = client(&server, ledger.clone(), Arc::new(Alerts::default()), false);
+    let _: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
+        .await
+        .unwrap();
+    complete_json::<Label>(&c, &req(LlmStage::Classify), DataClass::Synthetic)
+        .await
+        .unwrap_err();
+    *ledger.spent.lock().unwrap() = 10.0;
+    complete_json::<Label>(&c, &req(LlmStage::Classify), DataClass::Synthetic)
+        .await
+        .unwrap_err();
+
+    let ok = logs.events("llm_call_succeeded");
+    let failed = logs.events("llm_call_failed");
+    let capped = logs.events("llm_cap_reached");
+    assert_eq!(ok.len(), 1);
+    assert_eq!(failed.len(), 1);
+    assert_eq!(capped.len(), 1);
+    assert_eq!(failed[0]["stage"], "classify");
+    assert_eq!(failed[0]["error"], "status");
+    assert_eq!(capped[0]["stage"], "classify");
+    let all = String::from_utf8_lossy(&logs.0.lock().unwrap()).into_owned();
+    assert!(
+        !all.contains("Label the window") && !all.contains("fixture words"),
+        "no request text in logs"
+    );
+}
+
 #[tokio::test]
 async fn overload_retries_and_a_bad_reply_gets_one_repair() {
     let server = MockServer::start().await;
@@ -384,7 +528,7 @@ async fn overload_retries_and_a_bad_reply_gets_one_repair() {
             cap: 25.0,
             ..Default::default()
         }),
-        Arc::default(),
+        Arc::new(Alerts::default()),
         false,
     );
     let label: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
@@ -418,7 +562,7 @@ async fn overload_retries_and_a_bad_reply_gets_one_repair() {
             cap: 25.0,
             ..Default::default()
         }),
-        Arc::default(),
+        Arc::new(Alerts::default()),
         false,
     );
     let err = complete_json::<Label>(&c, &req(LlmStage::Classify), DataClass::Synthetic)
@@ -450,7 +594,7 @@ async fn usage_rows_in_postgres_sum_to_the_month_so_far() {
         .mount(&server)
         .await;
     let ledger = Arc::new(PgLedger::new(pool.clone(), 25.0));
-    let c = client(&server, ledger.clone(), Arc::default(), false);
+    let c = client(&server, ledger.clone(), Arc::new(Alerts::default()), false);
     for _ in 0..3 {
         let _: Label = complete_json(&c, &req(LlmStage::Classify), DataClass::Synthetic)
             .await

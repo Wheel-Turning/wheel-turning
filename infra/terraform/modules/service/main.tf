@@ -103,6 +103,17 @@ variable "llm" {
   })
 }
 
+variable "alert_topic_arn" {
+  description = "SNS topic for alerts to the owner (WT_ALERT_TOPIC_ARN)."
+  type        = string
+}
+
+variable "maintenance" {
+  description = "When true, the load balancer answers every path with the fixed maintenance page and nothing reaches the web task (Spec 11, PB4.4). The task keeps running."
+  type        = bool
+  default     = false
+}
+
 variable "health_check_grace_seconds" {
   description = "Time a new task has to copy and load the models before load balancer checks count."
   type        = number
@@ -176,6 +187,9 @@ locals {
     { name = "WT_DB_PORT", value = tostring(var.db.port) },
     { name = "WT_DB_NAME", value = var.db.name },
   ]
+  # The load balancer allows 1,024 bytes; tests/maintenance.tftest.hcl checks this stays under.
+  maintenance_page = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Wheel Turning: down for maintenance</title></head><body style=\"font-family:Georgia,serif;max-width:34rem;margin:4rem auto;padding:0 1rem;line-height:1.5\"><h1>Down for maintenance</h1><p>Wheel Turning is down for maintenance. Your invite link and your questions are kept, and the site will be back as soon as the work is done.</p><p>Testers will hear by email when it returns.</p></body></html>"
+
   common_env = [
     { name = "WT_ENV", value = "prod" },
     { name = "WT_LOG", value = "info" },
@@ -295,6 +309,7 @@ resource "aws_ecs_task_definition" "web" {
         # Removal requests are confirmed by an emailed link (Spec 08).
         { name = "WT_MAIL_FROM", value = var.mail_from },
         { name = "WT_PUBLIC_URL", value = "https://${var.domain_name}" },
+        { name = "WT_ALERT_TOPIC_ARN", value = var.alert_topic_arn },
       ])
       secrets = [
         { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
@@ -385,6 +400,7 @@ resource "aws_ecs_task_definition" "eval" {
         { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
         { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
         { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
+        { name = "WT_ALERT_TOPIC_ARN", value = var.alert_topic_arn },
       ])
       secrets = [
         { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_owner_login"] },
@@ -555,9 +571,20 @@ resource "aws_lb_listener" "https" {
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn   = aws_acm_certificate_validation.this.certificate_arn
 
+  # `maintenance` swaps the forward for a fixed 503 page on every path, /healthz included, so the
+  # health check alarms say the site is down while it is (runbook 13).
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
+    type             = var.maintenance ? "fixed-response" : "forward"
+    target_group_arn = var.maintenance ? null : aws_lb_target_group.web.arn
+
+    dynamic "fixed_response" {
+      for_each = var.maintenance ? [1] : []
+      content {
+        content_type = "text/html"
+        status_code  = "503"
+        message_body = local.maintenance_page
+      }
+    }
   }
 }
 

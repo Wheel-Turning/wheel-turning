@@ -57,12 +57,14 @@ module "database" {
 }
 
 module "observability" {
-  source         = "../../modules/observability"
-  name           = local.name
-  alert_email    = var.alert_email
-  alb_arn_suffix = module.service.alb_arn_suffix
-  db_identifier  = module.database.identifier
-  scratch_bucket = module.storage.bucket_names["scratch"]
+  source      = "../../modules/observability"
+  name        = local.name
+  alert_email = var.alert_email
+  # Spec 11, PB4.2: a second recipient, once the owner names one.
+  second_alert_email = var.second_alert_email
+  alb_arn_suffix     = module.service.alb_arn_suffix
+  db_identifier      = module.database.identifier
+  scratch_bucket     = module.storage.bucket_names["scratch"]
 
   target_group_arn_suffix = module.service.target_group_arn_suffix
   health_check_fqdn       = var.domain_name
@@ -83,6 +85,7 @@ module "iam" {
   ecr_repository_arn       = module.service.ecr_repository_arn
   log_group_arns           = module.observability.log_group_arns
   mail_from                = var.mail_from
+  alert_topic_arn          = module.observability.alarm_topic_arn
 }
 
 module "service" {
@@ -98,6 +101,8 @@ module "service" {
   web_cpu                = var.web_cpu
   web_memory             = var.web_memory
   mail_from              = var.mail_from
+  alert_topic_arn        = module.observability.alarm_topic_arn
+  maintenance            = var.maintenance
 
   llm = {
     model           = var.llm_model

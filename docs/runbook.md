@@ -366,3 +366,187 @@ runs twice:
 > load. Otherwise testers lose their invites, logs and feedback, and a talk taken down on RDS
 > comes back. After the load, run `wt takedown --replay --actor "<you>" --yes` against RDS
 > (procedure 6) and the parity check again.
+
+## 13. Alarms, incidents and outages
+
+Spec 11, PB4.2 to PB4.4. Every alarm emails the `wt-v1-alarms` topic (us-east-2; the health
+check's alarm uses the topic of the same name in us-east-1), and so does the language-model
+spend alert at 80 percent of the monthly cap. Both topics email `alert_email` and, once the
+owner names one, `second_alert_email` (`infra/terraform/envs/v1/variables.tf`). Each new address
+must click the confirmation link AWS sends it, or nothing arrives. Check delivery after any
+change, with the owner's profile:
+
+```bash
+WT_ALERT_TOPIC_ARN=$(terraform -chdir=infra/terraform/envs/v1 output -raw alert_topic_arn) wt alerts test
+```
+
+The web task and the batch host publish with their own roles, which may publish to this topic
+and nothing else in SNS. A worker on the batch host or the PC needs `WT_ALERT_TOPIC_ARN` in its
+environment to publish; without it the alert is only a log line.
+
+The web service writes one JSON object per line to the `/wt-v1/web` log group. No line carries
+question or passage text. To read one event in CloudWatch Logs Insights:
+
+```text
+fields @timestamp, event, stage, error, ms | filter event = "llm_call_failed" | sort @timestamp desc
+```
+
+**Scale to zero** stops the web task, so testers get the load balancer's 503 and nothing is
+served. Use it only when serving is itself the harm: a passage that must not be served is being
+served, a secret has leaked, or spend keeps climbing past the cap. For anything else prefer the
+maintenance page below, which tells testers what is happening.
+
+```bash
+aws ecs update-service --cluster wt-v1 --service wt-v1-web --desired-count 0
+```
+
+Bring it back with `--desired-count 1` once fixed; the next `terraform apply` also sets it to one
+task.
+
+### The alarms
+
+`crates/wt-core/tests/runbook_alarms.rs` checks this list against Terraform: every `alarm_name`
+under `infra/terraform` has a heading here, and every heading names an alarm there.
+
+#### `wt-v1-alb-5xx-rate`
+
+- **Means:** more than 5% of requests returned a 5xx over two 5-minute periods.
+- **First check:** `/wt-v1/web` for `"level":"ERROR"` lines in the window, and the ECS service's
+  events for task restarts.
+- **Fix:** a bad deploy is rolled back by deploying the previous `image_tag`; a database error
+  goes to the two database alarms below.
+- **Scale to zero:** no. Put up the maintenance page if it lasts more than 15 minutes.
+
+#### `wt-v1-db-cpu`
+
+- **Means:** database CPU above 80% for 15 minutes.
+- **First check:** `pg_stat_activity` through the batch host forward for a long query, and
+  whether an evaluation, reload or backfill is running.
+- **Fix:** cancel the runaway query (`pg_cancel_backend`) or stop the job. If the load is real,
+  raise `db_instance_class` and apply in a quiet hour.
+- **Scale to zero:** no.
+
+#### `wt-v1-db-free-storage`
+
+- **Means:** less than 2 GiB free on the database volume.
+- **First check:** the largest tables (`pg_total_relation_size`) and whether a reload left
+  copies behind.
+- **Fix:** raise the allocated storage in the `database` module and apply (RDS grows it
+  online). Drop leftovers only after a snapshot.
+- **Scale to zero:** no. If writes have started failing, put up the maintenance page.
+
+#### `wt-v1-scratch-not-empty`
+
+- **Means:** the scratch bucket has held objects for more than 24 hours. Audio must not persist
+  (CLAUDE.md rule 6).
+- **First check:** `aws s3 ls s3://wt-v1-scratch-904883674947/ --recursive`, and which job wrote
+  the objects.
+- **Fix:** delete the objects, then find why the pipeline did not, from the stage's logs. Record
+  it in `docs/incidents/` as a data-handling incident.
+- **Scale to zero:** no. The site does not read scratch.
+
+#### `wt-v1-no-healthy-web-task`
+
+- **Means:** no web task has passed `/healthz` for 5 minutes. The site is down.
+- **First check:** the ECS service's events and the stopped task's reason, then the `models`
+  and `web` log streams for the start-up error: a missing model, a secret without a value, the
+  database refusing the login, a setting the web server refuses to start without.
+- **Fix:** deploy the last good `image_tag`, or fix the setting the error names (procedure 12).
+  Put up the maintenance page while it is down.
+- **Scale to zero:** it already serves nothing.
+
+#### `wt-v1-healthz-unreachable`
+
+- **Means:** Route 53 has not reached `https://app.wheelturning.org/healthz` from outside AWS
+  for 3 minutes. It also fires while the maintenance page is up, by design.
+- **First check:** whether `wt-v1-no-healthy-web-task` fired too (the app) or not (DNS at
+  Cloudflare, the certificate or the load balancer).
+- **Fix:** the app: as above. DNS: the CNAME at Cloudflare must be DNS-only and match
+  `terraform output dns_records_for_cloudflare`. The certificate: ACM renews it while its
+  validation CNAME stays at Cloudflare.
+- **Scale to zero:** no.
+
+#### `wt-v1-model-failures`
+
+- **Means:** more than 20% of language-model calls failed in 15 minutes, with at least 5 calls.
+  Answers still show passages, but without a summary, and the relevance check falls back.
+- **First check:** the `llm_call_failed` lines (query above) and their `error`: `status` is the
+  provider's answer (401 or 403: the key or workspace; 429: the rate limit; 5xx: the provider),
+  `http` the network, `parse` or `truncated` a prompt or model change, `ledger` the database.
+- **Fix:** a key problem: rotate it (procedure 5). The provider down: wait, and tell testers if
+  it lasts an hour. Parse failures after a deploy: roll back.
+- **Scale to zero:** no.
+
+#### `wt-v1-cap-reached`
+
+- **Means:** the monthly spend cap (`llm_monthly_cap_usd`, or the owner's value in the
+  database) refused a call. Answers are passages only until the month ends or the cap rises.
+- **First check:** this month's `llm_usage` by stage, and whether one tester or job accounts for
+  most of it. The 80 percent alert should have arrived first.
+- **Fix:** expected spend: raise `llm_monthly_cap_usd` and apply. Unexpected: find the caller
+  first.
+- **Scale to zero:** only if spend still climbs with the cap reached, which would be a bug.
+
+#### `wt-v1-summaries`
+
+- **Means:** more than 30% of answers in an hour, with at least 5, ended with a summary status
+  other than `shown` or `not_attempted` (Spec 11, PB2.4).
+- **First check:** the `summary_settled` lines and their `summary_status`: `model_error` or
+  `timeout` go with `wt-v1-model-failures`; `cap_reached` with `wt-v1-cap-reached`; `no_key` is
+  the API key secret; `all_sentences_rejected` is the summary's check refusing every sentence;
+  `deferred_lost` is the web task restarting with summaries pending.
+- **Fix:** the matching alarm's fix. `all_sentences_rejected` after a deploy or model change:
+  roll back the prompt or model and run the evaluation set. `deferred_lost`: find why the task
+  restarted (ECS events).
+- **Scale to zero:** no. Answers still show passages.
+
+#### `wt-v1-ranker-fallback`
+
+- **Means:** an answer in the last hour was served with ranker `none (fallback)`: the relevance
+  check did not run and passages came in search order (Spec 11, PB2.1).
+- **First check:** the `ranker_served` lines, then `llm_call_failed` lines for the ranker's
+  stage around the same time (a timeout or provider error), and whether
+  `config/retrieval.toml` in the deployed image names the model ranker.
+- **Fix:** a provider problem: as `wt-v1-model-failures`. A config problem: fix
+  `config/retrieval.toml` and ship a new image.
+- **Scale to zero:** no.
+
+#### `wt-v1-slow-answers`
+
+- **Means:** the 95th percentile time to the answer page was above 8 seconds over an hour.
+- **First check:** the `ask_completed` lines and their `ms`, the `answer stored` line's
+  `synth_ms`, and `wt-v1-db-cpu`.
+- **Fix:** a slow provider: wait, or set a faster model for the slow stage. The database: as
+  above.
+- **Scale to zero:** no.
+
+### Incident procedure
+
+1. Note the time and the alarm in a new `docs/incidents/<date>-<slug>.md` from `TEMPLATE.md`.
+2. If anything is served that must not be (a removed talk, someone's question), scale to zero.
+3. If the site is down or wrong for testers, put up the maintenance page.
+4. Follow the alarm's entry above: the first check, then the fix.
+5. If a tester's data or a secret may be exposed, tell the security contacts the same day.
+6. If testers saw it or it lasts over an hour, email them (`docs/incidents/outage-email.md`).
+7. Deploy the fix and watch the alarm return to OK.
+8. Take the maintenance page down or scale back up; check `/healthz` and ask one question.
+9. Email testers that it is resolved, if step 6 sent the first email.
+10. Within a week, finish the incident file: the cause, what changed, and follow-up items.
+
+**Security contacts.** The list of whom to tell about a security incident (the owner, anyone
+else with access, and the affected sanghas' contacts for a rights breach) is kept privately,
+out of git, in `data/private/security-contacts.md` on the owner's PC (`data/` is ignored by
+git), with a copy in the owner's password manager under "Wheel Turning security contacts".
+
+### The maintenance page
+
+`maintenance = true` makes the load balancer answer every path, `/healthz` included, with a fixed
+503 page saying the site is down for maintenance. The web task keeps running behind it. From
+`infra/terraform/envs/v1`:
+
+```bash
+terraform apply -var maintenance=true -var image_tag=$(terraform output -raw image_tag)
+```
+
+Apply again with `-var maintenance=false` to end it. `terraform test` in
+`infra/terraform/modules/service` checks the switch offline.
