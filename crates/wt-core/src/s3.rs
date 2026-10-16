@@ -393,30 +393,33 @@ impl AwsBucket {
     /// A client for `bucket`. No request is made until the store is used.
     pub fn connect(bucket: &str, endpoint: Option<Endpoint>) -> Result<Self, S3Error> {
         let client = block(async move {
-            let region = aws_config::meta::region::RegionProviderChain::default_provider()
-                .or_else(HOME_REGION);
             use aws_smithy_http_client::tls::{Provider, rustls_provider::CryptoMode};
             let http = aws_smithy_http_client::Builder::new()
                 .tls_provider(Provider::Rustls(CryptoMode::Ring))
                 .build_https();
-            let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(region)
-                .http_client(http);
+            // The loader resolves the region itself, so its lookups (the profile, the instance
+            // metadata service) use this client too; the home region is the fallback below.
+            let mut loader =
+                aws_config::defaults(aws_config::BehaviorVersion::latest()).http_client(http);
             if let Some(e) = &endpoint {
-                loader = loader.endpoint_url(&e.url).credentials_provider(
-                    aws_sdk_s3::config::Credentials::new(
+                loader = loader
+                    .region(aws_config::Region::new(HOME_REGION))
+                    .endpoint_url(&e.url)
+                    .credentials_provider(aws_sdk_s3::config::Credentials::new(
                         &e.access_key,
                         e.secret_key.expose(),
                         None,
                         None,
                         "wt-endpoint",
-                    ),
-                );
+                    ));
             }
             let shared = loader.load().await;
-            let config = aws_sdk_s3::config::Builder::from(&shared)
-                .force_path_style(endpoint.is_some())
-                .build();
+            let mut config =
+                aws_sdk_s3::config::Builder::from(&shared).force_path_style(endpoint.is_some());
+            if shared.region().is_none() {
+                config = config.region(aws_config::Region::new(HOME_REGION));
+            }
+            let config = config.build();
             Ok(aws_sdk_s3::Client::from_conf(config))
         })?;
         Ok(Self {
