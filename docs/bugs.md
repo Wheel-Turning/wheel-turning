@@ -17,6 +17,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B9](#b9-the-privacy-line-is-not-fully-accurate) | 2026-10-15 | The privacy line is not fully accurate | open |
 | [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open |
 | [B11](#b11-source-texts-are-not-in-search-answers-or-excerpt-references) | 2026-10-15 | Source texts are not in search, answers or excerpt references | open |
+| [B12](#b12-feedback-is-one-thin-form-not-a-structured-review-of-the-answer) | 2026-10-15 | Feedback is one thin form, not a structured review of the answer | open (backlog) |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -268,3 +269,39 @@ Mostly specced, not built.
 ### Fix
 
 To be ordered in the build plan once the register is complete. In outline: spec SuttaCentral as a CC0 source; change Spec 08 for the owner's link order and drop the inline excerpt; add Bookshop.org and Amazon links to `wt text link-out`; build the texts retrieval path and section; add a rule for questions that name a work or canon; render work-level footnotes and the link to the source; then, as P2, link to the likely place in the source, on this site or at the source.
+
+## B12. Feedback is one thin form, not a structured review of the answer
+
+- Reported: October 15, 2026, by the owner, as a backlog feature. Model: the per-thread feedback dialog in Consensus (consensus.app), which the owner calls best in class.
+
+### Expected
+
+One "Give feedback" button on the answer page opens a dialog with the question at its top and two tabs, so a reader can say in under a minute what worked and what did not.
+
+1. Excerpts tab.
+   - "How useful are these excerpts?" on a 1 to 5 scale, labelled "Not at all useful" and "Very useful".
+   - "Teachers or talks you expected to see", optional free text.
+   - "Choose excerpts to give specific feedback", optional: a numbered checklist of the page's excerpts, each with the excerpt reasons in `EXCERPT_REASONS` (helpful, not relevant, cut off, words look wrong, wrong teacher, talk or date, hard to follow) and a note.
+2. Summary tab.
+   - "What's wrong?", optional chips: too long, too short, did not answer my question, not supported by the excerpts, misrepresents a teacher, other.
+   - "Any other feedback?", optional free text.
+   - "Critique a specific citation", optional: pick a cited excerpt in the summary and say what is wrong with how it is used.
+3. Cancel and Submit. One submit records everything chosen in both tabs as one submission.
+
+### Actual
+
+- Live (image `main-490f844d6fb6`): a separate feedback control under each excerpt, with reasons and a note. Nothing rates the answer as a whole and nothing asks what is missing.
+- On `main` (#164, not deployed): one "Feedback on these answers" form at the foot of the page, with seven reasons and a note, following the owner's decisions of October 12 and 15. It cannot say which excerpt a reason is about.
+- Neither can be reviewed on AWS yet: `wt report feedback` needs a `wt_analyst` login, which RDS does not have.
+
+### Cause
+
+Not built. The current form follows Spec 06, Answer page structure, rule 6, and Spec 09, Excerpt footer and feedback. Before code:
+
+1. Spec 06 and Spec 09: the dialog, its copy and its no-script form. The CSP forbids inline scripts, so the dialog opens from `answer.js`, and without the script the button links to a plain feedback page for the answer (for example `GET /a/{answer}/feedback`) with the same two sections.
+2. Spec 02 and a new migration: `feedback` has no column for a 1 to 5 rating or for "expected to see", and one submission spanning several excerpts needs its rows tied by `submission_id`, which exists, so only the rating and the expected-to-see text are new. `v_feedback_counts` and `feedback_notes()` need the new fields, and the expected-to-see text is a note under the same privacy rule: read without its question unless the query is flagged.
+3. The review path from the analyst-login work, so the owner can read the results.
+
+### Fix
+
+To be ordered in the build plan once the register is complete.
