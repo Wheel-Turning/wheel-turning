@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use wt_core::answer::SummaryPart;
+use wt_core::answer::{SummaryPart, SummaryStatus};
 use wt_core::config::LlmStage;
 use wt_core::excerpt::{Excerpt, Window, WindowPassage};
 use wt_core::ids::{PassageId, TeacherId};
@@ -130,6 +130,7 @@ async fn a_good_summary_passes_and_each_citation_becomes_a_verbatim_quotation() 
     let out = run(&llm).await;
     assert_eq!(out.failure, None);
     assert!(out.dropped.is_empty(), "{:?}", out.dropped);
+    assert_eq!(out.status(), SummaryStatus::Shown);
     let summary = out.summary.unwrap();
     let parts: Vec<SummaryPart> = summary.sentences.iter().map(|s| s.part).collect();
     assert_eq!(
@@ -336,6 +337,7 @@ async fn a_headline_lost_twice_leaves_no_summary() {
     let out = run(&llm).await;
     assert!(out.summary.is_none());
     assert_eq!(out.failure, None);
+    assert_eq!(out.status(), SummaryStatus::AllSentencesRejected);
     assert_eq!(out.calls, 10, "one revision only");
 }
 
@@ -371,6 +373,7 @@ async fn a_verifier_failure_omits_the_summary() {
         out.failure.as_ref().map(Failure::as_str),
         Some("synthesis_failed")
     );
+    assert_eq!(out.status(), SummaryStatus::ModelError);
 }
 
 #[tokio::test]
@@ -389,6 +392,7 @@ async fn no_excerpts_make_no_call() {
     )
     .await;
     assert_eq!(out, Synthesis::default());
+    assert_eq!(out.status(), SummaryStatus::NotAttempted);
     assert!(llm.seen.lock().unwrap().is_empty());
 }
 
@@ -429,10 +433,8 @@ async fn a_generation_timeout_omits_the_summary() {
     };
     let out = run_with(&slow, &settings).await;
     assert!(out.summary.is_none());
-    assert!(matches!(
-        out.failure,
-        Some(Failure::Failed { stage: "synth", .. })
-    ));
+    assert_eq!(out.failure, Some(Failure::TimedOut { stage: "synth" }));
+    assert_eq!(out.status(), SummaryStatus::Timeout);
 }
 
 #[tokio::test]
@@ -444,6 +446,15 @@ async fn a_refusal_at_the_cap_is_logged_as_cap_reached() {
     let out = run(&capped).await;
     assert!(out.summary.is_none());
     assert_eq!(out.failure, Some(Failure::CapReached));
+    assert_eq!(out.status(), SummaryStatus::CapReached);
+}
+
+#[tokio::test]
+async fn no_model_is_reported_as_no_key() {
+    let out = run(&wt_extract::UnavailableLlm).await;
+    assert!(out.summary.is_none());
+    assert_eq!(out.failure, Some(Failure::NoModel { stage: "synth" }));
+    assert_eq!(out.status(), SummaryStatus::NoKey);
 }
 
 /// Collects formatted log lines.

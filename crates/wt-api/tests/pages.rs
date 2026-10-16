@@ -429,6 +429,14 @@ async fn theme_counts(pool: &PgPool) -> (i32, i32) {
         .unwrap()
 }
 
+/// The answer's `summary_status` (Spec 11, PB2.4).
+async fn summary_status(pool: &PgPool) -> String {
+    sqlx::query_scalar("select summary_status from answer")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// The summary section of a page.
 fn summary_of(body: &str) -> &str {
     let start = body.find("<section id=\"summary\"").unwrap();
@@ -502,6 +510,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
 
     assert_eq!(theme_counts(&fx.pool).await, (2, 0));
+    assert_eq!(summary_status(&fx.pool).await, "shown");
     let stored: serde_json::Value = sqlx::query_scalar("select payload from answer")
         .fetch_one(&fx.pool)
         .await
@@ -530,7 +539,11 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
 
 #[tokio::test]
 async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
+    // The headline is rejected in the draft and again in its one revision.
     let llm = Arc::new(FakeLlm::new(vec![
+        Ok(summary_reply()),
+        Ok(verdict(false)),
+        Ok(verdict(true)),
         Ok(summary_reply()),
         Ok(verdict(false)),
         Ok(verdict(true)),
@@ -541,7 +554,8 @@ async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
     assert!(!page.body.contains("id=\"summary\""));
     assert!(!page.body.contains(HEADLINE) && !page.body.contains(AGREE));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
-    assert_eq!(theme_counts(&fx.pool).await, (0, 1));
+    assert_eq!(theme_counts(&fx.pool).await, (0, 2));
+    assert_eq!(summary_status(&fx.pool).await, "all_sentences_rejected");
 }
 
 #[tokio::test]
@@ -554,6 +568,7 @@ async fn a_failed_verifier_leaves_a_fully_rendered_answer_without_the_summary() 
     assert!(!page.body.contains("id=\"summary\""));
     assert!(page.body.contains("Ada Fixture") && page.body.contains("Bo Fixture"));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
+    assert_eq!(summary_status(&fx.pool).await, "model_error");
 }
 
 /// A model that never answers in time.
@@ -581,6 +596,90 @@ async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_summary
     assert_eq!(page.status, StatusCode::OK);
     assert!(!page.body.contains("id=\"summary\""));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
+    assert_eq!(summary_status(&fx.pool).await, "timeout");
+}
+
+/// A model that refuses every call at the month's cap.
+struct Capped;
+
+#[async_trait::async_trait]
+impl LlmClient for Capped {
+    async fn complete_value(
+        &self,
+        _: &LlmRequest,
+        _: &serde_json::Value,
+        _: DataClass,
+    ) -> Result<serde_json::Value, LlmError> {
+        Err(LlmError::CapReached {
+            month_to_date: 60.0,
+            cap: 60.0,
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_reached_cap_is_stored_as_cap_reached() {
+    let fx = start_with(site_with(Arc::new(Capped)), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("id=\"summary\""));
+    assert_eq!(summary_status(&fx.pool).await, "cap_reached");
+}
+
+/// Spec 11, PB2.4 and PB4.3: no model is stored as `no_key`, and the answer logs one
+/// `summary_settled` event with its status and no question text.
+#[tokio::test]
+async fn no_model_is_stored_as_no_key_and_logs_summary_settled() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let fx = start_with(site_with(Arc::new(wt_extract::UnavailableLlm)), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert_eq!(summary_status(&fx.pool).await, "no_key");
+    let answer: Uuid = sqlx::query_scalar("select id from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let events: Vec<serde_json::Value> = captured
+        .text()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "summary_settled")
+        .collect();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["summary_status"], "no_key");
+    assert_eq!(events[0]["answer_id"], answer.to_string());
+    assert!(
+        !captured.text().contains("work with anger"),
+        "no question text"
+    );
+}
+
+#[derive(Clone, Default)]
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Captured {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
 }
 
 /// The page comes back before the summary is written: its place shows at the top, and the
@@ -655,6 +754,7 @@ async fn named_mode_makes_no_summary_call() {
         llm.seen.lock().unwrap().is_empty(),
         "no model call in named mode"
     );
+    assert_eq!(summary_status(&fx.pool).await, "not_attempted");
 }
 
 /// Spec 04, Student questions, step 5: the transcript and answer pages show the student's

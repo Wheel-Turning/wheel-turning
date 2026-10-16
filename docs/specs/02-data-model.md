@@ -364,8 +364,17 @@ create table answer (
   id uuid primary key default gen_random_uuid(),
   query_log_id uuid not null unique references query_log(id) on delete cascade,
   payload jsonb not null,                -- passage ids and theme text only, never passage text
+  summary_status text,                   -- Spec 11, PB2.4: how the summary settled (below)
   created_at timestamptz not null default now()
 );
+
+-- answer.summary_status (Spec 11, PB2.4; migration 0047): 'pending' while a deferred summary is
+-- written, then 'shown', 'not_attempted' (named-teacher, sensitive or curated question, or no
+-- excerpts), 'timeout', 'model_error', 'cap_reached', 'all_sentences_rejected', 'no_key' or
+-- 'deferred_lost'. The web role writes it with the answer and settles a pending one through
+-- set_answer_summary_status(answer_id, summary, shown, dropped, status); the hourly purge calls
+-- settle_lost_summaries(interval), which marks any answer pending over ten minutes
+-- 'deferred_lost'. Null only on answers stored before 0047 whose payload did not show the outcome.
 
 create table answer_passage (
   answer_id uuid not null references answer(id) on delete cascade,

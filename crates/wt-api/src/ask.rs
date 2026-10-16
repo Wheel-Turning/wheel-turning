@@ -8,6 +8,7 @@ use std::time::Instant;
 use serde::Serialize;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
+use wt_core::answer::SummaryStatus;
 use wt_core::ids::{AnswerId, TesterId};
 use wt_db::answer::Payload;
 use wt_extract::DataClass;
@@ -61,6 +62,8 @@ pub struct Asked {
     pub themes_dropped: usize,
     /// Set when the summary failed or timed out.
     pub synthesis_failed: bool,
+    /// How the summary settled, or `pending` while a deferred one is written (Spec 11, PB2.4).
+    pub summary_status: SummaryStatus,
     /// The reranker was missing, failed or timed out.
     pub rerank_degraded: bool,
     /// The notice key stored in the payload, if any.
@@ -333,6 +336,11 @@ pub async fn answer_framed(
         Mode::Standard => ("standard", None),
         Mode::NamedTeacher(t) => ("named_teacher", Some(t)),
     };
+    let summary_status = match &input {
+        None => SummaryStatus::NotAttempted,
+        Some(_) if deferred => SummaryStatus::Pending,
+        Some(_) => synthesis.status(),
+    };
     let theme_count = synthesis.shown();
     let passage_count = ids.len();
     let payload = Payload {
@@ -368,12 +376,16 @@ pub async fn answer_framed(
         sensitive_category: level.as_str(),
         relevance: triaged.relevance().map(Relevance::as_str),
         triage_degraded: triaged.degraded,
+        summary_status,
     };
     let answer_id = wt_db::answer::persist(pool, &new)
         .await
         .map_err(AskError::Persist)?;
     timings.persist_ms = millis(stage);
     timings.total_ms = millis(started);
+    if summary_status != SummaryStatus::Pending {
+        settled(answer_id, summary_status);
+    }
     if deferred && let Some(input) = input {
         tokio::spawn(write_summary(
             pool.clone(),
@@ -398,6 +410,7 @@ pub async fn answer_framed(
         theme_count,
         themes_dropped: synthesis.dropped.len(),
         synthesis_failed: synthesis.failure.is_some(),
+        summary_status,
         rerank_degraded: found.rerank_degraded,
         notice,
         timings,
@@ -406,8 +419,20 @@ pub async fn answer_framed(
     })))
 }
 
-/// Writes a deferred summary and stores it, or that there is none, on the answer. A failure
-/// leaves the answer without a summary, as an inline failure does; the page stops waiting.
+/// Logs `summary_settled` (Spec 11, PB2.4 and PB4.3): how one answer's summary settled. It
+/// carries the answer id and the status, never the question.
+pub fn settled(answer: AnswerId, status: SummaryStatus) {
+    tracing::info!(
+        event = "summary_settled",
+        summary_status = status.as_str(),
+        answer_id = %answer,
+        "summary settled"
+    );
+}
+
+/// Writes a deferred summary and stores it, or that there is none, on the answer, with how it
+/// settled. A failure leaves the answer without a summary, as an inline failure does; the page
+/// stops waiting.
 async fn write_summary(
     pool: PgPool,
     llm: std::sync::Arc<dyn wt_extract::LlmClient>,
@@ -419,20 +444,31 @@ async fn write_summary(
     let started = Instant::now();
     let synthesis =
         wt_synth::summarize(llm.as_ref(), &input, &aliases, &settings, DataClass::Real).await;
+    let status = synthesis.status();
     let stored = wt_db::answer::set_summary(
         &pool,
         answer,
         synthesis.summary.as_ref(),
         synthesis.shown(),
         synthesis.dropped.len(),
+        status,
     )
     .await;
     match stored {
-        Ok(_) => tracing::info!(
+        Ok(true) => {
+            tracing::info!(
+                synth_ms = millis(started),
+                shown = synthesis.shown(),
+                failed = synthesis.failure.is_some(),
+                "summary stored"
+            );
+            settled(answer, status);
+        }
+        // The purge already marked it lost, and counted it so.
+        Ok(false) => tracing::warn!(
             synth_ms = millis(started),
-            shown = synthesis.shown(),
-            failed = synthesis.failure.is_some(),
-            "summary stored"
+            summary_status = status.as_str(),
+            "a deferred summary settled after it was marked lost"
         ),
         Err(e) => tracing::error!(error = %e, "storing a deferred summary"),
     }
