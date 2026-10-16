@@ -82,7 +82,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_WHISPER_CLI` | none | Path to whisper.cpp's `whisper-cli`, built for the worker's hardware, which the worker runs as a subprocess (Spec 04, decision of October 5, 2026) |
 | `GGML_VK_DISABLE_COOPMAT` | none | Set to 1 on the transcription worker. Read by whisper.cpp's Vulkan backend, not by the loader. Without it Vulkan produces garbage on the Arc 140V. See Spec 04. |
 | `WT_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
-| `WT_ALERT_TOPIC_ARN` | none | SNS topic for alerts to the owner. Empty turns alerts off. See Spec 08. |
+| `WT_ALERT_TOPIC_ARN` | none | SNS topic for alerts to the owner: the `observability` module's alarm topic, set on the web and eval tasks by Terraform. Empty logs alerts as warnings instead of publishing them. `wt alerts test` publishes one message. See Spec 08. |
 | `WT_PRIVACY_DEFAULT` | `share` | Question-keeping mode for new testers, share or count\_only. Set to count\_only before any public launch. See Spec 06. |
 | `WT_QUERY_RETENTION_DAYS` | `180` | Days a kept question's text is stored. See Spec 06. |
 | `WT_COUNT_ONLY_TTL_HOURS` | `24` | Hours a question is kept in count-only mode before it is deleted. See Spec 06. |
@@ -105,11 +105,11 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 | `network` | VPC over two availability zones, public and private subnets, S3 gateway endpoint | No NAT gateway in v1. Compute runs in public subnets with security groups that allow no inbound traffic except the load balancer to the web service. The database sits in private subnets. |
 | `database` | RDS Postgres 16, parameter group, subnet group | `db.t4g.medium`, 50 GB gp3, encrypted, 7-day backups, `rds.force_ssl=1`, no public access. The `vector` extension is created by migration. Master credentials live in Secrets Manager. |
 | `storage` | Three S3 buckets: transcripts, scratch, models | All block public access and deny non-TLS requests. Scratch expires objects after one day and aborts multipart uploads after one day. Transcripts has versioning off. Models has versioning on. |
-| `service` | ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate, HTTPS listener | One task, 2 vCPU and 8 GB to start, health check on `/healthz`, HTTP redirects to HTTPS. A `domain_name` variable wires DNS when set. |
+| `service` | ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate, HTTPS listener | One task, 2 vCPU and 8 GB to start, health check on `/healthz`, HTTP redirects to HTTPS. A `domain_name` variable wires DNS when set. `maintenance = true` makes the HTTPS listener answer every path with a fixed 503 maintenance page (Spec 11, PB4.4). |
 | `batch_host` | EC2 launch template and instance, instance profile | `g5.xlarge` by default with an NVIDIA-ready image, 200 GB gp3 scratch volume, access through SSM only. The variable `batch_host_enabled` creates or destroys it. |
 | `secrets` | Secrets Manager entries for database, Anthropic key, YouTube key, session secret | Values are set out of band and never appear in Terraform state as plaintext inputs |
 | `iam` | Task execution role, web task role, batch host role, CI deploy role | Least privilege per the rules below. The CI role trusts GitHub OIDC and holds no long-lived keys. |
-| `observability` | CloudWatch log groups, alarms, a Route 53 health check | 30-day log retention. Alarms on load balancer 5xx rate, database CPU and free storage, and on a nonempty scratch bucket after 24 hours. Two alarms fire with no traffic: no healthy web task behind the load balancer for 5 minutes, and a Route 53 HTTPS health check on `/healthz` failing for 3 minutes. Route 53 health check metrics exist only in us-east-1, so that alarm and a second alarm topic live there. |
+| `observability` | CloudWatch log groups, alarms, a Route 53 health check | 30-day log retention. Alarms on load balancer 5xx rate, database CPU and free storage, and on a nonempty scratch bucket after 24 hours. Two alarms fire with no traffic: no healthy web task behind the load balancer for 5 minutes, and a Route 53 HTTPS health check on `/healthz` failing for 3 minutes. Route 53 health check metrics exist only in us-east-1, so that alarm and a second alarm topic live there. Alarms on the answer path read the web service's JSON log events through metric filters (Spec 11, PB4.3): model calls failing, the spend cap reached, summaries not shown, answers served without the relevance check, and slow answers. Both topics email `alert_email` and, when set, `second_alert_email`. Runbook procedure 13 has an entry per alarm. |
 
 ### The beta deployment
 
@@ -117,8 +117,8 @@ Owner's decision of October 13, 2026: invited testers use this stack, not the PC
 
 ## Secrets, IAM and network rules
 
-1. The web task role reads the models bucket and the database, Anthropic and session secrets. It cannot write to the transcripts or scratch buckets.
-2. The batch host role reads and writes the transcripts and scratch buckets, reads the models bucket, and reads the database, Anthropic and YouTube secrets.
+1. The web task role reads the models bucket and the database, Anthropic and session secrets. It cannot write to the transcripts or scratch buckets. It may publish to the alert topic and to nothing else in SNS.
+2. The batch host role reads and writes the transcripts and scratch buckets, reads the models bucket, and reads the database, Anthropic and YouTube secrets, and publishes to the alert topic only.
 3. Database access uses four roles. `dg_owner` runs migrations and is used only from CI and a developer machine. `dg_pipeline` writes pipeline tables and is used by the batch host and by the worker on the owner's PC through the port forward. `dg_web` reads the serving view and writes logs and is used by the web service. `dg_analyst` reads aggregate views only. Spec 02 defines the grants.
 4. The database security group accepts port 5432 only from the web and batch security groups. The web security group accepts traffic only from the load balancer. The batch host accepts no inbound traffic. The owner's PC reaches the database through an SSM port forward via the batch host, so its connections arrive from the batch security group and need no new rule.
 5. Connections to Postgres require TLS outside `dev`, with `sslmode=require` in `DATABASE_URL`.
@@ -163,7 +163,7 @@ Decisions of October 3, 2026.
 
 - Naming. The GitHub organization is `Wheel-Turning` and the repository is `Wheel-Turning/wheel-turning`. Crates are `wt-*`, the command is `wt`, environment variables start with `WT_`, and AWS resources are prefixed `wt-`. Wherever the specs say `dg`, `DG_` or `dharma-gates`, the first Claude Code pass renames them and lists every change for review.
 - Domain. The project owns `wheelturning.org`. The Terraform variable `domain_name` is set to `demo.wheelturning.org` for v1, which leaves the apex free. The `service` module requests an ACM certificate with DNS validation. The owner adds the validation record at the registrar, or moves DNS to Route 53 and sets `route53_zone_id` so Terraform does it. The same module adds the record that points the name at the load balancer. `/rights`, `/accessibility` and `/robots.txt` are public on that name.
-- Alerts. The `observability` module adds an SNS topic, an email subscription to the variable `alert_email`, and an `sns:Publish` permission on that topic for the web service and the batch host. The owner must click the confirmation link AWS emails to that address, or nothing arrives. The topic ARN goes to the code as `WT_ALERT_TOPIC_ARN`. Spec 08 lists what is published.
+- Alerts. The `observability` module adds an SNS topic, an email subscription to the variable `alert_email` and, when set, a second to `second_alert_email`, and an `sns:Publish` permission on that topic for the web service and the batch host. The code publishes through `SnsAlerter` when `WT_ALERT_TOPIC_ARN` is set, and logs a warning through `LogAlerter` otherwise (Spec 11, PB4.2). The owner must click the confirmation link AWS emails to that address, or nothing arrives. The topic ARN goes to the code as `WT_ALERT_TOPIC_ARN`. Spec 08 lists what is published.
 - Accounts. AWS, Anthropic, Google Cloud and Hugging Face accounts are opened in the owner's own name for now. Moving them to a nonprofit later means creating new accounts and migrating, which the runbook notes.
 
 Acceptance criteria:
@@ -171,6 +171,21 @@ Acceptance criteria:
 - [x] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply. (Checked October 13, 2026 with the beta deploy. DNS stays at Cloudflare, so the validation record and the CNAME are Terraform outputs copied there by hand. `app.wheelturning.org` is the primary name and `demo.` an alternate on the same certificate.)
 - [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed.
 - [ ] The web role can publish to the alert topic and to nothing else in SNS.
+
+## Recovery and availability targets
+
+Owner's decision of October 16, 2026 (Spec 11, PB4.5, open question 8), from a tiered table of targets for small nonprofits. The database and the site are Tier 1, mission-critical:
+
+| Tier | Systems | Recovery time | Data loss | Availability |
+| --- | --- | --- | --- | --- |
+| 1, mission-critical | The RDS database, the site at `app.wheelturning.org` | 4 to 24 hours | 24 hours | 99.9% (about 9 hours of downtime a year) |
+| 2, operational | Shared files and drives, project tracking | 24 to 48 hours | 24 to 48 hours | 99.0% |
+| 3, low priority | Archived records, past materials | 3 to 7 days | 1 week | 95.0%, best effort |
+
+- Data loss. RDS keeps 7 days of automated backups with point-in-time recovery, which meets the 24-hour target with a wide margin. Runbook procedure 6 restores the database and replays takedowns.
+- Recovery time. A restore to a new instance, the replay and a redeploy fit within 4 hours when rehearsed. The restore test runs twice a year, timed against this target, and its result goes in `docs/incidents/` as a drill.
+- Availability is measured by the external Route 53 health check on `/healthz` (the `wt-v1-healthz-unreachable` alarm) and reported monthly against 99.9%. That target is not reachable on one database instance in one availability zone and one web task: a database restart, a deploy that fails its health check or a single-zone outage each spends most of a month's 43 minutes. The private beta records availability against 99.9% and reports the gap. Two zones and two tasks (UB3.3) are the fix.
+- Maintenance windows count as downtime.
 
 ## GPU access
 

@@ -10,7 +10,7 @@ use std::time::Duration;
 use wt_core::Config;
 use wt_core::config::LlmStage;
 use wt_extract::{
-    ClaudeClient, ClaudeSettings, LlmClient, LogAlerter, PgLedger, PriceTable, UnavailableLlm,
+    Alerter, ClaudeClient, ClaudeSettings, LlmClient, PgLedger, PriceTable, UnavailableLlm,
 };
 use wt_ml::{MlError, OnnxEmbedder, OnnxReranker, OnnxSettings, Reranker};
 use wt_retrieve::rank::LlmRanker;
@@ -93,7 +93,10 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         }
     };
     let (llm, triage): (Arc<dyn LlmClient>, Option<Arc<dyn Triage>>) = match claude(
-        config, &dir, pool,
+        config,
+        &dir,
+        pool,
+        wt_extract::alerter(config.alert_topic_arn.as_deref()).await,
     ) {
         Ok(c) => {
             let c: Arc<dyn LlmClient> = Arc::new(c);
@@ -178,6 +181,7 @@ fn claude(
     config: &Config,
     config_dir: &Path,
     pool: &sqlx::PgPool,
+    alerter: Arc<dyn Alerter>,
 ) -> Result<ClaudeClient, SiteError> {
     let api_key = config
         .anthropic_api_key
@@ -246,7 +250,7 @@ fn claude(
         },
         prices,
         Arc::new(PgLedger::new(pool.clone(), config.llm_monthly_cap_usd)),
-        Arc::new(LogAlerter),
+        alerter,
     )
     .map_err(err("building the Claude client"))
 }

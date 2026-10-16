@@ -385,7 +385,11 @@ pub async fn answer_framed(
         ));
     }
 
+    // `ask_completed` feeds the slow-answers alarm (Spec 11, PB4.3): time to the page, without
+    // the deferred summary.
     tracing::info!(
+        event = "ask_completed",
+        ms = timings.total_ms,
         latency_ms = timings.total_ms,
         synth_ms = timings.synth_ms,
         "answer stored"

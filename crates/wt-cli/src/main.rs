@@ -13,6 +13,7 @@ use wt_core::Config;
 use wt_core::telemetry::{LogOutput, init_logging};
 
 mod admin_cmds;
+mod alerts_cmds;
 mod asr_cmds;
 mod commands;
 mod eval_cmds;
@@ -42,6 +43,11 @@ struct Cli {
 /// module.
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Alerts to the owner through WT_ALERT_TOPIC_ARN (Spec 11, PB4.2).
+    Alerts {
+        #[command(subcommand)]
+        command: alerts_cmds::AlertsCommand,
+    },
     /// Database operations.
     Db {
         #[command(subcommand)]
@@ -232,6 +238,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         config,
     };
     match cli.command {
+        Command::Alerts { command } => alerts_cmds::alerts(&ctx.config, command).await?,
         Command::Db { command } => admin_cmds::db(&ctx, command).await?,
         Command::Registry { command } => admin_cmds::registry(&ctx, command).await?,
         Command::Sangha { command } => admin_cmds::sangha(&ctx, command).await?,
