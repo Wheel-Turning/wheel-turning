@@ -318,6 +318,43 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   pass `["wt","eval","export-review","--run","<id>","--out","/out/<id>/review.html"]`; the task
   copies `/out` to `s3://wt-v1-transcripts-904883674947/eval-reviews/`, and the owner downloads it
   with `aws s3 cp` (the page quotes transcripts: never share it by public link).
+- Logins: `wt_analyst_login` (aggregate reports) and `wt_audit_login` (the read-only nightly
+  audit) take their passwords from `wt-v1/db_wt_analyst_login` and `wt-v1/db_wt_audit_login`.
+  Create or reset each once with the `wt-v1-admin` task, which injects every login password:
+
+  ```bash
+  aws ecs run-task --cluster wt-v1 --task-definition wt-v1-admin --launch-type FARGATE     --network-configuration "awsvpcConfiguration={subnets=[<public subnets>],securityGroups=[<web sg>],assignPublicIp=ENABLED}"     --overrides '{"containerOverrides":[{"name":"admin","command":["wt","db","create-login","--role","wt_analyst","--password-env","WT_LOGIN_PASSWORD_WT_ANALYST_LOGIN"]}]}'
+  ```
+
+  and again with `"--role","wt_audit","--password-env","WT_LOGIN_PASSWORD_WT_AUDIT_LOGIN"`.
+- Feedback: testers' feedback is read on RDS as the analyst, which sees counts and notes but
+  never a question unless the tester flagged it. Open the batch host forward (procedure 1,
+  steps 1 and 2), then in the same PowerShell window (the password is the
+  `wt-v1/db_wt_analyst_login` secret, percent-encoded):
+
+  ```powershell
+  $env:DATABASE_URL_ANALYST = "postgres://wt_analyst_login:<password>@localhost:5433/wt?sslmode=require"
+  wt report feedback --since 7d --notes
+  ```
+
+- Nightly audit: the `wt-v1-audit` task runs `wt audit --fail-on warning --check-links` (plus
+  `--backup-bucket` while the PC keeps its database) against RDS as `wt_audit_login`, started by
+  the `wt-v1-audit-nightly` schedule at 10:17 UTC. Its JSON report is in the `/wt-v1/admin` log
+  group under `audit/audit/<task id>`. Any finding, warning or fail, exits 1, and the
+  `wt-v1-audit-failed` EventBridge rule emails the alarm topic; so does a task that fails to
+  start, and the `wt-v1-audit-not-started` alarm fires when the schedule cannot start it. To run
+  it now:
+
+  ```bash
+  aws ecs run-task --cluster wt-v1 --task-definition wt-v1-audit --launch-type FARGATE     --network-configuration "awsvpcConfiguration={subnets=[<public subnets>],securityGroups=[<web sg>],assignPublicIp=ENABLED}"
+  ```
+
+  To test the alarm, add an override with a command that exits 1. The image has no shell, so use
+  a bucket the task may not list:
+  `--overrides '{"containerOverrides":[{"name":"audit","command":["wt","audit","--backup-bucket","wt-no-such-bucket"]}]}'`.
+
+  The GitHub workflow "audit smoke test" (`nightly.yml`) only proves the binary on a fresh
+  database; it is not the audit of the beta.
 - Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
   about $30). Scale the service to 0 tasks between test rounds to save the task's share.
 

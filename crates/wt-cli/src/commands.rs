@@ -9,7 +9,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
-use wt_db::audit::AuditSettings;
+use wt_db::audit::{AuditSettings, FailOn};
 use wt_db::consent::{Holder, RightsTarget};
 use wt_db::registry::{self, SpeakerOutcome};
 use wt_db::takedown::{Scope, TakedownReport};
@@ -455,15 +455,46 @@ pub async fn takedown_replay(
     print_json(&report)
 }
 
+/// `wt audit`'s options.
+#[derive(Debug, clap::Args)]
+pub(crate) struct AuditArgs {
+    /// The directory holding pipeline.toml, for `[deployment] exposure`.
+    #[arg(long, default_value = "config")]
+    config_dir: std::path::PathBuf,
+    /// Which findings exit 1: those of fail checks, or of any check. The scheduled run on RDS
+    /// uses warning, so its alarm fires on either (Spec 11, PB1.4).
+    #[arg(long, value_enum, default_value = "fail")]
+    fail_on: FailOnArg,
+    /// The PC backups bucket. When given, the newest object under db/ must be younger than
+    /// --backup-max-age-h, or the audit warns (Spec 11, PB1.3). Leave it out once the PC keeps
+    /// no database.
+    #[arg(long)]
+    backup_bucket: Option<String>,
+    /// The newest PC backup's age limit in hours.
+    #[arg(long, default_value_t = 36)]
+    backup_max_age_h: u64,
+    /// Ask each web link on the support page and warn on any that does not answer (Spec 11,
+    /// PB3.4). Makes network calls; the scheduled task on AWS sets it.
+    #[arg(long)]
+    check_links: bool,
+}
+
+/// `--fail-on`'s values.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum FailOnArg {
+    Fail,
+    Warning,
+}
+
 /// `wt audit`: runs every check with the deployment's exposure from pipeline.toml, prints the
-/// report and exits 1 when a `fail` check has findings (Spec 07).
+/// report and exits 1 when a check at the `--fail-on` level has findings (Spec 07).
 pub async fn audit(
     pool: &PgPool,
     config: &wt_core::Config,
-    config_dir: &Path,
+    args: &AuditArgs,
 ) -> anyhow::Result<ExitCode> {
     // Without a pipeline.toml, as in a bare checkout, the tool is private.
-    let pipeline = config_dir.join("pipeline.toml");
+    let pipeline = args.config_dir.join("pipeline.toml");
     let deployment = if pipeline.exists() {
         wt_ingest::config::Deployment::load(&pipeline)?
     } else {
@@ -479,11 +510,37 @@ pub async fn audit(
         scratch_root: &config.scratch_dir,
         scratch_ttl_h: wt_db::audit::SCRATCH_TTL_H,
     };
-    let report = wt_db::audit::run_with_files(pool, settings, &files)
+    let mut report = wt_db::audit::run_with_files(pool, settings, &files)
         .await
         .context("running the audit")?;
+
+    let backups = match &args.backup_bucket {
+        Some(_) => Some(crate::audit_outside::S3Backups::new().await),
+        None => None,
+    };
+    let probe = if args.check_links {
+        Some(crate::audit_outside::HttpProbe::new()?)
+    } else {
+        None
+    };
+    let outside = crate::audit_outside::Outside {
+        backups: backups
+            .as_ref()
+            .zip(args.backup_bucket.as_deref())
+            .map(|(s, b)| (s as &dyn crate::audit_outside::BackupStore, b)),
+        backup_max_age: std::time::Duration::from_secs(args.backup_max_age_h.saturating_mul(3600)),
+        links: probe
+            .as_ref()
+            .map(|p| p as &dyn crate::audit_outside::LinkProbe),
+    };
+    crate::audit_outside::add_checks(&mut report, &outside).await?;
+
     print_json(&report)?;
-    Ok(if report.failed() {
+    let level = match args.fail_on {
+        FailOnArg::Fail => FailOn::Fail,
+        FailOnArg::Warning => FailOn::Warning,
+    };
+    Ok(if report.fails_on(level) {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS

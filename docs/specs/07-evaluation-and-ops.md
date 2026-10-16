@@ -74,7 +74,7 @@ The notebook is also the reference for the Rust retrieval build. After M5, a par
 
 ## Nightly audit checks
 
-`wt audit` runs the checks below, prints a JSON report, and exits nonzero if any check marked fail has findings. `nightly.yml` runs it as a one-off task against the live database. Checks marked warn are listed and do not change the exit code.
+`wt audit` runs the checks below, prints a JSON report, and exits nonzero if any check marked fail has findings. Checks marked warn are listed and do not change the exit code, unless `--fail-on warning` is given. The `wt-v1-audit` ECS task runs it against RDS every day at 10:17 UTC with `--fail-on warning`, as the read-only `wt_audit_login`, and a nonzero exit emails the alarm topic (Spec 11, PB1.4). `nightly.yml` is only a smoke test on a fresh database.
 
 | Check | Finding | Severity |
 | --- | --- | --- |
@@ -90,6 +90,8 @@ The notebook is also the reference for the Rust retrieval build. After M5, a par
 | Consent staleness | A consent row last verified more than `consent_review_days` ago (default 90) | Warn |
 | Quarantine age | A talk quarantined for more than 7 days | Warn |
 | Series metadata | A ready talk with no series whose title matches a series pattern | Warn |
+| PC backup age | While the PC keeps its own database (`--backup-bucket`), the newest dump under `db/` in its backups bucket is more than 36 hours old, or there is none (Spec 11, PB1.3) | Warn |
+| Crisis links | A web link on the support page does not answer with a success (`--check-links`, run only from AWS; Spec 11, PB3.4) | Warn |
 
 ## Takedown procedure and verification
 

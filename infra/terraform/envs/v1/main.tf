@@ -139,3 +139,26 @@ module "batch_host" {
   security_group_id     = module.network.security_group_ids["batch"]
   instance_profile_name = module.iam.batch_instance_profile_name
 }
+
+module "audit" {
+  source                   = "../../modules/audit"
+  name                     = local.name
+  permissions_boundary_arn = local.workload_boundary_arn
+  # The migrate tag, like the eval task, so a deploy's first plan moves the audit with it.
+  image              = "${module.service.ecr_repository_url}:${coalesce(var.migrate_image_tag, var.image_tag, "none")}"
+  cluster_name       = module.service.cluster_name
+  subnet_ids         = module.network.public_subnet_ids
+  security_group_id  = module.network.security_group_ids["web"]
+  log_group_name     = module.observability.log_group_names["admin"]
+  log_group_arn      = module.observability.log_group_arns["admin"]
+  ecr_repository_arn = module.service.ecr_repository_arn
+  secret_arns        = module.secrets.arns
+  alarm_topic_arn    = module.observability.alarm_topic_arn
+  pc_backup_bucket   = var.pc_backup_bucket
+
+  db = {
+    host = module.database.address
+    port = module.database.port
+    name = module.database.db_name
+  }
+}

@@ -140,6 +140,9 @@ data "aws_iam_policy_document" "admin_exec" {
       var.secret_arns["db_wt_owner_login"],
       var.secret_arns["db_wt_web_login"],
       var.secret_arns["db_wt_pipeline_login"],
+      # For `wt db create-login` of the analyst and audit logins (Spec 11, PB1.4 and PB4.1).
+      var.secret_arns["db_wt_analyst_login"],
+      var.secret_arns["db_wt_audit_login"],
       # The eval task asks questions through the language model, as the site does.
       var.secret_arns["anthropic_api_key"],
     ]
