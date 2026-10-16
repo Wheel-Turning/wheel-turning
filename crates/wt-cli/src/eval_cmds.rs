@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use clap::Subcommand;
@@ -41,6 +42,12 @@ pub(crate) enum EvalCommand {
         /// Ask only the first N questions.
         #[arg(long)]
         limit: Option<usize>,
+        /// Also write every ranking call's scores, 0 to 10, to this JSON file: the judged
+        /// ranking measure of Spec 10 (Evaluation 1), which compares rankers by their counts of
+        /// candidates scored 7 and up on the same questions (Spec 11, PB2.0). Candidates are
+        /// named by a hash of their text, never the text.
+        #[arg(long)]
+        rank_scores: Option<PathBuf>,
     },
     /// Write the self-contained review page for the teacher reviewer.
     ExportReview {
@@ -124,10 +131,29 @@ pub(crate) async fn eval(
                 "questions": questions.len(), "drafts": drafts,
             }))?;
         }
-        EvalCommand::Run { set, limit } => {
-            let site = wt_api::site::load(config, pool)
+        EvalCommand::Run {
+            set,
+            limit,
+            rank_scores,
+        } => {
+            let mut site = wt_api::site::load(config, pool)
                 .await
                 .context("loading the models")?;
+            let recorder = match (&rank_scores, site.reranker.take()) {
+                (Some(_), Some(inner)) => {
+                    let recorder = Arc::new(RecordingRanker {
+                        inner,
+                        calls: Mutex::default(),
+                    });
+                    site.reranker = Some(recorder.clone());
+                    Some(recorder)
+                }
+                (Some(_), None) => anyhow::bail!("--rank-scores needs a ranker, and none loaded"),
+                (None, inner) => {
+                    site.reranker = inner;
+                    None
+                }
+            };
             let run_config = run_config(config, &site)?;
             let run = wt_eval::run::run(pool, &site, &set, &run_config, limit, |p| {
                 let o = &p.outcome;
@@ -151,6 +177,35 @@ pub(crate) async fn eval(
             })
             .await?;
             println!("{run}");
+            if let (Some(path), Some(recorder)) = (&rank_scores, recorder) {
+                let calls = recorder
+                    .calls
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("the ranking record was poisoned"))?
+                    .clone();
+                let count = |min: f32| -> usize {
+                    calls
+                        .iter()
+                        .flat_map(|c| &c.scores)
+                        .filter(|s| s.score >= min)
+                        .count()
+                };
+                let summary = serde_json::json!({
+                    "run": run.to_string(),
+                    "rank_model": config.llm_model_for(LlmStage::Rank).ok(),
+                    "questions_ranked": calls.len(),
+                    "candidates": calls.iter().map(|c| c.scores.len()).sum::<usize>(),
+                    "judged_7_plus": count(7.0),
+                    "judged_4_plus": count(4.0),
+                });
+                eprintln!("{summary}");
+                if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let body = serde_json::json!({ "summary": summary, "calls": calls });
+                std::fs::write(path, serde_json::to_string_pretty(&body)?)
+                    .with_context(|| format!("writing {}", path.display()))?;
+            }
         }
         EvalCommand::ExportReview { run, out } => {
             let lead_in = retrieval_config()?.answer.link_lead_in_ms;
@@ -282,5 +337,93 @@ fn commit() -> String {
             _ => head,
         },
         None => "unknown".to_owned(),
+    }
+}
+
+/// One ranking call as `wt eval run --rank-scores` records it.
+#[derive(Debug, Clone, serde::Serialize)]
+struct RankCall {
+    /// The question as ranked.
+    query: String,
+    /// Each candidate's score, in the order given.
+    scores: Vec<CandidateScore>,
+}
+
+/// One candidate's score.
+#[derive(Debug, Clone, serde::Serialize)]
+struct CandidateScore {
+    /// The first 16 hex digits of the SHA-256 of the candidate's text, which matches the same
+    /// candidate across runs without writing the text.
+    text_sha: String,
+    /// The score from 0 to 10: the sigmoid of the ranker's logit, times 10.
+    score: f32,
+}
+
+/// The site's ranker, recording every successful call's scores for `--rank-scores`.
+struct RecordingRanker {
+    /// The ranker the site loaded.
+    inner: Arc<dyn wt_ml::Reranker>,
+    /// The calls so far.
+    calls: Mutex<Vec<RankCall>>,
+}
+
+#[async_trait::async_trait]
+impl wt_ml::Reranker for RecordingRanker {
+    fn model_id(&self) -> &str {
+        self.inner.model_id()
+    }
+
+    async fn score(&self, query: &str, passages: &[String]) -> Result<Vec<f32>, wt_ml::MlError> {
+        let logits = self.inner.score(query, passages).await?;
+        let scores = passages
+            .iter()
+            .zip(&logits)
+            .map(|(text, logit)| CandidateScore {
+                text_sha: wt_core::records::sha256_hex(text.as_bytes())[..16].to_owned(),
+                score: (10.0 / (1.0 + (-logit).exp()) * 100.0).round() / 100.0,
+            })
+            .collect();
+        if let Ok(mut calls) = self.calls.lock() {
+            calls.push(RankCall {
+                query: query.to_owned(),
+                scores,
+            });
+        }
+        Ok(logits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use wt_ml::Reranker;
+
+    /// The recorder passes the ranker's logits through unchanged and keeps each candidate's
+    /// score on the 0 to 10 scale, named by a hash and never by its text.
+    #[tokio::test]
+    async fn the_recording_ranker_keeps_scores_and_returns_the_same_logits() {
+        let recorder = RecordingRanker {
+            inner: Arc::new(wt_ml::FakeReranker),
+            calls: Mutex::default(),
+        };
+        let passages = vec![
+            "sitting with the breath".to_owned(),
+            "an unrelated passage".to_owned(),
+        ];
+        let direct = wt_ml::FakeReranker
+            .score("breath sitting", &passages)
+            .await
+            .unwrap();
+        let logits = recorder.score("breath sitting", &passages).await.unwrap();
+        assert_eq!(logits, direct);
+        let calls = recorder.calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1);
+        let scores = &calls[0].scores;
+        assert_eq!(scores.len(), 2);
+        assert!(scores[0].score > 7.0 && scores[1].score < 4.0, "{scores:?}");
+        assert_eq!(scores[0].text_sha.len(), 16);
+        let json = serde_json::to_string(&calls).unwrap();
+        assert!(!json.contains("unrelated passage"));
     }
 }
