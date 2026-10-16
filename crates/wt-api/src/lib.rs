@@ -77,6 +77,9 @@ pub struct Site {
     pub keys: Keys,
     /// Marks the cookie `Secure`; everywhere but `dev`.
     pub secure_cookies: bool,
+    /// Sends `Strict-Transport-Security`; `prod` only, so a local or staging host is never pinned
+    /// to HTTPS (Spec 11, PB3.5).
+    pub hsts: bool,
     /// The in-memory rate limits.
     pub limits: Limits,
     /// `WT_OWNER_NAME`: who runs the site, for About. Without it About says "an individual".
@@ -148,6 +151,7 @@ impl Site {
             triage: None,
             keys: Keys::new(b"test-only-key"),
             secure_cookies: false,
+            hsts: false,
             site_dana_url: None,
             scope_sizes: Arc::default(),
             mailer: Arc::new(mail::FakeMailer::default()),
@@ -228,7 +232,10 @@ pub fn router(state: AppState) -> Router {
         .route("/talk/{talk}", get(talk_page))
         .route("/talk/{talk}/transcript", get(transcript_page))
         .fallback(not_found)
-        .layer(middleware::from_fn(security_headers))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            security_headers,
+        ))
         .with_state(state)
 }
 
@@ -265,14 +272,24 @@ async fn healthz(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
     }
 }
 
-/// Spec 06, rule 7 of invite access: headers on every response.
-async fn security_headers(request: Request, next: Next) -> Response {
+/// Spec 06, rule 7 of invite access, and Spec 11, PB3.5: headers on every response.
+async fn security_headers(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let h = response.headers_mut();
     h.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'"),
+        HeaderValue::from_static("default-src 'self'; frame-ancestors 'none'"),
     );
+    h.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=(), browsing-topics=()"),
+    );
+    if state.site.hsts {
+        h.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        );
+    }
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
