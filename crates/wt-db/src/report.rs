@@ -462,6 +462,8 @@ pub struct BetaQuestion {
     pub page_ms: Option<i32>,
     /// Dana link clicks on the answer while it is kept.
     pub link_clicks: i32,
+    /// How the answer's summary settled (Spec 11 PB2.4); none once purged or before statuses.
+    pub summary_status: Option<String>,
 }
 
 /// What `wt report beta` reads, before it is summed.
@@ -527,6 +529,29 @@ pub struct BetaDana {
     pub share_of_testers_with_click: f64,
 }
 
+/// One summary status's answers.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct StatusCount {
+    /// Answers with the status.
+    pub answers: i64,
+    /// Their share of answers.
+    pub share: f64,
+}
+
+/// Summaries in the period, by `answer.summary_status` (Spec 11 PB2.4). The leading metric is
+/// `shown_share`: at least 90% of answers that tried for a summary should show one.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct BetaSummaries {
+    /// Answers that tried for a summary: every status but `not_attempted`, `pending` and
+    /// `unrecorded`.
+    pub attempted: i64,
+    /// `shown` over `attempted`.
+    pub shown_share: f64,
+    /// Answers per status, as a share of every answer. `unrecorded` is an answer the purge has
+    /// removed since, or one stored before statuses.
+    pub by_status: BTreeMap<String, StatusCount>,
+}
+
 /// Model cost per answered question, over the answers whose cost was recorded.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct BetaCost {
@@ -568,6 +593,8 @@ pub struct BetaReport {
     pub feedback: BetaFeedback,
     /// Dana click-through.
     pub dana: BetaDana,
+    /// The share of answers showing a summary, by status.
+    pub summaries: BetaSummaries,
     /// Model cost per question.
     pub cost: BetaCost,
     /// Time to the first progress event and to the page.
@@ -630,6 +657,24 @@ impl BetaReport {
         let per_active: Vec<f64> = per_tester.values().map(|(n, _)| *n as f64).collect();
         let with_click = count(per_tester.values().filter(|(_, c)| *c > 0).count());
         let answered: Vec<&BetaQuestion> = inputs.questions.iter().filter(|q| q.answered).collect();
+        let mut statuses: BTreeMap<String, i64> = BTreeMap::new();
+        for q in &answered {
+            let status = q.summary_status.as_deref().unwrap_or("unrecorded");
+            *statuses.entry(status.to_owned()).or_default() += 1;
+        }
+        let attempted: i64 = statuses
+            .iter()
+            .filter(|(s, _)| !matches!(s.as_str(), "not_attempted" | "pending" | "unrecorded"))
+            .map(|(_, n)| n)
+            .sum();
+        let shown = statuses.get("shown").copied().unwrap_or(0);
+        let by_status = statuses
+            .into_iter()
+            .map(|(s, n)| {
+                let share = rate(n, count(answered.len()));
+                (s, StatusCount { answers: n, share })
+            })
+            .collect();
         let costs: Vec<f64> = answered.iter().filter_map(|q| q.llm_cost_usd).collect();
         let firsts: Vec<f64> = answered
             .iter()
@@ -662,6 +707,11 @@ impl BetaReport {
                 testers_with_click: with_click,
                 share_of_testers_with_click: rate(with_click, active),
             },
+            summaries: BetaSummaries {
+                attempted,
+                shown_share: rate(shown, attempted),
+                by_status,
+            },
             cost: BetaCost {
                 answers: count(costs.len()),
                 mean_usd: mean(&costs),
@@ -683,7 +733,7 @@ impl BetaReport {
 pub async fn beta(pool: &PgPool, since: DateTime<Utc>) -> Result<BetaReport, DbError> {
     let questions = sqlx::query!(
         r#"select tester as "tester!", answered as "answered!", llm_cost_usd,
-                  first_progress_ms, page_ms, link_clicks as "link_clicks!"
+                  first_progress_ms, page_ms, link_clicks as "link_clicks!", summary_status
            from beta_questions($1)"#,
         since
     )
@@ -697,6 +747,7 @@ pub async fn beta(pool: &PgPool, since: DateTime<Utc>) -> Result<BetaReport, DbE
         first_progress_ms: r.first_progress_ms,
         page_ms: r.page_ms,
         link_clicks: r.link_clicks,
+        summary_status: r.summary_status,
     })
     .collect();
     let returning_testers = sqlx::query_scalar!(r#"select beta_returning_testers() as "n!""#)

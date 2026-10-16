@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select tester as \"tester!\", answered as \"answered!\", llm_cost_usd,\n                  first_progress_ms, page_ms, link_clicks as \"link_clicks!\"\n           from beta_questions($1)",
+  "query": "select tester as \"tester!\", answered as \"answered!\", llm_cost_usd,\n                  first_progress_ms, page_ms, link_clicks as \"link_clicks!\", summary_status\n           from beta_questions($1)",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,12 @@
         "name": "link_clicks!",
         "type_info": "Int4",
         "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "summary_status",
+        "type_info": "Text",
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -51,8 +57,9 @@
       null,
       null,
       null,
+      null,
       null
     ]
   },
-  "hash": "3f261345e1a66d19aceafe63779a42186291c2d3d983d8578e47ba9e36bd5bbb"
+  "hash": "9db19e198c047eebc0ed8454658fa71283ccb4b49f2960cf60a4f889cfbf8276"
 }

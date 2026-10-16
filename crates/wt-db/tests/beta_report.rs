@@ -46,6 +46,8 @@ struct Q {
     page_ms: Option<i32>,
     /// `answered`, `purged` (a count-only answer the purge removed) or `acute` (no answer).
     kind: &'static str,
+    /// The answer's summary status, when it has one.
+    status: Option<&'static str>,
 }
 
 /// Logs a question and, unless it is acute, its answer. Returns the answer id when one is kept.
@@ -78,10 +80,11 @@ async fn ask(pool: &PgPool, tester: Uuid, q: Q) -> Option<Uuid> {
     match q.kind {
         "answered" => Some(
             sqlx::query_scalar(
-                "insert into answer (query_log_id, payload)
-                 values ($1, '{\"mode\": \"standard\", \"passage_ids\": []}') returning id",
+                "insert into answer (query_log_id, payload, summary_status)
+                 values ($1, '{\"mode\": \"standard\", \"passage_ids\": []}', $2) returning id",
             )
             .bind(log)
+            .bind(q.status)
             .fetch_one(pool)
             .await
             .unwrap(),
@@ -138,9 +141,14 @@ async fn the_beta_report_counts_each_figure_and_never_prints_a_question() {
 
     // Ana: three answered questions this week and one two weeks ago, so she returns.
     let mut answers = Vec::new();
-    for (cost, first, page) in [(0.01, 100, 1000), (0.02, 200, 2000), (0.03, 300, 3000)] {
+    for (cost, first, page, status) in [
+        (0.01, 100, 1000, "shown"),
+        (0.02, 200, 2000, "shown"),
+        (0.03, 300, 3000, "timeout"),
+    ] {
         let q = Q {
             kind: "answered",
+            status: Some(status),
             cost: Some(cost),
             first_ms: Some(first),
             page_ms: Some(page),
@@ -231,6 +239,24 @@ async fn the_beta_report_counts_each_figure_and_never_prints_a_question() {
     assert_eq!(r.dana.clicks_per_answer, 0.75);
     assert_eq!(r.dana.testers_with_click, 1);
     assert!((r.dana.share_of_testers_with_click - 1.0 / 3.0).abs() < 1e-9);
+
+    // Two shown and a timeout among Ana's; Ben's status went with his purged answer.
+    assert_eq!(r.summaries.attempted, 3);
+    assert!((r.summaries.shown_share - 2.0 / 3.0).abs() < 1e-9);
+    let by: Vec<(&str, i64, f64)> = r
+        .summaries
+        .by_status
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.answers, v.share))
+        .collect();
+    assert_eq!(
+        by,
+        [
+            ("shown", 2, 0.5),
+            ("timeout", 1, 0.25),
+            ("unrecorded", 1, 0.25)
+        ]
+    );
 
     assert_eq!(r.cost.answers, 4);
     assert!((r.cost.mean_usd - 0.025).abs() < 1e-9);

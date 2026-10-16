@@ -36,10 +36,12 @@ grant execute on function settle_answer_cost(uuid) to wt_web;
 
 -- One row per question since `since`, without its text or its tester's id: `tester` numbers the
 -- testers within this call only. Evaluation runs are left out. A count-only question whose text
--- and answer the purge removed still counts, as answered, with its cost and times.
+-- and answer the purge removed still counts, as answered, with its cost and times, though its
+-- summary status went with the answer (null, as on answers stored before 0047).
 create function beta_questions(since timestamptz)
   returns table (tester integer, answered boolean, llm_cost_usd float8,
-                 first_progress_ms integer, page_ms integer, link_clicks integer)
+                 first_progress_ms integer, page_ms integer, link_clicks integer,
+                 summary_status text)
   language sql stable security definer set search_path = public as
 $$
   select dense_rank() over (order by q.tester_id)::int,
@@ -48,7 +50,8 @@ $$
          q.first_progress_ms,
          q.page_ms,
          (select count(*) from dana_event d
-           where d.answer_id = a.id and d.kind = 'link_click')::int
+           where d.answer_id = a.id and d.kind = 'link_click')::int,
+         a.summary_status
   from query_log q
   join tester t on t.id = q.tester_id
   left join answer a on a.query_log_id = q.id
