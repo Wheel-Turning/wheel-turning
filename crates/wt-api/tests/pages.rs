@@ -527,7 +527,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
     assert!(section.contains("href=\"#p1\"") && section.contains("href=\"#p2\""));
     assert!(
-        section.contains("Drawn from 2 talks by 2 teachers."),
+        section.contains("The summary draws on 2 of these excerpts."),
         "{section}"
     );
     assert!(
@@ -536,7 +536,12 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
     assert!(
         !section.contains("excerpts come from teachers at"),
-        "the one-sangha note needs three excerpts"
+        "no one-sangha note (Spec 11, PB2.3)"
+    );
+    assert!(
+        page.body.contains("<p class=\"result\">2 teachers, 2 teachings, 2 excerpts</p>"),
+        "{}",
+        page.body
     );
     assert!(
         page.body.find("id=\"summary\"").unwrap() < page.body.find("<blockquote>").unwrap(),

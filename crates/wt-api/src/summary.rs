@@ -54,7 +54,7 @@ pub struct SummaryView {
     pub notes: Vec<String>,
     /// The closing sentence.
     pub sum_up: Option<SentenceView>,
-    /// "Drawn from n talks by k teachers."
+    /// "The summary draws on n of these excerpts." (Spec 11, PB2.3)
     pub drawn_from: String,
     /// The quoted lines, in marker order.
     pub quotes: Vec<QuoteView>,
@@ -68,7 +68,7 @@ impl SummaryView {
 }
 
 /// A count with its noun, singular for one.
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub(crate) fn plural(n: usize, one: &str, many: &str) -> String {
     if n == 1 {
         format!("1 {one}")
     } else {
@@ -76,36 +76,21 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     }
 }
 
-/// The notes the code writes from counts over the excerpts the page shows: few talks, and one
-/// sangha holding more than half of at least three excerpts (Spec 05, Summary and verifier,
-/// item 5).
+/// The note the code writes from counts over the excerpts the page shows: few talks (Spec 05,
+/// Summary and verifier, item 5). The one-sangha note was removed at the owner's request
+/// (Spec 11, PB2.3).
 pub fn notes(served: &[Served], shown: &[PassageId]) -> Vec<String> {
-    let on_page: Vec<&Served> = served.iter().filter(|s| shown.contains(&s.id)).collect();
+    let talks: BTreeSet<_> = served
+        .iter()
+        .filter(|s| shown.contains(&s.id))
+        .map(|s| s.talk.id)
+        .collect();
     let mut out = Vec::new();
-    let talks: BTreeSet<_> = on_page.iter().map(|s| s.talk.id).collect();
     if !talks.is_empty() && talks.len() <= 2 {
         out.push(format!(
             "Only {} in this collection matched this question closely.",
             plural(talks.len(), "talk", "talks")
         ));
-    }
-    let n = on_page.len();
-    if n >= 3 {
-        let mut counts: Vec<(&str, usize)> = Vec::new();
-        for s in &on_page {
-            match counts
-                .iter_mut()
-                .find(|(name, _)| *name == s.talk.sangha_name)
-            {
-                Some((_, c)) => *c += 1,
-                None => counts.push((&s.talk.sangha_name, 1)),
-            }
-        }
-        if let Some((name, k)) = counts.into_iter().find(|(_, k)| k * 2 > n) {
-            out.push(format!(
-                "{k} of the {n} excerpts come from teachers at {name}."
-            ));
-        }
     }
     out
 }
@@ -190,16 +175,6 @@ pub fn build(
     };
     let headline = take(SummaryPart::Headline).into_iter().next()?;
     let shown: Vec<PassageId> = numbers.iter().map(|(id, _)| *id).collect();
-    let talks: BTreeSet<_> = served
-        .iter()
-        .filter(|p| cited.contains(&p.id))
-        .map(|p| p.talk.id)
-        .collect();
-    let teachers: BTreeSet<_> = served
-        .iter()
-        .filter(|p| cited.contains(&p.id))
-        .map(|p| p.talk.teacher_id)
-        .collect();
     Some(SummaryView {
         headline,
         framing: take(SummaryPart::Framing),
@@ -208,11 +183,7 @@ pub fn build(
         keep: take(SummaryPart::KeepInMind),
         notes: notes(served, &shown),
         sum_up: take(SummaryPart::SumUp).into_iter().next(),
-        drawn_from: format!(
-            "Drawn from {} by {}.",
-            plural(talks.len(), "talk", "talks"),
-            plural(teachers.len(), "teacher", "teachers")
-        ),
+        drawn_from: format!("The summary draws on {} of these excerpts.", cited.len()),
         quotes,
     })
 }
@@ -262,29 +233,21 @@ mod tests {
     }
 
     #[test]
-    fn the_code_notes_few_talks_and_one_sangha_holding_most_excerpts() {
+    fn the_code_notes_few_talks_and_never_one_sangha() {
         let s = vec![
             served(1, 1, "North Fixture Zendo"),
             served(2, 2, "North Fixture Zendo"),
             served(3, 3, "South Fixture Sangha"),
         ];
         let ids: Vec<PassageId> = s.iter().map(|p| p.id).collect();
-        assert_eq!(
-            notes(&s, &ids),
-            vec!["2 of the 3 excerpts come from teachers at North Fixture Zendo.".to_owned()]
+        assert!(
+            notes(&s, &ids).is_empty(),
+            "no note on how many excerpts come from one sangha"
         );
         assert_eq!(
             notes(&s, &ids[..1]),
             vec!["Only 1 talk in this collection matched this question closely.".to_owned()],
             "only the excerpts on the page count"
         );
-        let even = vec![
-            served(1, 1, "North Fixture Zendo"),
-            served(2, 2, "South Fixture Sangha"),
-            served(3, 3, "East Fixture Zendo"),
-            served(4, 4, "North Fixture Zendo"),
-        ];
-        let ids: Vec<PassageId> = even.iter().map(|p| p.id).collect();
-        assert!(notes(&even, &ids).is_empty(), "half is not more than half");
     }
 }
