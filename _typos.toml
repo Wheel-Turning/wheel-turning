@@ -14,6 +14,7 @@ gya = "gya" # romanized Japanese, the Heart Sutra mantra "gya tei gya tei"
 maka = "maka" # romanized Japanese, "maka hannya haramita" (Maha Prajna Paramita)
 flate = "flate" # the PDF FlateDecode filter
 ment = "ment" # an English suffix the synthesis grounding stemmer removes
+rto = "rto" # recovery time objective, in Spec 11 recovery targets
 
 [files]
 # Sensitive-question rules list common misspellings on purpose, and the fixture uses them.
