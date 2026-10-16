@@ -22,6 +22,7 @@ variables {
   admin_exec_role_arn = "arn:aws:iam::000000000000:role/admin-exec"
   web_task_role_arn   = "arn:aws:iam::000000000000:role/web-task"
   eval_task_role_arn  = "arn:aws:iam::000000000000:role/eval-task"
+  admin_task_role_arn = "arn:aws:iam::000000000000:role/admin-task"
   log_group_names     = { web = "/wt-test/web", admin = "/wt-test/admin" }
   secret_arns = {
     db_wt_web_login      = "arn:secret:web"
@@ -30,7 +31,8 @@ variables {
     session_secret       = "arn:secret:session"
     anthropic_api_key    = "arn:secret:anthropic"
   }
-  bucket_names = { transcripts = "t", scratch = "s", models = "m" }
+  bucket_names   = { transcripts = "t", scratch = "s", models = "m" }
+  records_bucket = "r"
   db = {
     host              = "db.example"
     port              = 5432
