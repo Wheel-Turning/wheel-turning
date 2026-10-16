@@ -3,7 +3,7 @@
 //! same models and settings as the page (Spec 07, Evaluation harness).
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,19 +41,13 @@ fn err<E: Into<Source>>(what: &'static str) -> impl FnOnce(E) -> SiteError {
     }
 }
 
-/// The configuration directory: `WT_CONFIG_DIR`, default `config`. It holds `retrieval.toml`,
-/// `common_words.txt`, `llm_prices.toml`, `sensitive.toml` and `sensitive_exemplars.toml`.
-pub fn config_dir() -> PathBuf {
-    PathBuf::from(std::env::var("WT_CONFIG_DIR").unwrap_or_else(|_| "config".into()))
-}
-
 /// Loads the embedder, the reranker if installed, the language model if it may be called, the
 /// retrieval settings, sensitive-question detection and the session key.
 pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteError> {
     let mut settings = OnnxSettings::new(&config.model_dir, &config.embed_model);
     settings.runtime.clone_from(&config.ort_dylib);
     let embedder = OnnxEmbedder::load(&settings).map_err(err("loading the embedding model"))?;
-    let dir = config_dir();
+    let dir = &config.config_dir;
     let retrieval = RetrievalConfig::load(&dir.join("retrieval.toml"))
         .map_err(err("loading retrieval.toml"))?;
     let common_words = std::fs::read_to_string(dir.join("common_words.txt")).unwrap_or_default();
@@ -94,7 +88,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
     };
     let (llm, triage): (Arc<dyn LlmClient>, Option<Arc<dyn Triage>>) = match claude(
         config,
-        &dir,
+        dir,
         pool,
         wt_extract::alerter(config.alert_topic_arn.as_deref()).await,
     ) {
@@ -123,17 +117,12 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         }
         Ranker::Onnx => onnx.clone(),
     };
-    let owner_name = std::env::var("WT_OWNER_NAME")
-        .ok()
-        .map(|n| n.trim().to_owned())
-        .filter(|n| !n.is_empty());
-    let trust_forwarded_for = std::env::var("WT_TRUST_FORWARDED_FOR").is_ok_and(|v| v == "true");
-    let (mailer, public_url) = mailer().await;
+    let (mailer, public_url) = mailer(config).await;
     Ok(Site {
         limits: crate::Limits::new(retrieval.answer.ask_rate_per_hour),
-        privacy: crate::privacy::Settings::from_env().map_err(err("reading the privacy keys"))?,
-        owner_name,
-        trust_forwarded_for,
+        privacy: crate::privacy::Settings::from_config(config),
+        owner_name: config.owner_name.clone(),
+        trust_forwarded_for: config.trust_forwarded_for,
         embedder: Arc::new(embedder),
         reranker,
         span_reranker: onnx,
@@ -153,19 +142,17 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
     })
 }
 
-/// `WT_MAIL_FROM` and `WT_PUBLIC_URL`, read from the environment: the sender address for SES and
-/// the site's address for links. Without both, the rights form cannot confirm requests and says
-/// so, pointing people to the rights mailbox instead.
-async fn mailer() -> (Arc<dyn Mailer>, String) {
-    let get = |key: &str| {
-        std::env::var(key)
-            .ok()
-            .map(|v| v.trim().trim_end_matches('/').to_owned())
-            .filter(|v| !v.is_empty())
-    };
-    match (get("WT_MAIL_FROM"), get("WT_PUBLIC_URL")) {
-        (Some(from), Some(url)) => (Arc::new(SesMailer::new(from).await), url),
-        _ => {
+/// `WT_MAIL_FROM` and `WT_PUBLIC_URL`: the sender address for SES and the site's address for
+/// links. The loader sets both or neither, and the web server requires them in prod. Without
+/// them (dev only), the rights form cannot confirm requests and says so, pointing people to the
+/// rights mailbox instead.
+async fn mailer(config: &Config) -> (Arc<dyn Mailer>, String) {
+    match config.mail() {
+        Some((from, url)) => (
+            Arc::new(SesMailer::new(from.to_owned()).await),
+            url.to_owned(),
+        ),
+        None => {
             tracing::warn!(
                 "no WT_MAIL_FROM or WT_PUBLIC_URL: removal requests cannot be confirmed"
             );

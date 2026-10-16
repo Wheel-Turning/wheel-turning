@@ -176,7 +176,7 @@ impl Stages {
         {
             let pipeline = config_dir.join("pipeline.toml");
             Some(TextJobs {
-                tools: wt_ingest::texts::pdf::tools::Poppler::from_env(),
+                tools: wt_ingest::texts::pdf::tools::Poppler::from_config(config),
                 word_list: wt_ingest::config::TextSettings::load(&pipeline)?.word_list,
                 allowed_codes: wt_ingest::config::LicenseSettings::load(&pipeline)?
                     .allowed_license_codes,

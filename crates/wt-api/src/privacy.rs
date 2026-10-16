@@ -18,11 +18,6 @@ use wt_db::privacy::{COUNT_ONLY, SHARE};
 use crate::chrome::{Chrome, Current};
 use crate::{AppState, Session, csrf_refused, page, server_error};
 
-/// A privacy key that does not parse.
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct SettingsError(String);
-
 /// `WT_PRIVACY_DEFAULT`, `WT_QUERY_RETENTION_DAYS` and `WT_COUNT_ONLY_TTL_HOURS`.
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -45,32 +40,16 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Reads the three keys, falling back to the defaults for any that is unset.
-    pub fn from_env() -> Result<Self, SettingsError> {
-        let d = Self::default();
-        let default_mode = match std::env::var("WT_PRIVACY_DEFAULT").ok().as_deref() {
-            None | Some("") | Some("share") => SHARE,
-            Some("count_only") => COUNT_ONLY,
-            Some(other) => {
-                return Err(SettingsError(format!(
-                    "WT_PRIVACY_DEFAULT is share or count_only, not {other}"
-                )));
-            }
-        };
-        let number = |key: &str, fallback: u32| -> Result<u32, SettingsError> {
-            match std::env::var(key) {
-                Ok(v) if !v.trim().is_empty() => v
-                    .trim()
-                    .parse()
-                    .map_err(|_| SettingsError(format!("{key} is a whole number, not {v}"))),
-                _ => Ok(fallback),
-            }
-        };
-        Ok(Self {
-            default_mode,
-            retention_days: number("WT_QUERY_RETENTION_DAYS", d.retention_days)?,
-            count_only_ttl_hours: number("WT_COUNT_ONLY_TTL_HOURS", d.count_only_ttl_hours)?,
-        })
+    /// The three keys, as `wt_core::config` read and checked them.
+    pub fn from_config(config: &wt_core::Config) -> Self {
+        Self {
+            default_mode: match config.privacy_default {
+                wt_core::config::PrivacyDefault::Share => SHARE,
+                wt_core::config::PrivacyDefault::CountOnly => COUNT_ONLY,
+            },
+            retention_days: config.query_retention_days,
+            count_only_ttl_hours: config.count_only_ttl_hours,
+        }
     }
 
     /// The mode a question is kept in: the tester's own choice; else `count_only` when the

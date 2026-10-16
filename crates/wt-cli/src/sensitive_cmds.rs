@@ -438,7 +438,7 @@ pub(crate) async fn run(config: &Config, command: SensitiveCommand) -> anyhow::R
             config_dir,
             eval_file,
         } => {
-            let dir = config_dir.unwrap_or_else(wt_api::site::config_dir);
+            let dir = config_dir.unwrap_or_else(|| config.config_dir.clone());
             commands::print_json(&accept(&sheet, &dir, &eval_file)?)?;
         }
         SensitiveCommand::Report { since } => {

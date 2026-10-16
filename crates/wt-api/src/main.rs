@@ -11,6 +11,8 @@ use wt_core::telemetry::{LogOutput, init_logging};
 async fn main() -> anyhow::Result<()> {
     let config = Config::from_env().context("loading configuration")?;
     init_logging(config.env, &config.log, LogOutput::Stdout)?;
+    // Spec 11, PB1.6: in prod a removal request must always be confirmable by email.
+    config.require_mail().context("loading configuration")?;
 
     let pool = wt_db::lazy_pool(&config.database_url)?;
     let site = wt_api::site::load(&config, &pool)

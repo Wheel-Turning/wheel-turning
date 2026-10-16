@@ -54,9 +54,13 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_DB_NAME` | `wt` | Database name, used with WT\_DB\_HOST |
 | `WT_DB_USER` | none, required with WT\_DB\_HOST | Database login |
 | `WT_DB_PASSWORD` | none, required with WT\_DB\_HOST | Database password, secret, injected from Secrets Manager |
+| `WT_DATABASE_NAME` | none, required in `prod` for the commands below | The name the target database records in `database_identity` (`rds-v1` or `pc`). `wt worker`, `wt pipeline`, every rights command and `wt takedown` refuse to run against a database whose recorded name differs. See Spec 11, PB1.1. |
 | `WT_BIND` | `127.0.0.1:8080` | Web listen address |
 | `WT_SESSION_SECRET` | none, required in non-dev | Key that signs session cookies |
 | `WT_SCRATCH_DIR` | `./data/scratch` | The only place audio or video may exist |
+| `WT_POPPLER_BIN` | unset | Directory holding poppler's `pdftotext` and `pdftoppm` for text imports (unset: the `PATH`). On Windows name poppler's directory, since Git's `/mingw64/bin` holds xpdf's `pdftotext`. See Spec 08. |
+| `WT_TESSERACT` | `tesseract` | The Tesseract program for OCR (default: found on the `PATH`). See Spec 08. |
+| `WT_CONFIG_DIR` | `config` | Directory the web server and `wt eval` read `retrieval.toml`, `common_words.txt`, `llm_prices.toml`, `sensitive.toml` and `sensitive_exemplars.toml` from |
 | `WT_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
 | `WT_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
 | `WT_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `WT_MODEL_DIR` |
@@ -86,6 +90,10 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `GGML_VK_DISABLE_COOPMAT` | none | Set to 1 on the transcription worker. Read by whisper.cpp's Vulkan backend, not by the loader. Without it Vulkan produces garbage on the Arc 140V. See Spec 04. |
 | `WT_SITE_DANA_URL` | none | The site's own donation page, shown separately in the dana panel |
 | `WT_ALERT_TOPIC_ARN` | none | SNS topic for alerts to the owner: the `observability` module's alarm topic, set on the web and eval tasks by Terraform. Empty logs alerts as warnings instead of publishing them. `wt alerts test` publishes one message. See Spec 08. |
+| `WT_MAIL_FROM` | none, required by the web server in `prod` | SES sender for the removal-request confirmation email, such as `rights@wheelturning.org`. Set with `WT_PUBLIC_URL` or not at all: one without the other stops startup in any environment (Spec 11, PB1.6). See Spec 08. |
+| `WT_PUBLIC_URL` | none, required by the web server in `prod` | The site's own address for links in emails, such as `https://app.wheelturning.org` |
+| `WT_OWNER_NAME` | none | Who runs the site, as About names them ("run by <name>, an individual"). Unset says "an individual". |
+| `WT_TRUST_FORWARDED_FOR` | `false` | `true` only behind the load balancer: the public forms' rate limit then counts the last `X-Forwarded-For` address. The header can be forged when the server faces clients directly. |
 | `WT_PRIVACY_DEFAULT` | `share` | Question-keeping mode for new testers, share or count\_only. Set to count\_only before any public launch. See Spec 06. |
 | `WT_QUERY_RETENTION_DAYS` | `180` | Days a kept question's text is stored. See Spec 06. |
 | `WT_COUNT_ONLY_TTL_HOURS` | `24` | Hours a question is kept in count-only mode before it is deleted. See Spec 06. |

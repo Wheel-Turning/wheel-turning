@@ -434,7 +434,7 @@ pub async fn import_text(
         &fake
     };
     let texts = wt_ingest::config::TextSettings::load(&config_dir.join("pipeline.toml"))?;
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let env = wt_ingest::texts::PdfEnv {
         tools: &tools,
         scratch: config.scratch_dir.join("texts"),
@@ -638,7 +638,7 @@ pub async fn fetch_texts(
     } else {
         &fake
     };
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let env = wt_ingest::texts::PdfEnv {
         tools: &tools,
         scratch: config.scratch_dir.join("texts"),
@@ -722,7 +722,7 @@ pub async fn refresh_text(
     } else {
         &fake
     };
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let env = wt_ingest::texts::PdfEnv {
         tools: &tools,
         scratch: config.scratch_dir.join("texts"),
@@ -763,7 +763,7 @@ pub async fn intake(
     let mut conn = pool.acquire().await?;
     let exclusions = wt_ingest::http::Exclusions::load(&mut conn).await?;
     let fetcher = wt_ingest::texts::web::WebFetcher::new(policy.web(), exclusions);
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let pdf_env = wt_ingest::texts::PdfEnv {
         tools: &tools,
         scratch: config.scratch_dir.join("texts"),
@@ -924,7 +924,7 @@ pub async fn reocr(
     let texts = wt_ingest::config::TextSettings::load(&pipeline)?;
     let objects = stages::objects(config)?;
     let embedder = stages::embedder(config)?;
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let env = wt_ingest::texts::PdfEnv {
         tools: &tools,
         scratch: config.scratch_dir.join("texts"),
@@ -955,7 +955,7 @@ pub async fn proof_sheet(
     out_dir: &Path,
 ) -> anyhow::Result<std::path::PathBuf> {
     let objects = stages::objects(config)?;
-    let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+    let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(config);
     let mut conn = pool.acquire().await?;
     let (_, html) = wt_ingest::texts::proofread::sheet(
         &mut conn,
