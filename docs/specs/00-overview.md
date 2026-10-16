@@ -115,6 +115,9 @@ Each spec below is a tab here and a file under `docs/specs/` in the repository. 
 | 05 Retrieval and answers | Query parsing, hybrid retrieval, reranking, selection, synthesis, validation, answer assembly, dana | M5, M6, M7 |
 | 06 API and web | Routes, invite access, page structure, logging, feedback | M5, M7 |
 | 07 Evaluation and ops | Tests, evaluation harness, the notebook gate, audit, takedown, observability | M8, and the tests of every milestone |
+| 08 Texts and reference | Foundational texts, reference assets, the rights ledger | M3R, M4b |
+| 09 Copy and templates | Public page copy, notices, attribution lines, the answer page's labels | M5, M7 |
+| 10 Cost and summary latency | Model cost per question, ranking and excerpt options, a summary that is always shown within 5 seconds | P1, after the MVP test pass |
 
 ## Blockers outside the code
 
@@ -151,7 +154,7 @@ Owner's notes of October 12, 2026, refined in discussion. None is built before b
 
 Answers and search
 1. Query variations. The triage call (Spec 05, Sensitive questions) also returns two or three rephrasings of the question, each searched as another fused list; the page and the log show only the original. Kept only if the evaluation set shows better relevance.
-2. Lower latency. Make vector search use the HNSW index through the serving view's filters, run stages in parallel, cache repeated questions, and consider a GPU-hosted reranker. The index fix may move before beta.
+2. Lower latency and cost. The search, ranking and deferred-summary work landed before beta (PRs #164 and #169, October 15, 2026: pages in 3.4 to 4.4 s on the live stack). What is left, a fivefold lower model cost per question and a summary that is always shown within 5 seconds, is Spec 10, milestone P1, after the MVP test pass.
 3. Live progress while a question runs. Moved before beta by the owner's decision of October 12, 2026, since an answer takes 10 to 15 seconds; specified in Spec 06, Live progress while a question runs. The variations stage waits for item 1.
 4. Moved before beta by the owner's decision of October 12, 2026: the fuller summary in the manner of Consensus is now PRD Answer experience item 3 and Spec 05, Summary and verifier. Consensus also reports its funnel (papers retrieved, eligible, included), which item 3 adopts.
 5. Follow-up questions and threads. A box at the bottom of an answer asks a follow-up in the same thread; the follow-up is rewritten into a standalone question with the thread's context. Threads keep the tester's privacy mode, and a back-to-this-question link sits on each answer.
