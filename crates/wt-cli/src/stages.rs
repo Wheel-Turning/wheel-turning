@@ -14,7 +14,7 @@ use sqlx::PgPool;
 use wt_asr::{AsrHints, AsrSettings, WhisperCli, glossary_prompt};
 use wt_core::Config;
 use wt_core::config::LlmStage;
-use wt_core::objects::LocalObjects;
+use wt_core::objects::ObjectStore;
 use wt_core::scratch::Ffmpeg;
 use wt_db::job::{Job, JobKind};
 use wt_extract::{
@@ -82,21 +82,20 @@ pub enum Ran {
     Capped(String),
 }
 
-/// The local object store: the transcripts bucket's stand-in while `WT_TRANSCRIPT_BUCKET` is
-/// unset (Spec 01).
-pub fn objects(config: &Config) -> anyhow::Result<LocalObjects> {
-    if config.transcript_bucket.is_some() {
-        bail!(
-            "WT_TRANSCRIPT_BUCKET is set, but this build stores transcripts locally only; unset it"
-        );
-    }
-    Ok(LocalObjects::new(PathBuf::from("data/objects")))
+/// The object store: the transcripts bucket when `WT_TRANSCRIPT_BUCKET` is set (Spec 11, PB1.2),
+/// else `data/objects` under the working directory (Spec 01).
+pub fn objects(config: &Config) -> anyhow::Result<Arc<dyn ObjectStore>> {
+    wt_core::objects::open(
+        config.transcript_bucket.as_deref(),
+        Path::new("data/objects"),
+    )
+    .context("opening the object store")
 }
 
 /// The stages a worker can run.
 pub struct Stages {
     pool: PgPool,
-    objects: LocalObjects,
+    objects: Arc<dyn ObjectStore>,
     scratch_root: PathBuf,
     segment: SegmentSettings,
     asr: AsrSettings,

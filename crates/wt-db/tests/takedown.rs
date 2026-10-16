@@ -8,7 +8,8 @@ use sqlx::PgPool;
 use sqlx::types::Uuid;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::{PassageId, TalkId};
-use wt_core::objects::{LocalObjects, ObjectStore};
+use wt_core::objects::{LocalObjects, ObjectStore, S3Objects};
+use wt_core::s3::FakeBucket;
 use wt_core::stores;
 use wt_db::registry::RegistryDbError;
 use wt_db::takedown::{
@@ -270,7 +271,7 @@ fn objects() -> (LocalObjects, std::path::PathBuf) {
 
 /// Writes what the pipeline stores for a talk: transcript versions, staged questions, glossary
 /// suggestions and the citation export.
-fn store_talk(store: &LocalObjects, talk: TalkId) {
+fn store_talk(store: &dyn ObjectStore, talk: TalkId) {
     let t = talk.as_uuid();
     for key in [
         format!("transcripts/{t}/v1.json"),
@@ -283,11 +284,65 @@ fn store_talk(store: &LocalObjects, talk: TalkId) {
     }
 }
 
-fn talk_keys(store: &LocalObjects, talk: TalkId) -> Vec<String> {
+fn talk_keys(store: &dyn ObjectStore, talk: TalkId) -> Vec<String> {
     let t = talk.as_uuid();
     let mut keys = store.list(&format!("transcripts/{t}/")).unwrap();
     keys.extend(store.list(&format!("citations/{t}.json")).unwrap());
     keys
+}
+
+#[tokio::test]
+async fn a_takedown_leaves_no_keys_and_no_versions_under_its_prefixes_in_a_versioned_bucket() {
+    // Spec 11, PB1.2: the S3 store over the in-process versioned bucket.
+    let fx = common::start().await;
+    let (ada_talks, _, bo_talk, _) = two_teachers(&fx.pool).await;
+    let store = S3Objects::new(FakeBucket::new(2));
+    for t in ada_talks.iter().chain([&bo_talk]) {
+        store_talk(&store, *t);
+        // A second version of each transcript, and a key deleted earlier that kept its version.
+        let t = t.as_uuid();
+        store
+            .put(&format!("transcripts/{t}/v1.json"), b"{\"v\":2}")
+            .unwrap();
+        store
+            .put(&format!("transcripts/{t}/old.json"), b"{}")
+            .unwrap();
+        store
+            .bucket()
+            .delete_current(&format!("transcripts/{t}/old.json"));
+    }
+
+    let report = complete(&fx.pool, &Scope::Teacher(ADA.into()), ACTOR, &store)
+        .await
+        .unwrap();
+    assert_eq!(report.objects["transcript_objects"], 8);
+    assert_eq!(report.objects["citation_objects"], 2);
+    for t in &ada_talks {
+        let t = t.as_uuid();
+        for (_, prefix) in stores::talk_objects(&t.to_string()) {
+            assert!(
+                store.list(&prefix).unwrap().is_empty(),
+                "keys left under {prefix}"
+            );
+            assert_eq!(
+                store.versions(&prefix).unwrap(),
+                0,
+                "versions left under {prefix}"
+            );
+        }
+        assert_eq!(
+            store.bucket().version_count(&format!("transcripts/{t}/")),
+            0
+        );
+    }
+    assert_eq!(talk_keys(&store, bo_talk).len(), 5, "Bo's objects stay");
+    assert!(
+        store
+            .get(&wt_db::takedown::record_key(report.log_id.unwrap()))
+            .unwrap()
+            .is_some(),
+        "the takedown record is kept"
+    );
 }
 
 #[tokio::test]

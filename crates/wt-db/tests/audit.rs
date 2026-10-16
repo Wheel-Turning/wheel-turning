@@ -10,7 +10,8 @@ use sqlx::types::Uuid;
 use wt_core::Env;
 use wt_core::gate::ConsentStatus;
 use wt_core::ids::TalkId;
-use wt_core::objects::{LocalObjects, ObjectStore};
+use wt_core::objects::{LocalObjects, ObjectStore, S3Objects};
+use wt_core::s3::FakeBucket;
 use wt_db::audit::{
     AuditReport, AuditSettings, Files, SCRATCH_TTL_H, Severity, run, run_with_files,
 };
@@ -886,4 +887,43 @@ async fn takedown_completeness_follows_the_log_when_a_restore_undoes_the_state()
     let report = audit(&fx.pool, Env::Prod).await;
     assert!(findings(&report, "takedown_completeness") >= 1);
     assert!(report.failed());
+}
+
+#[tokio::test]
+async fn takedown_completeness_reports_an_object_planted_in_the_bucket_under_a_withdrawn_talk() {
+    // Spec 11, PB1.2: the S3 store over the in-process versioned bucket.
+    let fx = common::start().await;
+    let t = clean(&fx.pool).await;
+    let bucket = S3Objects::new(FakeBucket::new(2));
+    wt_db::takedown::complete(&fx.pool, &wt_db::takedown::Scope::Talk(t), ACTOR, &bucket)
+        .await
+        .unwrap();
+    let scratch = std::env::temp_dir().join(format!("wt-audit-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&scratch).unwrap();
+    let files = Files {
+        objects: &bucket,
+        scratch_root: &scratch,
+        scratch_ttl_h: SCRATCH_TTL_H,
+    };
+    let audit = || run_with_files(&fx.pool, AuditSettings::defaults(Env::Prod), &files);
+    only(&audit().await.unwrap(), &[]);
+
+    // A planted object, as a stray sync or a restored backup could leave.
+    let planted = format!("transcripts/{t}/v1.json");
+    bucket.put(&planted, CLEAN_TRANSCRIPT).unwrap();
+    let report = audit().await.unwrap();
+    only(&report, &["takedown_completeness"]);
+    assert_eq!(findings(&report, "takedown_completeness"), 1);
+    assert!(report.failed());
+
+    // Deleted without its versions, the key still holds words: the audit counts the versions.
+    bucket.bucket().delete_current(&planted);
+    assert!(bucket.list(&planted).unwrap().is_empty());
+    let report = audit().await.unwrap();
+    only(&report, &["takedown_completeness"]);
+    assert_eq!(findings(&report, "takedown_completeness"), 1);
+
+    wt_db::takedown::finish(&fx.pool, &bucket).await.unwrap();
+    only(&audit().await.unwrap(), &[]);
+    let _ = std::fs::remove_dir_all(&scratch);
 }

@@ -9,8 +9,10 @@
 # is a second lock that still holds an object for retention_days if its hold is ever lifted.
 #
 # It lives in its own stack, apart from envs/v1, so destroying and rebuilding v1 never touches it.
-# No workload writes to it yet: the takedown routine (M2, finished in M8) gains s3:PutObject and
-# s3:PutObjectLegalHold on this bucket, and nothing ever gains delete or bypass permissions.
+# Since Spec 11 PB1.2 it also holds the rights ledger's records (statements, drafts, mandate
+# decisions) under records/<sha256>, which survive takedown (WT_RECORDS_BUCKET). The admin task
+# and batch host roles gain s3:PutObject and s3:PutObjectLegalHold on records/ only, and nothing
+# ever gains delete or bypass permissions.
 
 provider "aws" {
   region = var.region

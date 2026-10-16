@@ -151,6 +151,16 @@ variable "web_task_role_arn" {
   type = string
 }
 
+variable "admin_task_role_arn" {
+  description = "What one-off admin commands (wt takedown, wt audit) may call in S3."
+  type        = string
+}
+
+variable "records_bucket" {
+  description = "The records bucket (WT_RECORDS_BUCKET) for admin commands that store rights records."
+  type        = string
+}
+
 variable "log_group_names" {
   description = "Log group names by purpose: web, admin."
   type        = map(string)
@@ -481,6 +491,7 @@ resource "aws_ecs_task_definition" "admin" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = var.admin_exec_role_arn
+  task_role_arn            = var.admin_task_role_arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -495,6 +506,7 @@ resource "aws_ecs_task_definition" "admin" {
     command = ["wt", "db", "migrate"]
     environment = concat(local.common_env, local.db_env, [
       { name = "WT_DB_USER", value = var.db.master_username },
+      { name = "WT_RECORDS_BUCKET", value = var.records_bucket },
     ])
     secrets = [
       # RDS stores the master credentials as JSON; ECS extracts one key.

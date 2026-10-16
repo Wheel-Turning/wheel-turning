@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use sqlx::types::Uuid;
 use wt_core::objects::ObjectStore;
-use wt_core::records::LocalRecords;
+use wt_core::records::Records;
 use wt_ml::Embedder;
 
 use super::extract::{self, Section};
@@ -99,7 +99,7 @@ pub struct IntakeEnv<'a> {
     /// `[licenses] allowed_license_codes`.
     pub allowed_codes: &'a [String],
     /// Where statements and captured pages are kept.
-    pub records: &'a LocalRecords,
+    pub records: &'a dyn Records,
     /// For capturing a license page.
     pub fetcher: &'a WebFetcher,
     /// For PDFs.

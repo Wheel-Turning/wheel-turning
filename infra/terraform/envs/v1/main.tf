@@ -30,6 +30,9 @@ locals {
   name = "wt-v1"
   # Created by infra/terraform/github-oidc, which is applied before this stack.
   workload_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name}/${local.name}-workload-boundary"
+  # The versioned, Object Lock records bucket from infra/terraform/records, its own stack so
+  # rebuilding v1 never touches it (Spec 11, PB1.2, question 3).
+  records_bucket = "wt-records-${data.aws_caller_identity.current.account_id}"
 }
 
 module "network" {
@@ -80,6 +83,7 @@ module "iam" {
   name                     = local.name
   permissions_boundary_arn = local.workload_boundary_arn
   bucket_arns              = module.storage.bucket_arns
+  records_bucket_arn       = "arn:aws:s3:::${local.records_bucket}"
   secret_arns              = module.secrets.arns
   db_master_secret_arn     = module.database.master_secret_arn
   ecr_repository_arn       = module.service.ecr_repository_arn
@@ -117,9 +121,11 @@ module "service" {
   admin_exec_role_arn = module.iam.admin_exec_role_arn
   web_task_role_arn   = module.iam.web_task_role_arn
   eval_task_role_arn  = module.iam.eval_task_role_arn
+  admin_task_role_arn = module.iam.admin_task_role_arn
   log_group_names     = module.observability.log_group_names
   secret_arns         = module.secrets.arns
   bucket_names        = module.storage.bucket_names
+  records_bucket      = local.records_bucket
 
   db = {
     host              = module.database.address

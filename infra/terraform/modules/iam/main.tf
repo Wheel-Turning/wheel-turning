@@ -1,8 +1,11 @@
 # Spec 01 iam: least privilege per the Secrets, IAM and network rules.
-# - web task role: reads the models bucket; cannot write transcripts or scratch; publishes to the
-#   alert topic only
-# - batch host role: reads and writes transcripts and scratch, reads models, reads the database,
-#   Anthropic and YouTube secrets, and is reachable through SSM only
+# - web task role: reads the models bucket and the transcripts/ prefix; cannot write transcripts
+#   or scratch; publishes to the alert topic only
+# - admin task role: what one-off commands need in S3: takedown deletes every version under a
+#   talk's prefixes; rights commands add records to the records bucket, never deleting one
+# - batch host role: reads and writes transcripts and scratch, deletes transcript versions for a
+#   takedown, adds records but never deletes one, reads models, reads the database, Anthropic and
+#   YouTube secrets, and is reachable through SSM only
 # - execution roles: pull the image, write logs, and inject the secrets each task needs at start
 # The CI deploy role lives in infra/terraform/github-oidc so CI can never widen its own rights.
 # Every role sits under the /<name>/ path so the deploy role's PassRole can be scoped to it.
@@ -14,6 +17,11 @@ variable "name" {
 variable "bucket_arns" {
   description = "Bucket ARNs by purpose: transcripts, scratch, models."
   type        = map(string)
+}
+
+variable "records_bucket_arn" {
+  description = "The versioned, Object Lock records bucket from infra/terraform/records."
+  type        = string
 }
 
 variable "secret_arns" {
@@ -187,6 +195,13 @@ data "aws_iam_policy_document" "web_task" {
     actions   = ["s3:GetObject"]
     resources = ["${var.bucket_arns["models"]}/*"]
   }
+  # Transcripts are read through the same store as the pipeline's (Spec 11, PB1.2): that prefix
+  # only, not citations, takedown records or eval pages.
+  statement {
+    sid       = "ReadTranscripts"
+    actions   = ["s3:GetObject"]
+    resources = ["${var.bucket_arns["transcripts"]}/transcripts/*"]
+  }
   # The link that confirms a removal request (Spec 08). Any identity, so recipients verified
   # for the SES sandbox also match, but only from the one address.
   statement {
@@ -248,26 +263,72 @@ resource "aws_iam_role_policy" "eval_task" {
 }
 
 # ---------------------------------------------------------------------------------------------
+# Object storage shared by the admin task and the batch host (Spec 11, PB1.2). Takedown deletes
+# every version under a talk's prefixes, so it needs the version listing and DeleteObjectVersion
+# on the transcripts bucket. Records are added under a legal hold and never deleted: no delete
+# action on the records bucket is granted to any workload.
+# ---------------------------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "objects" {
+  statement {
+    sid       = "ListTranscriptsAndVersions"
+    actions   = ["s3:ListBucket", "s3:ListBucketVersions"]
+    resources = [var.bucket_arns["transcripts"]]
+  }
+  statement {
+    sid = "ReadWriteDeleteTranscripts"
+    actions = [
+      "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion",
+      "s3:AbortMultipartUpload",
+    ]
+    resources = ["${var.bucket_arns["transcripts"]}/*"]
+  }
+  # Unconditional: without s3:ListBucket, S3 answers a HeadObject for a missing key with 403, not
+  # 404, and storing a record checks first whether it is already there.
+  statement {
+    sid       = "ListRecords"
+    actions   = ["s3:ListBucket"]
+    resources = [var.records_bucket_arn]
+  }
+  statement {
+    sid       = "AddRecords"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:PutObjectLegalHold"]
+    resources = ["${var.records_bucket_arn}/records/*"]
+  }
+}
+
+resource "aws_iam_role" "admin_task" {
+  name                 = "${var.name}-admin-task"
+  path                 = local.path
+  permissions_boundary = var.permissions_boundary_arn
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_trust.json
+}
+
+resource "aws_iam_role_policy" "admin_task" {
+  name   = "admin-task"
+  role   = aws_iam_role.admin_task.id
+  policy = data.aws_iam_policy_document.objects.json
+}
+
+# ---------------------------------------------------------------------------------------------
 # Batch host role.
 # ---------------------------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "batch" {
+  source_policy_documents = [data.aws_iam_policy_document.objects.json]
+
   statement {
     sid     = "ListBuckets"
     actions = ["s3:ListBucket"]
     resources = [
-      var.bucket_arns["transcripts"],
       var.bucket_arns["scratch"],
       var.bucket_arns["models"],
     ]
   }
   statement {
-    sid     = "ReadWriteTranscriptsAndScratch"
-    actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
-    resources = [
-      "${var.bucket_arns["transcripts"]}/*",
-      "${var.bucket_arns["scratch"]}/*",
-    ]
+    sid       = "ReadWriteScratch"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
+    resources = ["${var.bucket_arns["scratch"]}/*"]
   }
   statement {
     sid       = "ReadModels"
@@ -334,6 +395,10 @@ output "web_task_role_arn" {
 
 output "eval_task_role_arn" {
   value = aws_iam_role.eval_task.arn
+}
+
+output "admin_task_role_arn" {
+  value = aws_iam_role.admin_task.arn
 }
 
 output "batch_instance_profile_name" {

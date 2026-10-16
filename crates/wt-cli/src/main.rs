@@ -19,6 +19,7 @@ mod commands;
 mod eval_cmds;
 mod index_cmds;
 mod ingest;
+mod objects_cmds;
 mod pipeline_cmds;
 mod rights;
 mod rights_cmds;
@@ -34,7 +35,8 @@ mod text_cmds;
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    /// Where statements, drafts and mandate decisions are stored, by SHA-256.
+    /// Where statements, drafts and mandate decisions are stored, by SHA-256, while
+    /// WT_RECORDS_BUCKET is unset.
     #[arg(long, global = true, default_value = "data/records")]
     records_dir: PathBuf,
 }
@@ -99,6 +101,16 @@ enum Command {
     /// Remove a teacher's or a talk's text from every store (Spec 07). Prints the counts as
     /// JSON. A real run needs --yes.
     Takedown(talk_cmds::TakedownArgs),
+    /// Object storage: the one-time copy into the transcripts bucket (Spec 11, PB1.2).
+    Objects {
+        #[command(subcommand)]
+        command: objects_cmds::ObjectsCommand,
+    },
+    /// Rights-ledger records: the one-time copy into the records bucket (Spec 11, PB1.2).
+    Records {
+        #[command(subcommand)]
+        command: objects_cmds::RecordsCommand,
+    },
     /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
     /// fail has findings.
     Audit {
@@ -234,7 +246,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     // Reports go to stdout, so logs must not.
     init_logging(config.env, &config.log, LogOutput::Stderr)?;
     let ctx = Ctx {
-        records: wt_core::records::LocalRecords::new(&cli.records_dir),
+        records: wt_core::records::open(config.records_bucket.as_deref(), &cli.records_dir)
+            .context("opening the records store")?,
         guarded: cli.command.writes_pipeline_or_rights(),
         named: std::sync::OnceLock::new(),
         config,
@@ -254,6 +267,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Audit { config_dir } => {
             return commands::audit(&ctx.pool().await?, &ctx.config, &config_dir).await;
         }
+        Command::Objects { command } => return objects_cmds::objects(&ctx, command).await,
+        Command::Records { command } => return objects_cmds::records(&ctx, command).await,
         Command::Source { command } => rights_cmds::source(&ctx, command).await?,
         Command::Rights { command } => return rights_cmds::rights(&ctx, command).await,
         Command::Exclusion { command } => rights_cmds::exclusion(&ctx, command).await?,
@@ -312,7 +327,7 @@ impl Command {
 /// pool opens on demand, so the commands that need no database run without one.
 pub(crate) struct Ctx {
     config: Config,
-    records: wt_core::records::LocalRecords,
+    records: Box<dyn wt_core::records::Records>,
     /// Whether this command checks the database's name before using it.
     guarded: bool,
     /// The database's name, once checked and printed.

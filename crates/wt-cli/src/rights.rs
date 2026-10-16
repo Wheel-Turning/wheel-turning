@@ -8,7 +8,7 @@ use anyhow::Context;
 use chrono::NaiveDate;
 use sqlx::PgPool;
 use sqlx::types::Uuid;
-use wt_core::records::LocalRecords;
+use wt_core::records::Records;
 use wt_db::rights::{self, Basis, NewBasis, NewSource};
 
 use crate::commands::print_json;
@@ -27,7 +27,7 @@ pub struct AddArgs<'a> {
 }
 
 /// `wt source add`: on a mandate unless `--basis` names license or permission evidence.
-pub async fn add(pool: &PgPool, records: &LocalRecords, args: AddArgs<'_>) -> anyhow::Result<()> {
+pub async fn add(pool: &PgPool, records: &dyn Records, args: AddArgs<'_>) -> anyhow::Result<()> {
     let decision;
     let basis = match args.basis {
         Basis::Mandate => {
@@ -97,7 +97,7 @@ pub async fn set_enabled(
 /// `wt rights request`.
 pub async fn request(
     pool: &PgPool,
-    records: &LocalRecords,
+    records: &dyn Records,
     key: &str,
     to: &str,
     channel: &str,
@@ -150,7 +150,7 @@ pub struct GrantArgs<'a> {
 /// `wt rights grant`.
 pub async fn grant(
     pool: &PgPool,
-    records: &LocalRecords,
+    records: &dyn Records,
     args: GrantArgs<'_>,
 ) -> anyhow::Result<()> {
     let GrantArgs {
@@ -175,7 +175,7 @@ pub async fn grant(
 pub async fn decline(
     pool: &PgPool,
     config: &wt_core::Config,
-    records: &LocalRecords,
+    records: &dyn Records,
     key: &str,
     statement: &Path,
     by: &str,
@@ -248,7 +248,7 @@ pub async fn exclusions(pool: &PgPool) -> anyhow::Result<()> {
 /// `wt exclusion lift`: needs the rights holder's written grant, which is stored and cited.
 pub async fn lift(
     pool: &PgPool,
-    records: &LocalRecords,
+    records: &dyn Records,
     id: Uuid,
     by: &str,
     evidence: &Path,
@@ -305,7 +305,7 @@ pub struct NoticeArgs<'a> {
 /// and records it as a drafted request. It sends nothing.
 pub async fn notice_draft(
     pool: &PgPool,
-    records: &LocalRecords,
+    records: &dyn Records,
     args: NoticeArgs<'_>,
 ) -> anyhow::Result<()> {
     let template = std::fs::read_to_string(args.template)

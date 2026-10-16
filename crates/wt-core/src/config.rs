@@ -101,6 +101,9 @@ pub struct Config {
     pub scratch_dir: PathBuf,
     /// `WT_TRANSCRIPT_BUCKET`. `None` means a local directory under `./data`.
     pub transcript_bucket: Option<String>,
+    /// `WT_RECORDS_BUCKET`, the versioned, Object Lock records bucket (Spec 11 PB1.2). `None`
+    /// means the local records directory (`wt --records-dir`).
+    pub records_bucket: Option<String>,
     /// `WT_MODEL_DIR`, holding the exported ONNX models and tokenizers.
     pub model_dir: PathBuf,
     /// `WT_EMBED_MODEL`, the embedding model directory name inside `model_dir`.
@@ -299,6 +302,7 @@ impl Config {
             scratch_dir: get("WT_SCRATCH_DIR")
                 .map_or_else(|| PathBuf::from("./data/scratch"), PathBuf::from),
             transcript_bucket: get("WT_TRANSCRIPT_BUCKET"),
+            records_bucket: get("WT_RECORDS_BUCKET"),
             model_dir: get("WT_MODEL_DIR").map_or_else(|| PathBuf::from("./models"), PathBuf::from),
             embed_model: get("WT_EMBED_MODEL").unwrap_or_else(|| "bge-m3-int8".to_owned()),
             rerank_model: get("WT_RERANK_MODEL")

@@ -698,8 +698,14 @@ pub async fn run_with_files(
     let mut left = Vec::new();
     for talk in taken_down {
         for (name, prefix) in stores::talk_objects(&talk.to_string()) {
-            for key in files.objects.list(&prefix)? {
+            let keys = files.objects.list(&prefix)?;
+            // In a versioned bucket a deleted key can keep old versions (Spec 11, PB1.2).
+            let old = files.objects.versions(&prefix)?.saturating_sub(keys.len());
+            for key in keys {
                 left.push(format!("{name}: {key}"));
+            }
+            if old > 0 {
+                left.push(format!("{name}: {old} old versions under {prefix}"));
             }
         }
     }
