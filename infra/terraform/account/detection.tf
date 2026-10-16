@@ -149,13 +149,28 @@ resource "aws_cloudwatch_log_metric_filter" "security" {
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "security" {
-  for_each = local.security_alarms
-
-  alarm_name          = "wt-account-${each.key}"
-  alarm_description   = each.value.description
+# One resource per alarm, so each alarm_name is literal for the runbook test (PB4.4).
+resource "aws_cloudwatch_metric_alarm" "root_activity" {
+  alarm_name          = "wt-account-root-activity"
+  alarm_description   = local.security_alarms["root-activity"].description
   namespace           = local.security_metric_namespace
-  metric_name         = each.key
+  metric_name         = "root-activity"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [local.alarm_topic_arn]
+
+  depends_on = [aws_cloudwatch_log_metric_filter.security]
+}
+
+resource "aws_cloudwatch_metric_alarm" "iam_policy_change" {
+  alarm_name          = "wt-account-iam-policy-change"
+  alarm_description   = local.security_alarms["iam-policy-change"].description
+  namespace           = local.security_metric_namespace
+  metric_name         = "iam-policy-change"
   statistic           = "Sum"
   period              = 300
   evaluation_periods  = 1

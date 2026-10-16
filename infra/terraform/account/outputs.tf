@@ -20,7 +20,10 @@ output "ses_dkim_records_for_cloudflare" {
 }
 
 output "security_alarm_names" {
-  value = [for alarm in aws_cloudwatch_metric_alarm.security : alarm.alarm_name]
+  value = [
+    aws_cloudwatch_metric_alarm.root_activity.alarm_name,
+    aws_cloudwatch_metric_alarm.iam_policy_change.alarm_name,
+  ]
 }
 
 output "guardduty_detector_id" {
