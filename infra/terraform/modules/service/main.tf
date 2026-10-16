@@ -80,6 +80,11 @@ variable "models_image" {
   default     = "public.ecr.aws/aws-cli/aws-cli:2.31.0"
 }
 
+variable "mail_from" {
+  description = "SES sender for the removal request confirmation email (WT_MAIL_FROM)."
+  type        = string
+}
+
 variable "llm" {
   description = "Language model settings for synthesis, verification and triage (Specs 04 and 05). The API key comes from Secrets Manager."
   type = object({
@@ -273,6 +278,9 @@ resource "aws_ecs_task_definition" "web" {
         { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
         # The load balancer is the only way in, so its X-Forwarded-For names the client.
         { name = "WT_TRUST_FORWARDED_FOR", value = "true" },
+        # Removal requests are confirmed by an emailed link (Spec 08).
+        { name = "WT_MAIL_FROM", value = var.mail_from },
+        { name = "WT_PUBLIC_URL", value = "https://${var.domain_name}" },
       ])
       secrets = [
         { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },

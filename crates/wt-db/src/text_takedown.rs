@@ -302,20 +302,23 @@ pub struct Request {
     pub message: Option<String>,
     /// The excerpt, when they reported one.
     pub text_unit_id: Option<Uuid>,
-    /// `open`, `suspended`, `removed` or `declined`.
+    /// `unverified` until the sender confirms their address, then `open`, `suspended`,
+    /// `removed` or `declined`.
     pub status: String,
+    /// When the sender confirmed their address; none for requests from before October 15, 2026.
+    pub verified_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Who handled it.
     pub handled_by: Option<String>,
     /// What was done.
     pub action_taken: Option<String>,
 }
 
-/// Requests, open and suspended ones unless `all`.
+/// Requests, open and suspended ones unless `all`. Unverified ones show only with `all`.
 pub async fn requests(conn: &mut PgConnection, all: bool) -> Result<Vec<Request>, DbError> {
     Ok(sqlx::query_as!(
         Request,
         "select id, received_at, requester_name, requester_email, organization, target, message,
-                text_unit_id, status, handled_by, action_taken
+                text_unit_id, status, verified_at, handled_by, action_taken
          from takedown_request
          where $1 or status in ('open', 'suspended')
          order by received_at",
@@ -330,7 +333,7 @@ pub async fn request(conn: &mut PgConnection, id: Uuid) -> Result<Option<Request
     Ok(sqlx::query_as!(
         Request,
         "select id, received_at, requester_name, requester_email, organization, target, message,
-                text_unit_id, status, handled_by, action_taken
+                text_unit_id, status, verified_at, handled_by, action_taken
          from takedown_request where id = $1",
         id
     )

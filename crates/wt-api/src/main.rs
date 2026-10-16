@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
         pool.clone(),
         site.privacy.retention_days,
     ));
+    tokio::spawn(wt_api::rights::purge_loop(pool.clone()));
     tokio::spawn(wt_api::warm::keep_warm(
         pool.clone(),
         site.embedder.clone(),

@@ -592,14 +592,23 @@ async fn texts_excluded_or_taken_down_fail_and_old_requests_warn() {
         .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
 
-    // A removal request open for more than a business day warns; a fresh one does not.
-    sqlx::query("insert into takedown_request (target) values ('fresh')")
-        .execute(&fx.pool)
-        .await
-        .unwrap();
+    // A removal request open for more than a business day since its sender confirmed it warns.
+    // A fresh one does not, nor one never confirmed, nor an old one confirmed today.
+    sqlx::raw_sql(
+        "insert into takedown_request (target, status, verified_at) values ('fresh', 'open', now());
+         insert into takedown_request (target, received_at)
+           values ('never confirmed', now() - interval '6 days');
+         insert into takedown_request (target, received_at, status, verified_at)
+           values ('confirmed today', now() - interval '6 days', 'open', now())",
+    )
+    .execute(&fx.pool)
+    .await
+    .unwrap();
     only(&audit(&fx.pool, Env::Prod).await, &[]);
+    // Requests from before confirmation existed have no verified_at and count from arrival.
     sqlx::query(
-        "insert into takedown_request (target, received_at) values ('old', now() - interval '6 days')",
+        "insert into takedown_request (target, received_at, status)
+         values ('old', now() - interval '6 days', 'open')",
     )
     .execute(&fx.pool)
     .await

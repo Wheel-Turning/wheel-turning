@@ -31,3 +31,9 @@ variable "batch_instance_types" {
   type        = list(string)
   default     = ["g5.xlarge", "t3.small"]
 }
+
+variable "mail_domain" {
+  description = "Domain workloads may send email from through SES (infra/terraform/account, email.tf)."
+  type        = string
+  default     = "wheelturning.org"
+}

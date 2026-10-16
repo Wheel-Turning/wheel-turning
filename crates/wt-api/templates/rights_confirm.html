@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Confirm your removal request · Wheel Turning{% endblock %}
+{% block content %}
+<div class="reading">
+{% match outcome %}
+{% when Some(true) %}
+<h1>Request confirmed</h1>
+<p class="status" role="status">Thank you. What you named stops appearing within one business day.</p>
+<p>We act on the request first and reply after, by email.</p>
+{% when Some(false) %}
+<h1>This link no longer works</h1>
+<p class="error" role="alert">The link has expired or was already used. Links work once, for 24 hours.</p>
+<p>If you still want material removed, <a href="/rights#request">send the request again</a>.</p>
+{% when None %}
+{% if let Some(t) = token %}
+<h1>Confirm your removal request</h1>
+<p>Nothing is removed until you confirm. Within one business day of confirming, the material you named stops appearing.</p>
+<form method="post" action="/rights/confirm">
+  <input type="hidden" name="token" value="{{ t }}">
+  <button type="submit">Confirm request</button>
+</form>
+{% else %}
+<h1>This link is incomplete</h1>
+<p class="error" role="alert">Please open the whole link from the email, or <a href="/rights#request">send the request again</a>.</p>
+{% endif %}
+{% endmatch %}
+</div>
+{% endblock %}

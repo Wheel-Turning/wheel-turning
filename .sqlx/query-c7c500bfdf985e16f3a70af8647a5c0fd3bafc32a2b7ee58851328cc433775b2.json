@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select confirm_takedown_request($1) as \"c!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "c!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c7c500bfdf985e16f3a70af8647a5c0fd3bafc32a2b7ee58851328cc433775b2"
+}

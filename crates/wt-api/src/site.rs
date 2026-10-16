@@ -19,6 +19,7 @@ use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
 use wt_retrieve::{Ranker, RetrievalConfig, Sensitivity, Triage};
 
 use crate::Site;
+use crate::mail::{Mailer, SesMailer, UnavailableMailer};
 use crate::session::Keys;
 
 /// Any error behind a [`SiteError`].
@@ -124,6 +125,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         .map(|n| n.trim().to_owned())
         .filter(|n| !n.is_empty());
     let trust_forwarded_for = std::env::var("WT_TRUST_FORWARDED_FOR").is_ok_and(|v| v == "true");
+    let (mailer, public_url) = mailer().await;
     Ok(Site {
         limits: crate::Limits::new(retrieval.answer.ask_rate_per_hour),
         privacy: crate::privacy::Settings::from_env().map_err(err("reading the privacy keys"))?,
@@ -142,7 +144,30 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         secure_cookies: !config.env.is_dev(),
         site_dana_url: config.site_dana_url.clone(),
         scope_sizes: Arc::default(),
+        mailer,
+        public_url,
     })
+}
+
+/// `WT_MAIL_FROM` and `WT_PUBLIC_URL`, read from the environment: the sender address for SES and
+/// the site's address for links. Without both, the rights form cannot confirm requests and says
+/// so, pointing people to the rights mailbox instead.
+async fn mailer() -> (Arc<dyn Mailer>, String) {
+    let get = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().trim_end_matches('/').to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    match (get("WT_MAIL_FROM"), get("WT_PUBLIC_URL")) {
+        (Some(from), Some(url)) => (Arc::new(SesMailer::new(from).await), url),
+        _ => {
+            tracing::warn!(
+                "no WT_MAIL_FROM or WT_PUBLIC_URL: removal requests cannot be confirmed"
+            );
+            (Arc::new(UnavailableMailer), String::new())
+        }
+    }
 }
 
 /// The Claude client for synthesis, verification and the triage gate:

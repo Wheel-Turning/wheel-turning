@@ -79,6 +79,16 @@ data "aws_iam_policy_document" "workload_boundary" {
   }
 
   statement {
+    sid       = "SendRightsMail"
+    actions   = ["ses:SendEmail"]
+    resources = ["arn:aws:ses:${local.region}:${local.account}:identity/*"]
+    condition {
+      test     = "StringLike"
+      variable = "ses:FromAddress"
+      values   = ["*@${var.mail_domain}"]
+    }
+  }
+  statement {
     sid       = "RegistryLogin"
     actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"] # this action has no resource-level permissions

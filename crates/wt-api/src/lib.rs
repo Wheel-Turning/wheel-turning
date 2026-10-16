@@ -1,7 +1,8 @@
 //! The Axum web app: routes, templates and invite auth (Spec 06).
 //!
 //! Every route but `/healthz`, `/robots.txt`, `/static/*`, `/favicon.ico`, `/join/{token}`,
-//! `/rights`, `/rights/request`, `/accessibility` and `/accessibility/report` needs a session,
+//! `/rights`, `/rights/request`, `/rights/confirm`, `/accessibility` and `/accessibility/report`
+//! needs a session,
 //! and answers the same generic 404 without one. Passage text reaches the templates only from
 //! `servable_passage`, and the templates escape it. Model text reaches only the "How approaches
 //! differ" section, as verified themes whose passages the code, not the model, names.
@@ -12,6 +13,7 @@ pub mod chrome;
 pub mod excerpt;
 pub mod feedback;
 pub mod limits;
+pub mod mail;
 pub mod privacy;
 pub mod progress;
 pub mod rights;
@@ -89,6 +91,12 @@ pub struct Site {
     pub site_dana_url: Option<String>,
     /// Passages-searched counts for the live progress display (Spec 06).
     pub scope_sizes: Arc<progress::ScopeSizes>,
+    /// Sends the link that confirms a removal request; [`mail::UnavailableMailer`] when
+    /// `WT_MAIL_FROM` or `WT_PUBLIC_URL` is unset, which turns the rights form away.
+    pub mailer: Arc<dyn mail::Mailer>,
+    /// `WT_PUBLIC_URL`: the site's address, such as `https://app.wheelturning.org`, for links in
+    /// email. Never taken from a request's `Host` header, which the sender controls.
+    pub public_url: String,
 }
 
 /// The rate limits (Spec 06): asks per tester, and the public forms per address.
@@ -96,8 +104,11 @@ pub struct Site {
 pub struct Limits {
     /// `ask_rate_per_hour` asks per tester.
     pub ask: Limiter,
-    /// `/rights/request` and `/accessibility/report`: 5 an hour per address, together.
+    /// `/rights/request`, `/rights/confirm` and `/accessibility/report`: 5 an hour per address,
+    /// together.
     pub public_forms: Limiter,
+    /// Confirmation emails: 3 an hour per recipient, so the form cannot flood someone's inbox.
+    pub confirm_emails: Limiter,
 }
 
 impl Limits {
@@ -106,12 +117,16 @@ impl Limits {
         Self {
             ask: Limiter::new(ask_per_hour),
             public_forms: Limiter::new(PUBLIC_FORMS_PER_HOUR),
+            confirm_emails: Limiter::new(CONFIRM_EMAILS_PER_HOUR),
         }
     }
 }
 
 /// Spec 08: the rights form takes 5 requests an hour from one address.
 pub const PUBLIC_FORMS_PER_HOUR: u32 = 5;
+
+/// Confirmation emails to one address in an hour.
+pub const CONFIRM_EMAILS_PER_HOUR: u32 = 3;
 
 impl Site {
     /// A site with a fake embedder, no reranker, no language model and a fixed key, for tests.
@@ -135,6 +150,8 @@ impl Site {
             secure_cookies: false,
             site_dana_url: None,
             scope_sizes: Arc::default(),
+            mailer: Arc::new(mail::FakeMailer::default()),
+            public_url: "https://wt.test".to_owned(),
         }
     }
 
@@ -191,6 +208,10 @@ pub fn router(state: AppState) -> Router {
         .route("/join/{token}", get(join))
         .route("/rights", get(rights::rights_page))
         .route("/rights/request", post(rights::request))
+        .route(
+            "/rights/confirm",
+            get(rights::confirm_page).post(rights::confirm),
+        )
         .route("/accessibility", get(accessibility::statement))
         .route("/accessibility/report", post(accessibility::report))
         .route("/", get(home))

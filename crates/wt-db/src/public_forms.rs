@@ -84,23 +84,46 @@ pub struct NewRequest<'a> {
     pub message: Option<&'a str>,
     /// The reported text unit, when the excerpt is one.
     pub text_unit: Option<Uuid>,
+    /// The SHA-256 of the token emailed to confirm it.
+    pub token_hash: &'a [u8],
 }
 
-/// Stores a request. The web role may insert and nothing more, so nothing is returned.
+/// Stores a request as `unverified`, its link valid for 24 hours. The web role may insert and
+/// nothing more, so nothing is returned.
 pub async fn request_removal(pool: &PgPool, r: &NewRequest<'_>) -> Result<(), DbError> {
     sqlx::query!(
         "insert into takedown_request (requester_name, requester_email, target, message,
-                                       text_unit_id)
-         values ($1, $2, $3, $4, $5)",
+                                       text_unit_id, verification_token_hash)
+         values ($1, $2, $3, $4, $5, $6)",
         r.name,
         r.email,
         r.target,
         r.message,
-        r.text_unit
+        r.text_unit,
+        r.token_hash
     )
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Confirms the unverified request whose token hashes to `token_hash`, if its link has not
+/// expired or been used. Returns whether one was confirmed.
+pub async fn confirm_removal(pool: &PgPool, token_hash: &[u8]) -> Result<bool, DbError> {
+    Ok(
+        sqlx::query_scalar!(r#"select confirm_takedown_request($1) as "c!""#, token_hash)
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+/// Deletes requests nobody confirmed, a week after their link expired. Returns how many went.
+pub async fn purge_unverified(pool: &PgPool) -> Result<i32, DbError> {
+    Ok(
+        sqlx::query_scalar!(r#"select purge_unverified_takedown_requests() as "n!""#)
+            .fetch_one(pool)
+            .await?,
+    )
 }
 
 /// A report from `/accessibility`.

@@ -11,6 +11,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::PgPool;
 use tower::ServiceExt;
+use wt_api::mail::{FakeMailer, UnavailableMailer};
 use wt_api::{AppState, Limits, Site, router, session};
 use wt_db::test_support::TestDb;
 
@@ -153,7 +154,10 @@ async fn the_rights_page_needs_no_session_and_states_each_source_in_plain_words(
         r.body
             .contains("If you hold rights in any talk or text shown here")
     );
-    assert!(r.body.contains("Within one business day of your request"));
+    assert!(
+        r.body
+            .contains("Within one business day of your confirming it")
+    );
     let line = |name: &str| {
         let at = r.body.find(name).unwrap();
         r.body[at..r.body[at..].find("</li>").unwrap() + at].to_owned()
@@ -297,6 +301,153 @@ async fn the_rights_form_rejects_a_honeypot_missing_fields_and_a_sixth_request_a
     assert!(sixth.body.contains("Please try again in"));
     assert!(sixth.headers.contains_key(header::RETRY_AFTER));
     assert_eq!(count(&fx.pool, "takedown_request").await, 2);
+}
+
+/// The token in a confirmation email's link.
+fn token_in(text: &str) -> String {
+    let start = text.find("token=").unwrap() + "token=".len();
+    text[start..].split_whitespace().next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn a_removal_request_waits_for_its_emailed_link_and_the_link_works_once() {
+    let mailer = Arc::new(FakeMailer::default());
+    let fx = start_with(Site {
+        mailer: mailer.clone(),
+        ..Site::with_fakes("fake-embed")
+    })
+    .await;
+    let r = send(
+        &fx.app,
+        post(
+            "/rights/request",
+            None,
+            "name=A+Holder&email=Holder%40Example.org&target=My+talk&website=",
+        ),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    let thanks = send(&fx.app, get("/rights?sent=1", None)).await;
+    assert!(thanks.body.contains("open the link to confirm the request"));
+
+    let sent = mailer.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].to, "Holder@Example.org");
+    assert!(
+        sent[0]
+            .text
+            .contains("https://wt.test/rights/confirm?token=")
+    );
+    assert!(
+        !sent[0].text.contains("My talk"),
+        "the email repeats nothing typed"
+    );
+    let token = token_in(&sent[0].text);
+    let status = || async {
+        sqlx::query_scalar::<_, String>("select status from takedown_request")
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(status().await, "unverified");
+
+    let page = send(
+        &fx.app,
+        get(&format!("/rights/confirm?token={token}"), None),
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("Confirm request"));
+    assert!(page.body.contains(&format!("value=\"{token}\"")));
+    assert_eq!(
+        status().await,
+        "unverified",
+        "following the link changes nothing"
+    );
+
+    let done = send(
+        &fx.app,
+        post("/rights/confirm", None, &format!("token={token}")),
+    )
+    .await;
+    assert_eq!(done.status, StatusCode::OK);
+    assert!(done.body.contains("Request confirmed"));
+    assert_eq!(status().await, "open");
+
+    let again = send(
+        &fx.app,
+        post("/rights/confirm", None, &format!("token={token}")),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::BAD_REQUEST);
+    assert!(again.body.contains("This link no longer works"));
+
+    let broken = send(&fx.app, get("/rights/confirm?token=abc", None)).await;
+    assert_eq!(broken.status, StatusCode::BAD_REQUEST);
+    assert!(broken.body.contains("This link is incomplete"));
+}
+
+#[tokio::test]
+async fn without_a_working_mailer_the_form_points_to_the_mailbox() {
+    let fx = start_with(Site {
+        mailer: Arc::new(UnavailableMailer),
+        ..Site::with_fakes("fake-embed")
+    })
+    .await;
+    let form = "name=N&email=n%40b.org&target=t&website=";
+    let r = send(&fx.app, post("/rights/request", None, form)).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(r.body.contains("rights@wheelturning.org"));
+    assert_eq!(count(&fx.pool, "takedown_request").await, 0);
+
+    let fx = start_with(Site {
+        mailer: Arc::new(FakeMailer::failing()),
+        ..Site::with_fakes("fake-embed")
+    })
+    .await;
+    let r = send(&fx.app, post("/rights/request", None, form)).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(r.body.contains("could not send the confirmation email"));
+    let status: String = sqlx::query_scalar("select status from takedown_request")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "unverified",
+        "a request whose email failed is never acted on"
+    );
+}
+
+#[tokio::test]
+async fn one_address_gets_at_most_three_confirmation_emails_an_hour() {
+    let mailer = Arc::new(FakeMailer::default());
+    let fx = start_with(Site {
+        mailer: mailer.clone(),
+        trust_forwarded_for: true,
+        ..Site::with_fakes("fake-embed")
+    })
+    .await;
+    for (i, email) in ["v%40b.org", "V%40B.org", "v%40b.org", "v%40b.org"]
+        .iter()
+        .enumerate()
+    {
+        let r = send(
+            &fx.app,
+            Request::post("/rights/request")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header("x-forwarded-for", format!("198.51.100.{i}"))
+                .body(Body::from(format!("name=N&email={email}&target=t")))
+                .unwrap(),
+        )
+        .await;
+        let expected = if i < 3 {
+            StatusCode::SEE_OTHER
+        } else {
+            StatusCode::TOO_MANY_REQUESTS
+        };
+        assert_eq!(r.status, expected, "request {i}");
+    }
+    assert_eq!(mailer.sent().len(), 3);
 }
 
 #[tokio::test]

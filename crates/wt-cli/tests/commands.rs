@@ -1503,6 +1503,28 @@ async fn removal_requests_suspend_decline_and_remove_text() {
     let fx = start().await;
     let (edition, unit, request) = reported_text(&fx.pool).await;
     let id = request.to_string();
+
+    // Until its sender confirms their email address, a request is not listed and nothing is
+    // taken down on it.
+    assert_eq!(
+        fx.json(&["takedown", "requests", "list"])
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let refused = fx.wt(&[
+        "takedown", "requests", "suspend", "--id", &id, "--by", "owner",
+    ]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("unverified"));
+    assert_eq!(edition_state(&fx.pool, edition).await, "ready");
+    sqlx::query("update takedown_request set status = 'open', verified_at = now() where id = $1")
+        .bind(request)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+
     let listed = fx.json(&["takedown", "requests", "list"]);
     assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(listed[0]["text_unit_id"], serde_json::json!(unit));
@@ -1536,7 +1558,8 @@ async fn removal_requests_suspend_decline_and_remove_text() {
     let preview = fx.json(&["takedown", "--edition", &e, "--actor", "owner", "--dry-run"]);
     assert_eq!(preview["units"], 1);
     let second: Uuid = sqlx::query_scalar(
-        "insert into takedown_request (target, text_unit_id) values ('again', $1) returning id",
+        "insert into takedown_request (target, text_unit_id, status, verified_at)
+         values ('again', $1, 'open', now()) returning id",
     )
     .bind(unit)
     .fetch_one(&fx.pool)

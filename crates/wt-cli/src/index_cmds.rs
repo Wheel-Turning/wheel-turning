@@ -528,6 +528,16 @@ pub async fn takedown_requests(
     use wt_db::text_takedown::{self as td, TextScope};
     let mut conn = pool.acquire().await?;
     let find = |r: Option<td::Request>, id| r.with_context(|| format!("no request {id}"));
+    // Nothing is taken down on a request whose sender never confirmed their address.
+    let confirmed = |r: td::Request| {
+        if r.status == "unverified" {
+            anyhow::bail!(
+                "request {} is unverified: its sender has not confirmed their email address",
+                r.id
+            );
+        }
+        Ok(r)
+    };
     match command {
         R::List { all } => commands::print_json(&td::requests(&mut conn, all).await?)?,
         R::Show { id } => commands::print_json(&find(td::request(&mut conn, id).await?, id)?)?,
@@ -537,7 +547,7 @@ pub async fn takedown_requests(
             source,
             by,
         } => {
-            let request = find(td::request(&mut conn, id).await?, id)?;
+            let request = confirmed(find(td::request(&mut conn, id).await?, id)?)?;
             let reason = format!("removal request {id}");
             let action = match request_scope(&mut conn, &request, edition, source).await? {
                 TextScope::Source(key) => {
@@ -560,7 +570,7 @@ pub async fn takedown_requests(
             by,
             yes,
         } => {
-            let request = find(td::request(&mut conn, id).await?, id)?;
+            let request = confirmed(find(td::request(&mut conn, id).await?, id)?)?;
             let scope = request_scope(&mut conn, &request, edition, source).await?;
             let reason = format!("removal request {id}");
             let objects = stages::objects(config)?;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id, received_at, requester_name, requester_email, organization, target, message,\n                text_unit_id, status, handled_by, action_taken\n         from takedown_request where id = $1",
+  "query": "select id, received_at, requester_name, requester_email, organization, target, message,\n                text_unit_id, status, verified_at, handled_by, action_taken\n         from takedown_request where id = $1",
   "describe": {
     "columns": [
       {
@@ -104,6 +104,17 @@
       },
       {
         "ordinal": 9,
+        "name": "verified_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "takedown_request",
+            "name": "verified_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "handled_by",
         "type_info": "Text",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "action_taken",
         "type_info": "Text",
         "origin": {
@@ -141,8 +152,9 @@
       true,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "c219d61d857af464b062a2e6f73d3e45ffeee89e03e125a9e5d8d4af29aab751"
+  "hash": "f485a4744d03e6180616b172e250c4b0d2f797481f72c69b8c5edf8220290d3c"
 }
