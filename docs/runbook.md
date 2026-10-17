@@ -9,8 +9,13 @@ root so `config/` and `data/` resolve.
 
 ## 1. A transcription run on the PC
 
-The PC worker reaches the database through an SSM port forward via the batch host (Spec 01;
-`docs/windows.md` has the details).
+Every pipeline stage, the worker and the text import write to RDS as `wt_pipeline_login`
+(Spec 11, PB1.1). The PC worker reaches RDS through an SSM port forward via the batch host
+(Spec 01; `docs/windows.md` has the details), and a GPU machine reaches it through its reverse
+tunnel to that same forward (step 3). The batch host runs only while a worker runs. RDS is named
+`rds-v1` in `database_identity`; with `WT_DATABASE_NAME=rds-v1` in `.env`, the worker, the
+pipeline commands, every rights command and `wt takedown` print `database: rds-v1` at start and
+refuse any other database.
 
 1. Start the batch host: in `infra/terraform/envs/v1`, apply with `batch_host_enabled = true`
    (as a `t3.small`, `batch_host_instance_type = "t3.small"`), or start the stopped instance in
@@ -23,9 +28,15 @@ The PC worker reaches the database through an SSM port forward via the batch hos
    ```
 
    It opens `localhost:5433` to the database and prints the `DATABASE_URL` to put in `.env`
-   (with `sslmode=require`; the password is the `db_dg_pipeline_login` secret).
+   (with `sslmode=require`; the password is the `db_dg_pipeline_login` secret). Put
+   `WT_DATABASE_NAME=rds-v1` beside it.
 3. Run the worker on the PC: `wt worker --kinds audio` (add `--drain` to stop when the queue is
-   empty). `wt pipeline advance` queues every cleared talk first if needed.
+   empty). `wt pipeline advance` queues every cleared talk first if needed. Check that it prints
+   `database: rds-v1`. For a GPU machine, keep the forward open and run
+   `infra/gpu-worker/run.sh ubuntu@<address> [workers] [hours]` from Git Bash: it sends the
+   machine the `.env` `DATABASE_URL` and `WT_DATABASE_NAME` (or `WT_GPU_DATABASE_URL`), and
+   tunnels the machine's `localhost:5433` back to the PC's forward. It refuses a URL that does
+   not name `localhost:5433`.
 4. When it finishes, close the forward window and stop the batch host (apply with
    `batch_host_enabled = false`, or stop the instance). It is the one costly resource.
 5. Confirm no audio is left: `wt audit` must show no `audio_residue` findings. It checks that
@@ -55,8 +66,9 @@ The PC worker reaches the database through an SSM port forward via the batch hos
 
 Target the same day.
 
-While two databases hold real data (the PC's `wt-m3-ssz` and the beta's RDS, §12), every step
-below runs against both: once with the PC `.env`, once against RDS through the batch host
+Since the October 16 cutover (§12, "Moving the pipeline to RDS") every step below runs against
+RDS only, as `wt_owner_login` through the batch host forward. Before it, while two databases held
+real data (the PC's `wt-m3-ssz` and the beta's RDS), every step ran against both: once with the PC `.env`, once against RDS through the batch host
 forward as `wt_owner_login` (§12, "Rights actions on both databases"). Then run the parity
 check, which must exit 0. A takedown run on one side only leaves the talk served from the other.
 
@@ -294,8 +306,10 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   from Secrets Manager (`wt-v1/*`), the language model settings from the `llm_*` variables in
   `infra/terraform/envs/v1/variables.tf`. Config files (`config/`) are baked into the image, so a
   config change ships as a new image.
-- Database: RDS `wt-v1`, Postgres 16, `db.t4g.medium`, private. Loaded on October 13, 2026 from
-  the PC's `wt-m3-ssz` database (data only, into the same migration level) through the batch host.
+- Database: RDS `wt-v1`, Postgres 16, `db.t4g.medium`, private, named `rds-v1`. Loaded on
+  October 13, 2026 from the PC's `wt-m3-ssz` database (data only, into the same migration level)
+  through the batch host, and caught up on October 16 (below). It is the one database every
+  pipeline and rights command writes.
 - Deploys: `deploy.yml` (plan, review, apply). An infrastructure change beyond the web task and
   service is applied by hand from `infra/terraform/envs/v1` with `-var image_tag=$(terraform
   output -raw image_tag)`.
@@ -321,13 +335,67 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 - Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
   about $30). Scale the service to 0 tasks between test rounds to save the task's share.
 
-The PC keeps its own database: the transcription worker still writes to `wt-m3-ssz`, so new
-talks reach the beta only when they are loaded again (or once the PC switches to RDS, which is
-the owner's call).
+### The database's name
+
+Each database holds its name in `database_identity`, written once: `rds-v1` on RDS, `pc` on the
+PC's `wt-m3-ssz`. Set it with `wt db set-identity --name <name>` as the owner (on RDS through the
+forward as `wt_owner_login`, or as an admin task override); naming it again with the same name
+changes nothing, and another name is refused. `wt db identity` prints it. The ECS tasks run with
+`WT_DATABASE_NAME=rds-v1`, and in `WT_ENV=prod` the worker, pipeline, rights and takedown
+commands refuse to run without the key.
+
+### Moving the pipeline to RDS (the one-time catch-up)
+
+Done once, on October 16, 2026 (Spec 11, PB1.1). RDS was loaded from the PC on October 13; the
+PC worker kept writing to `wt-m3-ssz` until this cutover. `wt db catch-up` copies the pipeline
+rows the PC changed since then, and nothing else:
+
+1. Name both databases (above): `pc` on the PC, `rds-v1` on RDS. Both must be at the same
+   migration; run `wt db migrate` on the PC first if RDS is ahead.
+2. Open the forward (procedure 1, steps 1 and 2) and set, in one PowerShell window, the source
+   and target as owner logins (percent-encoded passwords; the environment keeps them out of
+   shell history):
+
+   ```powershell
+   $env:WT_CATCH_UP_FROM = "postgres://wt:<password>@localhost:55433/wt"
+   $env:WT_CATCH_UP_TO = "postgres://wt_owner_login:<password>@localhost:5433/wt?sslmode=require"
+   wt db catch-up --actor "<you>" > catch-up-dry.json
+   ```
+
+   The dry run copies each talk inside a transaction and rolls it back, so its counts and
+   failures are those of the real run. It reports talks changed on the PC after `--since`
+   (default `2026-10-13T00:00:00Z`) as new, updated, unchanged, skipped or failed, rows per
+   table, the untouched tables' counts, and `wt rights parity` between RDS and the PC. It never
+   writes `tester`, `query_log`, `feedback`, `takedown_request`, `rights_event` or any other table
+   the web service or a rights command writes, keeps RDS's rights columns on every talk, and
+   skips any talk withdrawn, quarantined, excluded, taken down or opted out on RDS, or whose
+   passages an answer or feedback row on RDS names but the PC has replaced. Read the skipped and
+   failed lists before going on.
+3. Run it: `wt db catch-up --actor "<you>" --apply > catch-up.json`. It replays RDS's takedowns
+   first (procedure 6), then copies, then runs the parity check, and exits 1 on any failed copy,
+   any untouched table that lost rows, or any `"unsafe": true` difference. Fix an unsafe
+   difference by replaying the rights action on the side that lacks it, then rerun; rerunning is
+   safe and copies only what still differs.
+4. Talks listed under `in_pipeline_without_job` have no job on RDS; requeue them there (`wt
+   pipeline retry --talk <id>` for a dead job, `wt pipeline advance` for cleared talks).
+5. Point the worker at RDS: in the PC `.env`, put the forward's `DATABASE_URL` as
+   `wt_pipeline_login` and `WT_DATABASE_NAME=rds-v1`, and rename the old PC URL to
+   `PC_DATABASE_URL_READ_ONLY` so no command reaches it by accident.
+6. Set the PC database read-only for 14 days, then archive it (a final `pg_dump` to the backups
+   bucket) and remove it from this runbook:
+
+   ```powershell
+   docker exec wt-m3-ssz psql -U wt -d postgres -c "alter database wt set default_transaction_read_only = on"
+   ```
+
+   New sessions refuse writes (`cannot execute ... in a read-only transaction`); reads, backups
+   and `wt rights parity` still work. Undo with `= off` only to replay a rights action there.
 
 ### Rights actions on both databases
 
-Until one database is the single source of truth, both hold real data, and every `wt` command
+Until the catch-up above, both databases held real data. After it the PC is read-only and every
+rights action runs once, against RDS; this section and the next are retired once objects move to
+S3 too (Spec 11, PB1.2). Before the cutover, every `wt` command
 acts on the one `DATABASE_URL` names. So each rights action (procedure 3 and the list after it)
 runs twice:
 

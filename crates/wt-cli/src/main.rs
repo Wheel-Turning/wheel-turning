@@ -235,11 +235,13 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     init_logging(config.env, &config.log, LogOutput::Stderr)?;
     let ctx = Ctx {
         records: wt_core::records::LocalRecords::new(&cli.records_dir),
+        guarded: cli.command.writes_pipeline_or_rights(),
+        named: std::sync::OnceLock::new(),
         config,
     };
     match cli.command {
         Command::Alerts { command } => alerts_cmds::alerts(&ctx.config, command).await?,
-        Command::Db { command } => admin_cmds::db(&ctx, command).await?,
+        Command::Db { command } => return admin_cmds::db(&ctx, command).await,
         Command::Registry { command } => admin_cmds::registry(&ctx, command).await?,
         Command::Sangha { command } => admin_cmds::sangha(&ctx, command).await?,
         Command::Report { command } => admin_cmds::report(&ctx, command).await?,
@@ -282,18 +284,60 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+impl Command {
+    /// The commands that write pipeline or rights data (Spec 11, PB1.1). Their database must
+    /// hold the name `WT_DATABASE_NAME` gives, and in prod that key is required.
+    fn writes_pipeline_or_rights(&self) -> bool {
+        matches!(
+            self,
+            Self::Worker(_)
+                | Self::Pipeline { .. }
+                | Self::Ingest { .. }
+                | Self::Reindex(_)
+                | Self::Takedown(_)
+                | Self::Rights { .. }
+                | Self::Exclusion { .. }
+                | Self::Source { .. }
+                | Self::Teacher { .. }
+                | Self::Talk { .. }
+                | Self::Consent { .. }
+                | Self::Text { .. }
+                | Self::Intake { .. }
+                | Self::License { .. }
+        )
+    }
+}
+
 /// What every command handler shares: the configuration and the records store. The database
 /// pool opens on demand, so the commands that need no database run without one.
 pub(crate) struct Ctx {
     config: Config,
     records: wt_core::records::LocalRecords,
+    /// Whether this command checks the database's name before using it.
+    guarded: bool,
+    /// The database's name, once checked and printed.
+    named: std::sync::OnceLock<String>,
 }
 
 impl Ctx {
     /// A new pool on `DATABASE_URL`. Each call connects afresh, as the commands always have.
+    /// For the commands that write pipeline or rights data, the database's name is read,
+    /// printed to stderr once, and checked against `WT_DATABASE_NAME`.
     async fn pool(&self) -> anyhow::Result<sqlx::PgPool> {
-        wt_db::connect(&self.config.database_url)
+        let pool = wt_db::connect(&self.config.database_url)
             .await
-            .context("connecting to the database")
+            .context("connecting to the database")?;
+        if self.guarded {
+            let name = wt_db::identity::verify(
+                &pool,
+                self.config.database_name.as_deref(),
+                self.config.env,
+            )
+            .await?;
+            if self.named.set(name.clone()).is_ok() {
+                eprintln!("database: {name}");
+            }
+        }
+        Ok(pool)
     }
 }

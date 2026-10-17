@@ -192,6 +192,8 @@ locals {
 
   common_env = [
     { name = "WT_ENV", value = "prod" },
+    # The name RDS holds in database_identity; prod commands that write refuse any other (PB1.1).
+    { name = "WT_DATABASE_NAME", value = "rds-v1" },
     { name = "WT_LOG", value = "info" },
     { name = "WT_TRANSCRIPT_BUCKET", value = var.bucket_names["transcripts"] },
   ]

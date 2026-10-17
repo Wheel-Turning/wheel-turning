@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Runs on the GPU machine, started by run.sh: the diarization sidecar, then WORKERS audio workers
-# that drain the queue. The database is the PC's, reached through run.sh's reverse tunnel on
-# localhost:55433. Transcripts land in ~/wt/data/objects, which run.sh copies back. Audio stays
-# in the scratch directory, which the pipeline empties and this script removes (rule 6), and in
+# that drain the queue. The database is RDS, reached through run.sh's reverse tunnel to the PC's
+# forward; run.sh writes its URL and name to ~/.wt-database, which this script removes.
+# Transcripts land in ~/wt/data/objects, which run.sh copies back. Audio stays in the scratch
+# directory, which the pipeline empties and this script removes (rule 6), and in
 # the copy of the owner's storage files run.sh sends to ~/wt/data/storage, which this script
 # removes too.
 set -uo pipefail
@@ -12,10 +13,17 @@ TOOLS=$HOME/wt-tools
 SCRATCH=$HOME/wt-scratch
 LOGS=$HOME/wt-logs
 TOKEN=$HOME/.wt-hf-token
+DATABASE=$HOME/.wt-database
 mkdir -p "$SCRATCH" "$LOGS"
 cd "$REPO" || exit 1
 
-export DATABASE_URL=postgres://wt:wt@localhost:55433/wt
+[ -s "$DATABASE" ] || {
+  echo "no database settings; run.sh sends them"
+  exit 1
+}
+DATABASE_URL=$(sed -n 's/^DATABASE_URL=//p' "$DATABASE")
+WT_DATABASE_NAME=$(sed -n 's/^WT_DATABASE_NAME=//p' "$DATABASE")
+export DATABASE_URL WT_DATABASE_NAME
 export WT_LOG=info
 export WT_SCRATCH_DIR=$SCRATCH
 export WT_MODEL_LICENSES=$REPO/docs/model-licenses.md
@@ -27,7 +35,7 @@ unset ANTHROPIC_API_KEY WT_ENV WT_DB_HOST
 # shellcheck disable=SC2329 # run by the trap
 cleanup() {
   [ -n "${SIDECAR:-}" ] && kill "$SIDECAR" 2> /dev/null
-  rm -rf "$SCRATCH" "$TOKEN" "$REPO/data/storage"
+  rm -rf "$SCRATCH" "$TOKEN" "$DATABASE" "$REPO/data/storage"
 }
 trap cleanup EXIT
 

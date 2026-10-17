@@ -89,6 +89,10 @@ pub struct Config {
     pub database_url: Secret,
     /// `DATABASE_URL_ANALYST`, used only by `wt report`.
     pub database_url_analyst: Option<Secret>,
+    /// `WT_DATABASE_NAME`, the name the database must hold in `database_identity` before
+    /// `wt worker`, `wt pipeline`, the rights commands or `wt takedown` write to it (Spec 11,
+    /// PB1.1). Required by those commands when `WT_ENV=prod`.
+    pub database_name: Option<String>,
     /// `WT_BIND`, the web listen address.
     pub bind: SocketAddr,
     /// `WT_SESSION_SECRET`, the key that signs session cookies. Always set outside dev.
@@ -221,6 +225,7 @@ impl Config {
             env,
             database_url,
             database_url_analyst,
+            database_name: get("WT_DATABASE_NAME").map(|v| v.trim().to_owned()),
             bind,
             session_secret,
             scratch_dir: get("WT_SCRATCH_DIR")

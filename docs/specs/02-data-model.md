@@ -522,6 +522,20 @@ grant execute on function flag_query(uuid) to dg_web;
 
 The `eval_rating.passage_id` column carries no foreign key on purpose. After a takedown the rating row survives as a record of what was rated, and the passage is gone.
 
+### Database identity (Spec 11, PB1.1)
+
+`database_identity` holds one row, the database's own name, written once at setup by `wt db set-identity`: `rds-v1` on RDS, `pc` on the owner's PC. An append-only trigger refuses updates and deletes. `wt worker`, `wt pipeline`, `wt ingest`, every rights command and `wt takedown` read it at start, print it, and refuse to run when it differs from `WT_DATABASE_NAME`; with `WT_ENV=prod` the key is required.
+
+```sql
+create table database_identity (
+  only_row boolean primary key default true check (only_row),
+  name text not null check (name ~ '^[a-z0-9][a-z0-9-]{0,62}$'),
+  created_at timestamptz not null default now()
+);
+```
+
+Owned by `wt_owner`; `wt_pipeline`, `wt_web` and `wt_analyst` may read it.
+
 ## Migration order and acceptance
 
 Migration files, in order:

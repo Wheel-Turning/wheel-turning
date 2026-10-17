@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into database_identity (name) values ($1) on conflict (only_row) do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e6af162c4f53fc935f3cc04040af9ac1019298cdda9777b544911078eb71891"
+}
