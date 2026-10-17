@@ -169,8 +169,8 @@ Decisions of October 3, 2026.
 Acceptance criteria:
 
 - [x] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply. (Checked October 13, 2026 with the beta deploy. DNS stays at Cloudflare, so the validation record and the CNAME are Terraform outputs copied there by hand. `app.wheelturning.org` is the primary name and `demo.` an alternate on the same certificate.)
-- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed.
-- [ ] The web role can publish to the alert topic and to nothing else in SNS.
+- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed. (Published October 16, 2026, message 5d843c6d; tick once the owner sees it.)
+- [x] The web role can publish to the alert topic and to nothing else in SNS. (IAM simulation, October 16, 2026, after adding `sns:Publish` on the alert topic to the workload boundary in `infra/terraform/github-oidc`.)
 
 ## Recovery and availability targets
 
