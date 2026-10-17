@@ -4,13 +4,13 @@ Status: **proposed, waiting on the owner.** Written October 17, 2026. Nothing he
 
 ## Context
 
-The edge is everything between a tester's browser and the web task. Today, from `infra/terraform` and the Cloudflare zone as read on October 17:
+The edge is everything between a tester's browser and the web task. Today, from `infra/terraform`, the live account and the Cloudflare zone as read on October 17:
 
 | Piece | Where | What it does | Per month |
 | --- | --- | --- | --- |
-| Application load balancer `wt-v1`, two zones | `modules/service/main.tf` | TLS with the ACM certificate (`ELBSecurityPolicy-TLS13-1-2-2021-06`), HTTP to HTTPS redirect, `/healthz` target health check, the `maintenance` fixed page (PB4.4), health-gated deploys with the circuit breaker | $16.48 measured |
-| Public IPv4, three | two on the load balancer, one on the web task (`assign_public_ip = true`; there is no NAT gateway) | The task's address is its only way out: ECR, Secrets Manager, CloudWatch Logs, SNS, SES, `public.ecr.aws` and the model API | $11.42 measured ($3.65 each, plus one-off tasks) |
-| AWS WAF web ACL `wt-v1` | `modules/service/waf.tf` | AWS Common and Known Bad Inputs managed groups, 300 requests per 5 minutes per IP, all in count until `waf_block` (PB3.6) | about $8 + $0.60 per million requests |
+| Application load balancer `wt-v1`, two zones | `modules/service/main.tf` | TLS with the ACM certificate (`ELBSecurityPolicy-TLS13-1-2-2021-06`), HTTP to HTTPS redirect, `/healthz` target health check, the `maintenance` fixed page (PB4.4), health-gated deploys with the circuit breaker | $16.48 ($0.542 a day in Cost Explorer, October 10 to 16) |
+| Public IPv4, three | two on the load balancer, one on the web task (`assign_public_ip = true`; there is no NAT gateway) | The task's address is its only way out: ECR, Secrets Manager, CloudWatch Logs, SNS, SES, `public.ecr.aws` and the model API | $11.10 ($0.36 to $0.38 a day; $3.65 each, plus one-off tasks) |
+| AWS WAF web ACL `wt-v1` | `modules/service/waf.tf` | AWS Common and Known Bad Inputs managed groups, 300 requests per 5 minutes per IP, all in count until `waf_block` (PB3.6) | about $8 + $0.60 per million requests; attached since October 16, so not yet on the bill. The load balancer served 17,000 to 20,000 requests a day, so requests add about $0.35 |
 | Cloudflare | zone `wheelturning.org`, Free plan, set by hand | DNS only: `app` and `demo` are DNS-only CNAMEs to the load balancer, so testers' traffic never passes through Cloudflare. Zone SSL mode `full`, minimum TLS 1.0, Always Use HTTPS off (they matter only once a record is proxied) | $0 |
 | **Edge total** | | | **about $37** |
 
@@ -68,7 +68,7 @@ Not started. If the owner approves:
 ## Sources
 
 - Repository: `infra/terraform/modules/{network,service,observability}`, `docs/cost.md` (measured October 14 and 15), Spec 01, Spec 11 (PB3.5, PB3.6, PB4.4, PB4.5), `docs/roadmap.md` UB3.13.
-- Cloudflare zone read with the `cf` CLI on October 17, 2026 (records, `ssl`, `min_tls_version`, `always_use_https`, rulesets). AWS was not read live: the AWS tools needed authentication in this session, so AWS figures come from Terraform and `docs/cost.md`.
+- Cloudflare zone read with the `cf` CLI on October 17, 2026 (records, `ssl`, `min_tls_version`, `always_use_https`, rulesets). AWS read live with the `wheel-turning` profile, read-only, on October 17: the load balancer (`ipv4`, internet-facing, two public addresses), the one web-task address, the WAF association, no IPv6 block on the VPC, `RequestCount` by day, and Cost Explorer by service for October 10 to 16.
 - [Cloudflare rate limiting parameters](https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/) and [features by plan](https://developers.cloudflare.com/learning-paths/application-security/rate-limiting/features/).
 - [ALB IPv6-only for internet clients](https://aws.amazon.com/about-aws/whats-new/2024/05/application-load-balancer-ipv6-internet-clients) and [the AWS blog post](https://aws.amazon.com/blogs/networking-and-content-delivery/introducing-dual-stack-without-public-ipv4-application-load-balancer).
 - AAAA lookups through 1.1.1.1 on October 17: `api.anthropic.com`, `ecr.us-east-2.api.aws`, `logs.us-east-2.api.aws`, `sns.us-east-2.api.aws` and `email.us-east-2.api.aws` have IPv6; `secretsmanager.us-east-2.api.aws` and `public.ecr.aws` did not answer.
