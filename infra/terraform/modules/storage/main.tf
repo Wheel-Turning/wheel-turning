@@ -1,6 +1,9 @@
 # Spec 01 storage: three S3 buckets. All block public access and deny non-TLS requests.
 # Scratch expires objects after one day and aborts multipart uploads after one day.
-# Transcripts has versioning off. Models has versioning on.
+# Transcripts has versioning off. Models has versioning on; a replaced model version is kept 30
+# days (and the last two always), so a rollback stays possible without paying for every upload.
+# Transcripts and models abort multipart uploads after seven days, which a failed upload leaves
+# billing otherwise.
 
 variable "name" {
   description = "Name prefix for every resource."
@@ -72,6 +75,41 @@ resource "aws_s3_bucket_lifecycle_configuration" "scratch" {
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "models" {
+  bucket = aws_s3_bucket.this["models"].id
+
+  rule {
+    id     = "expire-replaced-models"
+    status = "Enabled"
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days           = 30
+      newer_noncurrent_versions = 2
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.models]
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "transcripts" {
+  bucket = aws_s3_bucket.this["transcripts"].id
+
+  rule {
+    id     = "abort-incomplete-uploads"
+    status = "Enabled"
+    filter {}
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }
