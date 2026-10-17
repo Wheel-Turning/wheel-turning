@@ -671,40 +671,15 @@ async fn a_reached_cap_is_stored_as_cap_reached() {
     assert_eq!(summary_status(&fx.pool).await, "cap_reached");
 }
 
-/// Spec 11, PB2.4 and PB4.3: no model is stored as `no_key`, and the answer logs one
-/// `summary_settled` event with its status and no question text.
+/// Spec 11, PB2.4: no model is stored as `no_key`. Its `summary_settled` event is checked in
+/// `log_scrubber.rs`, a binary of its own: a scoped subscriber here can miss events while the
+/// other tests in this binary log in parallel.
 #[tokio::test]
-async fn no_model_is_stored_as_no_key_and_logs_summary_settled() {
-    let captured = Captured::default();
-    let writer = captured.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-        .with_writer(move || writer.clone())
-        .json()
-        .flatten_event(true)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+async fn no_model_is_stored_as_no_key() {
     let fx = start_with(site_with(Arc::new(wt_extract::UnavailableLlm)), true).await;
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
     assert_eq!(summary_status(&fx.pool).await, "no_key");
-    let answer: Uuid = sqlx::query_scalar("select id from answer")
-        .fetch_one(&fx.pool)
-        .await
-        .unwrap();
-    let events: Vec<serde_json::Value> = captured
-        .text()
-        .lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter(|v| v["event"] == "summary_settled")
-        .collect();
-    assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0]["summary_status"], "no_key");
-    assert_eq!(events[0]["answer_id"], answer.to_string());
-    assert!(
-        !captured.text().contains("work with anger"),
-        "no question text"
-    );
 }
 
 /// A reranker that never answers within `rerank_timeout_s`.
@@ -722,30 +697,11 @@ impl wt_ml::Reranker for StalledRanker {
     }
 }
 
-/// The `ranker_served` events in the captured log.
-fn rankers(captured: &Captured) -> Vec<String> {
-    captured
-        .text()
-        .lines()
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter(|v| v["event"] == "ranker_served")
-        .map(|v| v["ranker"].as_str().unwrap_or_default().to_owned())
-        .collect()
-}
-
-/// Spec 11, PB2.1: every answer logs which ranker ordered it. A ranker that times out logs
-/// `none (fallback)` and the page says the relevance check did not finish.
+/// Spec 11, PB2.1: a ranker that times out leaves the fused order, and the page says the
+/// relevance check did not finish. The `ranker_served` event is checked in `log_scrubber.rs`
+/// and the ranker's name in `wt_api::ask` unit tests.
 #[tokio::test]
-async fn a_ranker_timeout_logs_none_fallback_and_the_page_says_so() {
-    let captured = Captured::default();
-    let writer = captured.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-        .with_writer(move || writer.clone())
-        .json()
-        .flatten_event(true)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+async fn a_ranker_timeout_falls_back_and_the_page_says_so() {
     let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
     site.reranker = Some(Arc::new(StalledRanker));
     site.retrieval.retrieval.rerank_timeout_s = 1;
@@ -758,24 +714,10 @@ async fn a_ranker_timeout_logs_none_fallback_and_the_page_says_so() {
         "{}",
         page.body
     );
-    assert_eq!(rankers(&captured), ["none (fallback)"]);
-    assert!(
-        !captured.text().contains("work with anger"),
-        "no question text"
-    );
 }
 
 #[tokio::test]
-async fn a_ranker_that_answers_logs_its_kind_and_no_notice() {
-    let captured = Captured::default();
-    let writer = captured.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
-        .with_writer(move || writer.clone())
-        .json()
-        .flatten_event(true)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+async fn a_ranker_that_answers_leaves_no_notice() {
     let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
     site.reranker = Some(Arc::new(wt_ml::FakeReranker));
     site.retrieval.ranking.ranker = wt_retrieve::Ranker::Model;
@@ -783,27 +725,6 @@ async fn a_ranker_that_answers_logs_its_kind_and_no_notice() {
     let page = ask(&fx, "How do I work with anger?").await;
     assert_eq!(page.status, StatusCode::OK);
     assert!(!page.body.contains("relevance check"), "{}", page.body);
-    assert_eq!(rankers(&captured), ["llm"]);
-}
-
-#[derive(Clone, Default)]
-struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl std::io::Write for Captured {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl Captured {
-    fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
-    }
 }
 
 /// The page comes back before the summary is written: its place shows at the top, and the

@@ -232,6 +232,20 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("quokkaflux warmth"), "the passage was served");
+    // The deferred summary settles before the logs are read (no model here, so `no_key`).
+    for _ in 0..100 {
+        let (status, _, _) = send(
+            &app,
+            with_cookie(Request::get(format!("{permalink}/summary")), &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        if status != StatusCode::ACCEPTED {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     send(
         &app,
         form(
@@ -263,6 +277,22 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
         .collect();
     assert_eq!(completed.len(), 1, "one ask_completed per answer");
     assert!(completed[0]["ms"].is_u64(), "ask_completed carries ms");
+    // Spec 11, PB2.4 and PB2.1: one summary_settled and one ranker_served per answer. They are
+    // checked here, in a binary of its own, because a scoped subscriber in a binary whose other
+    // tests log in parallel can miss events.
+    let events = |name: &str| -> Vec<serde_json::Value> {
+        logs.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["event"] == name)
+            .collect()
+    };
+    let settled = events("summary_settled");
+    assert_eq!(settled.len(), 1, "{settled:?}");
+    assert_eq!(settled[0]["summary_status"], "no_key");
+    assert!(settled[0]["answer_id"].is_string());
+    let ranked = events("ranker_served");
+    assert_eq!(ranked.len(), 1, "{ranked:?}");
+    assert_eq!(ranked[0]["ranker"], "none (fallback)", "no reranker here");
     for (what, secret) in [
         ("query text", "quokkaflux"),
         ("query text", QUERY),
