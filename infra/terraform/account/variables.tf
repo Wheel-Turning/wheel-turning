@@ -63,3 +63,9 @@ variable "cloudtrail_log_group_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "mail_from_subdomain" {
+  description = "Subdomain of mail_domain used as the SES MAIL FROM (envelope sender) domain, so SPF aligns for DMARC."
+  type        = string
+  default     = "mail"
+}
