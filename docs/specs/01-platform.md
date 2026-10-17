@@ -62,6 +62,7 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_TESSERACT` | `tesseract` | The Tesseract program for OCR (default: found on the `PATH`). See Spec 08. |
 | `WT_CONFIG_DIR` | `config` | Directory the web server and `wt eval` read `retrieval.toml`, `common_words.txt`, `llm_prices.toml`, `sensitive.toml` and `sensitive_exemplars.toml` from |
 | `WT_TRANSCRIPT_BUCKET` | none | S3 bucket for transcript JSON and the glossary. Unset means a local directory under `./data`. |
+| `WT_RECORDS_BUCKET` | none | S3 bucket for rights-ledger records (statements, drafts, mandate decisions), the versioned Object Lock bucket from `infra/terraform/records`; each record is written under a legal hold (Spec 11, PB1.2). Unset means `wt --records-dir`. |
 | `WT_MODEL_DIR` | `./models` | Directory holding the exported ONNX models and tokenizers |
 | `WT_EMBED_MODEL` | `bge-m3-int8` | Embedding model directory name inside `WT_MODEL_DIR` |
 | `WT_MODEL_LICENSES` | `docs/model-licenses.md` | Model license record; a stage refuses a model it does not list with a revision (Spec 04) |

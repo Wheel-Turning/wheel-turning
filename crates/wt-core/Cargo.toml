@@ -11,11 +11,19 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+aws-config.workspace = true
+aws-sdk-s3.workspace = true
+aws-smithy-http-client.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+
+[dev-dependencies]
+testcontainers.workspace = true
+tokio.workspace = true

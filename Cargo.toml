@@ -29,6 +29,11 @@ wt-eval = { path = "crates/wt-eval" }
 
 # external crates: exact versions are pinned in Cargo.lock
 anyhow = "1"
+# The S3 client (Spec 11, PB1.2), on rustls with ring as wt-api's SES client is: the default
+# features add aws-lc and the legacy hyper 0.14 stack. `sso` reads the PC's SSO profile.
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "credentials-process", "sso"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
 axum = "0.8"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }

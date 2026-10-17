@@ -13,6 +13,7 @@ use sqlx::types::Uuid;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 use wt_core::objects::{LocalObjects, ObjectStore};
+use wt_core::records::Records as _;
 use wt_db::test_support::TestDb;
 use wt_ingest::config::{LicenseSettings, UrlPolicy};
 use wt_ingest::http::Exclusions;

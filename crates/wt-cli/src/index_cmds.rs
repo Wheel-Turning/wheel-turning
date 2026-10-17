@@ -749,7 +749,7 @@ pub async fn refresh_text(
 pub async fn intake(
     pool: &PgPool,
     config: &Config,
-    records: &wt_core::records::LocalRecords,
+    records: &dyn wt_core::records::Records,
     config_dir: &Path,
     inbox: &Path,
 ) -> anyhow::Result<()> {
@@ -805,7 +805,7 @@ pub async fn intake(
 /// `wt license ...`.
 pub async fn license(
     pool: &PgPool,
-    records: &wt_core::records::LocalRecords,
+    records: &dyn wt_core::records::Records,
     command: crate::text_cmds::LicenseCommand,
 ) -> anyhow::Result<()> {
     use crate::text_cmds::LicenseCommand as L;

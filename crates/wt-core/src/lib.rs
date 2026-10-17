@@ -12,6 +12,7 @@ pub mod ids;
 pub mod licenses;
 pub mod objects;
 pub mod records;
+pub mod s3;
 pub mod scratch;
 pub mod stores;
 pub mod telemetry;

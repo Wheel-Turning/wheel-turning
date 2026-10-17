@@ -38,10 +38,14 @@ locals {
   # Owner and repo names are wildcards; the numeric ids are what pin the repository.
   repo_subject = "repo:*@${var.github_owner_id}/*@${var.github_repo_id}"
 
-  role_arns     = "arn:aws:iam::${local.account}:role${local.path}*"
-  profile_arns  = "arn:aws:iam::${local.account}:instance-profile${local.path}*"
-  boundary_arn  = "arn:aws:iam::${local.account}:policy${local.path}${var.name}-workload-boundary"
-  bucket_arns   = [for b in ["transcripts", "scratch", "models"] : "arn:aws:s3:::${var.name}-${b}-${local.account}"]
+  role_arns    = "arn:aws:iam::${local.account}:role${local.path}*"
+  profile_arns = "arn:aws:iam::${local.account}:instance-profile${local.path}*"
+  boundary_arn = "arn:aws:iam::${local.account}:policy${local.path}${var.name}-workload-boundary"
+  # The records bucket lives in its own stack (infra/terraform/records), named by account only.
+  bucket_arns = concat(
+    [for b in ["transcripts", "scratch", "models"] : "arn:aws:s3:::${var.name}-${b}-${local.account}"],
+    ["arn:aws:s3:::wt-records-${local.account}"],
+  )
   secret_arns   = "arn:aws:secretsmanager:${local.region}:${local.account}:secret:${var.name}/*"
   log_group_arn = "arn:aws:logs:${local.region}:${local.account}:log-group:/${var.name}/*"
 }
@@ -65,6 +69,9 @@ data "aws_iam_policy_document" "workload_boundary" {
     sid = "WorkloadServices"
     actions = [
       "s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload", "s3:ListBucket",
+      # Takedown deletes every version under a talk's prefix; records are written with a legal
+      # hold (Spec 11, PB1.2). No workload policy grants a delete on the records bucket.
+      "s3:ListBucketVersions", "s3:DeleteObjectVersion", "s3:PutObjectLegalHold",
       "secretsmanager:GetSecretValue",
       "logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams",
       "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability",

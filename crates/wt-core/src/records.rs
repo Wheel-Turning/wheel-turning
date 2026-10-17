@@ -2,12 +2,17 @@
 //! statements and the owner's mandate decisions. A record is kept under its SHA-256, so storing
 //! the same bytes twice keeps one copy and the key proves what was recorded.
 //!
-//! Records go to a local directory for now. The records bucket (`infra/terraform/records/`)
-//! takes them once the project has an S3 client; the key format stays the same.
+//! Records go to the records bucket (`infra/terraform/records/`) when `WT_RECORDS_BUCKET` is set
+//! ([`S3Records`], Spec 11 PB1.2), and to a local directory otherwise ([`LocalRecords`]). The key
+//! is `records/<sha256>` in both. The bucket keeps every version under an Object Lock legal hold,
+//! so records survive takedown, which deletes transcripts but never the record of what was
+//! agreed.
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
+
+use crate::s3::{AwsBucket, Bucket, S3Error};
 
 /// Why a record could not be stored.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +28,64 @@ pub enum RecordError {
     /// A statement or draft was empty, which records nothing.
     #[error("{0} is empty")]
     Empty(PathBuf),
+    /// The bucket refused.
+    #[error(transparent)]
+    S3(#[from] S3Error),
+}
+
+/// Where records are kept. Every implementation stores a record under its SHA-256 and never
+/// replaces or deletes one.
+pub trait Records: Send + Sync {
+    /// Stores `bytes` and returns their key. Storing identical bytes again is a no-op.
+    fn store(&self, bytes: &[u8]) -> Result<StoredRecord, RecordError>;
+    /// The bytes recorded under a SHA-256, if any.
+    fn get(&self, sha256: &str) -> Result<Option<Vec<u8>>, RecordError>;
+    /// The SHA-256 of every stored record, sorted.
+    fn list(&self) -> Result<Vec<String>, RecordError>;
+
+    /// Reads a file a person supplied, such as a pasted email, and stores it. An empty file is
+    /// refused.
+    fn store_file(&self, file: &Path) -> Result<StoredRecord, RecordError> {
+        let bytes = std::fs::read(file).map_err(|source| RecordError::Io {
+            path: file.to_owned(),
+            source,
+        })?;
+        if bytes.iter().all(u8::is_ascii_whitespace) {
+            return Err(RecordError::Empty(file.to_owned()));
+        }
+        self.store(&bytes)
+    }
+}
+
+impl<T: Records + ?Sized> Records for Box<T> {
+    fn store(&self, bytes: &[u8]) -> Result<StoredRecord, RecordError> {
+        (**self).store(bytes)
+    }
+    fn get(&self, sha256: &str) -> Result<Option<Vec<u8>>, RecordError> {
+        (**self).get(sha256)
+    }
+    fn list(&self) -> Result<Vec<String>, RecordError> {
+        (**self).list()
+    }
+}
+
+/// The records store a command uses: the records bucket when `bucket` is set, else `local_dir`.
+pub fn open(bucket: Option<&str>, local_dir: &Path) -> Result<Box<dyn Records>, RecordError> {
+    Ok(match bucket {
+        Some(name) => Box::new(S3Records::new(AwsBucket::connect(name, None)?)),
+        None => Box::new(LocalRecords::new(local_dir)),
+    })
+}
+
+/// The key prefix records live under, in the bucket and in `evidence_ref` and its kin.
+pub const PREFIX: &str = "records/";
+
+/// Whether `name` is a lowercase hex SHA-256, the only name a record has.
+fn is_sha256(name: &str) -> bool {
+    name.len() == 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// A stored record: its key and the SHA-256 of its bytes.
@@ -54,9 +117,10 @@ impl LocalRecords {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self { dir: dir.into() }
     }
+}
 
-    /// Stores `bytes` and returns their key. Storing identical bytes again is a no-op.
-    pub fn store(&self, bytes: &[u8]) -> Result<StoredRecord, RecordError> {
+impl Records for LocalRecords {
+    fn store(&self, bytes: &[u8]) -> Result<StoredRecord, RecordError> {
         let sha256 = sha256_hex(bytes);
         let path = self.dir.join(&sha256);
         if !path.exists() {
@@ -70,22 +134,91 @@ impl LocalRecords {
             })?;
         }
         Ok(StoredRecord {
-            key: format!("records/{sha256}"),
+            key: format!("{PREFIX}{sha256}"),
             sha256,
         })
     }
 
-    /// Reads a file a person supplied, such as a pasted email, and stores it. An empty file is
-    /// refused.
-    pub fn store_file(&self, file: &Path) -> Result<StoredRecord, RecordError> {
-        let bytes = std::fs::read(file).map_err(|source| RecordError::Io {
-            path: file.to_owned(),
-            source,
-        })?;
-        if bytes.iter().all(u8::is_ascii_whitespace) {
-            return Err(RecordError::Empty(file.to_owned()));
+    fn get(&self, sha256: &str) -> Result<Option<Vec<u8>>, RecordError> {
+        if !is_sha256(sha256) {
+            return Ok(None);
         }
-        self.store(&bytes)
+        let path = self.dir.join(sha256);
+        match std::fs::read(&path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(RecordError::Io { path, source }),
+        }
+    }
+
+    fn list(&self) -> Result<Vec<String>, RecordError> {
+        let entries = match std::fs::read_dir(&self.dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(RecordError::Io {
+                    path: self.dir.clone(),
+                    source,
+                });
+            }
+        };
+        let mut out: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|n| is_sha256(n))
+            .collect();
+        out.sort();
+        Ok(out)
+    }
+}
+
+/// Records in the records bucket under `records/<sha256>`, each written with a legal hold. The
+/// bucket's policy refuses a write without one, and nothing here deletes.
+#[derive(Debug)]
+pub struct S3Records<B = AwsBucket> {
+    /// The records bucket.
+    bucket: B,
+}
+
+impl<B: Bucket> S3Records<B> {
+    /// Records in `bucket`.
+    pub fn new(bucket: B) -> Self {
+        Self { bucket }
+    }
+
+    /// The bucket underneath.
+    pub fn bucket(&self) -> &B {
+        &self.bucket
+    }
+}
+
+impl<B: Bucket> Records for S3Records<B> {
+    fn store(&self, bytes: &[u8]) -> Result<StoredRecord, RecordError> {
+        let sha256 = sha256_hex(bytes);
+        let key = format!("{PREFIX}{sha256}");
+        // Checked first, so storing the same bytes again adds no version to the locked bucket.
+        if !self.bucket.exists(&key)? {
+            self.bucket.put(&key, bytes, true)?;
+        }
+        Ok(StoredRecord { key, sha256 })
+    }
+
+    fn get(&self, sha256: &str) -> Result<Option<Vec<u8>>, RecordError> {
+        if !is_sha256(sha256) {
+            return Ok(None);
+        }
+        Ok(self.bucket.get(&format!("{PREFIX}{sha256}"))?)
+    }
+
+    fn list(&self) -> Result<Vec<String>, RecordError> {
+        let mut out: Vec<String> = crate::s3::list_all(&self.bucket, PREFIX)?
+            .into_iter()
+            .filter_map(|k| k.strip_prefix(PREFIX).map(str::to_owned))
+            .filter(|n| is_sha256(n))
+            .collect();
+        out.sort();
+        Ok(out)
     }
 }
 

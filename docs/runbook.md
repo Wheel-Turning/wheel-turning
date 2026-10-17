@@ -438,7 +438,9 @@ runs twice:
    ```
 
    Object deletion uses the PC's object store both times, which is the only one until objects
-   move to S3; the second run finds nothing left to delete there and says so.
+   move to S3; the second run finds nothing left to delete there and says so. Once they have
+   moved ("Moving objects and records to S3" below), set `WT_TRANSCRIPT_BUCKET` and
+   `WT_RECORDS_BUCKET` for both runs.
 3. Compare the two, read-only on both. It exits 1 when one side could serve something the other
    has removed (a talk, teacher, source, exclusion, takedown or `talks_basis` that differs that
    way), and lists every other difference too, such as talks the PC found after the load or a
@@ -463,6 +465,44 @@ runs twice:
 > load. Otherwise testers lose their invites, logs and feedback, and a talk taken down on RDS
 > comes back. After the load, run `wt takedown --replay --actor "<you>" --yes` against RDS
 > (procedure 6) and the parity check again.
+
+### Moving objects and records to S3 (Spec 11, PB1.2)
+
+`wt` uses the transcripts bucket when `WT_TRANSCRIPT_BUCKET` is set and the records bucket when
+`WT_RECORDS_BUCKET` is set; otherwise `data/objects` and `--records-dir` (`data/records`). Both
+are one-time copies, done once, with the owner's go-ahead.
+
+1. Before. The owner applies `infra/terraform/github-oidc` (the boundary gains the version and
+   legal-hold actions and the records bucket), then `infra/terraform/envs/v1` (the admin task
+   role, the batch role's version deletes and records access, `WT_RECORDS_BUCKET` on the admin
+   task). Stop the worker, so `data/objects` does not change during the copy.
+2. Dry run, on the PC from the repository root, after `aws sso login --profile wheel-turning`:
+
+   ```powershell
+   $env:AWS_PROFILE = "wheel-turning"
+   $env:WT_TRANSCRIPT_BUCKET = "wt-v1-transcripts-904883674947"
+   $env:WT_RECORDS_BUCKET = "wt-records-904883674947"
+   wt objects sync --from data/objects
+   wt records sync --from data/records
+   ```
+
+   Each prints JSON: `source` (local keys), `matched_before`, `copied` (what `--apply` would
+   copy), `differing` (keys the bucket holds with other bytes), `only_in_bucket` and, for
+   records, `corrupt_source` (a file whose bytes do not hash to its name). Nothing is written.
+3. Copy. Rerun both with `--apply`. Each key is read back and compared by SHA-256; `verified`
+   must equal `source`, `mismatched` must be empty and `complete` true, or the command exits 1.
+   Rerunning is safe: it copies only what is missing or differs. Objects that differ are
+   replaced from the PC. Records are never replaced, since a record's key is its hash, and each
+   is written under a legal hold, so a `differing` or `corrupt_source` record is looked at by
+   hand.
+4. Remove what was taken down. The PC's objects may predate a takedown run only on RDS. Against
+   RDS (the batch host forward, as in "Rights actions on both databases"), with the two bucket
+   variables still set, run `wt takedown --finish`, which deletes every version under each
+   logged talk's prefixes, then `wt audit`: `takedown_completeness` must have no findings.
+5. After. Keep both variables set for every later `wt` command, in `.env` too, so no command
+   writes to `data/objects` or `data/records` again; pointing the worker at the buckets is part
+   of the database cutover (PB1.1). Keep `data/objects` and `data/records` until runbook §10 is
+   retired with PB1.1.
 
 ## 13. Alarms, incidents and outages
 
