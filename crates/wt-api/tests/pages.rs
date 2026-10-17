@@ -538,7 +538,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
     assert!(section.contains("href=\"#p1\"") && section.contains("href=\"#p2\""));
     assert!(
-        section.contains("Drawn from 2 talks by 2 teachers."),
+        section.contains("The summary draws on 2 of these excerpts."),
         "{section}"
     );
     assert_eq!(page.body.matches(MODEL_NOTE).count(), 1, "one model note");
@@ -549,7 +549,13 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
     assert!(
         !section.contains("excerpts come from teachers at"),
-        "the one-sangha note needs three excerpts"
+        "no one-sangha note (Spec 11, PB2.3)"
+    );
+    assert!(
+        page.body
+            .contains("<p class=\"result\">2 teachers, 2 teachings, 2 excerpts</p>"),
+        "{}",
+        page.body
     );
     assert!(
         page.body.find("id=\"summary\"").unwrap() < page.body.find("<blockquote>").unwrap(),
@@ -713,6 +719,85 @@ async fn no_model_is_stored_as_no_key_and_logs_summary_settled() {
         !captured.text().contains("work with anger"),
         "no question text"
     );
+}
+
+/// A reranker that never answers within `rerank_timeout_s`.
+struct StalledRanker;
+
+#[async_trait::async_trait]
+impl wt_ml::Reranker for StalledRanker {
+    fn model_id(&self) -> &str {
+        "stalled"
+    }
+
+    async fn score(&self, _: &str, passages: &[String]) -> Result<Vec<f32>, wt_ml::MlError> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(vec![0.0; passages.len()])
+    }
+}
+
+/// The `ranker_served` events in the captured log.
+fn rankers(captured: &Captured) -> Vec<String> {
+    captured
+        .text()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "ranker_served")
+        .map(|v| v["ranker"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+/// Spec 11, PB2.1: every answer logs which ranker ordered it. A ranker that times out logs
+/// `none (fallback)` and the page says the relevance check did not finish.
+#[tokio::test]
+async fn a_ranker_timeout_logs_none_fallback_and_the_page_says_so() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
+    site.reranker = Some(Arc::new(StalledRanker));
+    site.retrieval.retrieval.rerank_timeout_s = 1;
+    let fx = start_with(site, true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(
+        page.body
+            .contains("The relevance check did not finish for this question"),
+        "{}",
+        page.body
+    );
+    assert_eq!(rankers(&captured), ["none (fallback)"]);
+    assert!(
+        !captured.text().contains("work with anger"),
+        "no question text"
+    );
+}
+
+#[tokio::test]
+async fn a_ranker_that_answers_logs_its_kind_and_no_notice() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
+    site.reranker = Some(Arc::new(wt_ml::FakeReranker));
+    site.retrieval.ranking.ranker = wt_retrieve::Ranker::Model;
+    let fx = start_with(site, true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("relevance check"), "{}", page.body);
+    assert_eq!(rankers(&captured), ["llm"]);
 }
 
 #[derive(Clone, Default)]

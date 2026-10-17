@@ -76,6 +76,18 @@ variable "llm_model" {
   default     = "claude-haiku-4-5"
 }
 
+variable "llm_stage_models" {
+  description = "Per-stage models for the web service and the eval task (Spec 11, PB2.0): WT_LLM_MODEL_<STAGE>. A stage left out or empty falls back to llm_model."
+  type = object({
+    synth   = optional(string, "")
+    verify  = optional(string, "")
+    triage  = optional(string, "")
+    excerpt = optional(string, "")
+    rank    = optional(string, "")
+  })
+  default = {}
+}
+
 variable "anthropic_workspace_id" {
   description = "ANTHROPIC_WORKSPACE_ID. Not a secret; the API key is in Secrets Manager."
   type        = string
@@ -109,4 +121,10 @@ variable "mail_from" {
   description = "Sender of the removal request confirmation email. Its domain is the SES identity in infra/terraform/account."
   type        = string
   default     = "rights@wheelturning.org"
+}
+
+variable "waf_block" {
+  description = "Switch the load balancer's WAF rules from count to block. Spec 11 PB3.6: count for 7 days after the first apply, then set true once the sampled requests show no false positives."
+  type        = bool
+  default     = false
 }

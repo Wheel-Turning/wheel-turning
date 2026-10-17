@@ -12,7 +12,9 @@ use wt_core::answer::SummaryStatus;
 use wt_core::ids::{AnswerId, TesterId};
 use wt_db::answer::Payload;
 use wt_extract::DataClass;
-use wt_retrieve::{Level, Mode, NamedDetector, Notice, Relevance, Triaged, retrieve_reporting};
+use wt_retrieve::{
+    Level, Mode, NamedDetector, Notice, Ranker, Relevance, Triaged, retrieve_reporting,
+};
 use wt_synth::{SummaryExcerpt, SummaryInput, Synthesis};
 
 use crate::Site;
@@ -66,6 +68,8 @@ pub struct Asked {
     pub summary_status: SummaryStatus,
     /// The reranker was missing, failed or timed out.
     pub rerank_degraded: bool,
+    /// Which ranker ordered the excerpts: `llm`, `onnx` or `none (fallback)` (Spec 11, PB2.1).
+    pub ranker: &'static str,
     /// The notice key stored in the payload, if any.
     pub notice: Option<&'static str>,
     /// Per-stage timings.
@@ -383,6 +387,8 @@ pub async fn answer_framed(
         .map_err(AskError::Persist)?;
     timings.persist_ms = millis(stage);
     timings.total_ms = millis(started);
+    let ranker = ranker_name(site, found.rerank_degraded);
+    ranker_served(answer_id, ranker);
     if summary_status != SummaryStatus::Pending {
         settled(answer_id, summary_status);
     }
@@ -416,11 +422,34 @@ pub async fn answer_framed(
         synthesis_failed: synthesis.failure.is_some(),
         summary_status,
         rerank_degraded: found.rerank_degraded,
+        ranker,
         notice,
         timings,
         level,
         triaged,
     })))
+}
+
+/// The ranker that ordered an answer's excerpts, as `ranker_served` names it: the configured
+/// ranker, or `none (fallback)` when it was missing, failed or timed out and the fused order
+/// stood (Spec 11, PB2.1).
+pub fn ranker_name(site: &Site, degraded: bool) -> &'static str {
+    match (degraded, site.retrieval.ranking.ranker) {
+        (true, _) => "none (fallback)",
+        (false, Ranker::Model) => "llm",
+        (false, Ranker::Onnx) => "onnx",
+    }
+}
+
+/// Logs `ranker_served` (Spec 11, PB2.1 and PB4.3): which ranker ordered one answer. It carries
+/// the answer id and the ranker, never the question.
+pub fn ranker_served(answer: AnswerId, ranker: &str) {
+    tracing::info!(
+        event = "ranker_served",
+        ranker,
+        answer_id = %answer,
+        "ranker served"
+    );
 }
 
 /// Logs `summary_settled` (Spec 11, PB2.4 and PB4.3): how one answer's summary settled. It

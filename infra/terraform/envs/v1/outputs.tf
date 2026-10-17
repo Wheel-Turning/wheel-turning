@@ -56,3 +56,7 @@ output "alert_topic_arn" {
   description = "WT_ALERT_TOPIC_ARN, for `wt alerts test` and the batch host."
   value       = module.observability.alarm_topic_arn
 }
+
+output "web_acl_name" {
+  value = module.service.web_acl_name
+}

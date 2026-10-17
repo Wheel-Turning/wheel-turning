@@ -124,6 +124,7 @@ On the home page and under About, in the section Your questions.
 
 - Question too short or long: Please write between 3 and 500 characters.
 - Too many questions: You have asked a lot of questions this hour. Please try again in \[minutes\] minutes.
+- Result line under the question (Spec 11, PB2.3): \[x] teacher(s), \[y] teaching(s), \[z] excerpt(s). Teachings are distinct talks; texts count once texts ship. Each noun is singular when its count is 1. Final wording is the owner's.
 - No results: We found no excerpts that match this question well enough. Try describing the situation in different words.
 - Fewer than three teachers: Found excerpts from \[n\] teachers for this question.
 - Named teacher with nothing: This collection has no excerpts from \[name\].
@@ -136,13 +137,12 @@ On the home page and under About, in the section Your questions.
 
 ## Summary
 
-Owner's decision of October 12, 2026 (Spec 05, Summary and verifier).
+Owner's decision of October 12, 2026 (Spec 05, Summary and verifier). The one-sangha note was removed and the drawn-from line reworded at the owner's request of October 15, 2026 (B10, Spec 11, PB2.3).
 
 - Section heading: Summary
 - Section headings inside it: Where the talks agree; Where they differ; Points to keep in mind; In sum
 - Few talks note: Only \[n] talk(s) in this collection matched this question closely.
-- One sangha note: \[k] of the \[n] excerpts come from teachers at \[sangha].
-- Drawn-from line: Drawn from \[n] talk(s) by \[k] teacher(s). Each sentence is checked against the excerpts it cites; the excerpts are below.
+- Drawn-from line (Spec 11, PB2.3): The summary draws on \[n] of these excerpts. Each sentence is checked against the excerpts it cites; the excerpts are below.
 - Model note, one line under every summary, after the drawn-from line, and never on an answer without a summary (Spec 11, PB2.5). It never names the provider: Written by a language model from the excerpts on this page and checked against them. The teachers have not reviewed it.
 - Quoted lines heading: Quoted lines
 - A quoted line: “\[quotation]” \[teacher], “\[talk title]”, \[date]. Excerpt \[n]

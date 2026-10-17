@@ -380,7 +380,7 @@ change, with the owner's profile:
 WT_ALERT_TOPIC_ARN=$(terraform -chdir=infra/terraform/envs/v1 output -raw alert_topic_arn) wt alerts test
 ```
 
-The web task and the batch host publish with their own roles, which may publish to this topic
+`wt` loads its whole configuration first, so `DATABASE_URL` must be set (the PC's `.env` has it), though this command never connects. The web task and the batch host publish with their own roles, which may publish to this topic
 and nothing else in SNS. A worker on the batch host or the PC needs `WT_ALERT_TOPIC_ARN` in its
 environment to publish; without it the alert is only a log line.
 
@@ -519,6 +519,27 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 - **Fix:** a slow provider: wait, or set a faster model for the slow stage. The database: as
   above.
 - **Scale to zero:** no.
+
+#### `wt-account-root-activity`
+
+- **Means:** the AWS root user signed in to the console or made an API call (CIS 4.3, from the
+  CloudTrail copy in `/wt/cloudtrail`). Nobody should use root day to day.
+- **First check:** if the owner did it on purpose (billing, account settings), note it and stop.
+  If not, read the root events in `/wt/cloudtrail` (source IP, user agent, what was called).
+- **Fix:** if it was not the owner: treat it as a security incident (incident procedure, step
+  5). Change the root password, check root MFA, look for new IAM users, keys or roles, and
+  revoke anything unknown.
+- **Scale to zero:** only if the calls touched the database, buckets or secrets.
+
+#### `wt-account-iam-policy-change`
+
+- **Means:** an IAM policy was created, deleted, versioned, put, attached or detached (CIS 4.4).
+  A Terraform apply that changes IAM fires it, which is expected.
+- **First check:** did an apply or deploy run at that time? If so, match the change to its plan.
+  If not, read the event in `/wt/cloudtrail`: who made it and which policy.
+- **Fix:** an unexplained change is a security incident: revert it with `terraform apply`,
+  and find and revoke the credentials that made it.
+- **Scale to zero:** only if the change widened access to data or secrets.
 
 ### Incident procedure
 

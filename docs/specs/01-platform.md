@@ -64,10 +64,13 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_ORT_DYLIB` | unset | ONNX Runtime library, 1.22 or newer, loaded at run time (unset: `ORT_DYLIB_PATH` or the search path) |
 | `WT_RERANK_MODEL` | `bge-reranker-v2-m3-int8` | Reranker model directory name |
 | `WT_LLM_MODEL` | none, required for LLM stages | Model identifier sent to the Claude API |
-| `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction. See Spec 04. |
+| `WT_LLM_MODEL_EXTRACT` | `WT_LLM_MODEL` | Model for extraction, window labeling (`classify`) and the student-question edit (`question`). See Spec 04. |
 | `WT_LLM_MODEL_SYNTH` | `WT_LLM_MODEL` | Model for synthesis. See Spec 05. |
 | `WT_LLM_MODEL_VERIFY` | `WT_LLM_MODEL` | Model for the synthesis verifier. See Spec 05. |
 | `WT_LLM_MODEL_VISION` | `WT_LLM_MODEL` | Model for the vision re-read of poorly read OCR pages. See Spec 08. |
+| `WT_LLM_MODEL_TRIAGE` | `WT_LLM_MODEL` | Model for the triage gate's model layer (`llm_usage.stage` `sensitive`). See Spec 05 and Spec 11, PB2.0. |
+| `WT_LLM_MODEL_EXCERPT` | `WT_LLM_MODEL` | Model that chooses an excerpt's sentences. See Spec 05 and Spec 11, PB2.0. |
+| `WT_LLM_MODEL_RANK` | `WT_LLM_MODEL` | Model that scores retrieval candidates. See Spec 05 and Spec 11, PB2.0. |
 | `WT_LLM_MONTHLY_CAP_USD` | `25` | Monthly spending cap for language model calls. See Spec 04. |
 | `ANTHROPIC_API_KEY` | none | API credential, secret |
 | `ANTHROPIC_WORKSPACE_ID` | none | Sent as the `anthropic-workspace-id` header, which the API requires for a key that is not scoped to a workspace |
@@ -105,7 +108,7 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 | `network` | VPC over two availability zones, public and private subnets, S3 gateway endpoint | No NAT gateway in v1. Compute runs in public subnets with security groups that allow no inbound traffic except the load balancer to the web service. The database sits in private subnets. |
 | `database` | RDS Postgres 16, parameter group, subnet group | `db.t4g.medium`, 50 GB gp3, encrypted, 7-day backups, `rds.force_ssl=1`, no public access. The `vector` extension is created by migration. Master credentials live in Secrets Manager. |
 | `storage` | Three S3 buckets: transcripts, scratch, models | All block public access and deny non-TLS requests. Scratch expires objects after one day and aborts multipart uploads after one day. Transcripts has versioning off. Models has versioning on. |
-| `service` | ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate, HTTPS listener | One task, 2 vCPU and 8 GB to start, health check on `/healthz`, HTTP redirects to HTTPS. A `domain_name` variable wires DNS when set. `maintenance = true` makes the HTTPS listener answer every path with a fixed 503 maintenance page (Spec 11, PB4.4). |
+| `service` | ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate, HTTPS listener, WAF web ACL | One task, 2 vCPU and 8 GB to start, health check on `/healthz`, HTTP redirects to HTTPS. A `domain_name` variable wires DNS when set. `maintenance = true` makes the HTTPS listener answer every path with a fixed 503 maintenance page (Spec 11, PB4.4). The WAF is described under "Edge protection and detection". |
 | `batch_host` | EC2 launch template and instance, instance profile | `g5.xlarge` by default with an NVIDIA-ready image, 200 GB gp3 scratch volume, access through SSM only. The variable `batch_host_enabled` creates or destroys it. |
 | `secrets` | Secrets Manager entries for database, Anthropic key, YouTube key, session secret | Values are set out of band and never appear in Terraform state as plaintext inputs |
 | `iam` | Task execution role, web task role, batch host role, CI deploy role | Least privilege per the rules below. The CI role trusts GitHub OIDC and holds no long-lived keys. |
@@ -114,6 +117,12 @@ Terraform lives in `infra/terraform/`, one module per row below, composed by a s
 ### The beta deployment
 
 Owner's decision of October 13, 2026: invited testers use this stack, not the PC alpha, so they can test asynchronously. The web task loads the embedder and reranker into a task volume through a `models` container that copies them from the models bucket before `wt-api` starts, and the image carries ONNX Runtime and `config/`. Sizes are back to the table's: `db.t4g.medium` and a 2 vCPU / 8 GB task, about $170 a month in all. The database was loaded from the PC's working database on that day. The runbook, procedure 12, has the details.
+
+### Edge protection and detection
+
+Spec 11, PB3.6. The `service` module puts a WAFv2 web ACL on the load balancer with the AWS Common and Known Bad Inputs managed rule groups and a rate rule of 300 requests per 5 minutes per client address. Every rule counts until the `waf_block` variable is set, 7 days after the first apply. The Common group's body-size rule stays in count while `waf_count_body_size` is true (the default), since the rights and accessibility forms accept up to 4,000 characters, which form-encoded can pass its 8 KB limit.
+
+The account stack (`infra/terraform/account`) turns on GuardDuty with S3 data events, IAM Access Analyzer for external and unused access, and a CloudWatch Logs copy of the CloudTrail trail with two metric filters. Alarms `wt-account-root-activity` (any root sign-in or root API call) and `wt-account-iam-policy-change` (any IAM policy created, changed, attached or detached) publish to the `wt-v1-alarms` topic. `docs/cost.md` lists the cost.
 
 ## Secrets, IAM and network rules
 
@@ -169,8 +178,8 @@ Decisions of October 3, 2026.
 Acceptance criteria:
 
 - [x] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply. (Checked October 13, 2026 with the beta deploy. DNS stays at Cloudflare, so the validation record and the CNAME are Terraform outputs copied there by hand. `app.wheelturning.org` is the primary name and `demo.` an alternate on the same certificate.)
-- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed.
-- [ ] The web role can publish to the alert topic and to nothing else in SNS.
+- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed. (Published October 16, 2026, message 5d843c6d; tick once the owner sees it.)
+- [x] The web role can publish to the alert topic and to nothing else in SNS. (IAM simulation, October 16, 2026, after adding `sns:Publish` on the alert topic to the workload boundary in `infra/terraform/github-oidc`.)
 
 ## Recovery and availability targets
 

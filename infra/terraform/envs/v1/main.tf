@@ -103,9 +103,11 @@ module "service" {
   mail_from              = var.mail_from
   alert_topic_arn        = module.observability.alarm_topic_arn
   maintenance            = var.maintenance
+  waf_block              = var.waf_block
 
   llm = {
     model           = var.llm_model
+    stage_models    = var.llm_stage_models
     workspace_id    = var.anthropic_workspace_id
     real_data_ok    = var.llm_real_data_ok
     monthly_cap_usd = var.llm_monthly_cap_usd
