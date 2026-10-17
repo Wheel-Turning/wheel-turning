@@ -3,4 +3,5 @@
 * text=auto eol=lf
 *.sql text eol=lf
 *.png binary
+*.ico binary
 *.onnx binary
