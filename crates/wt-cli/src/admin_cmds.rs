@@ -103,6 +103,13 @@ pub(crate) enum ReportCommand {
         #[arg(long)]
         notes: bool,
     },
+    /// The weekly beta report (Spec 11 PB4.6): testers, questions, feedback, dana, model cost
+    /// and speed, as totals only, never question text.
+    Beta {
+        /// How far back: a number with d (days) or h (hours), for example 7d.
+        #[arg(long, default_value = "7d", value_parser = parse_since)]
+        since: chrono::Duration,
+    },
 }
 
 /// A pool connected as `wt_analyst` through `DATABASE_URL_ANALYST`, refused when the role can
@@ -318,6 +325,10 @@ pub(crate) async fn report(ctx: &Ctx, command: ReportCommand) -> anyhow::Result<
             } else {
                 commands::print_json(&counts)?;
             }
+        }
+        ReportCommand::Beta { since } => {
+            let from = chrono::Utc::now() - since;
+            commands::print_json(&wt_db::report::beta(&pool, from).await?)?;
         }
     }
     Ok(())

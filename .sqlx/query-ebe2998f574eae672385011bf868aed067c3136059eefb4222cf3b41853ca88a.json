@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select kind as \"kind!\", submissions as \"submissions!\"\n           from beta_feedback_reasons($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "submissions!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "ebe2998f574eae672385011bf868aed067c3136059eefb4222cf3b41853ca88a"
+}

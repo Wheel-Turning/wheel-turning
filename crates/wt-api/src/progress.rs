@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use axum::body::to_bytes;
@@ -112,24 +112,59 @@ impl Event {
     }
 }
 
-/// Where the query path reports its stages: nowhere for a plain post, or a stream.
-#[derive(Debug, Clone, Default)]
-pub struct Sink(Option<UnboundedSender<Event>>);
+/// Where the query path reports its stages: nowhere for a plain post, or a stream. It is made
+/// when the request arrives, so it also times the first event and the page for the beta report
+/// (Spec 11 PB4.6).
+#[derive(Debug, Clone)]
+pub struct Sink {
+    /// The stream, if anyone is listening.
+    tx: Option<UnboundedSender<Event>>,
+    /// When the request arrived.
+    started: Instant,
+    /// Milliseconds to the first event sent, once one is.
+    first: Arc<OnceLock<u64>>,
+}
+
+impl Default for Sink {
+    fn default() -> Self {
+        Self::silent()
+    }
+}
 
 impl Sink {
     /// Reports nowhere.
     pub fn silent() -> Self {
-        Self(None)
+        Self::to(None)
+    }
+
+    /// Reports to `tx`, timed from now.
+    fn to(tx: Option<UnboundedSender<Event>>) -> Self {
+        Self {
+            tx,
+            started: Instant::now(),
+            first: Arc::new(OnceLock::new()),
+        }
     }
 
     /// Whether anyone is listening.
     pub fn streaming(&self) -> bool {
-        self.0.is_some()
+        self.tx.is_some()
+    }
+
+    /// Milliseconds since the request arrived.
+    pub fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// Milliseconds from the request to the first event sent; none for a plain post.
+    pub fn first_event_ms(&self) -> Option<u64> {
+        self.first.get().copied()
     }
 
     /// Sends an event to the stream, if there is one.
     fn send(&self, event: Event) {
-        if let Some(tx) = &self.0 {
+        if let Some(tx) = &self.tx {
+            let _ = self.first.set(self.elapsed_ms());
             // A reader who left closes the channel; the question still runs to the end.
             let _ = tx.send(event);
         }
@@ -225,7 +260,7 @@ where
     Fut: Future<Output = Response> + Send + 'static,
 {
     let (tx, rx) = unbounded_channel();
-    let sink = Sink(Some(tx));
+    let sink = Sink::to(Some(tx));
     tokio::spawn(async move {
         let closing = closing(ask(sink.clone()).await).await;
         sink.send(closing);

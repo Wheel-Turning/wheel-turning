@@ -75,7 +75,7 @@ Expected: first sentence at about 1.5 s after the page opens, a finished summary
 
 ## Workstream E: knowing what a question costs
 
-1. `query_log` gains `llm_cost_usd`, the sum of the answer's calls, written when the answer and its deferred summary are stored, and `llm_usage` rows carry the answer id. `wt report costs --since 7d` prints the mean, the 95th percentile and the cost by stage.
+1. `query_log` gains `llm_cost_usd`, the sum of the answer's calls, written when the answer and its deferred summary are stored, and `llm_usage` rows carry the answer id. `wt report costs --since 7d` prints the mean, the 95th percentile and the cost by stage. The column and the answer id were pulled forward into Spec 11 PB4.6 (migration `0048_beta_report.sql`), and `wt report beta` prints the mean and 95th percentile; `wt report costs` with the cost by stage is still to build here (until then, the query in `docs/cost.md`).
 2. A daily spend alarm through the existing AWS notification at twice the expected daily cost.
 3. At the monthly cap (`WT_LLM_MONTHLY_CAP_USD`), the page still works: fused order with the "relevance check did not finish" line, excerpts trimmed by code, and the key-lines fallback. Today it loses the summary and ranking without saying so on the page beyond the order line.
 

@@ -94,6 +94,20 @@ pub struct NewAnswer<'a> {
     pub text_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// How the summary settled, or `pending` while a deferred one is written (Spec 11, PB2.4).
     pub summary_status: SummaryStatus,
+    /// The answer's id and times for the beta report (Spec 11 PB4.6).
+    pub measures: Measures,
+}
+
+/// What [`persist`] records for the beta report (Spec 11 PB4.6, Spec 10 E1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Measures {
+    /// The id the answer's model calls were recorded against; a new one when `None`. The
+    /// query log's `llm_cost_usd` is the sum of those calls.
+    pub answer_id: Option<AnswerId>,
+    /// Milliseconds from the request to its first progress event, for a streamed ask.
+    pub first_progress_ms: Option<i32>,
+    /// Milliseconds from the request to the answer being stored, when the page follows.
+    pub page_ms: Option<i32>,
 }
 
 /// Spec 06, Logging, rule 1: the query log, the answer and its passages in one transaction, so
@@ -125,12 +139,19 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
     // The ids are made here: `returning` needs select on the table, which the web role does
     // not have on query_log or answer (Spec 02).
     let log = Uuid::new_v4();
+    let answer = a
+        .measures
+        .answer_id
+        .map_or_else(Uuid::new_v4, |id| id.as_uuid());
     sqlx::query!(
         "insert into query_log (id, tester_id, query_text, mode, named_teacher_id, teacher_count,
                                 sangha_count, passage_count, thin_coverage, latency_ms,
                                 theme_count, themes_dropped, sensitive_category, privacy_mode,
-                                text_expires_at, relevance, triage_degraded)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+                                text_expires_at, relevance, triage_degraded, first_progress_ms,
+                                page_ms, llm_cost_usd)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                 $19, (select coalesce(sum(est_cost_usd), 0) from llm_usage
+                        where answer_id = $20))",
         log,
         a.tester.as_uuid(),
         a.query_text,
@@ -147,13 +168,15 @@ pub async fn persist(pool: &PgPool, a: &NewAnswer<'_>) -> Result<AnswerId, DbErr
         a.privacy_mode,
         a.text_expires_at,
         a.relevance,
-        a.triage_degraded
+        a.triage_degraded,
+        a.measures.first_progress_ms,
+        a.measures.page_ms,
+        answer
     )
     .execute(&mut *tx)
     .await?;
     let ids: Vec<Uuid> = payload.passage_ids.iter().map(|p| p.as_uuid()).collect();
     let payload = serde_json::to_value(&payload).unwrap_or(serde_json::Value::Null);
-    let answer = Uuid::new_v4();
     sqlx::query!(
         "insert into answer (id, query_log_id, payload, summary_status) values ($1, $2, $3, $4)",
         answer,
@@ -231,6 +254,15 @@ pub async fn summary_status(
     .await?
     .flatten();
     Ok(s.as_deref().and_then(SummaryStatus::parse))
+}
+
+/// Rewrites the query log's `llm_cost_usd` from the answer's recorded model calls, once its
+/// deferred summary's calls are in (Spec 10 E1).
+pub async fn settle_cost(pool: &PgPool, answer: AnswerId) -> Result<(), DbError> {
+    sqlx::query!("select settle_answer_cost($1)", answer.as_uuid())
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// Spec 05: an acute or out-of-scope question is logged as counts and its category only. No

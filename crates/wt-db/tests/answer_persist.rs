@@ -55,6 +55,7 @@ async fn a_passage_replaced_before_the_save_is_left_out_of_the_answer() {
             privacy_mode: "share",
             text_expires_at: None,
             summary_status: wt_core::answer::SummaryStatus::Shown,
+            measures: Default::default(),
         },
     )
     .await

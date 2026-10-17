@@ -253,6 +253,7 @@ async fn page(fx: &Fx) -> String {
             privacy_mode: "share",
             text_expires_at: None,
             summary_status: wt_core::answer::SummaryStatus::Shown,
+            measures: Default::default(),
         },
     )
     .await

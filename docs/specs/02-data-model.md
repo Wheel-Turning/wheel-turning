@@ -309,7 +309,7 @@ Roles are created by migration as `NOLOGIN` group roles. An ops command, `wt db 
 | `dg_owner` | Migrations from CI and a developer machine | Owns all objects |
 | `dg_pipeline` | Batch host and CLI | Read and write on source, talk, transcript, segment, passage, citation, job, glossary, registry and log tables. Insert and read on `speaker_consent`. No access to `query_log` text. |
 | `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. Select on `teacher_alias` and update on `tester.last_seen_at`. A tester's own answer is read only through functions scoped to one answer and one tester, which run as the owner: `tester_answer`, `tester_answer_query`, `answer_shows_passage` and `tester_answer_purged` (decision of October 13, 2026; migration `0040_web_scoped_reads.sql`). No select on `query_log`, `answer` or `answer_passage`, so inserts take ids made by the caller rather than `returning`. |
-| `dg_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`. Nothing else. |
+| `dg_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`, `feedback_notes()` and the beta report's functions (`beta_questions`, `beta_returning_testers`, `beta_link_clicks`, `beta_feedback`, `beta_feedback_reasons`; migration `0048_beta_report.sql`, Spec 11 PB4.6). None of them returns question text or a tester's id. Nothing else. |
 
 ## Operational tables
 
@@ -359,6 +359,11 @@ create table query_log (
   flagged_at timestamptz,
   created_at timestamptz not null default now()
 );
+```
+
+Spec 11 PB4.6, with Spec 10 E1 pulled forward (migration `0048_beta_report.sql`): `query_log` gains `llm_cost_usd numeric(14,8)`, the sum of the answer's model calls, written when the answer is stored and again, through `settle_answer_cost(uuid)`, when its deferred summary is; `first_progress_ms`, the milliseconds from the request to the first progress event of a streamed ask; and `page_ms`, to the stored answer behind the page. `llm_usage` gains `answer_id uuid`, set on every call the query path makes for an answer (not a foreign key: calls are recorded before the answer is stored and outlive a purge), and `est_cost_usd` widens to eight places.
+
+```sql
 
 create table answer (
   id uuid primary key default gen_random_uuid(),

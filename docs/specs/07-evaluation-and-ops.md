@@ -114,6 +114,8 @@ Backups are the honest limit. RDS automated backups retain deleted rows until th
 
 Logs are structured JSON through `tracing`. Request logs carry a request id, tester id, route, status and latency. They never carry query text, passage text, invite tokens, cookies or secrets. A test issues a request with a distinctive query string and asserts that string appears in no captured log line.
 
+The weekly beta report (Spec 11 PB4.6) is `wt report beta --since 7d`, run as `wt_analyst`. It prints JSON totals only, never question text or a tester's id, and counts count-only and stopped questions too: active testers and returning testers (questions in two or more distinct weeks since the beta began); questions asked and answered and the median per active tester; feedback submissions, the share marked helpful and submissions per reason; dana link clicks per answer and the share of active testers with a click; answers by `summary_status` with their shares, and the share of answers that tried for a summary that showed one; model cost per answer, mean and 95th percentile, from `query_log.llm_cost_usd`; and the median and 95th percentile time to the first progress event and to the page. Evaluation runs are left out. Tested on synthetic data in `wt-db/tests/beta_report.rs`.
+
 Log-based metrics in CloudWatch cover ask latency, `synthesis_failed`, `rerank_degraded`, 5xx responses, dead jobs and audit failures. Alarms are defined in Spec 01.
 
 Every answer logs one `summary_settled` event when its summary settles, with `event = "summary_settled"`, `summary_status` and `answer_id`, never the question (Spec 11, PB2.4): at once for an answer whose summary is inline or not attempted, when the deferred summary is stored, or from the hourly purge as `deferred_lost`.

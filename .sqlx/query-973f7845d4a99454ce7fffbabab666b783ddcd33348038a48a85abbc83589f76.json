@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select beta_returning_testers() as \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "973f7845d4a99454ce7fffbabab666b783ddcd33348038a48a85abbc83589f76"
+}
