@@ -45,3 +45,21 @@ variable "mail_domain" {
   type        = string
   default     = "wheelturning.org"
 }
+
+variable "alarm_topic_arn" {
+  description = "SNS topic the security alarms publish to. Null uses the v1 alarm topic, wt-v1-alarms in the home region."
+  type        = string
+  default     = null
+}
+
+variable "unused_access_age_days" {
+  description = "IAM Access Analyzer reports roles, keys and permissions unused for this many days."
+  type        = number
+  default     = 90
+}
+
+variable "cloudtrail_log_group_retention_days" {
+  description = "How long the CloudWatch Logs copy of CloudTrail is kept. The S3 copy keeps cloudtrail_retention_days."
+  type        = number
+  default     = 30
+}

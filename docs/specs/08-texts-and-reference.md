@@ -405,7 +405,7 @@ pub struct TextHit {
 }
 ```
 
-`AnswerView` gains `texts: Vec<TextHit>`. The page shows them in a section titled "From the texts" after the teacher groups, each as a blockquote with work, locator, author, translator, edition and license notice. A text hit has no give button. The result line counts them apart: "Passages from 3 teachers, and 2 text excerpts".
+`AnswerView` gains `texts: Vec<TextHit>`. The page shows them in a section titled "From the texts" after the teacher groups, each as a blockquote with work, locator, author, translator, edition and license notice. A text hit has no give button. The result line counts each text once among the teachings (Spec 11, PB2.3): "3 teachers, 5 teachings, 10 excerpts".
 
 Footnotes. When a citation has `text_unit_id`, its footnote links to `/text/<unit_id>` as "Read in the text", and a verified quotation also shows the unit under the footnote (Quoted passages inline). Otherwise it renders as before, with a link-out when the locator has a URL.
 

@@ -103,6 +103,7 @@ module "service" {
   mail_from              = var.mail_from
   alert_topic_arn        = module.observability.alarm_topic_arn
   maintenance            = var.maintenance
+  waf_block              = var.waf_block
 
   llm = {
     model           = var.llm_model

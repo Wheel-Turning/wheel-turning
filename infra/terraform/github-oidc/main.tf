@@ -88,6 +88,12 @@ data "aws_iam_policy_document" "workload_boundary" {
       values   = ["*@${var.mail_domain}"]
     }
   }
+  # Alerts to the owner (Spec 11, PB4.2): the web and batch roles publish to the alarm topic.
+  statement {
+    sid       = "PublishAlerts"
+    actions   = ["sns:Publish"]
+    resources = ["arn:aws:sns:${local.region}:${local.account}:${var.name}-alarms"]
+  }
   statement {
     sid       = "RegistryLogin"
     actions   = ["ecr:GetAuthorizationToken"]
@@ -453,8 +459,15 @@ data "aws_iam_policy_document" "deploy_observability" {
     actions = [
       "logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagLogGroup", "logs:TagResource",
       "logs:UntagResource", "logs:GetLogEvents", "logs:FilterLogEvents",
+      # The answer-path metric filters (Spec 11, PB4.3).
+      "logs:PutMetricFilter", "logs:DeleteMetricFilter",
     ]
     resources = [local.log_group_arn, "${local.log_group_arn}:*"]
+  }
+  statement {
+    sid       = "ReadMetricFilters"
+    actions   = ["logs:DescribeMetricFilters"]
+    resources = ["*"] # Terraform's refresh lists filters across log groups
   }
   statement {
     sid     = "Alarms"
@@ -483,7 +496,7 @@ data "aws_iam_policy_document" "deploy_observability" {
     actions = [
       "sns:CreateTopic", "sns:GetTopicAttributes", "sns:SetTopicAttributes", "sns:Subscribe",
       "sns:ListSubscriptionsByTopic", "sns:GetSubscriptionAttributes", "sns:ListTagsForResource",
-      "sns:TagResource", "sns:UntagResource",
+      "sns:TagResource", "sns:UntagResource", "sns:Unsubscribe",
     ]
     resources = [
       "arn:aws:sns:${local.region}:${local.account}:${var.name}-alarms",

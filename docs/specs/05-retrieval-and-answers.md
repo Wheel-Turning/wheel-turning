@@ -76,9 +76,9 @@ Shape, top to bottom, in a container with the stable id `summary`:
 2. Framing: one or two sentences that set out what the excerpts address.
 3. Where the talks agree: up to `max_themes` sentences, each citing excerpts from at least two teachers.
 4. Where they differ: up to `max_themes` sentences, each citing excerpts from at least two teachers.
-5. Points to keep in mind: up to two model sentences about context a quoted line leaves out, each citing the excerpt it concerns, then notes the code writes from counts: "Only \<n> talk(s) in this collection matched this question closely." when the answer's excerpts come from two talks or fewer, and "\<k> of the \<n> excerpts come from teachers at \<sangha>." when one sangha holds more than half of at least three excerpts.
+5. Points to keep in mind: up to two model sentences about context a quoted line leaves out, each citing the excerpt it concerns, then notes the code writes from counts: "Only \<n> talk(s) in this collection matched this question closely." when the answer's excerpts come from two talks or fewer. The page gives no note on how many excerpts come from one sangha (owner's request of October 15, 2026, B10; Spec 11, PB2.3).
 6. In sum: one sentence.
-7. In place of an evidence-strength meter, a line the code writes: "Drawn from \<n> talks by \<k> teachers.", counted over the excerpts the shown sentences cite.
+7. In place of an evidence-strength meter, a line the code writes: "The summary draws on \<n> of these excerpts.", counting the distinct excerpts the shown sentences cite (Spec 11, PB2.3).
 8. Quoted lines: one numbered entry per citation marker, in order of first appearance, holding the verbatim quotation, the teacher, the talk title and date, and a link to the excerpt below.
 
 The model sees the question and each excerpt as `E1..En`, with a header naming its teacher (display name) and the talk's year, followed by its sentences numbered `[1]..[m]` (the excerpt's sentences, from the boundaries the index step stores). It returns JSON only and never quoted text (CLAUDE.md rule 5):
@@ -242,7 +242,7 @@ M6, the summary (owner's decision of October 12, 2026)
 
 - [x] Each summary filter (citation, two teachers, one sentence, quotation mark or label, attribution, belief words, grounding) has a fixture that it drops and one that it passes. (`wt-synth` `filter` unit tests and `tests/synth.rs`.)
 - [x] Every citation marker's quotation is the cited excerpt's sentences, verbatim, rebuilt from `servable_passage` on a permalink; the payload stores spans, never text. (`wt-synth/tests/synth.rs`; `wt-api/tests/pages.rs`, which renders through the permalink.)
-- [x] The page shows the headline, framing, sections, the code's notes for few talks and one sangha, the drawn-from line and the quoted lines in a container with id `summary`, with the excerpts below. (`wt-api/tests/pages.rs`; the notes in `wt-api` `summary` unit tests. The summary's feedback control of Spec 06 sits inside the container.)
+- [x] The page shows the headline, framing, sections, the code's note for few talks, the drawn-from line and the quoted lines in a container with id `summary`, with the excerpts below. (`wt-api/tests/pages.rs`; the notes in `wt-api` `summary` unit tests. The summary's feedback control of Spec 06 sits inside the container.)
 - [x] A verifier that rejects the headline, a generation timeout and a verifier failure each leave a fully rendered answer without a summary; named mode makes no summary call. (`wt-api/tests/pages.rs`, `wt-synth/tests/synth.rs`.)
 - [x] Takedown strips summary sentences that cite a removed passage, and the whole summary when it strips the headline. (`wt-core` `answer` unit tests; takedown calls `AnswerPayload::strip_passages`.)
 - [x] `wt eval run` on the 20 Gate A questions records summary latency, and the PR reports p50 and p90 and the cost per answer. (Run `a95f32ed`, October 13, 2026, on a migrated copy of the real-data database with the 120 talks behind the answers reindexed: summary p50 9.8 s, p90 11.1 s; $0.0105 per answer for the summary; a summary on 13 of 20 answers, 57 sentences shown and 91 dropped. PR #128.)

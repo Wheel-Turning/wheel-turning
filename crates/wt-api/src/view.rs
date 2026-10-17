@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::summary::plural;
 use chrono::{Datelike, NaiveDate};
 use wt_core::entities::decode;
 use wt_core::excerpt::{Excerpt, ExcerptPart};
@@ -436,10 +437,21 @@ pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
         .map(|g| g.teacher.as_str())
         .collect::<std::collections::BTreeSet<_>>()
         .len();
-    let result_line = match teachers {
+    // Spec 11, PB2.3: teachers, teachings (distinct talks) and excerpts, as the page shows them.
+    let teachings = served
+        .iter()
+        .filter(|s| numbers.iter().any(|(id, _)| *id == s.id))
+        .map(|s| s.talk.id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    let result_line = match numbers.len() {
         0 => "No excerpts found".to_owned(),
-        1 => "Passages from 1 teacher".to_owned(),
-        n => format!("Passages from {n} teachers"),
+        n => format!(
+            "{}, {}, {}",
+            plural(teachers, "teacher", "teachers"),
+            plural(teachings, "teaching", "teachings"),
+            plural(n, "excerpt", "excerpts")
+        ),
     };
     let name = named_teacher.unwrap_or("this teacher");
     let notice = match payload.notice.as_deref() {
@@ -1064,7 +1076,62 @@ mod tests {
             .flat_map(|g| g.passages.iter().map(|p| p.id))
             .collect();
         assert_eq!(order, payload.passage_ids);
-        assert_eq!(view.result_line, "Passages from 2 teachers");
+        assert_eq!(view.result_line, "2 teachers, 2 teachings, 4 excerpts");
+    }
+
+    /// Spec 11, PB2.3: the top line counts teachers, teachings (distinct talks) and excerpts,
+    /// each singular when it is 1.
+    #[test]
+    fn the_top_line_counts_teachers_teachings_and_excerpts() {
+        let line = |passages: &[(u128, u128)]| {
+            let served: Vec<Served> = passages
+                .iter()
+                .zip(100u128..)
+                .map(|(&(teacher, talk), id)| {
+                    let mut c = card("youtube", "speaker_consent");
+                    c.id = TalkId::from_uuid(Uuid::from_u128(10 + talk));
+                    c.teacher_id = TeacherId::from_uuid(Uuid::from_u128(20 + teacher));
+                    c.teacher_name = format!("Teacher {teacher}");
+                    Served {
+                        id: PassageId::from_uuid(Uuid::from_u128(id)),
+                        text: "Sit.".into(),
+                        ordinal: 0,
+                        start_ms: 0,
+                        end_ms: 1000,
+                        talk: c,
+                    }
+                })
+                .collect();
+            let payload: Payload = serde_json::from_value(serde_json::json!({
+                "mode": "standard",
+                "passage_ids": served.iter().map(|s| s.id).collect::<Vec<_>>(),
+            }))
+            .unwrap();
+            assemble(
+                &AnswerRows {
+                    answer: AnswerId::from_uuid(Uuid::from_u128(9)),
+                    payload: &payload,
+                    served: &served,
+                    excerpts: &BTreeMap::new(),
+                    cited: &[],
+                    named_teacher: None,
+                    accessed: NaiveDate::from_ymd_opt(2026, 10, 15).unwrap(),
+                },
+                0,
+            )
+            .result_line
+        };
+        assert_eq!(line(&[(1, 1)]), "1 teacher, 1 teaching, 1 excerpt");
+        assert_eq!(line(&[(1, 1), (1, 1)]), "1 teacher, 1 teaching, 2 excerpts");
+        assert_eq!(
+            line(&[(1, 1), (1, 2)]),
+            "1 teacher, 2 teachings, 2 excerpts"
+        );
+        assert_eq!(
+            line(&[(1, 1), (2, 2), (3, 3), (3, 4)]),
+            "3 teachers, 4 teachings, 4 excerpts"
+        );
+        assert_eq!(line(&[]), "No excerpts found");
     }
 
     #[test]

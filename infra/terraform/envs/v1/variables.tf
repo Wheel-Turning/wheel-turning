@@ -122,3 +122,9 @@ variable "mail_from" {
   type        = string
   default     = "rights@wheelturning.org"
 }
+
+variable "waf_block" {
+  description = "Switch the load balancer's WAF rules from count to block. Spec 11 PB3.6: count for 7 days after the first apply, then set true once the sampled requests show no false positives."
+  type        = bool
+  default     = false
+}
