@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-askama = "0.14"
+askama = "0.16"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 async-trait = "0.1"
 # The SES client uses rustls on ring, already in the tree for sqlx, rather than the default
