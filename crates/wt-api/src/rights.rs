@@ -341,10 +341,12 @@ pub fn confirmation(to: &str, public_url: &str, token: &str) -> Message {
         subject: "Confirm your removal request to Wheel Turning".to_owned(),
         text: format!(
             "Someone asked Wheel Turning to remove material, and gave this email address.\n\n\
-             If it was you, open this link within 24 hours and confirm the request:\n\
+             If it was you, open this link and confirm the request. It works once, for 24 hours:\n\
              {public_url}/rights/confirm?token={token}\n\n\
-             Nothing is removed until you confirm. Within one business day of your confirming, \
-             the material you named stops appearing.\n\n\
+             Nothing is removed until you confirm. Once you confirm, we stop showing the material \
+             you named. Requests are handled in the order they arrive. The site is run by one \
+             person as a side project, so timing can vary, but each request is handled as \
+             promptly as possible.\n\n\
              If it was not you, ignore this email. The request lapses and nothing changes.\n\n\
              Wheel Turning\n"
         ),

@@ -11,7 +11,7 @@ File: `copy/home.md`.
 - Help text under the box: Write it the way you would say it. For example: I keep judging myself during zazen.
 - Button: Ask
 - Line under the button: Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.
-- Privacy line: Your questions are kept so the project can improve. Only totals are read, and one question is opened only if you flag it. You can switch this off or delete your questions at any time. Read how this works
+- Privacy line, in `copy/privacy_line.md`, its one source: the footer, the home page and the invitation `wt tester invite` prints all read it, and a test fails if they differ (Spec 11, PB3.1). It states only what the system enforces: Unless you choose counts only, your questions are kept for 180 days with obvious personal details, such as email addresses and phone numbers, removed. Kept questions can be read at any time by the site code, the owner and approved team members. Questions are also sent to a language model provider to check them and to find and summarize excerpts. With counts only, the text of a question is deleted after 24 hours and only counts remain. You can delete all your questions at any time. Then the link: Read how this works
 - Example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
 
 ## About page
@@ -28,7 +28,22 @@ File: `copy/about.md`. The page opens with a two-sentence summary, then short se
 
 **Giving.** Dana is the Sanskrit and Pali word for generosity. Every excerpt from a talk links to the giving page of the sangha that offered it. After an answer, you can choose to share a gift equally among the sanghas it drew on. This site handles no money and takes no share. The links open each sangha's own page. A separate, optional line is for the site's own running costs, and giving is never needed to use the site.
 
-**Your questions.** (anchor `privacy`) You choose whether your questions are kept. If you keep them, a question is saved for up to 180 days with obvious personal details such as email addresses and phone numbers removed. The project reads totals by topic, to learn which questions the collection cannot answer yet, and opens one question only if you flag it. If you switch keeping off, your question is kept for 24 hours so you can return to your answer, then deleted, and only counts remain. You can change the choice or delete all your questions at any time. Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student".
+**Your questions.** (anchor `privacy`) The privacy page (Spec 11, PB3.2). You choose how your questions are kept.
+
+- Keep, the default while the test is private: a question is saved for 180 days with obvious personal details removed, such as email addresses, phone numbers, web addresses and long runs of digits. Then its text is deleted and only counts remain.
+- Counts only: a question is saved for 24 hours so you can return to your answer. Then its text is deleted and only counts remain, such as how many teachers and excerpts it drew on, how long it took and clicks on giving links.
+
+If your browser sends the Global Privacy Control signal and you have not chosen, counts only applies. A question that looks like it is about a medical matter or about distress is kept as counts only, whatever you chose. The text of the most serious questions, about harm to yourself or someone else, is never saved. If you flag a question, its text is kept even with counts only, so the project can see what went wrong.
+
+Kept questions can be read at any time by the site's code, its owner and approved team members, through database queries or a simple dashboard. The project reads them to learn which questions the collection cannot answer yet. Feedback notes are read too, but the reports that show them never show your question with them unless you flagged it.
+
+Then the switch and the button Delete all my questions now. Under them: You can change your choice or delete all your questions at any time. Deleting removes every question you asked here, with its answers, your feedback and your clicks on giving links.
+
+Your question, and the excerpts found for it, are sent to a language model provider to check the question for sensitive topics, to check which excerpts fit it and where to cut them, and to write the summary. Under its current terms, the provider does not train on what it receives and deletes it after no more than 30 days. It may keep a request longer if it flags it for a misuse review. The provider can change, and this page will say so if its terms do. The provider is not named, since it can change (Spec 11, open question 7). \[The owner confirms the provider's current terms before each launch.\]
+
+Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student". To make that edit, the student's question is sent to the same provider under the same terms, and only the edited text is kept.
+
+For any other privacy request, such as asking what we hold about you, write to hello@wheelturning.org.
 
 **Who runs this.** Wheel Turning is run by \[name\], an individual, as a free project with no advertising and no fees. The plan is to form a nonprofit. The site uses a single cookie to keep you signed in for 30 days.
 
@@ -51,16 +66,16 @@ Our judgement that terms allow something is our own decision, not the rights hol
 
 **How it works.**
 
-1. We email you a link to confirm the request. Within one business day of your confirming it, the material you name stops appearing. We do this before checking that you hold the rights.
+1. We email you a link to confirm the request. Once you confirm it, we stop showing the material you name, before checking that you hold the rights. Requests are handled in the order they arrive. The site is run by one person as a side project, so timing can vary, but each request is handled as promptly as possible.
 2. Then we delete the text and our stored copies, and we block the same material from being added again, even from a different web address.
 3. If it turns out you do not hold the rights, we may restore it, and we will tell you first.
 4. If you would rather give permission or set limits, such as leaving out certain talks or topics, tell us that instead. We will record it and follow it.
 
 **Form.** Fields: Name. Email (help: We email you a link to confirm the request, and reply there.). Both are required (owner's decision of October 15, 2026); an empty name or email, or an address without one `@` and a dotted domain, is marked on its own field. What should be removed? (a web address, a title, or the code shown next to an excerpt). Message (optional). Button: Send request. Note under the button: The link works for 24 hours. We act on the request first and reply after. After sending: Thank you. Please check your email and open the link to confirm the request. Nothing is removed until you do.
 
-**Confirmation page** (`/rights/confirm`, from the emailed link). Heading: Confirm your removal request. Text: Nothing is removed until you confirm. Within one business day of confirming, the material you named stops appearing. Button: Confirm request. Confirmed: Request confirmed. Thank you. What you named stops appearing within one business day. We act on the request first and reply after, by email. Expired or used: This link no longer works. The link has expired or was already used. Links work once, for 24 hours. If you still want material removed, send the request again.
+**Confirmation page** (`/rights/confirm`, from the emailed link). Heading: Confirm your removal request. Text: Nothing is removed until you confirm. Once you confirm, we stop showing the material you named. Requests are handled in the order they arrive. The site is run by one person as a side project, so timing can vary, but each request is handled as promptly as possible. Button: Confirm request. Confirmed: Request confirmed. Thank you. Requests are handled in the order they arrive, as promptly as possible. We act on the request first and reply after, by email. Expired or used: This link no longer works. The link has expired or was already used. Links work once, for 24 hours. If you still want material removed, send the request again.
 
-**Confirmation email.** Subject: Confirm your removal request to Wheel Turning. Body: Someone asked Wheel Turning to remove material, and gave this email address. If it was you, open this link within 24 hours and confirm the request: \[link\]. Nothing is removed until you confirm. Within one business day of your confirming, the material you named stops appearing. If it was not you, ignore this email. The request lapses and nothing changes. The email repeats nothing the sender typed.
+**Confirmation email.** Subject: Confirm your removal request to Wheel Turning. Body: Someone asked Wheel Turning to remove material, and gave this email address. If it was you, open this link and confirm the request. It works once, for 24 hours: \[link\]. Nothing is removed until you confirm. Once you confirm, we stop showing the material you named. Requests are handled in the order they arrive. The site is run by one person as a side project, so timing can vary, but each request is handled as promptly as possible. If it was not you, ignore this email. The request lapses and nothing changes. The email repeats nothing the sender typed.
 
 **Student voices.** Recordings of students are never stored. A student's question is kept only in a lightly edited form, with names and identifying details removed, attributed to "Student" and shown as context for the teacher's answer. If you recognize your own question and want it removed, use the form below.
 
@@ -128,6 +143,7 @@ Owner's decision of October 12, 2026 (Spec 05, Summary and verifier). The one-sa
 - Section headings inside it: Where the talks agree; Where they differ; Points to keep in mind; In sum
 - Few talks note: Only \[n] talk(s) in this collection matched this question closely.
 - Drawn-from line (Spec 11, PB2.3): The summary draws on \[n] of these excerpts. Each sentence is checked against the excerpts it cites; the excerpts are below.
+- Model note, one line under every summary, after the drawn-from line, and never on an answer without a summary (Spec 11, PB2.5). It never names the provider: Written by a language model from the excerpts on this page and checked against them. The teachers have not reviewed it.
 - Quoted lines heading: Quoted lines
 - Also related (Spec 11, PB2.2), collapsed below the teacher groups: Also related (\[n]). Under it: The summary does not draw on these excerpts.
 - A quoted line: “\[quotation]” \[teacher], “\[talk title]”, \[date]. Excerpt \[n]
@@ -190,7 +206,7 @@ Here is what it holds. A written transcript of each talk, made from the recordin
 
 Here is what you can do.
 
-1. Leave at any time. Reply to this message, or use the form at wheelturning.org/rights. Within one business day your talks stop appearing, with no reason needed. Then I delete the transcripts and block the same material from being added again.
+1. Leave at any time. Reply to this message, or use the form at wheelturning.org/rights. Your talks stop appearing, with no reason needed. I handle requests in the order they arrive. I run the site alone as a side project, so timing can vary, but I handle each one as promptly as I can. Then I delete the transcripts and block the same material from being added again.
 2. Set limits. Tell me which talks, or which kinds of talk, to leave out, and I will follow it.
 3. Say yes in writing. I will record it, and the pages will then say your talks are used with your permission.
 
@@ -226,7 +242,7 @@ I have three questions.
 2. Is there anything we should leave out, for example where a translator or another publisher holds rights?
 3. [Who holds the rights to [specific work]?]
 
-If you would rather not take part, tell me and I will remove everything within one business day and make sure it is not added again. You can also use wheelturning.org/rights at any time.
+If you would rather not take part, tell me and I will remove everything and make sure it is not added again. I handle requests in the order they arrive, as promptly as I can. You can also use wheelturning.org/rights at any time.
 
 Thank you for making this material available, and for considering this.
 
@@ -323,7 +339,4 @@ File: `copy/sensitive.md`. The tone is plain and kind and makes no claims it can
 
 ## About page additions
 
-Add to the Your questions section of `copy/about.md`:
-
-- To write the summary and to check for sensitive topics, the text of your question may be sent to a language model provider. The provider does not train on it and deletes it within 30 days. \[Check before launch that this still matches the provider's terms.\]
-- If a question looks like it may involve crisis, the page leads with places to find help, leaves out the summary and the giving panel, and does not save the text of the most serious questions.
+The Your questions section above now holds what this section added: what goes to the language model provider, and that the text of the most serious questions is never saved. If a question looks like it may involve crisis, the page leads with places to find help and leaves out the summary and the giving panel.

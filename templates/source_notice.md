@@ -14,7 +14,7 @@ I have three questions.
 2. Is there anything we should leave out, for example where a translator or another publisher holds rights?
 3. [Who holds the rights to [specific work]?]
 
-If you would rather not take part, tell me and I will remove everything within one business day and make sure it is not added again. You can also use wheelturning.org/rights at any time.
+If you would rather not take part, tell me and I will remove everything and make sure it is not added again. I handle requests in the order they arrive, as promptly as I can. You can also use wheelturning.org/rights at any time.
 
 Thank you for making this material available, and for considering this.
 
