@@ -2,6 +2,10 @@
 # gateway endpoint. No NAT gateway in v1: compute runs in public subnets behind security groups
 # that allow no inbound traffic except the load balancer to the web service, and the database
 # sits in private subnets with no route to the internet.
+#
+# The VPC and the public subnets also carry an Amazon-provided IPv6 block, so the load balancer can
+# drop its public IPv4 addresses behind Cloudflare (docs/adr-edge-cost.md). Nothing else takes an
+# IPv6 address: tasks and the batch host keep IPv4 only.
 
 variable "name" {
   description = "Name prefix for every resource."
@@ -27,7 +31,9 @@ resource "aws_vpc" "this" {
   cidr_block           = var.cidr_block
   enable_dns_support   = true
   enable_dns_hostnames = true
-  tags                 = { Name = var.name }
+  # Amazon's IPv6 block carries no charge; only the load balancer uses it.
+  assign_generated_ipv6_cidr_block = true
+  tags                             = { Name = var.name }
 }
 
 # The default security group denies everything, so nothing can use it by accident.
@@ -47,7 +53,10 @@ resource "aws_subnet" "public" {
   availability_zone       = local.azs[count.index]
   cidr_block              = cidrsubnet(var.cidr_block, 8, count.index)
   map_public_ip_on_launch = false
-  tags                    = { Name = "${var.name}-public-${local.azs[count.index]}", tier = "public" }
+  ipv6_cidr_block         = cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, count.index)
+  # Tasks and the batch host keep IPv4 only.
+  assign_ipv6_address_on_creation = false
+  tags                            = { Name = "${var.name}-public-${local.azs[count.index]}", tier = "public" }
 }
 
 resource "aws_subnet" "private" {
@@ -67,6 +76,12 @@ resource "aws_route" "public_internet" {
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.this.id
+}
+
+resource "aws_route" "public_internet_ipv6" {
+  route_table_id              = aws_route_table.public.id
+  destination_ipv6_cidr_block = "::/0"
+  gateway_id                  = aws_internet_gateway.this.id
 }
 
 resource "aws_route_table_association" "public" {
@@ -97,7 +112,9 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 # Security groups, per the Spec 01 network rules:
-# - the load balancer accepts HTTP and HTTPS from the internet and talks only to the web tasks
+# - the load balancer accepts HTTPS (and HTTP, for the redirect) from the addresses below and
+#   talks only to the web tasks. Once Cloudflare fronts it, those are Cloudflare's ranges and
+#   HTTPS only (envs/v1 `cloudflare_only`)
 # - the web tasks accept traffic only from the load balancer
 # - the batch host accepts no inbound traffic
 # - the database accepts 5432 only from the web and batch security groups
@@ -109,6 +126,26 @@ variable "web_port" {
   default     = 8080
 }
 
+variable "alb_ingress" {
+  description = "Who may reach the load balancer: IPv4 and IPv6 ranges, and the ports they may use."
+  type = object({
+    ipv4  = list(string)
+    ipv6  = list(string)
+    ports = list(number)
+  })
+  default = {
+    ipv4  = ["0.0.0.0/0"]
+    ipv6  = ["::/0"]
+    ports = [443, 80]
+  }
+}
+
+locals {
+  alb_ingress_ipv4 = { for p in setproduct(var.alb_ingress.ports, var.alb_ingress.ipv4) : "${p[0]} ${p[1]}" => p }
+  alb_ingress_ipv6 = { for p in setproduct(var.alb_ingress.ports, var.alb_ingress.ipv6) : "${p[0]} ${p[1]}" => p }
+}
+
+# The security group's description cannot change in place, so it keeps its first wording.
 resource "aws_security_group" "alb" {
   name        = "${var.name}-alb"
   description = "Load balancer: HTTP and HTTPS from the internet"
@@ -116,22 +153,35 @@ resource "aws_security_group" "alb" {
   tags        = { Name = "${var.name}-alb" }
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_https" {
+resource "aws_vpc_security_group_ingress_rule" "alb_ipv4" {
+  for_each          = local.alb_ingress_ipv4
   security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from anywhere"
+  description       = each.value[0] == 443 ? "HTTPS" : "HTTP, redirected to HTTPS"
   ip_protocol       = "tcp"
-  from_port         = 443
-  to_port           = 443
-  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = each.value[0]
+  to_port           = each.value[0]
+  cidr_ipv4         = each.value[1]
 }
 
-resource "aws_vpc_security_group_ingress_rule" "alb_http" {
+resource "aws_vpc_security_group_ingress_rule" "alb_ipv6" {
+  for_each          = local.alb_ingress_ipv6
   security_group_id = aws_security_group.alb.id
-  description       = "HTTP from anywhere, redirected to HTTPS"
+  description       = each.value[0] == 443 ? "HTTPS" : "HTTP, redirected to HTTPS"
   ip_protocol       = "tcp"
-  from_port         = 80
-  to_port           = 80
-  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = each.value[0]
+  to_port           = each.value[0]
+  cidr_ipv6         = each.value[1]
+}
+
+# The two rules that existed before, so the first apply keeps them instead of replacing them.
+moved {
+  from = aws_vpc_security_group_ingress_rule.alb_https
+  to   = aws_vpc_security_group_ingress_rule.alb_ipv4["443 0.0.0.0/0"]
+}
+
+moved {
+  from = aws_vpc_security_group_ingress_rule.alb_http
+  to   = aws_vpc_security_group_ingress_rule.alb_ipv4["80 0.0.0.0/0"]
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_to_web" {

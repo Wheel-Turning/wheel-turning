@@ -1,10 +1,16 @@
 output "dns_records_for_cloudflare" {
-  description = "Create each as a DNS-only (grey cloud) record at Cloudflare."
+  description = "Create each at Cloudflare. The certificate validation records are DNS-only (grey cloud); the app's hostnames are proxied (orange cloud) from the edge cutover on."
   value = concat(module.service.certificate_validation_records, [for name in concat([var.domain_name], var.alternate_domain_names) : {
     name  = name
     type  = "CNAME"
     value = module.service.alb_dns_name
   }])
+}
+
+output "cloudflare_origin_header" {
+  description = "The header and value for the Cloudflare transform rule on the app's hostnames. terraform output -json cloudflare_origin_header"
+  sensitive   = true
+  value       = module.service.cloudflare_origin_header
 }
 
 output "url" {
@@ -55,10 +61,6 @@ output "batch_host_instance_id" {
 output "alert_topic_arn" {
   description = "WT_ALERT_TOPIC_ARN, for `wt alerts test` and the batch host."
   value       = module.observability.alarm_topic_arn
-}
-
-output "web_acl_name" {
-  value = module.service.web_acl_name
 }
 
 output "audit" {

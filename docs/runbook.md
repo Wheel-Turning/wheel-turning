@@ -297,7 +297,8 @@ Everything below runs with `AWS_PROFILE=wheel-turning` after `aws sso login --pr
 wheel-turning` (on Windows, `--use-device-code` works when the browser callback does not).
 
 - Site: `https://app.wheelturning.org`, also `https://demo.wheelturning.org` (Cloudflare DNS, set
-  by hand to the load balancer; `terraform output dns_records_for_cloudflare`).
+  by hand to the load balancer; `terraform output dns_records_for_cloudflare`). From the edge
+  cutover below, both are proxied by Cloudflare and the load balancer answers only Cloudflare.
 - Web service: Fargate, 2 vCPU / 8 GB, one task. Its `models` container copies
   `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-904883674947/` into the
   task before `wt-api` starts; startup takes about a minute. A new model goes to that bucket
@@ -371,6 +372,82 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   database; it is not the audit of the beta.
 - Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
   about $30). Scale the service to 0 tasks between test rounds to save the task's share.
+
+### The edge: Cloudflare in front of the load balancer
+
+Owner's decision of October 17, 2026 (`docs/adr-edge-cost.md`): Cloudflare proxies `app` and
+`demo`, its Free Managed Ruleset and one rate rule replace the AWS WAF web ACL, and the load
+balancer loses its public IPv4 addresses. The edge drops from about $37 to about $21 a month.
+
+Three Terraform variables in `infra/terraform/envs/v1` carry it, applied by hand in this order,
+since the deploy role cannot change the VPC, the load balancer's address type or listener rules:
+
+| Stage | Variables | What changes |
+| --- | --- | --- |
+| A | defaults (`cloudflare_only = false`, `alb_public_ipv4 = true`) | IPv6 block on the VPC and public subnets, `::/0` route, load balancer `dualstack`, IPv6 ingress, the origin header and its listener rule (forwarding, so nothing changes for testers), the WAF web ACL removed |
+| B | `cloudflare_only = true` | Requests without the origin header get a 403; ingress only from Cloudflare's ranges on 443; `WT_FORWARDED_HOPS=2` |
+| C | `cloudflare_only = true`, `alb_public_ipv4 = false` | Load balancer `dualstack-without-public-ipv4`: no public IPv4 |
+
+Every apply below runs from `infra/terraform/envs/v1` with both image tags of the running stack,
+so it moves no image:
+
+```bash
+T="-var image_tag=$(terraform output -raw image_tag) -var migrate_image_tag=<the migrate tag the admin task runs>"
+```
+
+**Cutover.** Pick a quiet hour; the whole run takes about an hour.
+
+1. Stage A, right after the PR merges and before the next deploy (`deploy.yml`'s apply would
+   otherwise fail on the VPC changes): `terraform apply $T`. Check `/healthz` and one question.
+2. Deploy the image with this change through `deploy.yml`, so `wt-api` reads
+   `WT_FORWARDED_HOPS` and the About page names Cloudflare. Then `terraform apply` again with
+   the new `image_tag` if the deploy did not already.
+3. At Cloudflare, zone `wheelturning.org`, before anything is proxied:
+   - SSL/TLS: encryption mode **Full (strict)**; Edge Certificates: minimum TLS **1.2**, **Always
+     Use HTTPS** on. The load balancer's ACM certificate already covers both names.
+   - Security, WAF, Managed rules: the **Cloudflare Free Managed Ruleset** deployed.
+   - Security, WAF, Rate limiting rules: the Free plan's one rule, "wt forms and asks". Free
+     rules can match only the path, count by IP over 10 seconds and block for 10 seconds, with no
+     count mode. Match
+     `(http.request.uri.path in {"/ask" "/ask/curated" "/rights/request" "/rights/confirm" "/accessibility/report"} or http.request.uri.path wildcard "/join/*")`,
+     **20 requests per 10 seconds**, action **Block**. The app's own limits (asks per tester, 5
+     public forms an hour per address) stay the main limits; this rule stops floods and invite
+     token guessing. The static site's paths do not overlap these.
+   - Rules, Transform Rules, Modify Request Header: one rule for the same two hosts that **sets**
+     the header named in `terraform output -json cloudflare_origin_header` to its value.
+   - Leave Bot Fight Mode off: it would challenge the Route 53 health checkers.
+4. Proxy `app` and `demo` (orange cloud), keeping the CNAME to the load balancer. The two
+   `_…acm-validations.aws` records stay DNS-only. Check from a browser and with
+   `curl -sI https://app.wheelturning.org/healthz` (a `cf-ray` header shows it came through
+   Cloudflare), ask one question and watch the progress stream reach the answer page, and send
+   the rights form once.
+5. Stage B: `terraform apply $T -var cloudflare_only=true`. Check: the site still works through
+   Cloudflare; `curl -sk https://<alb dns name>/healthz` answers 403 over IPv4 and IPv6 (or does
+   not connect, once the security group drops the old rules).
+6. Stage C: `terraform apply $T -var cloudflare_only=true -var alb_public_ipv4=false`. Check the
+   site again: Cloudflare now reaches the load balancer over IPv6 only. `nslookup <alb dns name>`
+   returns no A record.
+7. Commit `cloudflare_only = true` and `alb_public_ipv4 = false` as the defaults in
+   `variables.tf`, so the next deploy keeps them.
+8. The next day: no `wt-v1-healthz-unreachable` or `wt-v1-alb-5xx-rate` alarm, and Cloudflare's
+   Security Events show the rate rule only on real floods. Burst-test it once (Spec 11, PB3.6):
+   400 POSTs to `/rights/request` from one address as fast as they go; Cloudflare blocks them
+   once 20 arrive within 10 seconds, and Security Events records the block.
+
+**Rollback.** Undo the latest stage first; each takes a few minutes.
+
+- After C: `terraform apply $T -var cloudflare_only=true` (public IPv4 back; the DNS name gains A
+  records within minutes).
+- After B: `terraform apply $T` (open to all again, `WT_FORWARDED_HOPS=1`), then, if Cloudflare is
+  the problem, set `app` and `demo` back to DNS-only. Turn the proxy off only once public IPv4
+  is back, or IPv4-only testers lose the site.
+- After step 4 alone: set `app` and `demo` back to DNS-only.
+- AWS WAF does not come back by rollback; it would need `waf.tf` restored from git history.
+
+Cloudflare's ranges change rarely; `cloudflare_ranges` holds the copy read on October 17, 2026.
+Compare it with `https://www.cloudflare.com/ips-v4` and `ips-v6` before each edge change and
+every few months, since a new Cloudflare range missing here makes the site fail for some
+testers.
 
 ### The database's name
 
@@ -633,11 +710,14 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 
 - **Means:** Route 53 has not reached `https://app.wheelturning.org/healthz` from outside AWS
   for 3 minutes. It also fires while the maintenance page is up, by design.
-- **First check:** whether `wt-v1-no-healthy-web-task` fired too (the app) or not (DNS at
-  Cloudflare, the certificate or the load balancer).
-- **Fix:** the app: as above. DNS: the CNAME at Cloudflare must be DNS-only and match
-  `terraform output dns_records_for_cloudflare`. The certificate: ACM renews it while its
-  validation CNAME stays at Cloudflare.
+- **First check:** whether `wt-v1-no-healthy-web-task` fired too (the app) or not (Cloudflare,
+  DNS, the certificate or the load balancer). Cloudflare's status page and its Security Events
+  for blocked `/healthz` requests come next.
+- **Fix:** the app: as above. DNS: the CNAME at Cloudflare must be proxied and match
+  `terraform output dns_records_for_cloudflare`, and the transform rule must still set the origin
+  header (without it the load balancer answers 403). The certificate: ACM renews it while its
+  validation CNAME stays DNS-only at Cloudflare. A Cloudflare outage takes the site down; if it
+  lasts, roll the edge back (§12, "The edge").
 - **Scale to zero:** no.
 
 #### `wt-v1-model-failures`

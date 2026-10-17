@@ -1,6 +1,6 @@
 # ADR: a cheaper edge for the private beta
 
-Status: **proposed, waiting on the owner.** Written October 17, 2026. Nothing here is built: the recommended option replaces Spec 11 PB3.6's AWS WAF, so the owner decides before any Terraform changes (see "Decisions for the owner").
+Status: **accepted, a + d.** Written and approved October 17, 2026. The owner chose to replace Spec 11 PB3.6's AWS WAF with Cloudflare's free protection, to put Cloudflare in the request path with a line on the About page, and to make the load balancer IPv6-only. "What was built" lists the changes. The owner cuts over by hand (runbook §12, "The edge").
 
 ## Context
 
@@ -10,7 +10,7 @@ The edge is everything between a tester's browser and the web task. Today, from 
 | --- | --- | --- | --- |
 | Application load balancer `wt-v1`, two zones | `modules/service/main.tf` | TLS with the ACM certificate (`ELBSecurityPolicy-TLS13-1-2-2021-06`), HTTP to HTTPS redirect, `/healthz` target health check, the `maintenance` fixed page (PB4.4), health-gated deploys with the circuit breaker | $16.48 ($0.542 a day in Cost Explorer, October 10 to 16) |
 | Public IPv4, three | two on the load balancer, one on the web task (`assign_public_ip = true`; there is no NAT gateway) | The task's address is its only way out: ECR, Secrets Manager, CloudWatch Logs, SNS, SES, `public.ecr.aws` and the model API | $11.10 ($0.36 to $0.38 a day; $3.65 each, plus one-off tasks) |
-| AWS WAF web ACL `wt-v1` | `modules/service/waf.tf` | AWS Common and Known Bad Inputs managed groups, 300 requests per 5 minutes per IP, all in count until `waf_block` (PB3.6) | about $8 + $0.60 per million requests; attached since October 16, so not yet on the bill. The load balancer served 17,000 to 20,000 requests a day, so requests add about $0.35 |
+| AWS WAF web ACL `wt-v1` | `modules/service/waf.tf` | AWS Common and Known Bad Inputs managed groups, 300 requests per 5 minutes per IP, all in count until `waf_block` (PB3.6); removed by this change | about $8 + $0.60 per million requests; attached since October 16, so not yet on the bill. The load balancer served 17,000 to 20,000 requests a day, so requests add about $0.35 |
 | Cloudflare | zone `wheelturning.org`, Free plan, set by hand | DNS only: `app` and `demo` are DNS-only CNAMEs to the load balancer, so testers' traffic never passes through Cloudflare. Zone SSL mode `full`, minimum TLS 1.0, Always Use HTTPS off (they matter only once a record is proxied) | $0 |
 | **Edge total** | | | **about $37** |
 
@@ -48,18 +48,19 @@ b saves the most, but it undoes a ticked PB4.4 item and two Spec 01 alarms, chan
 
 Not recommended: (c) costs more than it saves; (d) alone locks out IPv4-only testers; Cloudflare Pro costs more than AWS WAF.
 
-## What a + d would build
+## What was built
 
-Not started. If the owner approves:
+Built on PR 204 after the owner's approval. Cutover stages, checks and rollback are in runbook §12, "The edge".
 
-1. **Network** (`modules/network`): an Amazon-provided IPv6 /56 on the VPC, a /64 per public subnet, `::/0` to the internet gateway. The load balancer security group accepts 443 and 80 only from Cloudflare's published IPv6 ranges (a variable, refreshed from `https://www.cloudflare.com/ips-v6`), and the IPv4 `0.0.0.0/0` rules go.
-2. **Service** (`modules/service`): `ip_address_type = "dualstack-without-public-ipv4"` on the load balancer. A listener rule forwards only requests carrying the origin header (a `random_password`, output as sensitive and copied to a Cloudflare request-header transform rule); anything else gets a fixed 403. `maintenance` keeps working as today. `waf.tf` and its three variables are removed.
-3. **Client address** (`wt-api`, `wt_core::config`): a new key, for example `WT_FORWARDED_HOPS=2`, so the address counted is the entry before the load balancer's, which is the one Cloudflare appended. Spec 06's rate limits and Spec 11 PB1's key list gain it, with tests.
-4. **Cloudflare** (owner, by hand, in the cutover runbook): SSL mode Full (strict), minimum TLS 1.2, Always Use HTTPS, Free Managed Ruleset on, one rate rule (for example 50 requests per 10 seconds per IP on `/ask` and the public forms, log first, then block), the header transform rule, then `app` and `demo` proxied.
-5. **Specs and docs**: PB3.6 item 1 and its acceptance rewritten for Cloudflare, Spec 01's edge section and network rules, `docs/cost.md`'s fixed table and edge section, runbook 12 and 13 (DNS is proxied; the Route 53 check now also fails if Cloudflare does), and the About page's line on who handles a question.
-6. **Checks**: `terraform validate`, `terraform test`, a plan against `envs/v1`, and a cutover and rollback runbook: proxy first while the load balancer still has IPv4, confirm the ask stream (server-sent events) works through Cloudflare's 100-second origin timeout, then apply the IPv6-only change.
+1. **Network** (`modules/network`): an Amazon-provided IPv6 /56 on the VPC, a /64 per public subnet, `::/0` to the internet gateway. Load balancer ingress is a variable (`alb_ingress`). Until the cutover it stays open to all on 443 and 80, over IPv4 and IPv6. With `cloudflare_only` it admits only `cloudflare_ranges` on 443, as read from `https://www.cloudflare.com/ips-v4` and `ips-v6` on October 17. The two existing rules move into the new map without being replaced.
+2. **Service** (`modules/service`): `ip_address_type` is `dualstack`, or `dualstack-without-public-ipv4` once `alb_public_ipv4 = false`; the env's validation refuses that value without `cloudflare_only`. A listener rule forwards requests carrying `X-WT-Origin`, whose value is a `random_password` held in state and output as sensitive. The rule exists from the first stage, so turning `cloudflare_only` on only switches the default action to a 403. `maintenance` answers through both paths. `waf.tf` and `waf_block` are removed. `tests/edge.tftest.hcl` checks all of this offline.
+3. **Client address**: `WT_FORWARDED_HOPS` (default 1) in `wt_core::config`. `wt-api` counts the entry that many from the end of `X-Forwarded-For`. Terraform sets it to 2 with `cloudflare_only`. `behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw` covers a forged first entry and a changing Cloudflare edge.
+4. **Cloudflare** (owner, by hand): Full (strict), minimum TLS 1.2, Always Use HTTPS, the Free Managed Ruleset, the transform rule, and the Free plan's one rate rule. That rule can match only the path, counts over 10 seconds and has no log mode, so it is 20 requests per 10 seconds per IP on the asks, the public forms and `/join/`, blocking from the start.
+5. **Docs**: Spec 11 PB3.6 rewritten, Spec 01 (topology, keys, modules, edge section, network rules), Spec 09 and the About page's Cloudflare line, `docs/cost.md`, and runbook §12 and the `healthz-unreachable` entry.
 
 ## Decisions for the owner
+
+Decided October 17, 2026: 1 yes, 2 yes. 3 is still open.
 
 1. **Replace PB3.6's AWS WAF with Cloudflare's free protection?** This loses the AWS Common rule group and the exact 300-per-5-minutes rule, and changes PB3.6's 400-request acceptance test to a 10-second window. Yes, a + d is built as above. No, the edge stays at $37, or only (d) behind a proxy that keeps AWS WAF, which saves $7 and needs the WAF rate rule to read the client address from a header.
 2. **Put Cloudflare in the request path?** It decrypts every request, questions included, the same way the static site already runs on Cloudflare. If yes, the About page says so in one sentence, as `site/privacy.html` does for the static site.

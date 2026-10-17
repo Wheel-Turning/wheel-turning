@@ -376,20 +376,23 @@ User stories:
 
 **Requirements.**
 
-1. **A WAF on the load balancer.** A WAFv2 web ACL in `infra/terraform/modules/service` with:
-   - AWS Common and Known Bad Inputs managed rule groups.
-   - A rate rule of 300 requests per 5 minutes per IP.
-   - Count mode for 7 days, then block, with the Common group's body-size rule kept in count if the rights form trips it.
-   - The ask stream (server-sent events) is verified to work behind it.
+1. **Cloudflare in front of the load balancer.** Owner's decision of October 17, 2026 (`docs/adr-edge-cost.md`). It replaces the AWS WAF web ACL first specified here, which was applied on October 16 and is removed by this change:
+   - `app` and `demo` are proxied by Cloudflare (Full (strict), minimum TLS 1.2, Always Use HTTPS). The load balancer answers only Cloudflare: its security group admits Cloudflare's ranges on 443, and the HTTPS listener forwards only requests carrying the origin header that a Cloudflare transform rule sets, answering anything else with a 403 (`cloudflare_only`). It has no public IPv4 address (`alb_public_ipv4 = false`).
+   - Cloudflare's Free Managed Ruleset, and the Free plan's one rate rule: 20 requests per 10 seconds per IP on the asks, the public forms and `/join/`, blocking for 10 seconds. The Free plan cannot count over 5 minutes and has no count mode, so the rule blocks floods from the start and the app's own limits stay the fine-grained ones.
+   - `WT_FORWARDED_HOPS=2`: the public forms' limit counts the address Cloudflare saw, not Cloudflare's own.
+   - The ask stream (server-sent events) is verified to work through Cloudflare.
+   - What this gives up: the AWS Common rule group (OWASP-style rules and size limits), which has no free Cloudflare equivalent, and AWS WAF's per-rule metrics and sampled requests. Cloudflare decrypts every request, so the About page says so.
 2. **Detection in `infra/terraform/account`.**
    - GuardDuty on.
    - IAM Access Analyzer for external and unused access.
    - CloudTrail metric filters with alarms to SNS for root sign-in and IAM policy changes.
-3. **Cost.** Expected about $10 to $15 a month, recorded in `docs/cost.md`.
+3. **Cost.** Detection costs about $3 to $6 a month. The Cloudflare edge is free and saves about $15 a month on the load balancer's addresses and AWS WAF. Both are recorded in `docs/cost.md`.
 
 **Acceptance.**
-- [ ] Terraform validates and applies.
-- [ ] A burst of 400 requests from one address in 5 minutes is counted, then blocked once blocking is on.
+- [ ] Terraform validates and applies. (October 17, 2026: `terraform validate` and `terraform test` pass, and `terraform plan` against the live state shows each cutover stage. The owner applies them per runbook §12, "The edge".)
+- [ ] A burst of 400 requests from one address is blocked by Cloudflare once 20 arrive within 10 seconds.
+- [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (`modules/service/tests/edge.tftest.hcl` checks the listener offline.)
+- [x] The public forms' limit counts the client behind Cloudflare. (`behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw` in `wt-api/tests/site.rs`.)
 - [ ] A test IAM policy change triggers the alarm.
 
 ## PB4. The owner can learn from the beta
@@ -520,7 +523,7 @@ To approve before code:
 | Document | Change | Story |
 | --- | --- | --- |
 | PRD | Principle 4, the success criterion, the risk row and the scope table drop the one-business-day promise | PB1.7 |
-| Spec 01 | New keys; per-stage model keys; the audit task; WAF and detection; alarms; analyst login; recovery and availability targets; chosen models | PB1.4, PB1.6, PB2.0, PB3.6, PB4.1 to PB4.5 |
+| Spec 01 | New keys; per-stage model keys; the audit task; Cloudflare edge and detection; alarms; analyst login; recovery and availability targets; chosen models | PB1.4, PB1.6, PB2.0, PB3.6, PB4.1 to PB4.5 |
 | Spec 02 | `database_identity`; `answer.summary_status`; `query_log.llm_cost_usd` | PB1.1, PB2.4, PB4.6 |
 | Spec 03 | Display levels rule 4 without a public time | PB1.7 |
 | Spec 05 | No sangha-count note; the B10 decision on unused excerpts | PB2.2, PB2.3 |

@@ -453,6 +453,45 @@ async fn one_address_gets_at_most_three_confirmation_emails_an_hour() {
     assert_eq!(mailer.sent().len(), 3);
 }
 
+/// Behind Cloudflare and the load balancer (`WT_FORWARDED_HOPS=2`), `X-Forwarded-For` arrives as
+/// "<whatever the sender wrote>, <client>, <Cloudflare edge>". The limit counts the client, so a
+/// forged first entry or a different edge does not reset it, and another client is unaffected.
+#[tokio::test]
+async fn behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw() {
+    let fx = start_with(Site {
+        trust_forwarded_for: true,
+        forwarded_hops: 2,
+        ..Site::with_fakes("fake-embed")
+    })
+    .await;
+    let honeypot = |forwarded: String| {
+        Request::post("/rights/request")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header("x-forwarded-for", forwarded)
+            .body(Body::from("target=x&website=spam"))
+            .unwrap()
+    };
+    for i in 0..6 {
+        let r = send(
+            &fx.app,
+            honeypot(format!("192.0.2.{i}, 203.0.113.9, 2606:4700::{i}")),
+        )
+        .await;
+        let expected = if i < 5 {
+            StatusCode::SEE_OTHER
+        } else {
+            StatusCode::TOO_MANY_REQUESTS
+        };
+        assert_eq!(r.status, expected, "request {i} from the same client");
+    }
+    let other = send(&fx.app, honeypot("203.0.113.10, 2606:4700::1".to_owned())).await;
+    assert_eq!(
+        other.status,
+        StatusCode::SEE_OTHER,
+        "another client has its own limit"
+    );
+}
+
 #[tokio::test]
 async fn the_accessibility_statement_lists_exactly_the_register_and_stores_a_report() {
     let fx = start().await;
