@@ -645,3 +645,19 @@ async fn stopped(
 fn millis(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ranker_is_named_by_its_setting_or_as_the_fallback() {
+        let mut site = Site::with_fakes("fake-embed");
+        site.retrieval.ranking.ranker = Ranker::Model;
+        assert_eq!(ranker_name(&site, false), "llm");
+        assert_eq!(ranker_name(&site, true), "none (fallback)");
+        site.retrieval.ranking.ranker = Ranker::Onnx;
+        assert_eq!(ranker_name(&site, false), "onnx");
+        assert_eq!(ranker_name(&site, true), "none (fallback)");
+    }
+}
