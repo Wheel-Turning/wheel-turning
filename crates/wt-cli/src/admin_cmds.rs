@@ -334,10 +334,9 @@ pub(crate) async fn db(ctx: &Ctx, command: DbCommand) -> anyhow::Result<ExitCode
             password_env,
         } => {
             let login = login.unwrap_or_else(|| format!("{role}_login"));
-            let password = std::env::var(&password_env)
-                .ok()
-                .filter(|p| !p.is_empty())
-                .map(wt_core::Secret::new)
+            let password = ctx
+                .config
+                .source_secret(&password_env)
                 .with_context(|| format!("{password_env} is not set"))?;
             let outcome = wt_db::create_login(&ctx.pool().await?, &role, &login, &password)
                 .await

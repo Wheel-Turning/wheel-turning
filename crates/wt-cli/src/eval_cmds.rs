@@ -208,7 +208,7 @@ pub(crate) async fn eval(
             }
         }
         EvalCommand::ExportReview { run, out } => {
-            let lead_in = retrieval_config()?.answer.link_lead_in_ms;
+            let lead_in = retrieval_config(config)?.answer.link_lead_in_ms;
             let html = wt_eval::review::export(pool, run, lead_in).await?;
             if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
                 std::fs::create_dir_all(dir)?;
@@ -292,14 +292,14 @@ pub(crate) async fn eval(
 
 /// The retrieval settings the server uses, from config/retrieval.toml, so an eval run ranks as the
 /// site does.
-fn retrieval_config() -> anyhow::Result<wt_retrieve::RetrievalConfig> {
-    let path = wt_api::site::config_dir().join("retrieval.toml");
+fn retrieval_config(config: &Config) -> anyhow::Result<wt_retrieve::RetrievalConfig> {
+    let path = config.config_dir.join("retrieval.toml");
     wt_retrieve::RetrievalConfig::load(&path).with_context(|| format!("loading {}", path.display()))
 }
 
 /// The build, commit, configuration snapshot and model names the run records.
 fn run_config(config: &Config, site: &wt_api::Site) -> anyhow::Result<RunConfig> {
-    let dir = wt_api::site::config_dir();
+    let dir = &config.config_dir;
     let read = |p: &Path| std::fs::read_to_string(p).ok();
     let retrieval_toml =
         read(&dir.join("retrieval.toml")).context("reading retrieval.toml for the snapshot")?;

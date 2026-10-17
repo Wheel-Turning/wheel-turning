@@ -755,7 +755,10 @@ label_template = "{work} {n}"
 // Real tools
 
 fn real_tools() -> Option<Poppler> {
-    let tools = Poppler::from_env();
+    let tools = Poppler::new(
+        std::env::var_os("WT_POPPLER_BIN").map(std::path::PathBuf::from),
+        std::env::var_os("WT_TESSERACT").map(std::path::PathBuf::from),
+    );
     if tools.available() {
         return Some(tools);
     }

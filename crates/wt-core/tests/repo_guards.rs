@@ -93,6 +93,77 @@ fn audio_is_written_only_under_scratch() {
     );
 }
 
+/// Where Rust source outside tests may read the process environment directly (Spec 11, PB1.6):
+/// every configuration key goes through `wt_core::config`, so it is read and checked once at
+/// startup and documented in `.env.example` and Spec 01. The exceptions, each not configuration:
+const ENV_READERS: &[(&str, &str)] = &[
+    ("crates/wt-core/src/config.rs", "the loader itself"),
+    (
+        "crates/wt-asr/src/bench.rs",
+        "extends the PATH a benchmark child process inherits",
+    ),
+    (
+        "crates/wt-cli/src/ingest.rs",
+        "COMPUTERNAME or HOSTNAME, the machine's own name for job locks",
+    ),
+    (
+        "crates/wt-api/examples/a11y_fixture.rs",
+        "a developer tool that serves fixtures for the accessibility check",
+    ),
+];
+
+/// The lines of `text` before its `#[cfg(test)]` module that read an environment variable.
+fn env_reads(text: &str) -> Vec<usize> {
+    let production = text.split("#[cfg(test)]").next().unwrap_or_default();
+    production
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let code = line.split("//").next().unwrap_or_default();
+            code.contains("env::var(") || code.contains("env::var_os(")
+        })
+        .map(|(i, _)| i + 1)
+        .collect()
+}
+
+#[test]
+fn the_env_guard_catches_reads_and_spares_comments_and_tests() {
+    assert_eq!(env_reads("let a = std::env::var(\"WT_X\");"), vec![1]);
+    assert_eq!(env_reads("x\nlet p = env::var_os(\"PATH\");"), vec![2]);
+    assert!(env_reads("// std::env::var(\"WT_X\") is not allowed").is_empty());
+    assert!(env_reads("let k = env!(\"CARGO_MANIFEST_DIR\");").is_empty());
+    assert!(
+        env_reads("fn a() {}\n#[cfg(test)]\nmod t { fn b() { std::env::var(\"X\"); } }").is_empty()
+    );
+}
+
+/// Spec 11, PB1.6: library, binary and example source outside [`ENV_READERS`] may not call
+/// `std::env::var` or `std::env::var_os`. Integration tests and a file's `#[cfg(test)]` module
+/// are not scanned.
+#[test]
+fn configuration_is_read_only_by_the_loader() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut found = Vec::new();
+    for path in tracked_files() {
+        let scanned = path.starts_with("crates/")
+            && (path.contains("/src/") || path.contains("/examples/"))
+            && path.ends_with(".rs");
+        if !scanned || ENV_READERS.iter().any(|(allowed, _)| path == *allowed) {
+            continue;
+        }
+        let text = std::fs::read_to_string(root.join(&path)).unwrap();
+        found.extend(
+            env_reads(&text)
+                .into_iter()
+                .map(|line| format!("{path}:{line}")),
+        );
+    }
+    assert!(
+        found.is_empty(),
+        "read the key through wt_core::config::Config instead: {found:?}"
+    );
+}
+
 /// Spec 04, Model license record: CI fails when `config/` names a model that
 /// `docs/model-licenses.md` does not list with a revision. The models named are the priced
 /// language models, the benchmark's model files and the default retrieval models.

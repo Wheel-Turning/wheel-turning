@@ -289,7 +289,7 @@ pub(crate) async fn text(ctx: &Ctx, command: TextCommand) -> anyhow::Result<()> 
             concurrency,
             ..
         } => {
-            let tools = wt_ingest::texts::pdf::tools::Poppler::from_env();
+            let tools = wt_ingest::texts::pdf::tools::Poppler::from_config(&ctx.config);
             let estimate = wt_ingest::texts::large::estimate(
                 &tools,
                 &manifest,

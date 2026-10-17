@@ -68,13 +68,17 @@ fn run(cmd: &mut Command, what: &str) -> Result<Vec<u8>, TextError> {
 }
 
 impl Poppler {
-    /// The tools named by `WT_POPPLER_BIN` and `WT_TESSERACT`, or on the `PATH`.
-    pub fn from_env() -> Self {
+    /// The tools in `bin` and at `tesseract`, each falling back to the `PATH` when `None`.
+    pub fn new(bin: Option<PathBuf>, tesseract: Option<PathBuf>) -> Self {
         Self {
-            bin: std::env::var_os("WT_POPPLER_BIN").map(PathBuf::from),
-            tesseract: std::env::var_os("WT_TESSERACT")
-                .map_or_else(|| PathBuf::from("tesseract"), PathBuf::from),
+            bin,
+            tesseract: tesseract.unwrap_or_else(|| PathBuf::from("tesseract")),
         }
+    }
+
+    /// The tools named by `WT_POPPLER_BIN` and `WT_TESSERACT`, or on the `PATH`.
+    pub fn from_config(config: &wt_core::Config) -> Self {
+        Self::new(config.poppler_bin.clone(), config.tesseract.clone())
     }
 
     /// A poppler command, from `WT_POPPLER_BIN` when set, else from the path.

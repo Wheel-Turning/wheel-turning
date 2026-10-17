@@ -141,6 +141,29 @@ pub struct Config {
     pub whisper_cli: Option<PathBuf>,
     /// `WT_SITE_DANA_URL`, the site's own donation page.
     pub site_dana_url: Option<String>,
+    /// `WT_MAIL_FROM`, the SES sender for removal-request confirmations. Set together with
+    /// `public_url` or not at all, and required by the web server in prod: see
+    /// [`Config::require_mail`].
+    pub mail_from: Option<String>,
+    /// `WT_PUBLIC_URL`, the site's own address for links in emails, without a trailing slash.
+    pub public_url: Option<String>,
+    /// `WT_OWNER_NAME`, the owner's name shown on the rights pages.
+    pub owner_name: Option<String>,
+    /// `WT_TRUST_FORWARDED_FOR`. True only behind a load balancer that sets `X-Forwarded-For`.
+    pub trust_forwarded_for: bool,
+    /// `WT_CONFIG_DIR`, default `config`: the directory holding `retrieval.toml` and the other
+    /// settings files the web server reads.
+    pub config_dir: PathBuf,
+    /// `WT_PRIVACY_DEFAULT`, the question privacy mode for a tester who never chose.
+    pub privacy_default: PrivacyDefault,
+    /// `WT_QUERY_RETENTION_DAYS`, default 180: days a kept question's text is stored.
+    pub query_retention_days: u32,
+    /// `WT_COUNT_ONLY_TTL_HOURS`, default 24: hours a count-only question is stored.
+    pub count_only_ttl_hours: u32,
+    /// `WT_POPPLER_BIN`, the directory holding poppler's tools. Unset means the `PATH`.
+    pub poppler_bin: Option<PathBuf>,
+    /// `WT_TESSERACT`, the Tesseract executable. Unset means `tesseract` on the `PATH`.
+    pub tesseract: Option<PathBuf>,
     /// `WT_LOG`, the log filter.
     pub log: String,
     /// Reads the keys a source names in `config/sources.toml`, such as a Vimeo source's
@@ -221,6 +244,51 @@ impl Config {
             });
         }
 
+        let mail_from = get("WT_MAIL_FROM").map(|v| v.trim().to_owned());
+        if let Some(from) = &mail_from
+            && !from.contains('@')
+        {
+            return Err(ConfigError::Invalid {
+                key: "WT_MAIL_FROM",
+                reason: format!("expected an email address, got {from:?}"),
+            });
+        }
+        let public_url = get("WT_PUBLIC_URL").map(|v| v.trim().trim_end_matches('/').to_owned());
+        if let Some(url) = &public_url
+            && !(url.starts_with("https://") || url.starts_with("http://"))
+        {
+            return Err(ConfigError::Invalid {
+                key: "WT_PUBLIC_URL",
+                reason: format!("expected an http:// or https:// address, got {url:?}"),
+            });
+        }
+        // Spec 11, PB1.6: one without the other would start a site whose removal requests are
+        // never confirmed.
+        match (&mail_from, &public_url) {
+            (None, Some(_)) => {
+                return Err(ConfigError::Missing {
+                    key: "WT_MAIL_FROM",
+                });
+            }
+            (Some(_), None) => {
+                return Err(ConfigError::Missing {
+                    key: "WT_PUBLIC_URL",
+                });
+            }
+            _ => {}
+        }
+
+        let privacy_default = match get("WT_PRIVACY_DEFAULT").as_deref().map(str::trim) {
+            None | Some("share") => PrivacyDefault::Share,
+            Some("count_only") => PrivacyDefault::CountOnly,
+            Some(other) => {
+                return Err(ConfigError::Invalid {
+                    key: "WT_PRIVACY_DEFAULT",
+                    reason: format!("expected share or count_only, got {other:?}"),
+                });
+            }
+        };
+
         Ok(Self {
             env,
             database_url,
@@ -274,6 +342,27 @@ impl Config {
             whisper_model: get("WT_WHISPER_MODEL").map(PathBuf::from),
             whisper_cli: get("WT_WHISPER_CLI").map(PathBuf::from),
             site_dana_url: get("WT_SITE_DANA_URL"),
+            mail_from,
+            public_url,
+            owner_name: get("WT_OWNER_NAME").map(|v| v.trim().to_owned()),
+            trust_forwarded_for: parse_bool(
+                "WT_TRUST_FORWARDED_FOR",
+                get("WT_TRUST_FORWARDED_FOR"),
+            )?,
+            config_dir: get("WT_CONFIG_DIR").map_or_else(|| PathBuf::from("config"), PathBuf::from),
+            privacy_default,
+            query_retention_days: parse_u32(
+                "WT_QUERY_RETENTION_DAYS",
+                get("WT_QUERY_RETENTION_DAYS"),
+                180,
+            )?,
+            count_only_ttl_hours: parse_u32(
+                "WT_COUNT_ONLY_TTL_HOURS",
+                get("WT_COUNT_ONLY_TTL_HOURS"),
+                24,
+            )?,
+            poppler_bin: get("WT_POPPLER_BIN").map(PathBuf::from),
+            tesseract: get("WT_TESSERACT").map(PathBuf::from),
             log,
             source_keys: lookup.clone(),
         })
@@ -282,7 +371,8 @@ impl Config {
     /// A secret a source names in `config/sources.toml` rather than a fixed key, such as the
     /// `token_env` of a Vimeo source: each sangha's Vimeo account has its own variable, like
     /// `WT_SSZ_VIMEO_ACCESS_TOKEN` (owner's decision of October 13, 2026). An empty value counts
-    /// as unset.
+    /// as unset. `wt db create-login` reads the password variable its `--password-env` names
+    /// the same way.
     pub fn source_secret(&self, key: &str) -> Option<Secret> {
         (self.source_keys.0)(key)
             .filter(|value| !value.trim().is_empty())
@@ -306,6 +396,29 @@ impl Config {
         own.as_deref()
             .or(self.llm_model.as_deref())
             .ok_or(ConfigError::Missing { key: stage.key() })
+    }
+
+    /// The sender and the site address for confirmation emails, when both are set.
+    pub fn mail(&self) -> Option<(&str, &str)> {
+        Some((self.mail_from.as_deref()?, self.public_url.as_deref()?))
+    }
+
+    /// The mail settings, which the web server requires in prod so that a removal request is
+    /// always confirmed by email (Spec 11, PB1.6). Fails naming the first missing key.
+    pub fn require_mail(&self) -> Result<Option<(&str, &str)>, ConfigError> {
+        if self.env == Env::Prod {
+            if self.mail_from.is_none() {
+                return Err(ConfigError::Missing {
+                    key: "WT_MAIL_FROM",
+                });
+            }
+            if self.public_url.is_none() {
+                return Err(ConfigError::Missing {
+                    key: "WT_PUBLIC_URL",
+                });
+            }
+        }
+        Ok(self.mail())
     }
 
     /// The model identifier for the Claude API, which the LLM stages require.
@@ -383,6 +496,16 @@ fn check_database_url(key: &'static str, url: &Secret, env: Env) -> Result<(), C
         });
     }
     Ok(())
+}
+
+/// The question privacy mode for a tester who never chose (Spec 06), from `WT_PRIVACY_DEFAULT`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PrivacyDefault {
+    /// `share`, the default while the demo is private.
+    #[default]
+    Share,
+    /// `count_only`.
+    CountOnly,
 }
 
 /// Per-stage language models, each optional.
@@ -483,6 +606,17 @@ fn parse_bool(key: &'static str, value: Option<String>) -> Result<bool, ConfigEr
         Some(other) => Err(ConfigError::Invalid {
             key,
             reason: format!("expected true or false, got {other:?}"),
+        }),
+    }
+}
+
+/// A whole-number key, `fallback` when unset.
+fn parse_u32(key: &'static str, value: Option<String>, fallback: u32) -> Result<u32, ConfigError> {
+    match value {
+        None => Ok(fallback),
+        Some(v) => v.trim().parse().map_err(|_| ConfigError::Invalid {
+            key,
+            reason: format!("expected a whole number, got {v:?}"),
         }),
     }
 }
@@ -840,6 +974,139 @@ mod tests {
                 ("WT_LLM_MONTHLY_CAP_USD", "lots")
             ])
             .is_err()
+        );
+    }
+
+    #[test]
+    fn web_server_keys_have_their_defaults() {
+        let config = load(&[("DATABASE_URL", "postgres://wt:wt@localhost/wt")]).unwrap();
+        assert_eq!(config.config_dir, PathBuf::from("config"));
+        assert_eq!(config.privacy_default, PrivacyDefault::Share);
+        assert_eq!(config.query_retention_days, 180);
+        assert_eq!(config.count_only_ttl_hours, 24);
+        assert!(!config.trust_forwarded_for);
+        assert_eq!(config.owner_name, None);
+        assert_eq!(config.mail(), None);
+        assert_eq!(config.require_mail(), Ok(None));
+        assert_eq!(config.poppler_bin, None);
+        assert_eq!(config.tesseract, None);
+    }
+
+    #[test]
+    fn web_server_keys_are_read_and_checked() {
+        let config = load(&[
+            ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+            ("WT_MAIL_FROM", " rights@wheelturning.org "),
+            ("WT_PUBLIC_URL", "https://app.wheelturning.org/"),
+            ("WT_OWNER_NAME", " A. Owner "),
+            ("WT_TRUST_FORWARDED_FOR", "true"),
+            ("WT_CONFIG_DIR", "/etc/wt"),
+            ("WT_PRIVACY_DEFAULT", "count_only"),
+            ("WT_QUERY_RETENTION_DAYS", "30"),
+            ("WT_COUNT_ONLY_TTL_HOURS", "2"),
+            ("WT_POPPLER_BIN", "/opt/poppler/bin"),
+            ("WT_TESSERACT", "/opt/tesseract"),
+        ])
+        .unwrap();
+        assert_eq!(
+            config.mail(),
+            Some(("rights@wheelturning.org", "https://app.wheelturning.org"))
+        );
+        assert_eq!(config.owner_name.as_deref(), Some("A. Owner"));
+        assert!(config.trust_forwarded_for);
+        assert_eq!(config.config_dir, PathBuf::from("/etc/wt"));
+        assert_eq!(config.privacy_default, PrivacyDefault::CountOnly);
+        assert_eq!(config.query_retention_days, 30);
+        assert_eq!(config.count_only_ttl_hours, 2);
+        assert_eq!(config.poppler_bin, Some(PathBuf::from("/opt/poppler/bin")));
+        assert_eq!(config.tesseract, Some(PathBuf::from("/opt/tesseract")));
+
+        let base = ("DATABASE_URL", "postgres://wt:wt@localhost/wt");
+        for (key, value) in [
+            ("WT_PRIVACY_DEFAULT", "private"),
+            ("WT_QUERY_RETENTION_DAYS", "six months"),
+            ("WT_COUNT_ONLY_TTL_HOURS", "-1"),
+            ("WT_TRUST_FORWARDED_FOR", "yes"),
+        ] {
+            assert!(
+                matches!(load(&[base, (key, value)]), Err(ConfigError::Invalid { key: k, .. }) if k == key),
+                "{key}={value} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn mail_keys_are_set_together_in_any_environment() {
+        let base = ("DATABASE_URL", "postgres://wt:wt@localhost/wt");
+        assert_eq!(
+            load(&[base, ("WT_PUBLIC_URL", "https://app.wheelturning.org")]).unwrap_err(),
+            ConfigError::Missing {
+                key: "WT_MAIL_FROM"
+            }
+        );
+        assert_eq!(
+            load(&[base, ("WT_MAIL_FROM", "rights@wheelturning.org")]).unwrap_err(),
+            ConfigError::Missing {
+                key: "WT_PUBLIC_URL"
+            }
+        );
+        assert!(matches!(
+            load(&[
+                base,
+                ("WT_MAIL_FROM", "rights"),
+                ("WT_PUBLIC_URL", "https://app.wheelturning.org")
+            ]),
+            Err(ConfigError::Invalid {
+                key: "WT_MAIL_FROM",
+                ..
+            })
+        ));
+        assert!(matches!(
+            load(&[
+                base,
+                ("WT_MAIL_FROM", "rights@wheelturning.org"),
+                ("WT_PUBLIC_URL", "app.wheelturning.org")
+            ]),
+            Err(ConfigError::Invalid {
+                key: "WT_PUBLIC_URL",
+                ..
+            })
+        ));
+    }
+
+    /// Spec 11, PB1.6 acceptance: prod with `WT_PUBLIC_URL` and no `WT_MAIL_FROM` stops startup
+    /// naming `WT_MAIL_FROM`, and the web server refuses prod without either.
+    #[test]
+    fn prod_requires_the_mail_keys() {
+        let mut pairs = full_prod();
+        pairs.push(("WT_PUBLIC_URL", "https://app.wheelturning.org".to_owned()));
+        let err = load_owned(&pairs).unwrap_err();
+        assert_eq!(
+            err,
+            ConfigError::Missing {
+                key: "WT_MAIL_FROM"
+            }
+        );
+        assert!(err.to_string().contains("WT_MAIL_FROM"));
+
+        let none = load_owned(&full_prod()).unwrap();
+        assert_eq!(
+            none.require_mail().unwrap_err(),
+            ConfigError::Missing {
+                key: "WT_MAIL_FROM"
+            }
+        );
+
+        let mut pairs = full_prod();
+        pairs.push(("WT_PUBLIC_URL", "https://app.wheelturning.org".to_owned()));
+        pairs.push(("WT_MAIL_FROM", "rights@wheelturning.org".to_owned()));
+        let both = load_owned(&pairs).unwrap();
+        assert_eq!(
+            both.require_mail(),
+            Ok(Some((
+                "rights@wheelturning.org",
+                "https://app.wheelturning.org"
+            )))
         );
     }
 }
