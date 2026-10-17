@@ -225,13 +225,15 @@ fn only_the_named_modules_read_the_passage_table() {
 
 /// Where Rust source may read the `student_question` table directly (Spec 04, Student
 /// questions, and rule 3): `wt-index` writes it, the takedown routine deletes from it, `wt audit`
-/// checks it, and the owner's exports read a talk's questions as they read its stored
-/// transcript. Serving reads `servable_student_question`.
+/// checks it, the owner's exports read a talk's questions as they read its stored transcript,
+/// and the one-time catch-up copies them to RDS. Serving reads `servable_student_question`.
 const QUESTION_READERS: &[&str] = &[
     "crates/wt-index/",
     "crates/wt-db/src/takedown.rs",
     "crates/wt-db/src/audit.rs",
     "crates/wt-db/src/questions.rs",
+    // The one-time PC-to-RDS copy of pipeline rows (Spec 11, PB1.1), which serves nothing.
+    "crates/wt-db/src/catch_up.rs",
 ];
 
 #[test]
