@@ -469,6 +469,19 @@ data "aws_iam_policy_document" "deploy_observability" {
     actions   = ["logs:DescribeMetricFilters"]
     resources = ["*"] # Terraform's refresh lists filters across log groups
   }
+  # The web ACL in front of the load balancer (Spec 11, PB3.6) is changed with the owner's
+  # profile; the deploy role only reads it, so a deploy's plan can refresh it.
+  statement {
+    sid = "ReadWebAcl"
+    actions = [
+      "wafv2:GetWebACL", "wafv2:GetWebACLForResource", "wafv2:ListTagsForResource",
+      "wafv2:GetLoggingConfiguration", "wafv2:ListResourcesForWebACL",
+    ]
+    resources = [
+      "arn:aws:wafv2:${local.region}:${local.account}:regional/webacl/${var.name}/*",
+      "arn:aws:elasticloadbalancing:${local.region}:${local.account}:loadbalancer/app/${var.name}/*",
+    ]
+  }
   statement {
     sid     = "Alarms"
     actions = ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource"]
