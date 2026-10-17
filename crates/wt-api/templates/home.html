@@ -2,7 +2,16 @@
 {% block title %}Ask · Wheel Turning{% endblock %}
 {% block content %}
 <div class="reading">
-<h1 class="tagline">What have Zen teachers said about the question you are living with?</h1>
+<h1 class="tagline">Find what Zen teachers have said about your question</h1>
+<section class="guide" aria-labelledby="guide-h">
+<h2 id="guide-h">How to use this site</h2>
+<ol class="steps">
+  <li>Type a question about your practice or your life, in your own words.</li>
+  <li>Press <strong>Ask</strong>.</li>
+  <li>Read short parts of talks, called excerpts. Each one shows the teacher's name and where it comes from.</li>
+</ol>
+<p><a href="/about#why">Why this site exists</a></p>
+</section>
 <form method="post" action="/ask" class="ask" data-progress>
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label for="q">Your question</label>
@@ -10,15 +19,15 @@
   <p id="q-help" class="help">Write it the way you would say it. For example: I keep judging myself during zazen.</p>
   {% if let Some(e) = error %}<p id="q-error" class="error">{{ e }}</p>{% endif %}
   <button type="submit">Ask</button>
-  <p class="help">A question takes a few seconds.</p>
+  <p class="help">An answer takes a few seconds.</p>
 </form>
-<p>Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.</p>
 <section id="privacy" aria-labelledby="privacy-h">
 <h2 id="privacy-h">Your questions</h2>
 <p>{{ chrome.logging_line() }} <a href="/about#privacy">Read how this works</a></p>
 {% include "privacy_switch.html" %}
 </section>
 <h2>Examples</h2>
+<p>Not sure what to ask? Press one of these.</p>
 <ul class="examples">
   {% for ex in examples %}<li><form method="post" action="/ask" data-progress><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ ex }}"><button type="submit" class="link">{{ ex }}</button></form></li>{% endfor %}
 </ul>
