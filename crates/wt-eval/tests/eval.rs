@@ -279,6 +279,14 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
     assert_eq!(r.named[0].teacher.as_deref(), Some("Ada Fixture"));
     assert_eq!(r.teacher_counts.values().sum::<usize>(), 3);
     assert_eq!(r.latency.len(), 10);
+    // Spec 11, PB2.4: two standard answers showed their summary; the named one had none asked.
+    assert_eq!(
+        r.summary_statuses.get("shown"),
+        Some(&2),
+        "{:?}",
+        r.summary_statuses
+    );
+    assert_eq!(r.summary_statuses.get("not_attempted"), Some(&1));
     // Excerpts: the fixture passages are whole sentences too short to trim, so each shows as
     // it is and none starts or ends mid-sentence.
     let shown: usize = results.iter().map(|a| a.payload.passage_ids.len()).sum();
@@ -299,6 +307,7 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
         "Dana events",
         "Draft questions",
         "PRD verdict",
+        "Summary status by answer: shown 2, not_attempted 1",
     ] {
         assert!(text.contains(needle), "{needle} missing from\n{text}");
     }

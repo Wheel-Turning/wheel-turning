@@ -238,13 +238,52 @@ async fn pages_need_a_session_and_every_response_carries_the_headers() {
     for path in ["/", "/about", "/talk/00000000-0000-0000-0000-000000000000"] {
         let r = send(&fx.app, get(path, None)).await;
         assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
-        assert_eq!(r.headers["content-security-policy"], "default-src 'self'");
-        assert_eq!(r.headers["x-content-type-options"], "nosniff");
-        assert_eq!(r.headers["referrer-policy"], "no-referrer");
-        assert_eq!(r.headers["x-robots-tag"], "noindex");
+        assert_common_headers(&r.headers);
+        assert!(
+            r.headers.get("strict-transport-security").is_none(),
+            "dev must not pin HTTPS: {path}"
+        );
     }
     let robots = send(&fx.app, get("/robots.txt", None)).await;
     assert!(robots.body.contains("Disallow: /"));
+    assert_common_headers(&robots.headers);
+}
+
+#[tokio::test]
+async fn prod_adds_strict_transport_security() {
+    let site = Site {
+        hsts: true,
+        ..Site::with_fakes(MODEL)
+    };
+    let fx = start_with(site, false).await;
+    let cookie = join(&fx, "owner").await;
+    for (path, cookie) in [
+        ("/", Some(cookie.as_str())),
+        ("/", None),
+        ("/robots.txt", None),
+    ] {
+        let r = send(&fx.app, get(path, cookie)).await;
+        assert_common_headers(&r.headers);
+        assert_eq!(
+            r.headers["strict-transport-security"], "max-age=31536000",
+            "{path}"
+        );
+    }
+}
+
+/// The headers every response carries in every environment (Spec 06, Spec 11 PB3.5).
+fn assert_common_headers(h: &axum::http::HeaderMap) {
+    assert_eq!(
+        h["content-security-policy"],
+        "default-src 'self'; frame-ancestors 'none'"
+    );
+    assert_eq!(
+        h["permissions-policy"],
+        "camera=(), microphone=(), geolocation=(), browsing-topics=()"
+    );
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(h["referrer-policy"], "no-referrer");
+    assert_eq!(h["x-robots-tag"], "noindex");
 }
 
 #[tokio::test]
@@ -429,6 +468,14 @@ async fn theme_counts(pool: &PgPool) -> (i32, i32) {
         .unwrap()
 }
 
+/// The answer's `summary_status` (Spec 11, PB2.4).
+async fn summary_status(pool: &PgPool) -> String {
+    sqlx::query_scalar("select summary_status from answer")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// The summary section of a page.
 fn summary_of(body: &str) -> &str {
     let start = body.find("<section id=\"summary\"").unwrap();
@@ -502,6 +549,7 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     );
 
     assert_eq!(theme_counts(&fx.pool).await, (2, 0));
+    assert_eq!(summary_status(&fx.pool).await, "shown");
     let stored: serde_json::Value = sqlx::query_scalar("select payload from answer")
         .fetch_one(&fx.pool)
         .await
@@ -530,7 +578,11 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
 
 #[tokio::test]
 async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
+    // The headline is rejected in the draft and again in its one revision.
     let llm = Arc::new(FakeLlm::new(vec![
+        Ok(summary_reply()),
+        Ok(verdict(false)),
+        Ok(verdict(true)),
         Ok(summary_reply()),
         Ok(verdict(false)),
         Ok(verdict(true)),
@@ -541,7 +593,8 @@ async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
     assert!(!page.body.contains("id=\"summary\""));
     assert!(!page.body.contains(HEADLINE) && !page.body.contains(AGREE));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
-    assert_eq!(theme_counts(&fx.pool).await, (0, 1));
+    assert_eq!(theme_counts(&fx.pool).await, (0, 2));
+    assert_eq!(summary_status(&fx.pool).await, "all_sentences_rejected");
 }
 
 #[tokio::test]
@@ -554,6 +607,7 @@ async fn a_failed_verifier_leaves_a_fully_rendered_answer_without_the_summary() 
     assert!(!page.body.contains("id=\"summary\""));
     assert!(page.body.contains("Ada Fixture") && page.body.contains("Bo Fixture"));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
+    assert_eq!(summary_status(&fx.pool).await, "model_error");
 }
 
 /// A model that never answers in time.
@@ -581,6 +635,169 @@ async fn a_generation_timeout_leaves_a_fully_rendered_answer_without_the_summary
     assert_eq!(page.status, StatusCode::OK);
     assert!(!page.body.contains("id=\"summary\""));
     assert_eq!(page.body.matches("<blockquote>").count(), 2);
+    assert_eq!(summary_status(&fx.pool).await, "timeout");
+}
+
+/// A model that refuses every call at the month's cap.
+struct Capped;
+
+#[async_trait::async_trait]
+impl LlmClient for Capped {
+    async fn complete_value(
+        &self,
+        _: &LlmRequest,
+        _: &serde_json::Value,
+        _: DataClass,
+    ) -> Result<serde_json::Value, LlmError> {
+        Err(LlmError::CapReached {
+            month_to_date: 60.0,
+            cap: 60.0,
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_reached_cap_is_stored_as_cap_reached() {
+    let fx = start_with(site_with(Arc::new(Capped)), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("id=\"summary\""));
+    assert_eq!(summary_status(&fx.pool).await, "cap_reached");
+}
+
+/// Spec 11, PB2.4 and PB4.3: no model is stored as `no_key`, and the answer logs one
+/// `summary_settled` event with its status and no question text.
+#[tokio::test]
+async fn no_model_is_stored_as_no_key_and_logs_summary_settled() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let fx = start_with(site_with(Arc::new(wt_extract::UnavailableLlm)), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert_eq!(summary_status(&fx.pool).await, "no_key");
+    let answer: Uuid = sqlx::query_scalar("select id from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let events: Vec<serde_json::Value> = captured
+        .text()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "summary_settled")
+        .collect();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["summary_status"], "no_key");
+    assert_eq!(events[0]["answer_id"], answer.to_string());
+    assert!(
+        !captured.text().contains("work with anger"),
+        "no question text"
+    );
+}
+
+/// A reranker that never answers within `rerank_timeout_s`.
+struct StalledRanker;
+
+#[async_trait::async_trait]
+impl wt_ml::Reranker for StalledRanker {
+    fn model_id(&self) -> &str {
+        "stalled"
+    }
+
+    async fn score(&self, _: &str, passages: &[String]) -> Result<Vec<f32>, wt_ml::MlError> {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        Ok(vec![0.0; passages.len()])
+    }
+}
+
+/// The `ranker_served` events in the captured log.
+fn rankers(captured: &Captured) -> Vec<String> {
+    captured
+        .text()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["event"] == "ranker_served")
+        .map(|v| v["ranker"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+/// Spec 11, PB2.1: every answer logs which ranker ordered it. A ranker that times out logs
+/// `none (fallback)` and the page says the relevance check did not finish.
+#[tokio::test]
+async fn a_ranker_timeout_logs_none_fallback_and_the_page_says_so() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
+    site.reranker = Some(Arc::new(StalledRanker));
+    site.retrieval.retrieval.rerank_timeout_s = 1;
+    let fx = start_with(site, true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(
+        page.body
+            .contains("The relevance check did not finish for this question"),
+        "{}",
+        page.body
+    );
+    assert_eq!(rankers(&captured), ["none (fallback)"]);
+    assert!(
+        !captured.text().contains("work with anger"),
+        "no question text"
+    );
+}
+
+#[tokio::test]
+async fn a_ranker_that_answers_logs_its_kind_and_no_notice() {
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new("info"))
+        .with_writer(move || writer.clone())
+        .json()
+        .flatten_event(true)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut site = site_with(Arc::new(wt_extract::UnavailableLlm));
+    site.reranker = Some(Arc::new(wt_ml::FakeReranker));
+    site.retrieval.ranking.ranker = wt_retrieve::Ranker::Model;
+    let fx = start_with(site, true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(!page.body.contains("relevance check"), "{}", page.body);
+    assert_eq!(rankers(&captured), ["llm"]);
+}
+
+#[derive(Clone, Default)]
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Captured {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
 }
 
 /// The page comes back before the summary is written: its place shows at the top, and the
@@ -655,6 +872,7 @@ async fn named_mode_makes_no_summary_call() {
         llm.seen.lock().unwrap().is_empty(),
         "no model call in named mode"
     );
+    assert_eq!(summary_status(&fx.pool).await, "not_attempted");
 }
 
 /// Spec 04, Student questions, step 5: the transcript and answer pages show the student's

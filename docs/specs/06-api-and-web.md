@@ -37,7 +37,7 @@ The PRD puts accounts out of scope, so access is an invite link and a cookie.
 4. Middleware verifies the signature on every request and checks that the tester is not revoked, with a 60-second cache. It updates `last_seen_at` at most once an hour.
 5. State-changing routes are `POST` and require a CSRF token, an HMAC of the session value rendered into each form as a hidden field.
 6. The token never appears in logs. The request logger records the path as `/join/[redacted]`.
-7. Every response carries `Content-Security-Policy: default-src 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`, and `/robots.txt` disallows everything. There are no inline scripts.
+7. Every response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), browsing-topics=()`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. In `WT_ENV=prod` only, it also carries `Strict-Transport-Security: max-age=31536000` (Spec 11, PB3.5). And `/robots.txt` disallows everything. There are no inline scripts.
 
 ## Answer page structure
 

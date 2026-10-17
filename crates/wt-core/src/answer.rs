@@ -92,6 +92,67 @@ impl StoredSummary {
     }
 }
 
+/// How an answer's summary settled (Spec 11, PB2.4): `answer.summary_status`, the
+/// `summary_settled` log event and the evaluation report all use these names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryStatus {
+    /// The deferred summary is still being written. The hourly purge turns one still pending
+    /// after ten minutes into [`SummaryStatus::DeferredLost`].
+    Pending,
+    /// A summary with its headline is on the page.
+    Shown,
+    /// No summary was asked for: a named-teacher, sensitive or curated question, or no excerpts.
+    NotAttempted,
+    /// A generation or verifier call ran past its limit.
+    Timeout,
+    /// A model call failed: an error reply, a refusal, a reply cut off or one that did not parse.
+    ModelError,
+    /// The month's language-model cap stopped a call.
+    CapReached,
+    /// Every drafted headline was dropped by the filters or the verifier, after the revision.
+    AllSentencesRejected,
+    /// No model may be called: no API key, no model configured, or real text not allowed.
+    NoKey,
+    /// The deferred summary never settled, as when the server stopped while writing it.
+    DeferredLost,
+}
+
+impl SummaryStatus {
+    /// Every status, in the order reports list them.
+    pub const ALL: [SummaryStatus; 9] = [
+        SummaryStatus::Shown,
+        SummaryStatus::NotAttempted,
+        SummaryStatus::Timeout,
+        SummaryStatus::ModelError,
+        SummaryStatus::CapReached,
+        SummaryStatus::AllSentencesRejected,
+        SummaryStatus::NoKey,
+        SummaryStatus::DeferredLost,
+        SummaryStatus::Pending,
+    ];
+
+    /// The status as stored and logged.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SummaryStatus::Pending => "pending",
+            SummaryStatus::Shown => "shown",
+            SummaryStatus::NotAttempted => "not_attempted",
+            SummaryStatus::Timeout => "timeout",
+            SummaryStatus::ModelError => "model_error",
+            SummaryStatus::CapReached => "cap_reached",
+            SummaryStatus::AllSentencesRejected => "all_sentences_rejected",
+            SummaryStatus::NoKey => "no_key",
+            SummaryStatus::DeferredLost => "deferred_lost",
+        }
+    }
+
+    /// The status a stored name stands for.
+    pub fn parse(s: &str) -> Option<SummaryStatus> {
+        Self::ALL.into_iter().find(|v| v.as_str() == s)
+    }
+}
+
 /// The model sentences a reviewer rates claim by claim (Spec 07): the summary's sentences, or
 /// for an answer stored before the summary, its themes.
 pub fn claims(themes: &[StoredTheme], summary: Option<&StoredSummary>) -> Vec<StoredTheme> {
@@ -159,6 +220,16 @@ impl AnswerPayload {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn each_summary_status_round_trips_by_name() {
+        for s in SummaryStatus::ALL {
+            assert_eq!(SummaryStatus::parse(s.as_str()), Some(s));
+            let json = serde_json::to_value(s).unwrap();
+            assert_eq!(json, serde_json::Value::String(s.as_str().to_owned()));
+        }
+        assert_eq!(SummaryStatus::parse("lost"), None);
+    }
 
     #[test]
     fn stripping_drops_themes_that_cite_removed_passages() {

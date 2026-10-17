@@ -59,6 +59,7 @@ fn new_answer(tester: TesterId, passages: &[PassageId]) -> NewAnswer<'static> {
         triage_degraded: false,
         privacy_mode: "share",
         text_expires_at: None,
+        summary_status: wt_core::answer::SummaryStatus::Shown,
     }
 }
 
@@ -165,6 +166,83 @@ async fn the_web_role_asks_shows_and_takes_feedback_on_its_testers_own_answers()
     wt_db::privacy::choice(&web, alice).await.unwrap();
     wt_db::privacy::delete_questions(&web, alice).await.unwrap();
     assert!(answer::load(&web, a, alice).await.unwrap().is_none());
+}
+
+/// Spec 11, PB2.4: a deferred summary settles once with its status, and the purge marks one
+/// still pending after ten minutes as lost.
+#[tokio::test]
+async fn the_web_role_settles_summaries_and_the_purge_marks_lost_ones() {
+    use std::time::Duration;
+    use wt_core::answer::SummaryStatus;
+    let fx = common::start().await;
+    let (_, p) = served(&fx.pool, ADA).await;
+    let alice = tester(&fx.pool, "alice").await;
+    let web = web_login(&fx).await;
+    let pending = |tester| {
+        let mut a = new_answer(tester, &[p]);
+        a.payload.summary_pending = true;
+        a.summary_status = SummaryStatus::Pending;
+        a
+    };
+    let status = |a| {
+        let pool = fx.pool.clone();
+        async move { answer::summary_status(&pool, a).await.unwrap() }
+    };
+
+    // A timeout settles the answer once; a late second write changes nothing.
+    let a = answer::persist(&web, &pending(alice)).await.unwrap();
+    assert_eq!(status(a).await, Some(SummaryStatus::Pending));
+    assert!(
+        answer::set_summary(&web, a, None, 0, 0, SummaryStatus::Timeout)
+            .await
+            .unwrap()
+    );
+    assert_eq!(status(a).await, Some(SummaryStatus::Timeout));
+    assert!(
+        !answer::set_summary(&web, a, None, 0, 0, SummaryStatus::Shown)
+            .await
+            .unwrap()
+    );
+    let stored = answer::load(&web, a, alice).await.unwrap().unwrap();
+    assert!(!stored.payload.summary_pending);
+
+    // Pending for eleven minutes: the purge marks it lost, and a late summary cannot land.
+    let late = answer::persist(&web, &pending(alice)).await.unwrap();
+    let fresh = answer::persist(&web, &pending(alice)).await.unwrap();
+    sqlx::query("update answer set created_at = now() - interval '11 minutes' where id = $1")
+        .bind(late.as_uuid())
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let lost = answer::settle_lost_summaries(&web, Duration::from_secs(600))
+        .await
+        .unwrap();
+    assert_eq!(lost, vec![late]);
+    assert_eq!(status(late).await, Some(SummaryStatus::DeferredLost));
+    assert_eq!(status(fresh).await, Some(SummaryStatus::Pending));
+    assert!(
+        !answer::set_summary(&web, late, None, 0, 0, SummaryStatus::Shown)
+            .await
+            .unwrap()
+    );
+    let stored = answer::load(&web, late, alice).await.unwrap().unwrap();
+    assert!(!stored.payload.summary_pending);
+
+    // An answer stored without a status by a server from before 0047 is caught too.
+    let old = answer::persist(&web, &pending(alice)).await.unwrap();
+    sqlx::query(
+        "update answer set summary_status = null, created_at = now() - interval '11 minutes'
+          where id = $1",
+    )
+    .bind(old.as_uuid())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let lost = answer::settle_lost_summaries(&web, Duration::from_secs(600))
+        .await
+        .unwrap();
+    assert_eq!(lost, vec![old]);
+    assert_eq!(status(old).await, Some(SummaryStatus::DeferredLost));
 }
 
 #[tokio::test]
