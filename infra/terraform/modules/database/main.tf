@@ -47,6 +47,11 @@ resource "aws_db_subnet_group" "this" {
   subnet_ids = var.private_subnet_ids
 }
 
+# shared_buffers stays at RDS's default, a quarter of the instance's memory. The rest is left to
+# the OS page cache, which holds the parts of the search indexes that do not fit in the buffers.
+# Raising it on a 2 GB instance starves that cache: on a copy held to 2 GB with 960 MB of
+# buffers, a pass of 242 searches ran for over 30 minutes without finishing, against 2.5 minutes
+# with the default.
 resource "aws_db_parameter_group" "this" {
   name   = "${var.name}-pg16"
   family = "postgres16"

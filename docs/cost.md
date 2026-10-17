@@ -31,7 +31,7 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | Service | What | Measured per month | Expected per month |
 | --- | --- | --- | --- |
 | ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on; the nightly audit and occasional migrate and eval tasks | $86.94 | $87 |
-| RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups | $49.85 | $50 |
+| RDS | `db.t4g.small` since October 17, 2026 (was `db.t4g.medium`, which the measured figure is), single zone, 20 GB of gp3, 7 days of backups. See "Database size" below | $49.85 | $26 |
 | Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
 | VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
 | Secrets Manager | The project's secrets at $0.40 each | $2.78 | $3 |
@@ -40,21 +40,55 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
 | AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
 | GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
-| **Total** | | **$170.70** | **about $186** |
+| **Total** | | **$170.70** | **about $162** |
 
 October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
 
+### Database size
+
+Measured on October 17, 2026, on a copy of the PC database restored at RDS's migration level (143,223 servable passages, the same count as RDS). CloudWatch figures for the live instance were not read for this change; see "After the change" below.
+
+| What searches read | Size |
+| --- | --- |
+| Half-precision vector index `passage_embedding_half_hnsw` (migration 0043) | 375 MB (RDS: 372 MB) |
+| Passage heap, which full-text ranking reads for every match | 231 MB |
+| Full-text index `passage_tsv_gin` | 25 MB |
+| Whole database | 1.7 GB |
+
+A pass of 242 searches (the student questions' embeddings and text, run the way `wt-retrieve` runs them: vector search with `ef_search` 1000, full-text search without common lexemes, then the candidate fetch) ran in containers whose memory matched what Postgres gets on each class. Each run started with an empty cache. The second pass shows steady state.
+
+| Postgres memory (shared buffers) | Like | Vector p50 / p95 | Full-text p50 / p95 | Read from disk, second pass |
+| --- | --- | --- | --- | --- |
+| 3.6 GB (960 MB) | `db.t4g.medium` | 61 / 66 ms | 297 / 1,942 ms | 0 MB |
+| 1.6 GB (450 MB) | `db.t4g.small` | 72 / 79 ms | 310 / 2,011 ms | 0 MB |
+| 1.1 GB (300 MB) | below small | 88 / 97 ms | 332 / 2,026 ms | 317 MB |
+
+What searches read comes to about 1.1 to 1.2 GB once the buffers and the OS cache are counted, so the small instance keeps all of it in memory with roughly 400 MB to spare. At about 8 KB of that per servable passage, the spare room holds about 50,000 more, so the small instance fits up to about 190,000. Full-text time is CPU. Both classes have 2 vCPUs at the same credit rate, and it was the same on all three sizes. The laptop's local disk hides the cost of a disk read; on gp3 the 317 MB row would add hundreds of milliseconds a question. Raising shared buffers on the small instance makes it worse: with 960 MB of buffers in 2 GB, a pass ran for over 30 minutes without finishing, against 2.5 minutes with the default.
+
+| Option | Per month | Notes |
+| --- | --- | --- |
+| `db.t4g.medium` on demand (before) | $47.45 + $2.30 storage = **$49.75** | Matches the measured $49.85 |
+| **`db.t4g.small` on demand (this change)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month |
+| `db.t4g.small`, 1-year Reserved Instance, no upfront | $16.79 + $2.30 = **$19.09** | $0.023 an hour, $201 over the year. A purchase, for the owner to decide. Buy only after two weeks on the small instance without a slow-answers alarm. RDS reservations are size-flexible within the family, so the reservation would still cover half of a `db.t4g.medium` if the database goes back |
+| `db.t4g.micro` | $11.68 + $2.30 | 1 GB: below the 1.1 GB row, so searches read from disk |
+| Less storage or fewer backup days | none | 20 GB is the gp3 minimum for RDS Postgres, and its 3,000 IOPS are included. Backup storage up to the allocated 20 GB is free, and 7 days of a 1.7 GB database fit in it |
+| A smaller index (binary or fewer dimensions) | not measured | The half-precision index already fits. Going smaller would cost recall and an eval to prove it, to save the $12 between small and micro |
+
+Prices are us-east-2 list prices for single-zone PostgreSQL over 730 hours, October 2026.
+
+**After the change.** The resize restarts the database, a few minutes without it, and the cache starts empty. Afterwards, restart the web service so its warm-up searches run (`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). For the next two days, watch the database's ReadIOPS and FreeableMemory in CloudWatch, and the `wt-v1-slow-answers` alarm. ReadIOPS that climbs with questions means the indexes no longer fit. **Rollback:** set `db_instance_class` back to `db.t4g.medium` and apply. That is another restart of a few minutes.
+
 ### Totals by daily questions
 
-A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.medium` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $50 more), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
+A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.small` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $70 more than the small), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
 
 | Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 100 | 3,000 | $162 | $21 | $186 | **$348** | **$207** | $0.069 |
-| 1,000 | 30,000 | $1,620 | $210 | $186 | **$1,806** | **$396** | $0.013 |
+| 100 | 3,000 | $162 | $21 | $162 | **$324** | **$183** | $0.061 |
+| 1,000 | 30,000 | $1,620 | $210 | $162 | **$1,782** | **$372** | $0.012 |
 | 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
 
-Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 110 to about 900 questions a day.
+Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 100 to about 770 questions a day.
 
 ### Monthly ceiling and the actions at 80% and 100%
 

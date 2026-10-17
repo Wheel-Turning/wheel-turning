@@ -49,9 +49,18 @@ variable "migrate_image_tag" {
 # Spec 01's sizes, raised from the M1 minimum (db.t4g.micro, 0.5 vCPU / 1 GB) for the beta: the
 # HNSW index over about 137,000 passages needs the database's memory, and the task holds the
 # embedder and four reranker sessions.
+#
+# The database went from db.t4g.medium (4 GB) to db.t4g.small (2 GB) on October 17, 2026. Since
+# migration 0043 the vector index is half precision (372 MB). Searches read about 1.1 to 1.2 GB:
+# that index, the passage heap that full-text ranking reads, and the full-text index. On a copy
+# of the 143,223 servable passages with Postgres held to 1.6 GB, a second pass over 242
+# questions read nothing from disk, and the vector search p95 was 79 ms against 66 ms at 3.6 GB.
+# At 1.1 GB it began reading from disk. The CPU is the same: 2 vCPUs and the same credit rate.
+# Go back to db.t4g.medium when servable passages pass about 190,000, or when ReadIOPS climbs
+# during questions.
 variable "db_instance_class" {
   type    = string
-  default = "db.t4g.medium"
+  default = "db.t4g.small"
 }
 
 variable "db_deletion_protection" {
