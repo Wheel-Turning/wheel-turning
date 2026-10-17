@@ -161,6 +161,7 @@ module "audit" {
   secret_arns        = module.secrets.arns
   alarm_topic_arn    = module.observability.alarm_topic_arn
   pc_backup_bucket   = var.pc_backup_bucket
+  transcripts_bucket = module.storage.bucket_names["transcripts"]
 
   db = {
     host = module.database.address

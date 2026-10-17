@@ -65,6 +65,11 @@ variable "permissions_boundary_arn" {
   type = string
 }
 
+variable "transcripts_bucket" {
+  description = "The transcripts bucket, which the audit reads for student speech, audio residue and objects left after a takedown."
+  type        = string
+}
+
 variable "pc_backup_bucket" {
   description = "The PC backups bucket (runbook §10). While set, the audit warns when its newest dump is over 36 hours old (Spec 11, PB1.3). Empty once the PC keeps no database."
   type        = string
@@ -80,12 +85,13 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  account     = data.aws_caller_identity.current.account_id
-  region      = data.aws_region.current.region
-  path        = "/${var.name}/"
-  family      = "${var.name}-audit"
-  cluster_arn = "arn:aws:ecs:${local.region}:${local.account}:cluster/${var.cluster_name}"
-  backups_arn = "arn:aws:s3:::${var.pc_backup_bucket}"
+  account         = data.aws_caller_identity.current.account_id
+  region          = data.aws_region.current.region
+  path            = "/${var.name}/"
+  family          = "${var.name}-audit"
+  cluster_arn     = "arn:aws:ecs:${local.region}:${local.account}:cluster/${var.cluster_name}"
+  backups_arn     = "arn:aws:s3:::${var.pc_backup_bucket}"
+  transcripts_arn = "arn:aws:s3:::${var.transcripts_bucket}"
 
   command = concat(
     ["wt", "audit", "--config-dir", "config", "--fail-on", "warning", "--check-links"],
@@ -153,7 +159,9 @@ resource "aws_iam_role_policy" "exec" {
   policy = data.aws_iam_policy_document.exec.json
 }
 
-# What the running audit may call: list the PC backups, while they exist.
+# What the running audit may call: read the transcripts bucket (versions too, since a takedown
+# must leave no old version behind), and list the PC backups while they exist. Nothing it can
+# write.
 resource "aws_iam_role" "task" {
   name                 = "${var.name}-audit-task"
   path                 = local.path
@@ -162,24 +170,35 @@ resource "aws_iam_role" "task" {
 }
 
 data "aws_iam_policy_document" "task" {
-  count = var.pc_backup_bucket == "" ? 0 : 1
   statement {
-    sid       = "ListPcBackups"
-    actions   = ["s3:ListBucket"]
-    resources = [local.backups_arn]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["db/*"]
+    sid       = "ListTranscripts"
+    actions   = ["s3:ListBucket", "s3:ListBucketVersions"]
+    resources = [local.transcripts_arn]
+  }
+  statement {
+    sid       = "ReadTranscripts"
+    actions   = ["s3:GetObject"]
+    resources = ["${local.transcripts_arn}/*"]
+  }
+  dynamic "statement" {
+    for_each = var.pc_backup_bucket == "" ? [] : [local.backups_arn]
+    content {
+      sid       = "ListPcBackups"
+      actions   = ["s3:ListBucket"]
+      resources = [statement.value]
+      condition {
+        test     = "StringLike"
+        variable = "s3:prefix"
+        values   = ["db/*"]
+      }
     }
   }
 }
 
 resource "aws_iam_role_policy" "task" {
-  count  = var.pc_backup_bucket == "" ? 0 : 1
   name   = "audit-task"
   role   = aws_iam_role.task.id
-  policy = data.aws_iam_policy_document.task[0].json
+  policy = data.aws_iam_policy_document.task.json
 }
 
 # EventBridge Scheduler starts the task and passes it its two roles, nothing else.
@@ -257,9 +276,8 @@ resource "aws_ecs_task_definition" "audit" {
     image     = var.image
     essential = true
     command   = local.command
-    # No WT_TRANSCRIPT_BUCKET: this build reads objects locally only and refuses the key. The
-    # S3 object store (PB1.2) adds it.
     environment = [
+      { name = "WT_TRANSCRIPT_BUCKET", value = var.transcripts_bucket },
       { name = "WT_ENV", value = "prod" },
       { name = "WT_LOG", value = "info" },
       { name = "WT_DB_HOST", value = var.db.host },
