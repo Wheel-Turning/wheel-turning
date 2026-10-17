@@ -26,23 +26,23 @@ How it is measured: every model call made for an answer carries the answer's id 
 
 ### Fixed AWS cost by service
 
-What runs whether or not anyone asks a question.
+What runs whether or not anyone asks a question. "Measured" is Cost Explorer's daily cost by service, the mean of October 14 and 15, 2026 (the first full days on the current 2 vCPU task and `db.t4g.medium`), times 30.4. "Expected" adds what was deployed after those days and is not yet on the bill, at us-east-2 list prices.
 
-| Service | What | Per month |
-| --- | --- | --- |
-| ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on | $85 |
-| ECS Fargate | The nightly audit and occasional migrate and eval tasks, 0.25 vCPU and 0.5 GB, minutes each | under $1 |
-| RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups (free up to the storage size) | $50 |
-| Elastic Load Balancing | One application load balancer, with its few load balancer capacity units at beta traffic | $18 |
-| Public IPv4 addresses | Two on the load balancer, one on the web task (there is no NAT gateway) | $11 |
-| AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | $9 |
-| CloudWatch | Logs, about 12 alarms, the Route 53 health check, the CloudTrail security metric filter | $4 |
-| Secrets Manager | About 8 secrets at $0.40 each | $3 |
-| GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6), at this account's event volume | $3 |
-| ECR, S3, SES, SNS, CloudTrail | Images, transcripts and records buckets, removal emails, alerts, the one free trail | $2 |
-| **Total** | | **about $186** |
+| Service | What | Measured per month | Expected per month |
+| --- | --- | --- | --- |
+| ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on; the nightly audit and occasional migrate and eval tasks | $86.94 | $87 |
+| RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups | $49.85 | $50 |
+| Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
+| VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
+| Secrets Manager | The project's secrets at $0.40 each | $2.78 | $3 |
+| KMS | Keys behind the secrets and the database | $1.90 | $2 |
+| Route 53 | The health check | $0.98 | $1 |
+| S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
+| AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
+| GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
+| **Total** | | **$170.70** | **about $186** |
 
-Spec 10 measured about $170 before WAF and detection were added. Domain and DNS are at Cloudflare and are not in this bill.
+October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
 
 ### Totals by daily questions
 
