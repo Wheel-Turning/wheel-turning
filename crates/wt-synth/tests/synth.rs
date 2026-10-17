@@ -124,6 +124,55 @@ fn reasons(out: &Synthesis) -> Vec<DropReason> {
     out.dropped.iter().map(|d| d.reason).collect()
 }
 
+/// Spec 11, PB2.3: an em dash in a drafted sentence is gone before the verifier sees it and
+/// from the stored summary, while a quotation holding one keeps it.
+#[tokio::test]
+async fn em_dashes_leave_model_text_and_stay_in_quotations() {
+    const DASHED: &str = "Sit down \u{2014} then simply breathe with the posture. \
+                          Judging is just more thinking.";
+    let input = SummaryInput {
+        query: "I keep judging myself during zazen.".into(),
+        excerpts: vec![
+            excerpt(1, "Ada Fixture", Some(2011), DASHED),
+            excerpt(2, "Bo Lindqvist", Some(2015), BO),
+        ],
+    };
+    let draft = json!({
+        "headline": s(
+            "Two talks say to sit down \u{2014} then breathe with the posture and treat judging as thinking.",
+            &[("E1", 1, 1), ("E2", 1, 1)]
+        ),
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+    });
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = summarize(
+        &llm,
+        &input,
+        &aliases(),
+        &Settings::default(),
+        DataClass::Real,
+    )
+    .await;
+    let summary = out.summary.expect("a summary");
+    let headline = &summary.sentences[0];
+    assert_eq!(
+        headline.text,
+        "Two talks say to sit down, then breathe with the posture and treat judging as thinking."
+    );
+    let seen = llm.seen.lock().unwrap();
+    let sentence = seen[1].0.user.lines().next().unwrap_or_default();
+    assert!(
+        sentence.starts_with("Sentence: ") && !sentence.contains('\u{2014}'),
+        "the verifier sees the replaced sentence: {sentence}"
+    );
+    let rows = [row(1, DASHED)];
+    let quote = wt_core::excerpt::Excerpt::rebuild(&headline.cites[0].quote, &rows).unwrap();
+    assert_eq!(
+        quote.text,
+        "Sit down \u{2014} then simply breathe with the posture."
+    );
+}
+
 #[tokio::test]
 async fn a_good_summary_passes_and_each_citation_becomes_a_verbatim_quotation() {
     let llm = FakeLlm::new(vec![Ok(good_draft()), yes(), yes(), yes(), yes()]);

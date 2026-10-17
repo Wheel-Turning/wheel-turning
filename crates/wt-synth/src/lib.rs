@@ -612,7 +612,8 @@ fn by_part(d: SummaryDraft, settings: &Settings) -> (Vec<Placed>, Vec<Placed>) {
     (kept, over)
 }
 
-/// Filters 1 to 9, in order. Survivors go to the verifier.
+/// Filters 1 to 9, in order, on each sentence with its em dashes replaced. Survivors go to the
+/// verifier.
 fn filter_draft(
     drafted: SummaryDraft,
     input: &SummaryInput,
@@ -638,6 +639,11 @@ fn filter_draft(
     }
     let mut candidates = Vec::new();
     for (part, d) in sentences {
+        // Spec 11, PB2.3: no em dash reaches a filter, the verifier or the page.
+        let d = DraftSentence {
+            text: filter::replace_dashes(&d.text),
+            ..d
+        };
         let refs = refs_of(&d);
         let mut reject = |reason: DropReason, detail: Option<String>, text: String| {
             dropped.push(Dropped {

@@ -5,6 +5,37 @@ use std::collections::BTreeSet;
 
 use crate::DropReason;
 
+/// Spec 11, PB2.3: model text carries no em dashes. Each dash used as one (an em dash, a spaced
+/// en dash or a spaced double hyphen) becomes punctuation: a colon when one dash leads into a
+/// list, a comma otherwise, so a pair around an aside becomes two commas. It runs on the model's
+/// sentences before the filters and the verifier; quotations are cut from the excerpts later
+/// and never pass through it.
+pub fn replace_dashes(text: &str) -> String {
+    let marked = text
+        .replace(" \u{2013} ", "\u{2014}")
+        .replace(" -- ", "\u{2014}");
+    if !marked.contains('\u{2014}') {
+        return text.to_owned();
+    }
+    let parts: Vec<&str> = marked
+        .split('\u{2014}')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut out = String::new();
+    for part in &parts {
+        if !out.is_empty() {
+            if !out.ends_with([',', ':', ';']) {
+                let list = parts.len() == 2 && part.contains(',');
+                out.push(if list { ':' } else { ',' });
+            }
+            out.push(' ');
+        }
+        out.push_str(part);
+    }
+    out
+}
+
 /// Filter 4: one sentence of at most `max_words` words.
 pub fn one_sentence(description: &str, max_words: usize) -> Option<DropReason> {
     let text = description.trim();
@@ -414,6 +445,34 @@ mod tests {
     use super::*;
 
     const MAX: usize = 40;
+
+    #[test]
+    fn em_dashes_become_commas_or_a_colon() {
+        let cases = [
+            (
+                "Two talks say to sit \u{2014} not to strive.",
+                "Two talks say to sit, not to strive.",
+            ),
+            (
+                "Practice\u{2014}as one talk puts it\u{2014}is not self-improvement.",
+                "Practice, as one talk puts it, is not self-improvement.",
+            ),
+            (
+                "Three talks name what to return to \u{2014} breath, posture, sound.",
+                "Three talks name what to return to: breath, posture, sound.",
+            ),
+            ("Sit -- and breathe.", "Sit, and breathe."),
+            ("Sit \u{2013} and breathe.", "Sit, and breathe."),
+            (
+                "Talks from 2010\u{2013}2012.",
+                "Talks from 2010\u{2013}2012.",
+            ),
+            ("No dash here.", "No dash here."),
+        ];
+        for (input, want) in cases {
+            assert_eq!(replace_dashes(input), want, "{input}");
+        }
+    }
 
     #[test]
     fn one_sentence_passes_a_single_short_sentence() {
