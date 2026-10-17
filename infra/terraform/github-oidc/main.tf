@@ -474,11 +474,21 @@ data "aws_iam_policy_document" "deploy_observability" {
   statement {
     sid = "ReadWebAcl"
     actions = [
-      "wafv2:GetWebACL", "wafv2:GetWebACLForResource", "wafv2:ListTagsForResource",
+      "wafv2:GetWebACL", "wafv2:ListTagsForResource",
       "wafv2:GetLoggingConfiguration", "wafv2:ListResourcesForWebACL",
     ]
     resources = [
       "arn:aws:wafv2:${local.region}:${local.account}:regional/webacl/${var.name}/*",
+      "arn:aws:elasticloadbalancing:${local.region}:${local.account}:loadbalancer/app/${var.name}/*",
+    ]
+  }
+  # GetWebACLForResource is authorized against any web ACL (regional/webacl/*/*), since the
+  # caller does not know which one is attached; the load balancer stays scoped to this stack.
+  statement {
+    sid     = "ReadWebAclForLoadBalancer"
+    actions = ["wafv2:GetWebACLForResource"]
+    resources = [
+      "arn:aws:wafv2:${local.region}:${local.account}:regional/webacl/*/*",
       "arn:aws:elasticloadbalancing:${local.region}:${local.account}:loadbalancer/app/${var.name}/*",
     ]
   }
