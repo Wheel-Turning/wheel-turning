@@ -520,6 +520,27 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
   above.
 - **Scale to zero:** no.
 
+#### `wt-account-root-activity`
+
+- **Means:** the AWS root user signed in to the console or made an API call (CIS 4.3, from the
+  CloudTrail copy in `/wt/cloudtrail`). Nobody should use root day to day.
+- **First check:** if the owner did it on purpose (billing, account settings), note it and stop.
+  If not, read the root events in `/wt/cloudtrail` (source IP, user agent, what was called).
+- **Fix:** if it was not the owner: treat it as a security incident (incident procedure, step
+  5). Change the root password, check root MFA, look for new IAM users, keys or roles, and
+  revoke anything unknown.
+- **Scale to zero:** only if the calls touched the database, buckets or secrets.
+
+#### `wt-account-iam-policy-change`
+
+- **Means:** an IAM policy was created, deleted, versioned, put, attached or detached (CIS 4.4).
+  A Terraform apply that changes IAM fires it, which is expected.
+- **First check:** did an apply or deploy run at that time? If so, match the change to its plan.
+  If not, read the event in `/wt/cloudtrail`: who made it and which policy.
+- **Fix:** an unexplained change is a security incident: revert it with `terraform apply`,
+  and find and revoke the credentials that made it.
+- **Scale to zero:** only if the change widened access to data or secrets.
+
 ### Incident procedure
 
 1. Note the time and the alarm in a new `docs/incidents/<date>-<slug>.md` from `TEMPLATE.md`.
