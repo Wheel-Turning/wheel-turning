@@ -10,6 +10,9 @@ updates:
     groups:
       cargo-minor:
         update-types: [minor, patch]
+        # ort is a release candidate whose "patch" bumps change its API, and it must move with the
+        # ONNX Runtime library pinned in the Dockerfile, so it arrives in a PR of its own.
+        exclude-patterns: ["ort", "ort-sys"]
 
   - package-ecosystem: github-actions
     directory: /
