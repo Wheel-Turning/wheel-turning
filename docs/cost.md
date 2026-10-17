@@ -46,37 +46,54 @@ October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is 
 
 ### Database size
 
-Measured on October 17, 2026, on a copy of the PC database restored at RDS's migration level (143,223 servable passages, the same count as RDS). CloudWatch figures for the live instance were not read for this change; see "After the change" below.
+Measured on October 17, 2026. Searches were timed on a copy of the PC database restored at RDS's migration level, with 143,223 servable passages, the same count as RDS. The live instance's memory comes from CloudWatch.
 
-| What searches read | Size |
+**The live instance.** CloudWatch hourly figures, October 4 to 17:
+
+| Period | Class | FreeableMemory | ReadIOPS, mean | Other |
+| --- | --- | --- | --- | --- |
+| October 6 to 12 | `db.t4g.micro` (1 GB) | 150 to 200 MB | 0.4 to 0.5 | Swap grew to 29 MB |
+| October 16 and 17 | `db.t4g.medium` (4 GB) | 2.04 to 2.06 GB, steady | 0.27 | CPU mean 4%, peak 19%. At most 14 connections. CPU credits full (576), none charged. Swap holds 22 MB left from the micro days |
+
+The resize to medium was on October 13. October 13 to 15 carried the load, the catch-up and migration 0043's index build: ReadIOPS peaked at 1,350, CPU at 99%, and FreeableMemory fell to 1.0 GB. ReadIOPS near zero on medium means every search is served from memory. What the instance itself uses (memory minus FreeableMemory minus shared buffers) was about 0.6 GB on the micro and 1.1 GB on the medium. That puts it at about 0.7 to 0.8 GB on a small, which leaves Postgres about 1.25 to 1.35 GB, buffers included.
+
+**What searches read.**
+
+| | Size |
 | --- | --- |
 | Half-precision vector index `passage_embedding_half_hnsw` (migration 0043) | 375 MB (RDS: 372 MB) |
 | Passage heap, which full-text ranking reads for every match | 231 MB |
 | Full-text index `passage_tsv_gin` | 25 MB |
 | Whole database | 1.7 GB |
 
-A pass of 242 searches (the student questions' embeddings and text, run the way `wt-retrieve` runs them: vector search with `ef_search` 1000, full-text search without common lexemes, then the candidate fetch) ran in containers whose memory matched what Postgres gets on each class. Each run started with an empty cache. The second pass shows steady state.
+**Benchmark.** Each pass was 242 searches, using the student questions' embeddings and text. They ran the way `wt-retrieve` runs them: vector search at `ef_search` 1000, full-text search without common lexemes, then the candidate fetch. Each container was held to the memory shown and started with an empty cache. The second pass shows steady state.
 
 | Postgres memory (shared buffers) | Like | Vector p50 / p95 | Full-text p50 / p95 | Read from disk, second pass |
 | --- | --- | --- | --- | --- |
 | 3.6 GB (960 MB) | `db.t4g.medium` | 61 / 66 ms | 297 / 1,942 ms | 0 MB |
-| 1.6 GB (450 MB) | `db.t4g.small` | 72 / 79 ms | 310 / 2,011 ms | 0 MB |
-| 1.1 GB (300 MB) | below small | 88 / 97 ms | 332 / 2,026 ms | 317 MB |
+| 1.6 GB (450 MB) | | 72 / 79 ms | 310 / 2,011 ms | 0 MB |
+| 1.45 GB (450 MB) | | 79 / 87 ms | 302 / 2,032 ms | 314 MB |
+| 1.35 GB (450 MB) | `db.t4g.small`, by the estimate above | 78 / 88 ms | 305 / 2,004 ms | 229 MB |
+| 1.25 GB (450 MB) | | 79 / 89 ms | 311 / 2,049 ms | 243 MB |
+| 1.1 GB (300 MB) | | 88 / 97 ms | 332 / 2,026 ms | 317 MB |
 
-What searches read comes to about 1.1 to 1.2 GB once the buffers and the OS cache are counted, so the small instance keeps all of it in memory with roughly 400 MB to spare. At about 8 KB of that per servable passage, the spare room holds about 50,000 more, so the small instance fits up to about 190,000. Full-text time is CPU. Both classes have 2 vCPUs at the same credit rate, and it was the same on all three sizes. The laptop's local disk hides the cost of a disk read; on gp3 the 317 MB row would add hundreds of milliseconds a question. Raising shared buffers on the small instance makes it worse: with 960 MB of buffers in 2 GB, a pass ran for over 30 minutes without finishing, against 2.5 minutes with the default.
+Everything searches read stays in memory only from about 1.5 GB of Postgres memory up. Below that, about 1 MB a question comes from disk, whatever the size. Full-text ranking reads the whole passage heap on most questions, so once it does not fit, each question pushes out pages the next one needs. On the small instance, then, expect about 130 reads of 8 KB per question from gp3. At gp3's latency of about 1 ms that is roughly 0.1 to 0.15 s a question, against the 0.6 s between Spec 10's measured 4.4 s page p95 and its 5 s limit. The laptop disk hides this cost, so the timings above do not show it. Full-text time itself is CPU-bound, and the CPU is the same on both classes: 2 vCPUs at the same credit rate. Raising shared buffers makes the small instance worse: with 960 MB of buffers in 2 GB, a pass ran for over 30 minutes without finishing, against 2.5 minutes with the default.
+
+The passage heap is what tips the balance: the vector index and the full-text index alone are 400 MB. A full-text search that ranked without reading every matching row would fit the small instance with room to grow, and would also cut the full-text p95 of about 2 s. That is a Spec 05 change, not a sizing one.
 
 | Option | Per month | Notes |
 | --- | --- | --- |
-| `db.t4g.medium` on demand (before) | $47.45 + $2.30 storage = **$49.75** | Matches the measured $49.85 |
-| **`db.t4g.small` on demand (this change)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month |
+| `db.t4g.medium` on demand (before) | $47.45 + $2.30 storage = **$49.75** | Matches the measured $49.85. Everything in memory with about 2 GB to spare |
+| **`db.t4g.small` on demand (this change)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month. Searches read about 1 MB a question from disk, about 0.1 to 0.15 s |
+| `db.t4g.medium`, 1-year Reserved Instance, no upfront | $34.31 + $2.30 = **$36.61** | $0.047 an hour. Saves $13.14 a month and keeps everything in memory. A purchase, for the owner to decide |
 | `db.t4g.small`, 1-year Reserved Instance, no upfront | $16.79 + $2.30 = **$19.09** | $0.023 an hour, $201 over the year. A purchase, for the owner to decide. Buy only after two weeks on the small instance without a slow-answers alarm. RDS reservations are size-flexible within the family, so the reservation would still cover half of a `db.t4g.medium` if the database goes back |
-| `db.t4g.micro` | $11.68 + $2.30 | 1 GB: below the 1.1 GB row, so searches read from disk |
-| Less storage or fewer backup days | none | 20 GB is the gp3 minimum for RDS Postgres, and its 3,000 IOPS are included. Backup storage up to the allocated 20 GB is free, and 7 days of a 1.7 GB database fit in it |
-| A smaller index (binary or fewer dimensions) | not measured | The half-precision index already fits. Going smaller would cost recall and an eval to prove it, to save the $12 between small and micro |
+| `db.t4g.micro` | $11.68 + $2.30 | 1 GB. It was the beta's first size: FreeableMemory sat under 200 MB and swap grew |
+| Less storage or fewer backup days | under $1 | 20 GB is the gp3 minimum for RDS Postgres, and its 3,000 IOPS are included. Backup storage beyond the free 20 GB came to $0.009 to $0.018 a day after the October 13 to 16 loads, and it ages out with the 7-day window |
+| A smaller vector index (binary or fewer dimensions) | not measured | It would not help: the heap, not the vector index, is what does not fit |
 
 Prices are us-east-2 list prices for single-zone PostgreSQL over 730 hours, October 2026.
 
-**After the change.** The resize restarts the database, a few minutes without it, and the cache starts empty. Afterwards, restart the web service so its warm-up searches run (`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). For the next two days, watch the database's ReadIOPS and FreeableMemory in CloudWatch, and the `wt-v1-slow-answers` alarm. ReadIOPS that climbs with questions means the indexes no longer fit. **Rollback:** set `db_instance_class` back to `db.t4g.medium` and apply. That is another restart of a few minutes.
+**After the change.** The resize restarts the database: a few minutes without it, and the cache starts empty. Afterwards, restart the web service so its warm-up searches run (`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). For the next two weeks, watch the database's ReadIOPS during questions (expect a few hundred reads a question; sustained ReadIOPS while nobody is asking means something else is wrong) and the `wt-v1-slow-answers` alarm. Compare the page p95 in `wt report beta` with the 4.4 s on medium. Go back if the page p95 passes 4.8 s, or when servable passages grow by a fifth (about 170,000), since each one adds to the heap that full-text ranking reads. **Rollback:** set `db_instance_class` back to `db.t4g.medium` and apply. That is another restart of a few minutes.
 
 ### Totals by daily questions
 
