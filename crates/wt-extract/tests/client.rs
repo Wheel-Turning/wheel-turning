@@ -276,7 +276,11 @@ impl Captured {
             .json()
             .flatten_event(true)
             .finish();
-        tracing::subscriber::set_default(subscriber)
+        let guard = tracing::subscriber::set_default(subscriber);
+        // Tests in this binary run in parallel without a subscriber, and a callsite first hit
+        // there is cached as never enabled. Rebuilding the cache counts this subscriber.
+        tracing::callsite::rebuild_interest_cache();
+        guard
     }
 
     /// The parsed lines whose `event` field is `name`.
