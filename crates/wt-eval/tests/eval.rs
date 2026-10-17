@@ -287,6 +287,14 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
         r.summary_statuses
     );
     assert_eq!(r.summary_statuses.get("not_attempted"), Some(&1));
+    // Spec 11, PB2.2: each excerpt served with a summary is cited, unused or neither.
+    let u = &r.summary_use;
+    assert_eq!(
+        u.excerpts,
+        u.cited + u.off_topic + u.duplicate + u.neither,
+        "{u:?}"
+    );
+    assert!(u.cited >= 2, "{u:?}");
     // Excerpts: the fixture passages are whole sentences too short to trim, so each shows as
     // it is and none starts or ends mid-sentence.
     let shown: usize = results.iter().map(|a| a.payload.passage_ids.len()).sum();
@@ -308,6 +316,8 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
         "Draft questions",
         "PRD verdict",
         "Summary status by answer: shown 2, not_attempted 1",
+        "Excerpts served with a summary:",
+        "with an agree or differ sentence",
     ] {
         assert!(text.contains(needle), "{needle} missing from\n{text}");
     }

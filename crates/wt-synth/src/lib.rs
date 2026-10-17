@@ -20,7 +20,10 @@ use std::time::Duration;
 use futures_util::future::join_all;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use wt_core::answer::{StoredCite, StoredSentence, StoredSummary, SummaryPart, SummaryStatus};
+use wt_core::answer::{
+    StoredCite, StoredSentence, StoredSummary, StoredUnused, SummaryPart, SummaryStatus,
+    UnusedReason,
+};
 use wt_core::config::LlmStage;
 use wt_core::excerpt::{Chooser, Window};
 use wt_core::ids::{PassageId, TeacherId};
@@ -126,6 +129,37 @@ pub struct SummaryDraft {
     pub keep_in_mind: Vec<DraftSentence>,
     /// One closing sentence.
     pub sum_up: Option<DraftSentence>,
+    /// Each excerpt no sentence cites, with why (Spec 11, PB2.2).
+    #[serde(default)]
+    pub unused: Vec<DraftUnused>,
+}
+
+/// An excerpt the draft leaves out, as the model gives it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
+pub struct DraftUnused {
+    /// The excerpt label, such as `E4`.
+    pub excerpt: String,
+    /// `off_topic` or `duplicate`.
+    pub reason: DraftReason,
+}
+
+/// Why the draft leaves an excerpt out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DraftReason {
+    /// It does not speak to the question.
+    OffTopic,
+    /// It repeats what a cited excerpt says.
+    Duplicate,
+}
+
+impl From<DraftReason> for UnusedReason {
+    fn from(r: DraftReason) -> Self {
+        match r {
+            DraftReason::OffTopic => UnusedReason::OffTopic,
+            DraftReason::Duplicate => UnusedReason::Duplicate,
+        }
+    }
 }
 
 /// The verifier's reply about one sentence.
@@ -407,21 +441,32 @@ pub async fn summarize(
     }
 
     let names = filter::name_words(aliases);
-    let mut kept = match round(llm, input, &names, settings, class, None, &mut out).await {
-        Ok(k) => k,
-        Err(done) => return done,
-    };
+    let (mut kept, mut unused) =
+        match round(llm, input, &names, settings, class, None, &mut out).await {
+            Ok(k) => k,
+            Err(done) => return done,
+        };
     // A draft that loses its headline gets one revision that is told why each sentence went
     // (October 15, 2026: on the beta every summary was lost this way). The summary is written
     // after the page is shown, so the second call costs the reader no wait.
     if !kept.iter().any(|c| c.part == SummaryPart::Headline) && !out.dropped.is_empty() {
         let first = out.dropped.clone();
         match round(llm, input, &names, settings, class, Some(&first), &mut out).await {
-            Ok(k) => kept = k,
+            Ok(k) => (kept, unused) = k,
             Err(done) => return done,
         }
     }
+    let cited: Vec<usize> = kept.iter().flat_map(Candidate::excerpts).collect();
+    let unused = unused
+        .iter()
+        .filter(|(i, _)| !cited.contains(i))
+        .map(|&(i, reason)| StoredUnused {
+            passage_id: input.excerpts[i].passage_id,
+            reason,
+        })
+        .collect();
     let summary = StoredSummary {
+        unused,
         sentences: kept
             .into_iter()
             .map(|c| StoredSentence {
@@ -446,8 +491,9 @@ pub async fn summarize(
     out
 }
 
-/// One draft: generation, the filters and the verifier. The sentences the verifier kept, or the
-/// finished synthesis when a call failed. `revise` holds the drops a revision is told about.
+/// One draft: generation, the filters and the verifier. The sentences the verifier kept with the
+/// excerpts the draft listed as unused, or the finished synthesis when a call failed. `revise`
+/// holds the drops a revision is told about.
 async fn round(
     llm: &dyn LlmClient,
     input: &SummaryInput,
@@ -456,7 +502,7 @@ async fn round(
     class: DataClass,
     revise: Option<&[Dropped]>,
     out: &mut Synthesis,
-) -> Result<Vec<Candidate>, Synthesis> {
+) -> Result<(Vec<Candidate>, Vec<(usize, UnusedReason)>), Synthesis> {
     out.calls += 1;
     let request = LlmRequest {
         stage: LlmStage::Synth,
@@ -477,6 +523,7 @@ async fn round(
         Ok(Err(e)) => return Err(fail(std::mem::take(out), "synth", e)),
         Err(_) => return Err(timed_out(std::mem::take(out), "synth")),
     };
+    let unused = unused_positions(&drafted.unused, input.excerpts.len());
     let candidates = filter_draft(drafted, input, names, settings, &mut out.dropped);
     out.calls += candidates.len();
     let verdicts = join_all(
@@ -504,7 +551,7 @@ async fn round(
             }
         }
     }
-    Ok(kept)
+    Ok((kept, unused))
 }
 
 /// Records a failed model call on the synthesis and logs it; a spend cap that stopped the call is
@@ -519,6 +566,20 @@ fn fail(mut out: Synthesis, stage: &'static str, e: LlmError) -> Synthesis {
 fn timed_out(mut out: Synthesis, stage: &'static str) -> Synthesis {
     out.failure = Some(Failure::TimedOut { stage });
     log(&out);
+    out
+}
+
+/// The draft's unused list as offered positions, each once; labels naming no offered excerpt
+/// are left out.
+fn unused_positions(list: &[DraftUnused], offered: usize) -> Vec<(usize, UnusedReason)> {
+    let mut out: Vec<(usize, UnusedReason)> = Vec::new();
+    for u in list {
+        if let Some(i) = position(&u.excerpt, offered)
+            && !out.iter().any(|(j, _)| *j == i)
+        {
+            out.push((i, u.reason.into()));
+        }
+    }
     out
 }
 

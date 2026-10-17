@@ -1,0 +1,22 @@
+{# One excerpt with its links, for answer.html: needs `p`, `g`, `view` and `giving`. #}
+  <article class="passage" id="p{{ p.number }}">
+    {% if let Some(q) = p.question %}<div class="student-question"><p><strong>Student:</strong> {{ q }}</p><p class="muted small">{{ question_label }}</p></div>{% endif %}
+    <blockquote>{% for r in p.runs %}{{ r.text }}{% if let Some(m) = r.marker %}<sup><a class="fn" href="#ref-{{ m.reference }}" aria-label="Footnote {{ m.number }}, reference {{ m.reference }}">{{ m.number }}</a></sup>{% endif %}{% endfor %}</blockquote>
+    <p class="meta"><a href="#ref-{{ p.reference }}">{{ p.meta }}</a></p>
+    <ul class="excerpt-links">
+      {% if let Some(l) = p.links.listen %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Listen</a></li>{% endif %}
+      {% if let Some(s) = p.links.starts_at %}<li class="muted small">{{ s }}</li>{% endif %}
+      {% if let Some(l) = p.links.read %}<li><a href="{{ l.href }}"{% if l.external %} target="_blank" rel="noopener noreferrer"{% endif %} aria-label="{{ l.label }}">Read</a></li>{% endif %}
+      <li class="cite-item"><details>
+        <summary aria-label="Cite this excerpt">Cite</summary>
+        <div class="cite-body">
+          <p class="mla" id="cite-p{{ p.number }}">{% for r in view.references %}{% if r.number == p.reference %}{{ r.before }}<i>{{ r.italic }}</i>{{ r.after }}{% endif %}{% endfor %}</p>
+          <button type="button" class="small" data-copy="cite-p{{ p.number }}" hidden>Copy citation</button>
+          <span class="copy-status small" role="status" aria-live="polite"></span>
+        </div>
+      </details></li>
+      {% if giving %}{% if let Some(gv) = p.give_href %}<li><a href="{{ gv }}" aria-label="Give to this sangha, {{ g.sangha }}">Give to this sangha</a></li>{% endif %}{% endif %}
+      <li><a href="/rights?excerpt={{ p.id }}#request" aria-label="Report this excerpt">Report</a></li>
+    </ul>
+    <p class="credit">{{ p.credit }}</p>
+  </article>

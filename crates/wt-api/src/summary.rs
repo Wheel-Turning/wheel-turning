@@ -107,6 +107,7 @@ pub fn build(
     let numbers: Vec<(PassageId, usize)> = view
         .groups
         .iter()
+        .chain(&view.also_related)
         .flat_map(|g| g.passages.iter().map(|p| (p.id, p.number)))
         .collect();
     let mut quotes: Vec<QuoteView> = Vec::new();

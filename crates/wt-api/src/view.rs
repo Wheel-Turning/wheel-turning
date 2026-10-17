@@ -233,11 +233,66 @@ pub const QUESTION_LABEL: &str = wt_core::transcript::STUDENT_QUESTION_LABEL;
 
 /// Puts each question above the passage it stands for.
 pub fn attach_questions(view: &mut AnswerView, questions: &[wt_db::questions::ShownQuestion]) {
-    for p in view.groups.iter_mut().flat_map(|g| g.passages.iter_mut()) {
+    for p in view
+        .groups
+        .iter_mut()
+        .chain(view.also_related.iter_mut())
+        .flat_map(|g| g.passages.iter_mut())
+    {
         p.question = questions
             .iter()
             .find(|q| q.passage_id == p.id)
             .map(|q| decode(&q.text).into_owned());
+    }
+}
+
+/// Spec 11, PB2.2: moves the excerpts a summary does not cite to "Also related", below the
+/// teacher groups, and numbers every excerpt again in reading order. The page the summary was
+/// written for is never changed under its reader: the deferred summary's fragment is built
+/// without this, so its markers point at the numbers that page shows, and only a later load of
+/// the permalink sets excerpts aside. Nothing moves when no excerpt is cited.
+pub fn set_aside_unused(view: &mut AnswerView, cited: &[PassageId]) {
+    if cited.is_empty() {
+        return;
+    }
+    let mut kept: Vec<Group> = Vec::new();
+    let mut aside: Vec<Group> = Vec::new();
+    let place = |into: &mut Vec<Group>, g: &Group, p: PassageView| match into
+        .last_mut()
+        .filter(|last| last.teacher == g.teacher)
+    {
+        Some(last) => last.passages.push(p),
+        None => into.push(Group {
+            teacher: g.teacher.clone(),
+            sangha: g.sangha.clone(),
+            passages: vec![p],
+        }),
+    };
+    for g in std::mem::take(&mut view.groups) {
+        for p in &g.passages {
+            if cited.contains(&p.id) {
+                place(&mut kept, &g, p.clone());
+            } else {
+                place(&mut aside, &g, p.clone());
+            }
+        }
+    }
+    for (n, p) in kept
+        .iter_mut()
+        .chain(aside.iter_mut())
+        .flat_map(|g| g.passages.iter_mut())
+        .enumerate()
+    {
+        p.number = n + 1;
+    }
+    view.groups = kept;
+    view.also_related = aside;
+}
+
+impl AnswerView {
+    /// Excerpts set aside under "Also related".
+    pub fn also_related_count(&self) -> usize {
+        self.also_related.iter().map(|g| g.passages.len()).sum()
     }
 }
 
@@ -274,6 +329,9 @@ pub struct AnswerView {
     pub summary: Option<crate::summary::SummaryView>,
     /// Runs of consecutive passages from one teacher, in relevance order.
     pub groups: Vec<Group>,
+    /// Excerpts the summary does not use, in the same order and grouping, shown collapsed
+    /// under "Also related" (Spec 11, PB2.2). Empty until [`set_aside_unused`] runs.
+    pub also_related: Vec<Group>,
     /// Passages that no longer serve.
     pub withdrawn: usize,
     /// The References list, in MLA style and alphabetical order (rule 5).
@@ -480,6 +538,7 @@ pub fn assemble(rows: &AnswerRows<'_>, lead_in_ms: i64) -> AnswerView {
         themes,
         summary: None,
         groups,
+        also_related: Vec::new(),
         withdrawn: payload.passage_ids.len().saturating_sub(served.len()),
         references: references.into_iter().map(|(_, e)| e).collect(),
         degraded: payload.rerank_degraded,
@@ -1077,6 +1136,95 @@ mod tests {
             .collect();
         assert_eq!(order, payload.passage_ids);
         assert_eq!(view.result_line, "2 teachers, 2 teachings, 4 excerpts");
+    }
+
+    /// Spec 11, PB2.2: excerpts the summary does not cite move below the groups, in order and
+    /// grouped by teacher, and every excerpt is numbered again in reading order.
+    #[test]
+    fn unused_excerpts_are_set_aside_and_renumbered() {
+        let passages = [(1u128, 1u128), (2, 2), (1, 3), (3, 4)];
+        let served: Vec<Served> = passages
+            .iter()
+            .zip(100u128..)
+            .map(|(&(teacher, talk), id)| {
+                let mut c = card("youtube", "speaker_consent");
+                c.id = TalkId::from_uuid(Uuid::from_u128(10 + talk));
+                c.teacher_id = TeacherId::from_uuid(Uuid::from_u128(20 + teacher));
+                c.teacher_name = format!("Teacher {teacher}");
+                Served {
+                    id: PassageId::from_uuid(Uuid::from_u128(id)),
+                    text: "Sit.".into(),
+                    ordinal: 0,
+                    start_ms: 0,
+                    end_ms: 1000,
+                    talk: c,
+                }
+            })
+            .collect();
+        let ids: Vec<PassageId> = served.iter().map(|s| s.id).collect();
+        let payload: Payload = serde_json::from_value(serde_json::json!({
+            "mode": "standard", "passage_ids": ids,
+        }))
+        .unwrap();
+        let mut view = assemble(
+            &AnswerRows {
+                answer: AnswerId::from_uuid(Uuid::from_u128(9)),
+                payload: &payload,
+                served: &served,
+                excerpts: &BTreeMap::new(),
+                cited: &[],
+                named_teacher: None,
+                accessed: NaiveDate::from_ymd_opt(2026, 10, 15).unwrap(),
+            },
+            0,
+        );
+        let before = view.clone();
+        set_aside_unused(&mut view, &[]);
+        assert_eq!(
+            view.groups.len(),
+            before.groups.len(),
+            "no summary, nothing moves"
+        );
+        assert!(view.also_related.is_empty());
+
+        set_aside_unused(&mut view, &[ids[2], ids[3]]);
+        let shown: Vec<(String, PassageId, usize)> = view
+            .groups
+            .iter()
+            .flat_map(|g| {
+                g.passages
+                    .iter()
+                    .map(|p| (g.teacher.clone(), p.id, p.number))
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("Teacher 1".to_owned(), ids[2], 1),
+                ("Teacher 3".to_owned(), ids[3], 2)
+            ]
+        );
+        let aside: Vec<(String, PassageId, usize)> = view
+            .also_related
+            .iter()
+            .flat_map(|g| {
+                g.passages
+                    .iter()
+                    .map(|p| (g.teacher.clone(), p.id, p.number))
+            })
+            .collect();
+        assert_eq!(
+            aside,
+            [
+                ("Teacher 1".to_owned(), ids[0], 3),
+                ("Teacher 2".to_owned(), ids[1], 4)
+            ]
+        );
+        assert_eq!(view.also_related_count(), 2);
+        assert_eq!(
+            view.result_line, "3 teachers, 4 teachings, 4 excerpts",
+            "counts every excerpt"
+        );
     }
 
     /// Spec 11, PB2.3: the top line counts teachers, teachings (distinct talks) and excerpts,

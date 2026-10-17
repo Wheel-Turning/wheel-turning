@@ -137,6 +137,8 @@ pub struct Report {
     /// Answers by how their summary settled (Spec 11, PB2.4); `unrecorded` for answers stored
     /// before statuses.
     pub summary_statuses: BTreeMap<String, usize>,
+    /// How the summaries used the excerpts served with them (Spec 11, PB2.2).
+    pub summary_use: SummaryUse,
     /// Themes shown across the run.
     pub themes_shown: usize,
     /// Themes dropped by the filters and verifier.
@@ -151,6 +153,64 @@ pub struct Report {
     pub excerpts: ExcerptStats,
     /// Per question.
     pub questions: Vec<QuestionLine>,
+}
+
+/// Spec 11, PB2.2: whether each served excerpt is cited by its answer's summary or listed as
+/// unused with a reason, and how often answers from three or more teachers say where the talks
+/// agree or differ. Counted over standard answers that show a summary.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct SummaryUse {
+    /// Excerpts served with a shown summary.
+    pub excerpts: usize,
+    /// Of those, cited by a shown sentence.
+    pub cited: usize,
+    /// Listed as unused, `off_topic`.
+    pub off_topic: usize,
+    /// Listed as unused, `duplicate`.
+    pub duplicate: usize,
+    /// Neither cited nor listed: what the acceptance item counts as a miss.
+    pub neither: usize,
+    /// Standard answers from three or more teachers.
+    pub three_teacher_answers: usize,
+    /// Of those, with at least one agree or differ sentence shown.
+    pub with_agree_or_differ: usize,
+}
+
+/// Counts [`SummaryUse`] over a run's answers.
+fn summary_use(answers: &[RunAnswer]) -> SummaryUse {
+    use wt_core::answer::{SummaryPart, UnusedReason};
+    let mut u = SummaryUse::default();
+    for a in answers.iter().filter(|a| a.payload.mode == "standard") {
+        let teachers = a.outcome.as_ref().map_or(0, |o| o.teacher_count);
+        let summary = a.payload.summary.as_ref();
+        if teachers >= 3 {
+            u.three_teacher_answers += 1;
+            if summary.is_some_and(|s| {
+                s.sentences
+                    .iter()
+                    .any(|x| matches!(x.part, SummaryPart::Agree | SummaryPart::Differ))
+            }) {
+                u.with_agree_or_differ += 1;
+            }
+        }
+        let Some(summary) = summary else {
+            continue;
+        };
+        let cited = summary.cited();
+        for p in &a.payload.passage_ids {
+            u.excerpts += 1;
+            if cited.contains(p) {
+                u.cited += 1;
+                continue;
+            }
+            match summary.unused.iter().find(|x| x.passage_id == *p) {
+                Some(x) if x.reason == UnusedReason::OffTopic => u.off_topic += 1,
+                Some(_) => u.duplicate += 1,
+                None => u.neither += 1,
+            }
+        }
+    }
+    u
 }
 
 /// How the run's excerpts came out, measured on the passages as they serve now. An answer stored
@@ -378,6 +438,7 @@ pub async fn build(pool: &PgPool, run: Uuid, pass_ratio: f64) -> Result<Report, 
         rerank_degraded: outcomes().filter(|o| o.rerank_degraded).count(),
         synthesis_failed: outcomes().filter(|o| o.synthesis_failed).count(),
         summary_statuses: summary_statuses(&answers),
+        summary_use: summary_use(&answers),
         themes_shown: outcomes().map(|o| o.theme_count).sum(),
         themes_dropped: outcomes().map(|o| o.themes_dropped).sum(),
         named: named(&answers),
@@ -551,6 +612,17 @@ pub fn render(r: &Report) -> String {
         s,
         "  Summary status by answer: {}",
         status_line(&r.summary_statuses)
+    );
+    let u = &r.summary_use;
+    let _ = writeln!(
+        s,
+        "  Excerpts served with a summary: {}; cited {}, unused off topic {}, unused duplicate {}, neither {} (0 passes)",
+        u.excerpts, u.cited, u.off_topic, u.duplicate, u.neither
+    );
+    let _ = writeln!(
+        s,
+        "  Answers from three or more teachers with an agree or differ sentence: {} of {} (60% passes)",
+        u.with_agree_or_differ, u.three_teacher_answers
     );
     let _ = writeln!(
         s,

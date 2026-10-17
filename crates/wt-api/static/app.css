@@ -104,6 +104,9 @@ blockquote { margin: 0; padding: 0 0 0 1rem; border-left: 3px solid var(--ink); 
 /* Links that stand alone, not inside a sentence, get 44px targets (Spec 06, Input and operation). */
 .links a, .support-links a, .meta a { display: inline-flex; align-items: center; min-height: 44px; }
 .references summary { min-height: 44px; padding: 0.35rem 0; cursor: pointer; }
+/* Excerpts the summary does not use (Spec 11, PB2.2), collapsed below the teacher groups. */
+.also-related { margin: 2rem 0; }
+.also-related > summary { min-height: 44px; padding: 0.35rem 0; cursor: pointer; font-weight: 600; }
 /* The excerpt footer: Listen, Read, Cite, Give, Report in one row that wraps (Spec 06, rule 5). */
 .excerpt-links { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 1.25rem; margin: 0.25rem 0 0; padding: 0; }
 .excerpt-links li { display: flex; flex-wrap: wrap; align-items: center; min-height: 44px; }

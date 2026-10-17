@@ -129,6 +129,7 @@ Owner's decision of October 12, 2026 (Spec 05, Summary and verifier). The one-sa
 - Few talks note: Only \[n] talk(s) in this collection matched this question closely.
 - Drawn-from line (Spec 11, PB2.3): The summary draws on \[n] of these excerpts. Each sentence is checked against the excerpts it cites; the excerpts are below.
 - Quoted lines heading: Quoted lines
+- Also related (Spec 11, PB2.2), collapsed below the teacher groups: Also related (\[n]). Under it: The summary does not draw on these excerpts.
 - A quoted line: “\[quotation]” \[teacher], “\[talk title]”, \[date]. Excerpt \[n]
 - Marker label for screen readers: Quoted line \[n]
 
