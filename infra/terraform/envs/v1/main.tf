@@ -107,6 +107,7 @@ module "service" {
 
   llm = {
     model           = var.llm_model
+    stage_models    = var.llm_stage_models
     workspace_id    = var.anthropic_workspace_id
     real_data_ok    = var.llm_real_data_ok
     monthly_cap_usd = var.llm_monthly_cap_usd

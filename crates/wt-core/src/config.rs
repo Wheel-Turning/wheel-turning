@@ -117,8 +117,9 @@ pub struct Config {
     pub anthropic_workspace_id: Option<String>,
     /// `WT_LLM_REAL_DATA_OK`. Must be true before any call carries real transcript text.
     pub llm_real_data_ok: bool,
-    /// `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and
-    /// `WT_LLM_MODEL_VISION`: per-stage models, each falling back to `WT_LLM_MODEL`.
+    /// `WT_LLM_MODEL_EXTRACT`, `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY`,
+    /// `WT_LLM_MODEL_VISION`, `WT_LLM_MODEL_TRIAGE`, `WT_LLM_MODEL_EXCERPT` and
+    /// `WT_LLM_MODEL_RANK`: per-stage models, each falling back to `WT_LLM_MODEL`.
     pub llm_stage_models: LlmStageModels,
     /// `WT_LLM_MONTHLY_CAP_USD`, default 25. `wt llm cap set` overrides it in the database.
     pub llm_monthly_cap_usd: f64,
@@ -241,6 +242,9 @@ impl Config {
                 synth: get("WT_LLM_MODEL_SYNTH"),
                 verify: get("WT_LLM_MODEL_VERIFY"),
                 vision: get("WT_LLM_MODEL_VISION"),
+                triage: get("WT_LLM_MODEL_TRIAGE"),
+                excerpt: get("WT_LLM_MODEL_EXCERPT"),
+                rank: get("WT_LLM_MODEL_RANK"),
             },
             llm_monthly_cap_usd: match get("WT_LLM_MONTHLY_CAP_USD") {
                 None => 25.0,
@@ -284,12 +288,12 @@ impl Config {
     /// neither is set, so a worker that runs the stage refuses to start (Spec 04).
     pub fn llm_model_for(&self, stage: LlmStage) -> Result<&str, ConfigError> {
         let own = match stage {
-            LlmStage::Extract
-            | LlmStage::Classify
-            | LlmStage::Question
-            | LlmStage::Sensitive
-            | LlmStage::Excerpt
-            | LlmStage::Rank => &self.llm_stage_models.extract,
+            LlmStage::Extract | LlmStage::Classify | LlmStage::Question => {
+                &self.llm_stage_models.extract
+            }
+            LlmStage::Sensitive => &self.llm_stage_models.triage,
+            LlmStage::Excerpt => &self.llm_stage_models.excerpt,
+            LlmStage::Rank => &self.llm_stage_models.rank,
             LlmStage::Synth => &self.llm_stage_models.synth,
             LlmStage::Verify => &self.llm_stage_models.verify,
             LlmStage::Vision => &self.llm_stage_models.vision,
@@ -387,6 +391,12 @@ pub struct LlmStageModels {
     pub verify: Option<String>,
     /// `WT_LLM_MODEL_VISION`.
     pub vision: Option<String>,
+    /// `WT_LLM_MODEL_TRIAGE`, the triage gate's model layer (`llm_usage.stage` `sensitive`).
+    pub triage: Option<String>,
+    /// `WT_LLM_MODEL_EXCERPT`.
+    pub excerpt: Option<String>,
+    /// `WT_LLM_MODEL_RANK`.
+    pub rank: Option<String>,
 }
 
 /// A stage that calls the language model.
@@ -400,15 +410,15 @@ pub enum LlmStage {
     /// Lightly editing a student's question (Spec 04, Student questions). Uses the extraction
     /// model.
     Question,
-    /// The optional model layer of sensitive-question detection (Spec 05, Sensitive
-    /// questions). Uses the extraction model, Haiku-class.
+    /// The optional model layer of sensitive-question detection, the triage gate (Spec 05,
+    /// Sensitive questions). Its own model, `WT_LLM_MODEL_TRIAGE` (Spec 11, PB2.0).
     Sensitive,
-    /// Choosing an answer excerpt's sentences (Spec 05, Answer assembly, rule 8). Uses the
-    /// extraction model, Haiku-class.
+    /// Choosing an answer excerpt's sentences (Spec 05, Answer assembly, rule 8). Its own model,
+    /// `WT_LLM_MODEL_EXCERPT` (Spec 11, PB2.0).
     Excerpt,
     /// Scoring retrieval candidates for relevance, in place of the cross-encoder on the web
-    /// service (Spec 05, step 4, owner's decision of October 15, 2026). Uses the extraction
-    /// model, Haiku-class.
+    /// service (Spec 05, step 4, owner's decision of October 15, 2026). Its own model,
+    /// `WT_LLM_MODEL_RANK` (Spec 11, PB2.0).
     Rank,
     /// Answer synthesis.
     Synth,
@@ -437,12 +447,12 @@ impl LlmStage {
     /// The setting a missing model is reported under.
     pub fn key(self) -> &'static str {
         match self {
-            LlmStage::Extract
-            | LlmStage::Classify
-            | LlmStage::Question
-            | LlmStage::Sensitive
-            | LlmStage::Excerpt
-            | LlmStage::Rank => "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL",
+            LlmStage::Extract | LlmStage::Classify | LlmStage::Question => {
+                "WT_LLM_MODEL_EXTRACT or WT_LLM_MODEL"
+            }
+            LlmStage::Sensitive => "WT_LLM_MODEL_TRIAGE or WT_LLM_MODEL",
+            LlmStage::Excerpt => "WT_LLM_MODEL_EXCERPT or WT_LLM_MODEL",
+            LlmStage::Rank => "WT_LLM_MODEL_RANK or WT_LLM_MODEL",
             LlmStage::Synth => "WT_LLM_MODEL_SYNTH or WT_LLM_MODEL",
             LlmStage::Verify => "WT_LLM_MODEL_VERIFY or WT_LLM_MODEL",
             LlmStage::Vision => "WT_LLM_MODEL_VISION or WT_LLM_MODEL",
@@ -782,6 +792,42 @@ mod tests {
             Some("claude-sonnet-5-5")
         );
         assert_eq!(own.llm_monthly_cap_usd, 25.0);
+        // Spec 11, PB2.0: every stage in `llm_usage.stage` is set by its own key or else by
+        // WT_LLM_MODEL, never by another stage's key.
+        let keys = [
+            (LlmStage::Extract, "WT_LLM_MODEL_EXTRACT"),
+            (LlmStage::Classify, "WT_LLM_MODEL_EXTRACT"),
+            (LlmStage::Question, "WT_LLM_MODEL_EXTRACT"),
+            (LlmStage::Sensitive, "WT_LLM_MODEL_TRIAGE"),
+            (LlmStage::Excerpt, "WT_LLM_MODEL_EXCERPT"),
+            (LlmStage::Rank, "WT_LLM_MODEL_RANK"),
+            (LlmStage::Synth, "WT_LLM_MODEL_SYNTH"),
+            (LlmStage::Verify, "WT_LLM_MODEL_VERIFY"),
+            (LlmStage::Vision, "WT_LLM_MODEL_VISION"),
+        ];
+        for (stage, key) in keys {
+            let set = load(&[
+                ("WT_ENV", "dev"),
+                ("DATABASE_URL", "postgres://wt:wt@localhost/wt"),
+                ("WT_LLM_MODEL", "claude-haiku-4-5"),
+                (key, "claude-haiku-5-5"),
+            ])
+            .unwrap_or_else(|e| panic!("{e}"));
+            for (other, other_key) in keys {
+                let want = if other_key == key {
+                    "claude-haiku-5-5"
+                } else {
+                    "claude-haiku-4-5"
+                };
+                assert_eq!(
+                    set.llm_model_for(other).ok(),
+                    Some(want),
+                    "{} with only {key} set",
+                    other.as_str()
+                );
+            }
+            assert!(stage.key().starts_with(key), "{}", stage.as_str());
+        }
         assert!(
             load(&[
                 ("WT_ENV", "dev"),

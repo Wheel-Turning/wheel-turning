@@ -4,15 +4,32 @@
 #
 # `sampling` says whether the model accepts sampling settings: the client sends temperature 0
 # only where it does. Claude Sonnet 5.5, Opus 5.5 and Fable 5.1 reject them (decision of
-# October 5, 2026).
+# October 5, 2026). Claude Haiku 5.5 rejects them too: a temperature-0 request on October 16,
+# 2026 was refused with "`temperature` is deprecated for this model". A stage on it is therefore
+# not deterministic. Its JSON schema still fixes the reply's shape, and pipeline stages are keyed
+# by their input, not their output, so a rerun on unchanged input stays a no-op. What changes is
+# that two runs of the same question can differ, so an eval comparison of a stage on Haiku 5.5
+# is read against the run-to-run spread of that stage, not as exact.
+#
+# `max_prompt_tokens` is the longest prompt the price holds for. The client refuses a longer one,
+# since the table has no price for it. Claude Haiku 5.5 is priced higher above 100,000 tokens
+# (Spec 11, PB2.0); its tokenizer counts about 30 percent more tokens than Haiku 4.5's for the
+# same text.
 
-checked_on = "2026-10-05"
+checked_on = "2026-10-15"
 
 [[model]]
 id = "claude-haiku-4-5"
 input_per_mtok = 1.0
 output_per_mtok = 5.0
 sampling = true
+
+[[model]]
+id = "claude-haiku-5-5"
+input_per_mtok = 0.10
+output_per_mtok = 0.50
+sampling = false
+max_prompt_tokens = 100000
 
 [[model]]
 id = "claude-sonnet-5-5"

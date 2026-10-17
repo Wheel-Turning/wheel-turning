@@ -174,9 +174,10 @@ async fn mailer() -> (Arc<dyn Mailer>, String) {
     }
 }
 
-/// The Claude client for synthesis, verification and the triage gate:
-/// `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY` and `WT_LLM_MODEL_EXTRACT` (Haiku-class), each
-/// falling back to `WT_LLM_MODEL`. Real text is refused unless `WT_LLM_REAL_DATA_OK=true`, and
+/// The Claude client for the web service's stages: synthesis, verification, the triage gate,
+/// excerpts and ranking, set by `WT_LLM_MODEL_SYNTH`, `WT_LLM_MODEL_VERIFY`,
+/// `WT_LLM_MODEL_TRIAGE`, `WT_LLM_MODEL_EXCERPT` and `WT_LLM_MODEL_RANK`, each falling back to
+/// `WT_LLM_MODEL` (Spec 11, PB2.0). Real text is refused unless `WT_LLM_REAL_DATA_OK=true`, and
 /// spend counts against the shared monthly cap.
 fn claude(
     config: &Config,

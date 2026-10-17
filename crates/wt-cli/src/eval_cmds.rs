@@ -259,6 +259,9 @@ fn run_config(config: &Config, site: &wt_api::Site) -> anyhow::Result<RunConfig>
             "rerank": site.reranker.as_ref().map(|_| config.rerank_model.clone()),
             "synth": model(LlmStage::Synth),
             "verify": model(LlmStage::Verify),
+            "triage": model(LlmStage::Sensitive),
+            "excerpt": model(LlmStage::Excerpt),
+            "rank": model(LlmStage::Rank),
         }),
     })
 }
