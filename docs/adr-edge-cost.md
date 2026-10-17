@@ -60,7 +60,7 @@ Built on PR 204 after the owner's approval. Cutover stages, checks and rollback 
 
 ## Decisions for the owner
 
-Decided October 17, 2026: 1 yes, 2 yes. 3 is still open.
+Decided October 17, 2026: 1 yes, 2 yes, 3 yes: the Tunnel (UB3.13) stays on the roadmap as the follow-on.
 
 1. **Replace PB3.6's AWS WAF with Cloudflare's free protection?** This loses the AWS Common rule group and the exact 300-per-5-minutes rule, and changes PB3.6's 400-request acceptance test to a 10-second window. Yes, a + d is built as above. No, the edge stays at $37, or only (d) behind a proxy that keeps AWS WAF, which saves $7 and needs the WAF rate rule to read the client address from a header.
 2. **Put Cloudflare in the request path?** It decrypts every request, questions included, the same way the static site already runs on Cloudflare. If yes, the About page says so in one sentence, as `site/privacy.html` does for the static site.
