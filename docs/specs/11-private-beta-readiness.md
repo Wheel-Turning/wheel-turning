@@ -488,8 +488,8 @@ The owner set these in the tiered targets table below (open question 8): the dat
 - **Speed:** p50 and p95 for time to the first progress event and to the page.
 
 **Acceptance.**
-- [ ] A test on synthetic data checks each figure.
-- [ ] A test asserts that no question text appears in the output.
+- [x] A test on synthetic data checks each figure. (`wt-db/tests/beta_report.rs`, as a `wt_analyst` login, with count-only, purged and acute questions and an evaluation run left out; the per-answer cost and times are written as `wt_web` in `wt-db/tests/web_role.rs` and on a streamed ask in `wt-api/tests/progress.rs`; migration `0048_beta_report.sql`.)
+- [x] A test asserts that no question text appears in the output. (Same test: no question text, feedback note or tester id in the printed report.)
 
 ### PB4.7 The cost model (F1, WA COST05-BP06)
 
@@ -499,6 +499,8 @@ The owner set these in the tiered targets table below (open question 8): the dat
 - Fixed AWS cost by service.
 - Totals at 100, 1,000 and 10,000 questions a day.
 - A monthly ceiling with the action taken at 80% and 100% of it.
+
+Done in `docs/cost.md`, "Cost model": the after-switch figures are estimates until PB2.0's eval runs replace them, and the model rows are to be replaced by `wt report beta` figures after the first beta week.
 
 ## PB5. Evidence for the next increment (owner work)
 
