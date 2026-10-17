@@ -61,8 +61,8 @@ variable "db_deletion_protection" {
 }
 
 # 1 vCPU / 3 GB since October 17, 2026 (was 2 vCPU / 8 GB). With `[ranking] ranker = "model"` the
-# task loads only the int8 embedder, about 1.2 GB resident, and one question's embedding takes
-# 77 ms at the 95th percentile on 1 vCPU (docs/cost.md). Switching the ranker to "onnx" also
+# task loads only the int8 embedder and used at most 0.88 GB on the beta, and one question's
+# embedding takes 77 ms at the 95th percentile on 1 vCPU (docs/cost.md). Switching the ranker to "onnx" also
 # loads rerank_sessions copies of the cross-encoder and needs 2048 / 8192 again.
 variable "web_cpu" {
   type    = number
