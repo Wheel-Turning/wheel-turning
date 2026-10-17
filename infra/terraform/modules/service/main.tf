@@ -515,6 +515,8 @@ resource "aws_ecs_task_definition" "admin" {
       { name = "WT_LOGIN_PASSWORD_WT_OWNER_LOGIN", valueFrom = var.secret_arns["db_wt_owner_login"] },
       { name = "WT_LOGIN_PASSWORD_WT_WEB_LOGIN", valueFrom = var.secret_arns["db_wt_web_login"] },
       { name = "WT_LOGIN_PASSWORD_WT_PIPELINE_LOGIN", valueFrom = var.secret_arns["db_wt_pipeline_login"] },
+      { name = "WT_LOGIN_PASSWORD_WT_ANALYST_LOGIN", valueFrom = var.secret_arns["db_wt_analyst_login"] },
+      { name = "WT_LOGIN_PASSWORD_WT_AUDIT_LOGIN", valueFrom = var.secret_arns["db_wt_audit_login"] },
     ]
     logConfiguration = {
       logDriver = "awslogs"

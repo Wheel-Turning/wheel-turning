@@ -15,6 +15,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 mod admin_cmds;
 mod alerts_cmds;
 mod asr_cmds;
+mod audit_outside;
 mod commands;
 mod eval_cmds;
 mod index_cmds;
@@ -112,12 +113,8 @@ enum Command {
         command: objects_cmds::RecordsCommand,
     },
     /// Run the integrity checks (Spec 07). Prints a JSON report and exits 1 when a check marked
-    /// fail has findings.
-    Audit {
-        /// The directory holding pipeline.toml, for `[deployment] exposure`.
-        #[arg(long, default_value = "config")]
-        config_dir: PathBuf,
-    },
+    /// fail has findings, or any check with --fail-on warning.
+    Audit(commands::AuditArgs),
     /// Discovery from the configured sources (Spec 03).
     Ingest {
         #[command(subcommand)]
@@ -264,8 +261,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Talk { command } => talk_cmds::talk(&ctx, command).await?,
         Command::Takedown(args) => talk_cmds::takedown(&ctx, args).await?,
         Command::Teacher { command } => talk_cmds::teacher(&ctx, command).await?,
-        Command::Audit { config_dir } => {
-            return commands::audit(&ctx.pool().await?, &ctx.config, &config_dir).await;
+        Command::Audit(args) => {
+            return commands::audit(&ctx.pool().await?, &ctx.config, &args).await;
         }
         Command::Objects { command } => return objects_cmds::objects(&ctx, command).await,
         Command::Records { command } => return objects_cmds::records(&ctx, command).await,

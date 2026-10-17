@@ -1,15 +1,15 @@
-# Spec 07, Nightly audit checks: runs `wt audit` every night and on demand, and fails the
-# workflow when a check marked fail has findings. The JSON report is kept as an artifact.
+# Audit smoke test (Spec 11, PB1.4): proves every night that `wt audit` builds, migrates a fresh
+# database and runs end to end. It is not the audit of the beta: GitHub cannot reach private RDS,
+# so the real audit is the wt-v1-audit ECS task (runbook §12), which alarms by email on failure.
+# The JSON report is kept as an artifact.
 #
-# Target: with the `WT_AUDIT_DATABASE_URL` secret set, the audit reads that database, which is
-# how it reaches the deployed environment once one exists (Spec 01: through the batch host's
-# port forward or a runner inside the VPC; set `WT_AUDIT_ENV` to `staging` or `prod`, and the
-# `WT_SESSION_SECRET` secret, which configuration requires outside dev). Without the secret it
-# audits a freshly migrated database in a service container, which proves the job and the
-# binary work end to end.
+# With the `WT_AUDIT_DATABASE_URL` secret set, it audits that database instead (set `WT_AUDIT_ENV`
+# to `staging` or `prod`, and the `WT_SESSION_SECRET` secret, which configuration requires outside
+# dev). Without it, which is the normal case, it audits a freshly migrated database in a service
+# container.
 #
 # Third-party actions are pinned to commit SHAs; Dependabot keeps the pins current.
-name: nightly
+name: audit smoke test
 
 on:
   schedule:
@@ -29,7 +29,7 @@ env:
 
 jobs:
   audit:
-    name: wt audit
+    name: wt audit (fresh database)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     services:

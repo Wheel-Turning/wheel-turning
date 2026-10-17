@@ -65,6 +65,9 @@ resource "aws_iam_openid_connect_provider" "github" {
 # ---------------------------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "workload_boundary" {
+  # The nightly audit's scheduler and backup listing (audit.tf, Spec 11 PB1.4).
+  source_policy_documents = [data.aws_iam_policy_document.workload_boundary_audit.json]
+
   statement {
     sid = "WorkloadServices"
     actions = [

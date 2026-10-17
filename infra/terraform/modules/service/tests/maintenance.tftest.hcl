@@ -28,6 +28,8 @@ variables {
     db_wt_web_login      = "arn:secret:web"
     db_wt_owner_login    = "arn:secret:owner"
     db_wt_pipeline_login = "arn:secret:pipeline"
+    db_wt_analyst_login  = "arn:secret:analyst"
+    db_wt_audit_login    = "arn:secret:audit"
     session_secret       = "arn:secret:session"
     anthropic_api_key    = "arn:secret:anthropic"
   }

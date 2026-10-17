@@ -384,6 +384,84 @@ async fn audit_exits_zero_when_clean_and_one_when_a_fail_check_has_findings() {
     assert_eq!(check["findings"], 1);
 }
 
+#[tokio::test]
+async fn audit_fail_on_warning_exits_one_on_a_planted_warning() {
+    let fx = start().await;
+    fx.import_registry();
+    let clean = fx.wt(&["audit", "--fail-on", "warning"]);
+    assert_eq!(clean.status.code(), Some(0), "{}", stderr(&clean));
+
+    // A dead job is a warning (job_health): the default still passes, warning fails.
+    let t = fx.talk(None).await;
+    sqlx::query(
+        "insert into job (kind, talk_id, idempotency_key, state) values ('fetch', $1, 'dead', 'dead')",
+    )
+    .bind(t)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let default = fx.wt(&["audit"]);
+    assert_eq!(default.status.code(), Some(0), "{}", stderr(&default));
+    let warning = fx.wt(&["audit", "--fail-on", "warning"]);
+    assert_eq!(warning.status.code(), Some(1), "{}", stderr(&warning));
+    let report: serde_json::Value = serde_json::from_slice(&warning.stdout).unwrap();
+    let job_health = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "job_health")
+        .unwrap();
+    assert_eq!(job_health["findings"], 1);
+}
+
+#[tokio::test]
+async fn the_audit_runs_as_the_read_only_audit_login() {
+    let fx = start().await;
+    fx.import_registry();
+    // A takedown, so every takedown query has rows to read.
+    let t = fx.talk(Some("Ada Fixture")).await;
+    fx.json(&[
+        "takedown",
+        "--talk",
+        &t.to_string(),
+        "--actor",
+        "test",
+        "--yes",
+    ]);
+
+    let password = wt_core::Secret::new("audit-test-password-0123456789ab");
+    wt_db::create_login(&fx.pool, "wt_audit", "audit_login", &password)
+        .await
+        .unwrap();
+    let rest = fx.db.url().expose().split_once('@').unwrap().1.to_owned();
+    let url = format!("postgres://audit_login:audit-test-password-0123456789ab@{rest}");
+
+    let out = fx.wt_env(
+        &["audit", "--fail-on", "warning"],
+        &[("DATABASE_URL", &url)],
+        &[],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("no report ({e}): {}", stderr(&out)));
+    assert!(report["checks"].as_array().unwrap().len() >= 11);
+
+    // Read-only, and blind to what testers wrote.
+    let audit = sqlx::PgPool::connect(&url).await.unwrap();
+    for sql in [
+        "select count(*) from query_log",
+        "select count(*) from feedback",
+        "select count(*) from tester",
+        "select requester_email from takedown_request",
+        "delete from job",
+    ] {
+        let err = sqlx::query(sql).execute(&audit).await.unwrap_err();
+        assert!(
+            err.to_string().contains("permission denied"),
+            "{sql}: {err}"
+        );
+    }
+}
+
 /// A config directory with the committed pipeline and series files and a fixture source.
 fn config_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("wt-config-{}", Uuid::new_v4()));

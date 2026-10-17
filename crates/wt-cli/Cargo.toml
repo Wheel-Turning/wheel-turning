@@ -27,6 +27,12 @@ wt-registry.workspace = true
 wt-ingest.workspace = true
 wt-asr.workspace = true
 async-trait = "0.1"
+# The audit reads the PC backups bucket (Spec 11, PB1.3) with rustls on ring, as wt-api's SES
+# client does, and asks the crisis help links (PB3.4) over HTTPS.
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 wt-segment.workspace = true
 wt-extract.workspace = true
 wt-index.workspace = true

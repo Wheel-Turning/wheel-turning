@@ -57,6 +57,24 @@ impl AuditReport {
             .iter()
             .any(|c| c.severity == Severity::Fail && c.findings > 0)
     }
+
+    /// True when a check at `level` or above has findings (`wt audit --fail-on`).
+    pub fn fails_on(&self, level: FailOn) -> bool {
+        match level {
+            FailOn::Fail => self.failed(),
+            FailOn::Warning => self.checks.iter().any(|c| c.findings > 0),
+        }
+    }
+}
+
+/// Which findings make `wt audit` exit nonzero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailOn {
+    /// Findings of `Fail` checks only, the default.
+    Fail,
+    /// Findings of any check: the scheduled run on RDS, whose nonzero exit raises the alarm
+    /// (Spec 11, PB1.4).
+    Warning,
 }
 
 /// Audit thresholds, with Spec 07's defaults.
@@ -737,6 +755,44 @@ fn extend(report: &mut AuditReport, name: &str, found: Vec<String>) {
     }
 }
 
+/// The prefix the PC's nightly backup writes its database dumps under (runbook §10).
+pub const PC_BACKUP_PREFIX: &str = "db/";
+
+/// The newest PC backup's age limit, 36 hours (Spec 11, PB1.3).
+pub const PC_BACKUP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(36 * 3600);
+
+/// The stale-backup warning while the PC keeps its own database (Spec 11, PB1.3): one finding
+/// when the newest object under [`PC_BACKUP_PREFIX`], given as its key and time, is older than
+/// `max_age`, or when there is none. The caller reads the bucket; this only judges.
+pub fn pc_backup_stale(
+    newest: Option<(String, std::time::SystemTime)>,
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+) -> CheckResult {
+    let found = match newest {
+        None => vec![format!("no backup under {PC_BACKUP_PREFIX}")],
+        Some((key, at)) => {
+            let age = now.duration_since(at).unwrap_or_default();
+            if age > max_age {
+                vec![format!("{key} is {} hours old", age.as_secs() / 3600)]
+            } else {
+                vec![]
+            }
+        }
+    };
+    result("pc_backup_stale", Severity::Warn, found)
+}
+
+/// The crisis help check (Spec 11, PB3.4): one finding per support page link that did not
+/// answer, with why. The caller makes the requests, from AWS and never in tests.
+pub fn crisis_link_dead(probes: Vec<(String, Result<(), String>)>) -> CheckResult {
+    let found = probes
+        .into_iter()
+        .filter_map(|(url, answer)| answer.err().map(|why| format!("{url}: {why}")))
+        .collect();
+    result("crisis_link_dead", Severity::Warn, found)
+}
+
 /// `transcripts/<talk>/v<n>.json`.
 fn is_transcript_key(key: &str) -> bool {
     let parts: Vec<&str> = key.split('/').collect();
@@ -803,5 +859,42 @@ mod tests {
         let teacher = br#"{"words":[{"w":"hi","speaker":"teacher"}],"spans":[]}"#;
         assert_eq!(student_speech_in(teacher), None);
         assert!(student_speech_in(b"not json").is_some());
+    }
+
+    #[test]
+    fn a_pc_backup_over_36_hours_old_or_missing_is_a_warning() {
+        use std::time::{Duration, SystemTime};
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 86_400);
+        let hours = |h: u64| now - Duration::from_secs(h * 3600);
+        let fresh = pc_backup_stale(
+            Some(("db/wt-1.dump".into(), hours(30))),
+            now,
+            PC_BACKUP_MAX_AGE,
+        );
+        assert_eq!((fresh.findings, fresh.severity), (0, Severity::Warn));
+        let stale = pc_backup_stale(
+            Some(("db/wt-0.dump".into(), hours(40))),
+            now,
+            PC_BACKUP_MAX_AGE,
+        );
+        assert_eq!(stale.findings, 1);
+        assert_eq!(stale.examples, ["db/wt-0.dump is 40 hours old"]);
+        assert_eq!(pc_backup_stale(None, now, PC_BACKUP_MAX_AGE).findings, 1);
+    }
+
+    #[test]
+    fn a_dead_crisis_link_is_a_warning_and_fails_on_warning_only() {
+        let check = crisis_link_dead(vec![
+            ("https://988lifeline.org/".into(), Ok(())),
+            ("https://dead.example/".into(), Err("status 404".into())),
+        ]);
+        assert_eq!(check.findings, 1);
+        assert_eq!(check.examples, ["https://dead.example/: status 404"]);
+        let report = AuditReport {
+            checks: vec![check],
+            not_yet_checked: vec![],
+        };
+        assert!(!report.fails_on(FailOn::Fail));
+        assert!(report.fails_on(FailOn::Warning));
     }
 }

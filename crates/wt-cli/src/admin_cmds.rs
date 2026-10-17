@@ -19,7 +19,7 @@ pub(crate) enum DbCommand {
     Migrate,
     /// Create or update a login role that inherits one group role. Safe to run repeatedly.
     CreateLogin {
-        /// Group role to inherit: wt_owner, wt_pipeline, wt_web or wt_analyst.
+        /// Group role to inherit: wt_owner, wt_pipeline, wt_web, wt_analyst or wt_audit.
         #[arg(long)]
         role: String,
         /// Login role name. Defaults to <role>_login.

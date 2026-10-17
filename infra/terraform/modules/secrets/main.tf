@@ -49,6 +49,8 @@ locals {
     db_wt_owner_login    = "Password of the wt_owner_login database role (migrations)"
     db_wt_web_login      = "Password of the wt_web_login database role (web service)"
     db_wt_pipeline_login = "Password of the wt_pipeline_login database role (batch host and CLI)"
+    db_wt_analyst_login  = "Password of the wt_analyst_login database role (aggregate reports, Spec 11 PB4.1)"
+    db_wt_audit_login    = "Password of the wt_audit_login database role (read-only nightly audit, Spec 11 PB1.4)"
   }
 }
 

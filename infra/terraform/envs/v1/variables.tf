@@ -128,3 +128,9 @@ variable "waf_block" {
   type        = bool
   default     = false
 }
+
+variable "pc_backup_bucket" {
+  description = "The PC's nightly backup bucket (runbook §10), which the audit checks for a dump under 36 hours old (Spec 11, PB1.3). Set to \"\" once the PC keeps no database."
+  type        = string
+  default     = "wheel-turning-backups-904883674947-us-east-2"
+}

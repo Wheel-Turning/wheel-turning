@@ -60,3 +60,13 @@ output "alert_topic_arn" {
 output "web_acl_name" {
   value = module.service.web_acl_name
 }
+
+output "audit" {
+  description = "The nightly audit's task family, schedule, failure rule and alarms (Spec 11, PB1.4)."
+  value = {
+    task_definition_family = module.audit.task_definition_family
+    schedule_name          = module.audit.schedule_name
+    event_rule_name        = module.audit.event_rule_name
+    alarm_names            = module.audit.alarm_names
+  }
+}

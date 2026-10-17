@@ -332,6 +332,43 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   pass `["wt","eval","export-review","--run","<id>","--out","/out/<id>/review.html"]`; the task
   copies `/out` to `s3://wt-v1-transcripts-904883674947/eval-reviews/`, and the owner downloads it
   with `aws s3 cp` (the page quotes transcripts: never share it by public link).
+- Logins: `wt_analyst_login` (aggregate reports) and `wt_audit_login` (the read-only nightly
+  audit) take their passwords from `wt-v1/db_wt_analyst_login` and `wt-v1/db_wt_audit_login`.
+  Create or reset each once with the `wt-v1-admin` task, which injects every login password:
+
+  ```bash
+  aws ecs run-task --cluster wt-v1 --task-definition wt-v1-admin --launch-type FARGATE     --network-configuration "awsvpcConfiguration={subnets=[<public subnets>],securityGroups=[<web sg>],assignPublicIp=ENABLED}"     --overrides '{"containerOverrides":[{"name":"admin","command":["wt","db","create-login","--role","wt_analyst","--password-env","WT_LOGIN_PASSWORD_WT_ANALYST_LOGIN"]}]}'
+  ```
+
+  and again with `"--role","wt_audit","--password-env","WT_LOGIN_PASSWORD_WT_AUDIT_LOGIN"`.
+- Feedback: testers' feedback is read on RDS as the analyst, which sees counts and notes but
+  never a question unless the tester flagged it. Open the batch host forward (procedure 1,
+  steps 1 and 2), then in the same PowerShell window (the password is the
+  `wt-v1/db_wt_analyst_login` secret, percent-encoded):
+
+  ```powershell
+  $env:DATABASE_URL_ANALYST = "postgres://wt_analyst_login:<password>@localhost:5433/wt?sslmode=require"
+  wt report feedback --since 7d --notes
+  ```
+
+- Nightly audit: the `wt-v1-audit` task runs `wt audit --fail-on warning --check-links` (plus
+  `--backup-bucket` while the PC keeps its database) against RDS as `wt_audit_login`, started by
+  the `wt-v1-audit-nightly` schedule at 10:17 UTC. Its JSON report is in the `/wt-v1/admin` log
+  group under `audit/audit/<task id>`. Any finding, warning or fail, exits 1, and the
+  `wt-v1-audit-failed` EventBridge rule emails the alarm topic; so does a task that fails to
+  start, and the `wt-v1-audit-not-started` alarm fires when the schedule cannot start it. To run
+  it now:
+
+  ```bash
+  aws ecs run-task --cluster wt-v1 --task-definition wt-v1-audit --launch-type FARGATE     --network-configuration "awsvpcConfiguration={subnets=[<public subnets>],securityGroups=[<web sg>],assignPublicIp=ENABLED}"
+  ```
+
+  To test the alarm, add an override with a command that exits 1. The image has no shell, so use
+  a bucket the task may not list:
+  `--overrides '{"containerOverrides":[{"name":"audit","command":["wt","audit","--backup-bucket","wt-no-such-bucket"]}]}'`.
+
+  The GitHub workflow "audit smoke test" (`nightly.yml`) only proves the binary on a fresh
+  database; it is not the audit of the beta.
 - Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
   about $30). Scale the service to 0 tasks between test rounds to save the task's share.
 
@@ -677,6 +714,36 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 - **Fix:** an unexplained change is a security incident: revert it with `terraform apply`,
   and find and revoke the credentials that made it.
 - **Scale to zero:** only if the change widened access to data or secrets.
+
+#### The nightly audit failed (EventBridge rule `wt-v1-audit-failed`)
+
+Not a CloudWatch alarm: an EventBridge rule that emails the topic when a `wt-v1-audit` task stops
+with a nonzero exit code or fails to start (Spec 11, PB1.4; §12, "Nightly audit").
+
+- **Means:** exit 1 is a finding: the audit runs with `--fail-on warning`, so any check with
+  findings, fail or warn, raises it. Another code, or "failed to start", means the task itself
+  broke: a missing secret, a refused database login, or an image that will not pull.
+- **First check:** the report in `/wt-v1/admin` under `audit/audit/<task id>` (the email names
+  the task). Each check with `findings > 0` lists up to 20 examples.
+- **Fix:** a fail check (`consent_drift`, `serving_parity`, `opted_out_served`,
+  `takedown_completeness` and the rest in Spec 07) is a rights incident: follow the incident
+  procedure below. A warning is upkeep: `takedown_request_overdue` is procedure 3,
+  `pc_backup_stale` is §10 (the PC's 03:00 backup has not run), `crisis_link_dead` means a help
+  link on the support page needs correcting in `support_text.html`, and the rest are in Spec 07.
+  A broken task: `aws ecs describe-tasks` for its `stoppedReason`, and `wt db create-login --role
+  wt_audit` (§12) if the login was refused.
+- **Scale to zero:** only for a fail check showing that something which must not be served is
+  being served.
+
+#### `wt-v1-audit-not-started`
+
+- **Means:** the `wt-v1-audit-nightly` schedule could not start the audit task, so no audit ran
+  and no task event was sent.
+- **First check:** the schedule's target in the EventBridge Scheduler console, and whether the
+  `wt-v1-audit` task definition is active and its scheduler role can still run it and pass its
+  roles.
+- **Fix:** reapply Terraform, then run the audit once by hand (§12) to see it pass.
+- **Scale to zero:** no.
 
 ### Incident procedure
 
