@@ -1005,11 +1005,14 @@ struct Loaded {
     view: view::AnswerView,
 }
 
-/// Loads the answer for its owner. `Ok(None)` is the generic 404.
+/// Loads the answer for its owner. `Ok(None)` is the generic 404. `set_aside` moves excerpts
+/// the shown summary does not cite to "Also related" (Spec 11, PB2.2): the answer page does,
+/// the deferred summary's fragment does not, so its markers fit the page already shown.
 async fn load_answer(
     state: &AppState,
     s: &Session,
     answer: AnswerId,
+    set_aside: bool,
 ) -> Result<Option<Loaded>, Box<Response>> {
     let stored = match wt_db::answer::load(&state.pool, answer, s.tester).await {
         Ok(Some(a)) => a,
@@ -1081,6 +1084,13 @@ async fn load_answer(
         .summary
         .as_ref()
         .and_then(|s| summary::build(s, &view, &served, &rows));
+    if set_aside
+        && view.summary.is_some()
+        && let Some(stored_summary) = stored.payload.summary.as_ref()
+    {
+        view::set_aside_unused(&mut view, &stored_summary.cited());
+        view.summary = summary::build(stored_summary, &view, &served, &rows);
+    }
     match wt_db::questions::for_passages(&state.pool, &stored.payload.passage_ids).await {
         Ok(q) => view::attach_questions(&mut view, &q),
         Err(e) => return Err(Box::new(server_error("loading student questions", &e))),
@@ -1120,7 +1130,7 @@ async fn summary_fragment(
     let Some(answer) = parse::<AnswerId>(&answer) else {
         return not_found_page();
     };
-    let loaded = match load_answer(&state, &s, answer).await {
+    let loaded = match load_answer(&state, &s, answer, false).await {
         Ok(Some(l)) => l,
         Ok(None) => return not_found_page(),
         Err(r) => return *r,
@@ -1155,7 +1165,7 @@ async fn answer_page(
     let Some(answer) = parse::<AnswerId>(&answer) else {
         return not_found_page();
     };
-    let loaded = match load_answer(&state, &s, answer).await {
+    let loaded = match load_answer(&state, &s, answer, true).await {
         Ok(Some(l)) => l,
         Ok(None) => return not_found_page(),
         Err(r) => return *r,
@@ -1284,7 +1294,7 @@ async fn dana(
             Err(e) => server_error("logging the dana panel", &e),
         };
     }
-    let loaded = match load_answer(&state, &s, answer).await {
+    let loaded = match load_answer(&state, &s, answer, false).await {
         Ok(Some(l)) => l,
         Ok(None) => return not_found_page(),
         Err(r) => return *r,

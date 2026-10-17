@@ -81,6 +81,10 @@ impl StoredSentence {
 pub struct StoredSummary {
     /// Sentences, headline first.
     pub sentences: Vec<StoredSentence>,
+    /// Excerpts the model left out of the summary, with why (Spec 11, PB2.2). Empty on answers
+    /// stored before PB2.2.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused: Vec<StoredUnused>,
 }
 
 impl StoredSummary {
@@ -90,6 +94,46 @@ impl StoredSummary {
             .iter()
             .any(|s| s.part == SummaryPart::Headline)
     }
+
+    /// The excerpts the sentences cite, in first-cited order.
+    pub fn cited(&self) -> Vec<PassageId> {
+        let mut out: Vec<PassageId> = Vec::new();
+        for c in self.sentences.iter().flat_map(|s| &s.cites) {
+            if !out.contains(&c.passage_id) {
+                out.push(c.passage_id);
+            }
+        }
+        out
+    }
+}
+
+/// Why the model left an excerpt out of the summary (Spec 11, PB2.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnusedReason {
+    /// It does not speak to the question.
+    OffTopic,
+    /// It says what another excerpt the summary cites already says.
+    Duplicate,
+}
+
+impl UnusedReason {
+    /// The reason as stored and reported.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UnusedReason::OffTopic => "off_topic",
+            UnusedReason::Duplicate => "duplicate",
+        }
+    }
+}
+
+/// One excerpt the model left out, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredUnused {
+    /// The excerpt's passage.
+    pub passage_id: PassageId,
+    /// Why it was left out.
+    pub reason: UnusedReason,
 }
 
 /// How an answer's summary settled (Spec 11, PB2.4): `answer.summary_status`, the
@@ -178,6 +222,7 @@ pub fn strip_summary(summary: &mut Option<StoredSummary>, removed: &[PassageId])
     let before = s.sentences.len();
     s.sentences
         .retain(|sentence| !sentence.cites.iter().any(|c| c.touches(removed)));
+    s.unused.retain(|u| !removed.contains(&u.passage_id));
     if !s.has_headline() {
         *summary = None;
         return before;
@@ -280,6 +325,7 @@ mod tests {
                 sentence(SummaryPart::Headline, a, a),
                 sentence(SummaryPart::Agree, b, n),
             ],
+            unused: Vec::new(),
         };
         let mut payload: AnswerPayload = serde_json::from_value(serde_json::json!({
             "mode": "standard", "passage_ids": [a, b], "summary": summary

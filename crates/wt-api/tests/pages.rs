@@ -582,6 +582,51 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     assert!(seen.iter().all(|(_, class)| *class == DataClass::Real));
 }
 
+/// Spec 11, PB2.2: an excerpt the summary does not cite moves to a collapsed "Also related"
+/// list below the teacher groups on a later load, and is never dropped from the page.
+#[tokio::test]
+async fn an_unused_excerpt_moves_to_also_related_and_stays_on_the_page() {
+    let cite = |e: &str| serde_json::json!({ "excerpt": e, "start": 1, "end": 1 });
+    let reply = serde_json::json!({
+        "headline": { "text": "One talk says to turn toward anger and breathe with it.", "cites": [cite("E1")] },
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+        "unused": [{ "excerpt": "E2", "reason": "duplicate" }]
+    });
+    let llm = Arc::new(FakeLlm::new(vec![Ok(reply), Ok(verdict(true))]));
+    let fx = start_with(site_with(llm), true).await;
+    let page = ask(&fx, "How do I work with anger?").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert_eq!(
+        page.body.matches("<blockquote>").count(),
+        2,
+        "both excerpts stay"
+    );
+    let aside = page
+        .body
+        .find("<details class=\"also-related\">")
+        .expect("Also related");
+    assert!(page.body.contains("Also related (1)"), "{}", page.body);
+    assert_eq!(
+        page.body[aside..].matches("<blockquote>").count(),
+        1,
+        "the unused excerpt is below the groups"
+    );
+    assert!(page.body[..aside].contains("id=\"p1\""));
+    assert!(page.body[aside..].contains("id=\"p2\""));
+    let section = summary_of(&page.body);
+    assert!(section.contains("href=\"#p1\""), "{section}");
+    assert!(
+        section.contains("The summary draws on 1 of these excerpts."),
+        "{section}"
+    );
+    assert!(page.body.contains("2 teachers, 2 teachings, 2 excerpts"));
+    let stored: serde_json::Value = sqlx::query_scalar("select payload from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored["summary"]["unused"][0]["reason"], "duplicate");
+}
+
 #[tokio::test]
 async fn a_rejected_headline_leaves_no_summary_and_counts_the_drop() {
     // The headline is rejected in the draft and again in its one revision.

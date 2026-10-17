@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use wt_core::answer::{SummaryPart, SummaryStatus};
+use wt_core::answer::{StoredUnused, SummaryPart, SummaryStatus, UnusedReason};
 use wt_core::config::LlmStage;
 use wt_core::excerpt::{Excerpt, Window, WindowPassage};
 use wt_core::ids::{PassageId, TeacherId};
@@ -122,6 +122,33 @@ fn stages(llm: &FakeLlm) -> Vec<LlmStage> {
 
 fn reasons(out: &Synthesis) -> Vec<DropReason> {
     out.dropped.iter().map(|d| d.reason).collect()
+}
+
+/// Spec 11, PB2.2: the draft's unused list is stored by passage, once each; an excerpt a kept
+/// sentence cites, or a label naming no excerpt, is left off it.
+#[tokio::test]
+async fn unused_excerpts_are_stored_with_their_reason() {
+    let draft = json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+        "unused": [
+            {"excerpt": "E3", "reason": "off_topic"},
+            {"excerpt": "E3", "reason": "duplicate"},
+            {"excerpt": "E1", "reason": "duplicate"},
+            {"excerpt": "E9", "reason": "off_topic"},
+        ],
+    });
+    let llm = FakeLlm::new(vec![Ok(draft), yes()]);
+    let out = run(&llm).await;
+    let summary = out.summary.expect("a summary");
+    assert_eq!(
+        summary.unused,
+        vec![StoredUnused {
+            passage_id: pid(3),
+            reason: UnusedReason::OffTopic,
+        }]
+    );
+    assert_eq!(summary.cited(), vec![pid(1), pid(2)]);
 }
 
 /// Spec 11, PB2.3: an em dash in a drafted sentence is gone before the verifier sees it and
