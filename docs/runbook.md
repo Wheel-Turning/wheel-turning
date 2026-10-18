@@ -298,7 +298,7 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 
 - Site: `https://app.wheelturning.org`, also `https://demo.wheelturning.org` (Cloudflare DNS, set
   by hand to the load balancer; `terraform output dns_records_for_cloudflare`).
-- Web service: Fargate, 2 vCPU / 8 GB, one task. Its `models` container copies
+- Web service: Fargate, 1 vCPU / 3 GB, one task. Its `models` container copies
   `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-904883674947/` into the
   task before `wt-api` starts; startup takes about a minute. A new model goes to that bucket
   (`aws s3 sync models/<dir> s3://wt-v1-models-904883674947/<dir>`), then a redeploy.
@@ -370,8 +370,9 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 
   The GitHub workflow "audit smoke test" (`nightly.yml`) only proves the binary on a fresh
   database; it is not the audit of the beta.
-- Cost: about $170 a month (task about $85, database about $50, load balancer and addresses
-  about $30). Scale the service to 0 tasks between test rounds to save the task's share.
+- Cost: about $125 a month (task about $40 since October 17, 2026, database about $50, load
+  balancer and addresses about $30). Scale the service to 0 tasks between test rounds to save
+  the task's share.
 
 ### The database's name
 
