@@ -1,6 +1,6 @@
 # ADR: a cheaper edge for the private beta
 
-Status: **accepted, a + d.** Written and approved October 17, 2026. The owner chose to replace Spec 11 PB3.6's AWS WAF with Cloudflare's free protection, to put Cloudflare in the request path with a line on the About page, and to make the load balancer IPv6-only. "What was built" lists the changes. The owner cuts over by hand (runbook §12, "The edge"). The Tunnel follow-on (b, UB3.13) is designed in "Follow-on" below and waits on decision T1.
+Status: **accepted, a + d.** Written and approved October 17, 2026. The owner chose to replace Spec 11 PB3.6's AWS WAF with Cloudflare's free protection, to put Cloudflare in the request path with a line on the About page, and to make the load balancer IPv6-only. "What was built" lists the changes. The owner cuts over by hand (runbook §12, "The edge"). The Tunnel follow-on (b, UB3.13) is designed in "Follow-on" below; T1 is decided (a), and it is built after the a + d cutover.
 
 ## Context
 
@@ -68,7 +68,7 @@ Decided October 17, 2026: 1 yes, 2 yes, 3 yes: the Tunnel (UB3.13) stays on the 
 
 ## Follow-on: a Cloudflare Tunnel in place of the load balancer (b, UB3.13)
 
-Status: **designed, not built.** Written October 17, 2026. Two things hold the build: PR 204's three edge stages are not applied yet (read live that day: the load balancer is still `ipv4` and the VPC has no IPv6 block), and decision T1 below, because the maintenance page as PB4.4 states it cannot survive without the load balancer.
+Status: **designed, T1 decided, not built.** Written October 17, 2026. The owner chose T1 (a) the same day: an owner-only `infra/terraform/edge` root with Cloudflare's provider and the maintenance Worker. The build starts once PR 204's three edge stages are applied; read live again after the decision, the load balancer was still `ipv4`, the VPC had no IPv6 block and `app` resolved straight to the load balancer. T2 is open; the build follows the recommendation (T-D last) unless the owner says otherwise.
 
 ### What the load balancer does today, and what replaces it
 
@@ -142,7 +142,7 @@ Each stage is one apply, or one change at Cloudflare, and each is undone by the 
 
 ### Decisions for the owner
 
-T1. **The maintenance page without a load balancer.**
+T1. **The maintenance page without a load balancer.** Decided October 17, 2026: (a).
    - (a) **Terraform keeps the switch** (recommended). A separate Terraform root, `infra/terraform/edge`, applied only by the owner, holds the Cloudflare side under Cloudflare's provider: the tunnel and its route, the `app` and `demo` records, and the maintenance Worker and its routes, which `maintenance = true` creates. PB4.4 item 4 then reads "a Terraform variable `maintenance` that makes Cloudflare answer every path with a fixed page", and `maintenance.tftest.hcl` moves to that root with a mocked provider. It needs a Cloudflare API token limited to the `wheelturning.org` zone (DNS edit, Workers routes edit) and the account's Tunnel and Workers scripts, kept on the owner's machine only. `deploy.yml` never sees it. The records set by hand today move into Terraform's state with `terraform import`.
    - (b) **By hand at Cloudflare.** The Worker is deployed once with the `cf` CLI and its route added or removed in the dashboard. No new token, but PB4.4's ticked item and its test are rewritten to a runbook step that nothing tests, and the switch leaves the plan-and-apply record.
    - (c) **No Tunnel.** Stay on a + d at $21.
