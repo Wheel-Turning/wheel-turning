@@ -34,13 +34,13 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | RDS | `db.t4g.small` since October 17, 2026 (was `db.t4g.medium`, which the measured figure is), single zone, 20 GB of gp3, 7 days of backups. See "Database size" below | $49.85 | $26 |
 | Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
 | VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
-| Secrets Manager | The project's secrets at $0.40 each | $2.78 | $3 |
-| KMS | Keys behind the secrets and the database | $1.90 | $2 |
+| Secrets Manager | The project's secrets at $0.40 each: seven today (six `wt-v1/` and RDS's master secret), nine once `db_wt_analyst_login` and `db_wt_audit_login` are applied | $2.78 | $3.60 |
+| KMS | Not the secrets or the database, which use the free AWS-managed keys: the IAM Identity Center customer-managed multi-region key and its us-west-2 replica, $1 each (see below) | $1.90 | $2 |
 | Route 53 | The health check | $0.98 | $1 |
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
 | AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
 | GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
-| **Total** | | **$170.70** | **about $162** |
+| **Total** | | **$170.70** | **about $163** |
 
 October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
 
@@ -95,17 +95,34 @@ Prices are us-east-2 list prices for single-zone PostgreSQL over 730 hours, Octo
 
 **After the change.** The resize restarts the database: a few minutes without it, and the cache starts empty. Afterwards, restart the web service so its warm-up searches run (`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). For the next two weeks, watch the database's ReadIOPS during questions (expect a few hundred reads a question; sustained ReadIOPS while nobody is asking means something else is wrong) and the `wt-v1-slow-answers` alarm. Compare the page p95 in `wt report beta` with the 4.4 s on medium. Go back if the page p95 passes 4.8 s, or when servable passages grow by a fifth (about 170,000), since each one adds to the heap that full-text ranking reads. **Rollback:** set `db_instance_class` back to `db.t4g.medium` and apply. That is another restart of a few minutes.
 
+### Small line items and idle resources (October 17, 2026)
+
+A read-only scan of the account on October 17, 2026, for the small fixed lines and for anything billing while unused. Cost Explorer has charges in us-east-2, us-west-2 (the KMS replica only), us-east-1 (cents) and global (the Route 53 health check), and nothing for September. The October total to the 16th was $39.93, with October 14 to 16 at $5.57 to $5.76 a day.
+
+**Nothing idle was found.** In us-east-2, us-west-2 and us-east-1: no EC2 instances (the batch host is destroyed), no EBS volumes or snapshots, no AMIs, no RDS manual snapshots, no NAT gateway or interface endpoints, and no unattached Elastic IPs (both are the load balancer's). The ECR repository holds 11 images (0.46 GB) under its keep-20 rule, every log group keeps 30 days, the models bucket has no old versions and no bucket has an unfinished multipart upload. Earlier October lines that have stopped: the alpha's `db.t4g.micro` ($4.15) and the batch host's `t3.small` and its EBS volume ($0.29).
+
+| Item | Cost a month | Decision |
+| --- | --- | --- |
+| IAM Identity Center customer-managed key `mrk-a21c...` in us-east-2 and its replica in us-west-2, from Identity Center's second region (us-west-2) | $2.00 | **Owner, in the console:** if a second Identity Center region is not needed, remove us-west-2 from Identity Center, switch its encryption to the AWS-owned key, then schedule deletion of the replica and the primary key. This changes a security setting, so it is not in Terraform and was not done here |
+| Secrets Manager: six project secrets and RDS's master secret, two more pending | $2.80 to $3.60 | Kept (owner, October 17): Specs 00, 01 and 02 name Secrets Manager. Moving the project secrets to SSM Parameter Store SecureString would save about $3.20 |
+| `wt-v1/youtube_api_key`, never read: only the batch host's role may read it | $0.40 | Kept: the batch host needs it when YouTube ingestion runs |
+| IAM Access Analyzer `wt-unused-access`: 25 roles and 1 user | about $5.20 after the 30-day trial, at the top of the $2 to $5 range above | Kept (owner, October 17): PB3.6 requires it |
+| CloudWatch: 14 alarms and 9 custom metrics | about $0.40 | Inside the free 10 alarms and 10 metrics, apart from 4 alarms |
+| ECR, 0.46 GB | under $0.05 | Lifecycle rule already in place |
+
+**Changed in Terraform.** `modules/storage` gains lifecycle rules: replaced versions in the models bucket expire after 30 days, keeping the last two, and the transcripts and models buckets abort multipart uploads left after 7 days. Neither saves anything today, since the models bucket has no old versions and neither bucket has a stale upload. They stop a model re-upload (1.2 GB a copy, $0.03 a month each) or a failed transcript upload from billing indefinitely.
+
 ### Totals by daily questions
 
 A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.small` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $70 more than the small), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
 
 | Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 100 | 3,000 | $162 | $21 | $162 | **$324** | **$183** | $0.061 |
-| 1,000 | 30,000 | $1,620 | $210 | $162 | **$1,782** | **$372** | $0.012 |
+| 100 | 3,000 | $162 | $21 | $163 | **$325** | **$184** | $0.061 |
+| 1,000 | 30,000 | $1,620 | $210 | $163 | **$1,783** | **$373** | $0.012 |
 | 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
 
-Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 100 to about 770 questions a day.
+Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 100 to about 780 questions a day.
 
 ### Monthly ceiling and the actions at 80% and 100%
 

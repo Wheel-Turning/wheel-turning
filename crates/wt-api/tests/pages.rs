@@ -225,7 +225,7 @@ async fn an_invite_sets_the_session_and_a_bad_token_gets_the_generic_404() {
     let cookie = join(&fx, "owner").await;
     let home = send(&fx.app, get("/", Some(&cookie))).await;
     assert_eq!(home.status, StatusCode::OK);
-    assert!(home.body.contains("What have Zen teachers said"));
+    assert!(home.body.contains("How to use this site"));
     // Spec 11, PB3.1: the home page and the footer show the one privacy line.
     assert_eq!(
         home.body.matches(wt_api::chrome::privacy_line()).count(),
