@@ -34,8 +34,8 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups | $49.85 | $50 |
 | Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
 | VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
-| Secrets Manager | The project's secrets at $0.40 each | $2.78 | $3 |
-| KMS | Keys behind the secrets and the database | $1.90 | $2 |
+| Secrets Manager | The project's secrets at $0.40 each: seven today (six `wt-v1/` and RDS's master secret), nine once `db_wt_analyst_login` and `db_wt_audit_login` are applied | $2.78 | $3.60 |
+| KMS | Not the secrets or the database, which use the free AWS-managed keys: the IAM Identity Center customer-managed multi-region key and its us-west-2 replica, $1 each (see below) | $1.90 | $2 |
 | Route 53 | The health check | $0.98 | $1 |
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
 | AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
@@ -43,6 +43,23 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | **Total** | | **$170.70** | **about $186** |
 
 October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
+
+### Small line items and idle resources (October 17, 2026)
+
+A read-only scan of the account on October 17, 2026, for the small fixed lines and for anything billing while unused. Cost Explorer has charges in us-east-2, us-west-2 (the KMS replica only), us-east-1 (cents) and global (the Route 53 health check), and nothing for September. The October total to the 16th was $39.93, with October 14 to 16 at $5.57 to $5.76 a day.
+
+**Nothing idle was found.** In us-east-2, us-west-2 and us-east-1: no EC2 instances (the batch host is destroyed), no EBS volumes or snapshots, no AMIs, no RDS manual snapshots, no NAT gateway or interface endpoints, and no unattached Elastic IPs (both are the load balancer's). The ECR repository holds 11 images (0.46 GB) under its keep-20 rule, every log group keeps 30 days, the models bucket has no old versions and no bucket has an unfinished multipart upload. Earlier October lines that have stopped: the alpha's `db.t4g.micro` ($4.15) and the batch host's `t3.small` and its EBS volume ($0.29).
+
+| Item | Cost a month | Decision |
+| --- | --- | --- |
+| IAM Identity Center customer-managed key `mrk-a21c...` in us-east-2 and its replica in us-west-2, from Identity Center's second region (us-west-2) | $2.00 | **Owner, in the console:** if a second Identity Center region is not needed, remove us-west-2 from Identity Center, switch its encryption to the AWS-owned key, then schedule deletion of the replica and the primary key. This changes a security setting, so it is not in Terraform and was not done here |
+| Secrets Manager: six project secrets and RDS's master secret, two more pending | $2.80 to $3.60 | Kept (owner, October 17): Specs 00, 01 and 02 name Secrets Manager. Moving the project secrets to SSM Parameter Store SecureString would save about $3.20 |
+| `wt-v1/youtube_api_key`, never read: only the batch host's role may read it | $0.40 | Kept: the batch host needs it when YouTube ingestion runs |
+| IAM Access Analyzer `wt-unused-access`: 25 roles and 1 user | about $5.20 after the 30-day trial, at the top of the $2 to $5 range above | Kept (owner, October 17): PB3.6 requires it |
+| CloudWatch: 14 alarms and 9 custom metrics | about $0.40 | Inside the free 10 alarms and 10 metrics, apart from 4 alarms |
+| ECR, 0.46 GB | under $0.05 | Lifecycle rule already in place |
+
+**Changed in Terraform.** `modules/storage` gains lifecycle rules: replaced versions in the models bucket expire after 30 days, keeping the last two, and the transcripts and models buckets abort multipart uploads left after 7 days. Neither saves anything today, since the models bucket has no old versions and neither bucket has a stale upload. They stop a model re-upload (1.2 GB a copy, $0.03 a month each) or a failed transcript upload from billing indefinitely.
 
 ### Totals by daily questions
 
