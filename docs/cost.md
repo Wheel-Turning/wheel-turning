@@ -32,19 +32,19 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | --- | --- | --- | --- |
 | ECS Fargate | One web task, 1 vCPU and 3 GB, x86, always on (2 vCPU and 8 GB until October 17, 2026); the nightly audit and occasional migrate and eval tasks | $86.94 | $41 |
 | RDS | `db.t4g.small` since October 17, 2026 (was `db.t4g.medium`, which the measured figure is), single zone, 20 GB of gp3, 7 days of backups. See "Database size" below | $49.85 | $26 |
-| Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
-| VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
+| Elastic Load Balancing | One application load balancer and its capacity units at beta traffic, behind Cloudflare from the edge cutover | $16.48 | $17 |
+| VPC | Public IPv4 addresses: one on the web task (there is no NAT gateway). The load balancer's two go at the edge cutover, when it becomes IPv6-only behind Cloudflare | $11.42 | $4 |
 | Secrets Manager | The project's secrets at $0.40 each: seven today (six `wt-v1/` and RDS's master secret), nine once `db_wt_analyst_login` and `db_wt_audit_login` are applied | $2.78 | $3.60 |
 | KMS | Not the secrets or the database, which use the free AWS-managed keys: the IAM Identity Center customer-managed multi-region key and its us-west-2 replica, $1 each (see below) | $1.90 | $2 |
 | Route 53 | The health check | $0.98 | $1 |
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
-| AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
+| AWS WAF | Removed at the edge cutover: Cloudflare's free managed rules and rate rule replace it (PB3.6, `docs/adr-edge-cost.md`) | not yet billed | $0 |
 | GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
-| **Total** | | **$170.70** | **about $116** |
+| **Total** | | **$170.70** | **about $100** |
 
 The web task's size (October 17, 2026): with `[ranking] ranker = "model"` the task loads only the int8 embedder, so 2 vCPU and 8 GB were mostly idle. CloudWatch's `AWS/ECS` metrics for `wt-v1-web` (Container Insights is off) show it. From October 13 to the morning of October 15, with the cross-encoder's four sessions loaded, memory sat at 44 to 46% of 8 GB, about 3.7 GB. From the switch to the model ranker to October 17, 1-minute maxima give memory p50 10.72%, p99 10.79% and a maximum of 10.80% of 8 GB, about 0.88 GB, and CPU p99 0.08% with a maximum of 28% of 2 vCPU, at a deploy's start. That window held only 11 questions, whose `embed_ms` was at most 72. Under load, the embedder is the task's one CPU-heavy stage. One question's embedding, one text per run as `wt-ml` does it, takes 49 ms at the median and 118 ms at the 95th percentile on 2 vCPU, against 54 and 77 ms on 1 vCPU and 118 and 216 ms on 0.5 vCPU (the 50 practitioner questions in a capped x86 container, about 1.2 GB resident there). That is a small part of the 5-second page, so 1 vCPU keeps the page target, and 3 GB is more than three times the measured use. At us-east-2 list prices ($0.04048 per vCPU-hour, $0.004445 per GB-hour, 730 hours) the task costs $39.28 a month, against $85.06. Switching `ranker` to `"onnx"` loads `rerank_sessions` copies of the cross-encoder as well and needs 2 vCPU and 8 GB again. Graviton would cut another fifth ($31.43), but on arm64 the int8 embedder's vectors move away from x86's. Over the 50 questions the cosine was 0.985 at worst and 0.993 on average, and only 14 of 50 questions kept the same five nearest neighbours (ORT 1.22 under emulation). The passages were embedded on x86, and that is the size of drift the decision of October 9, 2026 refused for batching, so the task stays x86.
 
-October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
+October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once GuardDuty has a full week and a week after the edge cutover. The edge change (October 17, 2026) takes about $16 off the expected column: $7.30 for the load balancer's two addresses and about $8.35 of WAF. The totals table below still uses $186 until the other October 17 cost changes land with it.
 
 ### Database size
 
@@ -120,11 +120,11 @@ A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.small
 
 | Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 100 | 3,000 | $162 | $21 | $116 | **$278** | **$137** | $0.046 |
-| 1,000 | 30,000 | $1,620 | $210 | $116 | **$1,736** | **$326** | $0.011 |
+| 100 | 3,000 | $162 | $21 | $100 | **$262** | **$121** | $0.040 |
+| 1,000 | 30,000 | $1,620 | $210 | $100 | **$1,720** | **$310** | $0.010 |
 | 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
 
-Below about 550 questions a day (after the switch) the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 70 to about 550 questions a day.
+Below about 480 questions a day (after the switch) the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 60 to about 480 questions a day.
 
 ### Monthly ceiling and the actions at 80% and 100%
 
@@ -186,11 +186,11 @@ Records are kept permanently and can never be expired by a lifecycle rule, so th
 
 ## Edge protection and detection
 
-Added for the private beta (Spec 11, PB3.6). Spec 11 expects about 10 to 15 USD a month; this estimate, from us-east-2 list prices in October 2026, comes to about 12 to 17 USD. GuardDuty and the unused-access analyzer each start with a 30-day free trial, so the first month costs less. Check the real figure in Cost Explorer a month after the apply.
+Added for the private beta (Spec 11, PB3.6). Spec 11 expected about 10 to 15 USD a month with an AWS WAF web ACL; with Cloudflare in its place (owner's decision of October 17, 2026) detection alone comes to about 4 to 9 USD. GuardDuty and the unused-access analyzer each start with a 30-day free trial, so the first month costs less. Check the real figure in Cost Explorer a month after the apply.
 
 | What | Managed by | What it costs |
 |---|---|---|
-| WAF web ACL `wt-v1` on the load balancer: AWS Common and Known Bad Inputs managed groups and a 300-per-5-minutes rate rule | `infra/terraform/modules/service/waf.tf` | 5 USD for the web ACL plus 1 USD per rule (3), and 0.60 USD per million requests. The two AWS managed groups carry no subscription fee. About 8 USD a month at beta traffic. Count and block cost the same |
+| Cloudflare proxy on `app` and `demo`: Free Managed Ruleset, one rate rule, a transform rule adding the origin header | Cloudflare dashboard, by hand (runbook §12, "The edge"); the load balancer side in `infra/terraform/modules/service` and `modules/network` | Nothing: all on Cloudflare's Free plan. It replaced the WAF web ACL `wt-v1` (5 USD plus 1 USD per rule and 0.60 USD per million requests, about 8 USD a month), applied October 16 and removed at the cutover |
 | GuardDuty: CloudTrail management events, VPC flow logs, DNS logs and S3 data events | `infra/terraform/account/detection.tf` | Billed by volume: 4 USD per million management events, 1 USD per GB of flow and DNS logs, 0.80 USD per million S3 data events. The trail's measured rate (about 24,000 files a month) suggests 1 to 4 USD a month. EKS, Lambda, runtime and malware scanning are off |
 | IAM Access Analyzer `wt-external-access` and `wt-unused-access` | `infra/terraform/account/detection.tf` | External access: free. Unused access: 0.20 USD per IAM role or user analyzed each month, so 2 to 5 USD for the account's 10 to 25 roles |
 | CloudTrail copy in log group `/wt/cloudtrail`, kept 30 days, with two metric filters and alarms | `infra/terraform/account/detection.tf` | 0.50 USD per GB ingested; the trail's management events come to well under 1 GB a month. Two custom metrics at 0.30 USD and two alarms at 0.10 USD: under 1.50 USD a month in all |

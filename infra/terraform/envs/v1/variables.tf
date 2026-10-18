@@ -136,10 +136,40 @@ variable "mail_from" {
   default     = "rights@wheelturning.org"
 }
 
-variable "waf_block" {
-  description = "Switch the load balancer's WAF rules from count to block. Spec 11 PB3.6: count for 7 days after the first apply, then set true once the sampled requests show no false positives."
+variable "cloudflare_only" {
+  description = "Cloudflare proxies the app's hostnames and is the only way in: the listener needs the origin header and the security group admits only Cloudflare's ranges (docs/adr-edge-cost.md, runbook edge cutover). Set only after the hostnames are proxied and the transform rule exists."
   type        = bool
   default     = false
+}
+
+variable "alb_public_ipv4" {
+  description = "Give the load balancer public IPv4 addresses. False saves two addresses ($7.30 a month) and needs cloudflare_only, since testers on IPv4 then reach the site only through Cloudflare."
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.alb_public_ipv4 || var.cloudflare_only
+    error_message = "alb_public_ipv4 = false needs cloudflare_only = true, or IPv4-only testers lose the site."
+  }
+}
+
+variable "cloudflare_ranges" {
+  description = "Cloudflare's published address ranges, https://www.cloudflare.com/ips-v4 and ips-v6, read October 17, 2026. Check them before each edge change."
+  type = object({
+    ipv4 = list(string)
+    ipv6 = list(string)
+  })
+  default = {
+    ipv4 = [
+      "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18",
+      "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17",
+      "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+    ]
+    ipv6 = [
+      "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32",
+      "2a06:98c0::/29", "2c0f:f248::/32",
+    ]
+  }
 }
 
 variable "pc_backup_bucket" {

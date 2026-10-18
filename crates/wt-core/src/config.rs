@@ -154,6 +154,10 @@ pub struct Config {
     pub owner_name: Option<String>,
     /// `WT_TRUST_FORWARDED_FOR`. True only behind a load balancer that sets `X-Forwarded-For`.
     pub trust_forwarded_for: bool,
+    /// `WT_FORWARDED_HOPS`, default 1: how many proxies in front of the server each append to
+    /// `X-Forwarded-For`. The client is the entry that many from the end: 1 behind the load
+    /// balancer alone, 2 behind Cloudflare and the load balancer.
+    pub forwarded_hops: u32,
     /// `WT_CONFIG_DIR`, default `config`: the directory holding `retrieval.toml` and the other
     /// settings files the web server reads.
     pub config_dir: PathBuf,
@@ -353,6 +357,7 @@ impl Config {
                 "WT_TRUST_FORWARDED_FOR",
                 get("WT_TRUST_FORWARDED_FOR"),
             )?,
+            forwarded_hops: parse_hops(get("WT_FORWARDED_HOPS"))?,
             config_dir: get("WT_CONFIG_DIR").map_or_else(|| PathBuf::from("config"), PathBuf::from),
             privacy_default,
             query_retention_days: parse_u32(
@@ -622,6 +627,18 @@ fn parse_u32(key: &'static str, value: Option<String>, fallback: u32) -> Result<
             key,
             reason: format!("expected a whole number, got {v:?}"),
         }),
+    }
+}
+
+/// `WT_FORWARDED_HOPS`: a whole number of at least 1, 1 when unset.
+fn parse_hops(value: Option<String>) -> Result<u32, ConfigError> {
+    let key = "WT_FORWARDED_HOPS";
+    match parse_u32(key, value, 1)? {
+        0 => Err(ConfigError::Invalid {
+            key,
+            reason: "expected at least 1".to_owned(),
+        }),
+        hops => Ok(hops),
     }
 }
 
@@ -989,6 +1006,7 @@ mod tests {
         assert_eq!(config.query_retention_days, 180);
         assert_eq!(config.count_only_ttl_hours, 24);
         assert!(!config.trust_forwarded_for);
+        assert_eq!(config.forwarded_hops, 1);
         assert_eq!(config.owner_name, None);
         assert_eq!(config.mail(), None);
         assert_eq!(config.require_mail(), Ok(None));
@@ -1004,6 +1022,7 @@ mod tests {
             ("WT_PUBLIC_URL", "https://app.wheelturning.org/"),
             ("WT_OWNER_NAME", " A. Owner "),
             ("WT_TRUST_FORWARDED_FOR", "true"),
+            ("WT_FORWARDED_HOPS", "2"),
             ("WT_CONFIG_DIR", "/etc/wt"),
             ("WT_PRIVACY_DEFAULT", "count_only"),
             ("WT_QUERY_RETENTION_DAYS", "30"),
@@ -1018,6 +1037,7 @@ mod tests {
         );
         assert_eq!(config.owner_name.as_deref(), Some("A. Owner"));
         assert!(config.trust_forwarded_for);
+        assert_eq!(config.forwarded_hops, 2);
         assert_eq!(config.config_dir, PathBuf::from("/etc/wt"));
         assert_eq!(config.privacy_default, PrivacyDefault::CountOnly);
         assert_eq!(config.query_retention_days, 30);
@@ -1031,6 +1051,8 @@ mod tests {
             ("WT_QUERY_RETENTION_DAYS", "six months"),
             ("WT_COUNT_ONLY_TTL_HOURS", "-1"),
             ("WT_TRUST_FORWARDED_FOR", "yes"),
+            ("WT_FORWARDED_HOPS", "0"),
+            ("WT_FORWARDED_HOPS", "two"),
         ] {
             assert!(
                 matches!(load(&[base, (key, value)]), Err(ConfigError::Invalid { key: k, .. }) if k == key),

@@ -123,6 +123,7 @@ pub async fn load(config: &Config, pool: &sqlx::PgPool) -> Result<Site, SiteErro
         privacy: crate::privacy::Settings::from_config(config),
         owner_name: config.owner_name.clone(),
         trust_forwarded_for: config.trust_forwarded_for,
+        forwarded_hops: config.forwarded_hops,
         embedder: Arc::new(embedder),
         reranker,
         span_reranker: onnx,

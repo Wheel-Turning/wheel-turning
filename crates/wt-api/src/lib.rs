@@ -86,9 +86,12 @@ pub struct Site {
     pub owner_name: Option<String>,
     /// Question privacy settings.
     pub privacy: privacy::Settings,
-    /// `WT_TRUST_FORWARDED_FOR`: behind the load balancer, the client address is the last
-    /// entry of `X-Forwarded-For`. Off, the connection's peer address is used.
+    /// `WT_TRUST_FORWARDED_FOR`: behind the load balancer, the client address is read from
+    /// `X-Forwarded-For`. Off, the connection's peer address is used.
     pub trust_forwarded_for: bool,
+    /// `WT_FORWARDED_HOPS`: how many proxies append to `X-Forwarded-For`, so the client is the
+    /// entry that many from the end (1 for the load balancer, 2 behind Cloudflare as well).
+    pub forwarded_hops: u32,
     /// `WT_SITE_DANA_URL`: the site's own giving page, for the separate site line. Without it
     /// the panel offers no site line.
     pub site_dana_url: Option<String>,
@@ -140,6 +143,7 @@ impl Site {
             owner_name: None,
             privacy: privacy::Settings::default(),
             trust_forwarded_for: false,
+            forwarded_hops: 1,
             embedder: Arc::new(FakeEmbedder::new(embedder_model)),
             reranker: None,
             span_reranker: None,
@@ -407,9 +411,11 @@ pub(crate) fn too_many(wait: Duration, what: &str) -> Response {
     response
 }
 
-/// The address a public form's rate limit counts against: the last `X-Forwarded-For` entry
-/// when the site sits behind the load balancer, which appends the client it saw, otherwise the
-/// connection's peer.
+/// The address a public form's rate limit counts against. Behind proxies, each appends the
+/// address it saw to `X-Forwarded-For`, so the client is the entry `forwarded_hops` from the end:
+/// the load balancer's own entry when it is the only proxy, Cloudflare's when Cloudflare is in
+/// front of it. Entries further left came from the sender and could be forged; a header shorter
+/// than the hop count gives its first entry. Otherwise the connection's peer.
 pub struct ClientAddress(pub String);
 
 impl FromRequestParts<AppState> for ClientAddress {
@@ -420,15 +426,21 @@ impl FromRequestParts<AppState> for ClientAddress {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let forwarded = if state.site.trust_forwarded_for {
-            parts
+            let entries: Vec<&str> = parts
                 .headers
                 .get_all("x-forwarded-for")
                 .iter()
                 .filter_map(|v| v.to_str().ok())
                 .flat_map(|v| v.split(','))
                 .map(str::trim)
-                .rfind(|v| !v.is_empty())
-                .map(str::to_owned)
+                .filter(|v| !v.is_empty())
+                .collect();
+            let hops = usize::try_from(state.site.forwarded_hops.max(1)).unwrap_or(1);
+            entries
+                .len()
+                .checked_sub(hops)
+                .map_or(entries.first(), |i| entries.get(i))
+                .map(|v| (*v).to_owned())
         } else {
             None
         };

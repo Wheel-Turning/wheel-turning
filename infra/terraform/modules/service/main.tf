@@ -11,6 +11,13 @@
 #
 # DNS for the domain lives at Cloudflare and is managed by hand: the certificate's validation
 # record and the app's CNAME are outputs to copy there.
+#
+# Edge (docs/adr-edge-cost.md): Cloudflare proxies the app's hostnames and is the only way in.
+# With `cloudflare_only`, the HTTPS listener forwards only requests carrying the origin header,
+# which a Cloudflare transform rule adds, and answers anything else with a 403; the security
+# group admits only Cloudflare's ranges (envs/v1). Without `alb_public_ipv4` the load balancer has
+# no public IPv4 address and Cloudflare reaches it over IPv6. Cloudflare's managed rules and rate
+# rule replace the AWS WAF web ACL that Spec 11 PB3.6 first specified.
 
 variable "name" {
   type = string
@@ -112,6 +119,24 @@ variable "maintenance" {
   description = "When true, the load balancer answers every path with the fixed maintenance page and nothing reaches the web task (Spec 11, PB4.4). The task keeps running."
   type        = bool
   default     = false
+}
+
+variable "cloudflare_only" {
+  description = "Forward only requests carrying the Cloudflare origin header; answer the rest with a 403."
+  type        = bool
+  default     = false
+}
+
+variable "alb_public_ipv4" {
+  description = "Give the load balancer public IPv4 addresses. False is dualstack-without-public-ipv4: reachable over IPv6 only, so only behind Cloudflare."
+  type        = bool
+  default     = true
+}
+
+variable "forwarded_hops" {
+  description = "WT_FORWARDED_HOPS: proxies that append to X-Forwarded-For. 1 for the load balancer alone, 2 with Cloudflare in front."
+  type        = number
+  default     = 1
 }
 
 variable "health_check_grace_seconds" {
@@ -316,8 +341,10 @@ resource "aws_ecs_task_definition" "web" {
         { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
         { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
         { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
-        # The load balancer is the only way in, so its X-Forwarded-For names the client.
+        # The load balancer is the only way in, so X-Forwarded-For names the client: the entry
+        # forwarded_hops from the end (the load balancer's, or Cloudflare's in front of it).
         { name = "WT_TRUST_FORWARDED_FOR", value = "true" },
+        { name = "WT_FORWARDED_HOPS", value = tostring(var.forwarded_hops) },
         # Removal requests are confirmed by an emailed link (Spec 08).
         { name = "WT_MAIL_FROM", value = var.mail_from },
         { name = "WT_PUBLIC_URL", value = "https://${var.domain_name}" },
@@ -537,6 +564,7 @@ resource "aws_lb" "this" {
   name                       = var.name
   load_balancer_type         = "application"
   internal                   = false
+  ip_address_type            = var.alb_public_ipv4 ? "dualstack" : "dualstack-without-public-ipv4"
   subnets                    = var.public_subnet_ids
   security_groups            = [var.security_group_ids["alb"]]
   drop_invalid_header_fields = true
@@ -580,6 +608,42 @@ resource "aws_acm_certificate_validation" "this" {
   }
 }
 
+# The header Cloudflare adds to every request it sends here (a transform rule, set by hand from
+# the `cloudflare_origin_header` output). It sits in state and in the listener rule; it proves a
+# request came through this zone's Cloudflare, not who sent it.
+resource "random_password" "origin_header" {
+  length  = 40
+  special = false
+}
+
+locals {
+  origin_header_name = "X-WT-Origin"
+
+  # What a request that reached the site gets: the web task, or the maintenance page.
+  site_action = var.maintenance ? {
+    type             = "fixed-response"
+    target_group_arn = null
+    status_code      = "503"
+    message_body     = local.maintenance_page
+    } : {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+    status_code      = null
+    message_body     = null
+  }
+
+  refused_page = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Wheel Turning</title></head><body><p>Please use https://${var.domain_name}.</p></body></html>"
+
+  # Without `cloudflare_only` the default action is the site; with it, a 403, and only the rule
+  # below, which needs the origin header, reaches the site.
+  default_action = var.cloudflare_only ? {
+    type             = "fixed-response"
+    target_group_arn = null
+    status_code      = "403"
+    message_body     = local.refused_page
+  } : local.site_action
+}
+
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
   port              = 443
@@ -590,15 +654,43 @@ resource "aws_lb_listener" "https" {
   # `maintenance` swaps the forward for a fixed 503 page on every path, /healthz included, so the
   # health check alarms say the site is down while it is (runbook 13).
   default_action {
-    type             = var.maintenance ? "fixed-response" : "forward"
-    target_group_arn = var.maintenance ? null : aws_lb_target_group.web.arn
+    type             = local.default_action.type
+    target_group_arn = local.default_action.target_group_arn
 
     dynamic "fixed_response" {
-      for_each = var.maintenance ? [1] : []
+      for_each = local.default_action.type == "fixed-response" ? [1] : []
       content {
         content_type = "text/html"
-        status_code  = "503"
-        message_body = local.maintenance_page
+        status_code  = local.default_action.status_code
+        message_body = local.default_action.message_body
+      }
+    }
+  }
+}
+
+# Exists before `cloudflare_only` is set, so turning it on changes only the default action and no
+# request through Cloudflare is ever refused in between.
+resource "aws_lb_listener_rule" "from_cloudflare" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 10
+
+  condition {
+    http_header {
+      http_header_name = local.origin_header_name
+      values           = [random_password.origin_header.result]
+    }
+  }
+
+  action {
+    type             = local.site_action.type
+    target_group_arn = local.site_action.target_group_arn
+
+    dynamic "fixed_response" {
+      for_each = local.site_action.type == "fixed-response" ? [1] : []
+      content {
+        content_type = "text/html"
+        status_code  = local.site_action.status_code
+        message_body = local.site_action.message_body
       }
     }
   }
@@ -690,6 +782,15 @@ output "alb_arn_suffix" {
 
 output "target_group_arn_suffix" {
   value = aws_lb_target_group.web.arn_suffix
+}
+
+output "cloudflare_origin_header" {
+  description = "The request header a Cloudflare transform rule sets on the app's hostnames (runbook, edge cutover)."
+  sensitive   = true
+  value = {
+    name  = local.origin_header_name
+    value = random_password.origin_header.result
+  }
 }
 
 output "certificate_validation_records" {

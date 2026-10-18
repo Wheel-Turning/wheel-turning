@@ -38,6 +38,19 @@ locals {
 module "network" {
   source = "../../modules/network"
   name   = local.name
+
+  # Behind Cloudflare only its ranges reach the load balancer, over HTTPS; Cloudflare redirects
+  # HTTP itself (docs/adr-edge-cost.md). IPv4 ranges matter only while the load balancer has
+  # public IPv4 addresses.
+  alb_ingress = var.cloudflare_only ? {
+    ipv4  = var.alb_public_ipv4 ? var.cloudflare_ranges.ipv4 : []
+    ipv6  = var.cloudflare_ranges.ipv6
+    ports = [443]
+    } : {
+    ipv4  = ["0.0.0.0/0"]
+    ipv6  = ["::/0"]
+    ports = [443, 80]
+  }
 }
 
 module "storage" {
@@ -107,7 +120,10 @@ module "service" {
   mail_from              = var.mail_from
   alert_topic_arn        = module.observability.alarm_topic_arn
   maintenance            = var.maintenance
-  waf_block              = var.waf_block
+  cloudflare_only        = var.cloudflare_only
+  alb_public_ipv4        = var.alb_public_ipv4
+  # Cloudflare appends the client and the load balancer appends Cloudflare's edge.
+  forwarded_hops = var.cloudflare_only ? 2 : 1
 
   llm = {
     model           = var.llm_model

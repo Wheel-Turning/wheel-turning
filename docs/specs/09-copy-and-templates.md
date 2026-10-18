@@ -56,6 +56,8 @@ Then the switch and the button Delete all my questions now. Under them: You can 
 
 Your question, and the excerpts found for it, are sent to a language model provider to check the question for sensitive topics, to check which excerpts fit it and where to cut them, and to write the summary. Under its current terms, the provider does not train on what it receives and deletes it after no more than 30 days. It may keep a request longer if it flags it for a misuse review. The provider can change, and this page will say so if its terms do. The provider is not named, since it can change (Spec 11, open question 7). \[The owner confirms the provider's current terms before each launch.\]
 
+The site reaches you through Cloudflare, which protects it from abuse. Like any web host, Cloudflare receives each request, your questions included, and your IP address, so that it can deliver the page. It handles them under its own privacy policy (linked). We do not use Cloudflare to identify you. (Owner's decision of October 17, 2026, with the edge change in `docs/adr-edge-cost.md`.)
+
 Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student". To make that edit, the student's question is sent to the same provider under the same terms, and only the edited text is kept.
 
 For any other privacy request, such as asking what we hold about you, write to hello@wheelturning.org.
