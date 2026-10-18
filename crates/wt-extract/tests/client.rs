@@ -87,6 +87,7 @@ fn prices() -> PriceTable {
                 output_per_mtok: 5.0,
                 sampling: true,
                 max_prompt_tokens: None,
+                thinking_off: false,
             },
             ModelPrice {
                 id: "claude-sonnet-5-5".into(),
@@ -94,6 +95,7 @@ fn prices() -> PriceTable {
                 output_per_mtok: 10.0,
                 sampling: false,
                 max_prompt_tokens: None,
+                thinking_off: false,
             },
             ModelPrice {
                 id: "claude-haiku-5-5".into(),
@@ -101,6 +103,7 @@ fn prices() -> PriceTable {
                 output_per_mtok: 0.50,
                 sampling: false,
                 max_prompt_tokens: Some(100_000),
+                thinking_off: true,
             },
         ],
     }
@@ -190,6 +193,7 @@ async fn requests_use_structured_outputs_and_temperature_only_where_accepted() {
         sonnet.get("temperature").is_none(),
         "Sonnet 5.5 rejects sampling settings"
     );
+    assert!(haiku.get("thinking").is_none() && sonnet.get("thinking").is_none());
     for b in [&haiku, &sonnet] {
         assert!(b.get("tool_choice").is_none() && b.get("tools").is_none());
         let schema = &b["output_config"]["format"];
@@ -223,7 +227,8 @@ async fn a_prompt_over_the_priced_limit_is_counted_and_refused() {
     });
     let c = client(&server, ledger.clone(), Arc::new(Alerts::default()), false);
 
-    // A short prompt goes straight to the API, at Haiku 5.5's price and without temperature.
+    // A short prompt goes straight to the API, at Haiku 5.5's price, without temperature and
+    // with thinking turned off.
     let _: Label = complete_json(&c, &req(LlmStage::Rank), DataClass::Synthetic)
         .await
         .unwrap();
@@ -231,6 +236,7 @@ async fn a_prompt_over_the_priced_limit_is_counted_and_refused() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].url.path(), "/v1/messages");
     assert!(body(&seen[0]).get("temperature").is_none());
+    assert_eq!(body(&seen[0])["thinking"]["type"], "disabled");
     let rows = ledger.rows.lock().unwrap().clone();
     assert!((rows[0].4 - 0.00015).abs() < 1e-12, "{}", rows[0].4);
 

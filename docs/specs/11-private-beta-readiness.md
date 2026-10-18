@@ -210,10 +210,24 @@ User stories:
 
 5. **Record the result.** The chosen model per stage goes into the Terraform variables and Spec 01, with the eval run ids and the measured cost per question.
 
+**First comparison (October 18, 2026, image `main-36648bfe31f7`).** Each run is `wt eval run --set practitioner@2 --rank-scores` on the `wt-v1-eval` task, one stage switched to Haiku 5.5 by its key. Triage is scored with `wt eval gate --file eval/gate_questions_v1.toml`, since `wt eval run` asks without the gate. Cost is the sum of the run's logged `est_cost_usd` by stage, over 50 questions.
+
+| Run | Run id | Result |
+| --- | --- | --- |
+| Baseline 1, all Haiku 4.5 | `6dab5a3c` | 1,233 candidates judged 7+ of 2,937; 39 summaries shown; $0.0495 a question |
+| Baseline 2, all Haiku 4.5 | `bb8e6450` | 1,238 judged 7+; same top 10 quality (judge mean 8.90 against 8.91); $0.0478 a question |
+| Ranking on 5.5 | `4c98980a` | 28 of 50 questions' ranking replies cut off at `max_tokens`, so fused order served. On the 22 ranked, 314 judged 7+ against 4.5's 522 on the same candidates (60%) |
+| Excerpts on 5.5 | `1da07ef6` | 319 of 430 excerpt calls cut off at `max_tokens` |
+| Summary on 5.5 | `20630b20` | 45 of 50 summaries cut off at `max_tokens` (`model_error`); 1 shown, against 39 and 43 |
+| Verifier on 5.5 | stopped | Stopped once the cause below was clear |
+| Triage on 5.5, gate set | two runs | The gate degraded on 22 and 21 of 51 questions (cut off at 128 tokens) and missed 4 and 5 notice pages, 2 and 3 of the 6 acute. On 4.5, 51 of 51 routed right in both runs |
+
+No stage passes, all for one cause: Claude Haiku 5.5 thinks by default (effort medium), its thinking tokens count against `max_tokens`, and every stage's budget is sized for Haiku 4.5, which does not think unless asked. The price table's `thinking_off` now sends `thinking: {type: "disabled"}` to it, which the API accepts at effort high or below. Every stage stays on Haiku 4.5 until the comparison is rerun on an image with that change; the per-stage keys stay empty. The summary, verifier and excerpt rules also need the owner's blind pairs, claim audit and 30 excerpts, which the rerun's `wt eval export-review` pages are for.
+
 **Acceptance.**
-- [ ] The eval runs and comparisons for each stage are recorded in the PR.
-- [ ] Each stage's model is set by its own key, and a test shows the fallback to `WT_LLM_MODEL`.
-- [ ] Mean model cost per question on the 50-question set is reported before and after.
+- [ ] The eval runs and comparisons for each stage are recorded in the PR. (First round recorded above; the rerun with `thinking_off` is still to do.)
+- [x] Each stage's model is set by its own key, and a test shows the fallback to `WT_LLM_MODEL`. (`wt-core` `config::tests::stage_models_fall_back_to_the_default_and_fail_when_neither_is_set`.)
+- [ ] Mean model cost per question on the 50-question set is reported before and after. (Before: $0.0495 and $0.0478 over the four answer stages, in `docs/cost.md`. After waits for the rerun.)
 
 ### PB2.1 The relevance check is live (B1 cause 4, B10)
 
