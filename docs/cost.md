@@ -84,9 +84,9 @@ The passage heap is what tips the balance: the vector index and the full-text in
 | Option | Per month | Notes |
 | --- | --- | --- |
 | `db.t4g.medium` on demand (before) | $47.45 + $2.30 storage = **$49.75** | Matches the measured $49.85. Everything in memory with about 2 GB to spare |
-| **`db.t4g.small` on demand (this change)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month. Searches read about 1 MB a question from disk, about 0.1 to 0.15 s |
-| `db.t4g.medium`, 1-year Reserved Instance, no upfront | $34.31 + $2.30 = **$36.61** | $0.047 an hour. Saves $13.14 a month and keeps everything in memory. A purchase, for the owner to decide |
-| `db.t4g.small`, 1-year Reserved Instance, no upfront | $16.79 + $2.30 = **$19.09** | $0.023 an hour, $201 over the year. A purchase, for the owner to decide. Buy only after two weeks on the small instance without a slow-answers alarm. RDS reservations are size-flexible within the family, so the reservation would still cover half of a `db.t4g.medium` if the database goes back |
+| **`db.t4g.small` on demand (chosen by the owner, October 17, 2026)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month. Searches read about 1 MB a question from disk, about 0.1 to 0.15 s |
+| `db.t4g.medium`, 1-year Reserved Instance, no upfront | $34.31 + $2.30 = **$36.61** | Considered, not taken. $0.047 an hour. It would have saved $13.14 a month and kept everything in memory; the owner took the small instance's larger saving and its 0.1 to 0.15 s instead |
+| `db.t4g.small`, 1-year Reserved Instance, no upfront | $16.79 + $2.30 = **$19.09** | Not bought. $0.023 an hour, $201 over the year, a later purchase for the owner to decide. Worth it only after two weeks on the small instance without a slow-answers alarm. RDS reservations are size-flexible within the family, so the reservation would still cover half of a `db.t4g.medium` if the database goes back |
 | `db.t4g.micro` | $11.68 + $2.30 | 1 GB. It was the beta's first size: FreeableMemory sat under 200 MB and swap grew |
 | Less storage or fewer backup days | under $1 | 20 GB is the gp3 minimum for RDS Postgres, and its 3,000 IOPS are included. Backup storage beyond the free 20 GB came to $0.009 to $0.018 a day after the October 13 to 16 loads, and it ages out with the 7-day window |
 | A smaller vector index (binary or fewer dimensions) | not measured | It would not help: the heap, not the vector index, is what does not fit |
