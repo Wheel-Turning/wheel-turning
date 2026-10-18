@@ -77,6 +77,8 @@ button.link { background: none; border: none; color: var(--ink); text-decoration
 .small { font-size: 0.9rem; }
 .error { color: var(--error); font-weight: 600; }
 .examples { padding-left: 1.25rem; }
+.steps { padding-left: 1.5rem; font-size: 1.125rem; }
+.steps li { margin-bottom: 0.5rem; }
 .result { font-weight: 600; }
 .themes ul { padding-left: 1.25rem; }
 .themes li { margin: 0.4rem 0; }

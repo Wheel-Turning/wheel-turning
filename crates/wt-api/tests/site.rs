@@ -603,6 +603,7 @@ async fn every_page_shares_the_structure_and_has_a_unique_title() {
             .contains("<dfn>Dana</dfn> is the Sanskrit and Pali word for generosity.")
     );
     assert!(about.body.contains("class=\"summary\""));
+    assert!(about.body.contains("<h2 id=\"why\">Why this exists</h2>"));
     assert!(about.body.contains("aria-current=\"page\">About</a>"));
     assert!(
         about

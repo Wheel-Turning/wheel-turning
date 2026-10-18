@@ -1,5 +1,19 @@
 **Summary.** Wheel Turning helps you find what Zen teachers and foundational texts have said about the questions that come up in practice. Every answer is made of short excerpts, each with its source, and the site writes none of the excerpts itself.
 
+**Why this exists.** (anchor `why`) Written in the owner's voice and signed with the owner's name. I built Wheel Turning because I wanted to learn from Soto Zen teachers in the United States, and I could not find what I was looking for.
+
+The talks were spread across many sangha websites, each in its own format. When I found a talk on my topic, I often could not tell if it spoke to the part I cared about. To know, I had to listen for 30 minutes or more. That time is never wasted. But it does not always answer the question in front of you.
+
+I came to see that others have the same problem. Students want to learn. Teachers, as they prepare their own talks, want to know what others have said. Tens of thousands of talks exist outside of published books, and almost none of them can be searched.
+
+So I built a place where these talks can be found. Here you can find a talk, the part of it that speaks to your question, and the teacher and sangha who offered it. You can give dana to that sangha on its own giving page, so the teaching can keep being offered.
+
+A talk that shares the Dharma, the Buddha's teaching, is said to turn the wheel of the Dharma. That is where the name comes from. I hope this site helps these talks reach further, so that all beings can find the insight that carries them to the other shore. The other shore is an old Buddhist image for awakening.
+
+To teachers and sanghas whose talks are here: thank you. This site exists only because of your teaching, and it works best with your blessing. You can tell us how you want your talks used, or have them removed, on the rights page. Rights and removal
+
+\[Owner's name\]
+
 **What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows the closest matches first, each under its teacher's name, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
 
 **How answers are chosen.** Excerpts are ranked by how well they match your question and by nothing else. Who gave the talk, which sangha it came from, and whether a sangha has a giving page do not change the order. A sangha is a community that practices together. When an answer opens with a summary, a language model writes it from the excerpts below it, and each sentence is checked against the excerpts it cites before you see it. Each number in the summary leads to the exact words it rests on, and the excerpts themselves are always shown in full.
