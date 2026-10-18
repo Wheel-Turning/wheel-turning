@@ -30,7 +30,7 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 
 | Service | What | Measured per month | Expected per month |
 | --- | --- | --- | --- |
-| ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on; the nightly audit and occasional migrate and eval tasks | $86.94 | $87 |
+| ECS Fargate | One web task, 1 vCPU and 3 GB, x86, always on (2 vCPU and 8 GB until October 17, 2026); the nightly audit and occasional migrate and eval tasks | $86.94 | $41 |
 | RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups | $49.85 | $50 |
 | Elastic Load Balancing | One application load balancer and its capacity units at beta traffic | $16.48 | $17 |
 | VPC | Public IPv4 addresses: two on the load balancer, one on the web task (there is no NAT gateway) | $11.42 | $11 |
@@ -40,7 +40,9 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
 | AWS WAF | One web ACL, its managed rule groups and the rate rule (PB3.6), plus $0.60 per million requests | not yet billed | $9 |
 | GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
-| **Total** | | **$170.70** | **about $186** |
+| **Total** | | **$170.70** | **about $140** |
+
+The web task's size (October 17, 2026): with `[ranking] ranker = "model"` the task loads only the int8 embedder, so 2 vCPU and 8 GB were mostly idle. CloudWatch's `AWS/ECS` metrics for `wt-v1-web` (Container Insights is off) show it. From October 13 to the morning of October 15, with the cross-encoder's four sessions loaded, memory sat at 44 to 46% of 8 GB, about 3.7 GB. From the switch to the model ranker to October 17, 1-minute maxima give memory p50 10.72%, p99 10.79% and a maximum of 10.80% of 8 GB, about 0.88 GB, and CPU p99 0.08% with a maximum of 28% of 2 vCPU, at a deploy's start. That window held only 11 questions, whose `embed_ms` was at most 72. Under load, the embedder is the task's one CPU-heavy stage. One question's embedding, one text per run as `wt-ml` does it, takes 49 ms at the median and 118 ms at the 95th percentile on 2 vCPU, against 54 and 77 ms on 1 vCPU and 118 and 216 ms on 0.5 vCPU (the 50 practitioner questions in a capped x86 container, about 1.2 GB resident there). That is a small part of the 5-second page, so 1 vCPU keeps the page target, and 3 GB is more than three times the measured use. At us-east-2 list prices ($0.04048 per vCPU-hour, $0.004445 per GB-hour, 730 hours) the task costs $39.28 a month, against $85.06. Switching `ranker` to `"onnx"` loads `rerank_sessions` copies of the cross-encoder as well and needs 2 vCPU and 8 GB again. Graviton would cut another fifth ($31.43), but on arm64 the int8 embedder's vectors move away from x86's. Over the 50 questions the cosine was 0.985 at worst and 0.993 on average, and only 14 of 50 questions kept the same five nearest neighbours (ORT 1.22 under emulation). The passages were embedded on x86, and that is the size of drift the decision of October 9, 2026 refused for batching, so the task stays x86.
 
 October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once WAF and GuardDuty have a full week.
 
