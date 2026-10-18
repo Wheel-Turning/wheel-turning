@@ -30,31 +30,101 @@ What runs whether or not anyone asks a question. "Measured" is Cost Explorer's d
 
 | Service | What | Measured per month | Expected per month |
 | --- | --- | --- | --- |
-| ECS Fargate | One web task, 2 vCPU and 8 GB, x86, always on; the nightly audit and occasional migrate and eval tasks | $86.94 | $87 |
-| RDS | `db.t4g.medium`, single zone, 20 GB of storage, 7 days of backups | $49.85 | $50 |
+| ECS Fargate | One web task, 1 vCPU and 3 GB, x86, always on (2 vCPU and 8 GB until October 17, 2026); the nightly audit and occasional migrate and eval tasks | $86.94 | $41 |
+| RDS | `db.t4g.small` since October 17, 2026 (was `db.t4g.medium`, which the measured figure is), single zone, 20 GB of gp3, 7 days of backups. See "Database size" below | $49.85 | $26 |
 | Elastic Load Balancing | One application load balancer and its capacity units at beta traffic, behind Cloudflare from the edge cutover | $16.48 | $17 |
 | VPC | Public IPv4 addresses: one on the web task (there is no NAT gateway). The load balancer's two go at the edge cutover, when it becomes IPv6-only behind Cloudflare | $11.42 | $4 |
-| Secrets Manager | The project's secrets at $0.40 each | $2.78 | $3 |
-| KMS | Keys behind the secrets and the database | $1.90 | $2 |
+| Secrets Manager | The project's secrets at $0.40 each: seven today (six `wt-v1/` and RDS's master secret), nine once `db_wt_analyst_login` and `db_wt_audit_login` are applied | $2.78 | $3.60 |
+| KMS | Not the secrets or the database, which use the free AWS-managed keys: the IAM Identity Center customer-managed multi-region key and its us-west-2 replica, $1 each (see below) | $1.90 | $2 |
 | Route 53 | The health check | $0.98 | $1 |
 | S3, ECR, SES, SNS, CloudTrail, CloudWatch | Buckets, images, removal emails, alerts, the one free trail, logs and alarms | $0.35 | $3, once PB4.3's alarms and their logs add up |
 | AWS WAF | Removed at the edge cutover: Cloudflare's free managed rules and rate rule replace it (PB3.6, `docs/adr-edge-cost.md`) | not yet billed | $0 |
 | GuardDuty and IAM Access Analyzer | Account-level detection (PB3.6) | not yet billed | $3 |
-| **Total** | | **$170.70** | **about $170** |
+| **Total** | | **$170.70** | **about $100** |
+
+The web task's size (October 17, 2026): with `[ranking] ranker = "model"` the task loads only the int8 embedder, so 2 vCPU and 8 GB were mostly idle. CloudWatch's `AWS/ECS` metrics for `wt-v1-web` (Container Insights is off) show it. From October 13 to the morning of October 15, with the cross-encoder's four sessions loaded, memory sat at 44 to 46% of 8 GB, about 3.7 GB. From the switch to the model ranker to October 17, 1-minute maxima give memory p50 10.72%, p99 10.79% and a maximum of 10.80% of 8 GB, about 0.88 GB, and CPU p99 0.08% with a maximum of 28% of 2 vCPU, at a deploy's start. That window held only 11 questions, whose `embed_ms` was at most 72. Under load, the embedder is the task's one CPU-heavy stage. One question's embedding, one text per run as `wt-ml` does it, takes 49 ms at the median and 118 ms at the 95th percentile on 2 vCPU, against 54 and 77 ms on 1 vCPU and 118 and 216 ms on 0.5 vCPU (the 50 practitioner questions in a capped x86 container, about 1.2 GB resident there). That is a small part of the 5-second page, so 1 vCPU keeps the page target, and 3 GB is more than three times the measured use. At us-east-2 list prices ($0.04048 per vCPU-hour, $0.004445 per GB-hour, 730 hours) the task costs $39.28 a month, against $85.06. Switching `ranker` to `"onnx"` loads `rerank_sessions` copies of the cross-encoder as well and needs 2 vCPU and 8 GB again. Graviton would cut another fifth ($31.43), but on arm64 the int8 embedder's vectors move away from x86's. Over the 50 questions the cosine was 0.985 at worst and 0.993 on average, and only 14 of 50 questions kept the same five nearest neighbours (ORT 1.22 under emulation). The passages were embedded on x86, and that is the size of drift the decision of October 9, 2026 refused for batching, so the task stays x86.
 
 October 14 also carried $3.27 of EC2 for the batch host's toggle test, which is not a fixed cost and is left out. Domain and DNS are at Cloudflare and are not in this bill. Read the table again from Cost Explorer (Billing and Cost Management, Cost Explorer, grouped by Service, daily) once GuardDuty has a full week and a week after the edge cutover. The edge change (October 17, 2026) takes about $16 off the expected column: $7.30 for the load balancer's two addresses and about $8.35 of WAF. The totals table below still uses $186 until the other October 17 cost changes land with it.
 
+### Database size
+
+Measured on October 17, 2026. Searches were timed on a copy of the PC database restored at RDS's migration level, with 143,223 servable passages, the same count as RDS. The live instance's memory comes from CloudWatch.
+
+**The live instance.** CloudWatch hourly figures, October 4 to 17:
+
+| Period | Class | FreeableMemory | ReadIOPS, mean | Other |
+| --- | --- | --- | --- | --- |
+| October 6 to 12 | `db.t4g.micro` (1 GB) | 150 to 200 MB | 0.4 to 0.5 | Swap grew to 29 MB |
+| October 16 and 17 | `db.t4g.medium` (4 GB) | 2.04 to 2.06 GB, steady | 0.27 | CPU mean 4%, peak 19%. At most 14 connections. CPU credits full (576), none charged. Swap holds 22 MB left from the micro days |
+
+The resize to medium was on October 13. October 13 to 15 carried the load, the catch-up and migration 0043's index build: ReadIOPS peaked at 1,350, CPU at 99%, and FreeableMemory fell to 1.0 GB. ReadIOPS near zero on medium means every search is served from memory. What the instance itself uses (memory minus FreeableMemory minus shared buffers) was about 0.6 GB on the micro and 1.1 GB on the medium. That puts it at about 0.7 to 0.8 GB on a small, which leaves Postgres about 1.25 to 1.35 GB, buffers included.
+
+**What searches read.**
+
+| | Size |
+| --- | --- |
+| Half-precision vector index `passage_embedding_half_hnsw` (migration 0043) | 375 MB (RDS: 372 MB) |
+| Passage heap, which full-text ranking reads for every match | 231 MB |
+| Full-text index `passage_tsv_gin` | 25 MB |
+| Whole database | 1.7 GB |
+
+**Benchmark.** Each pass was 242 searches, using the student questions' embeddings and text. They ran the way `wt-retrieve` runs them: vector search at `ef_search` 1000, full-text search without common lexemes, then the candidate fetch. Each container was held to the memory shown and started with an empty cache. The second pass shows steady state.
+
+| Postgres memory (shared buffers) | Like | Vector p50 / p95 | Full-text p50 / p95 | Read from disk, second pass |
+| --- | --- | --- | --- | --- |
+| 3.6 GB (960 MB) | `db.t4g.medium` | 61 / 66 ms | 297 / 1,942 ms | 0 MB |
+| 1.6 GB (450 MB) | | 72 / 79 ms | 310 / 2,011 ms | 0 MB |
+| 1.45 GB (450 MB) | | 79 / 87 ms | 302 / 2,032 ms | 314 MB |
+| 1.35 GB (450 MB) | `db.t4g.small`, by the estimate above | 78 / 88 ms | 305 / 2,004 ms | 229 MB |
+| 1.25 GB (450 MB) | | 79 / 89 ms | 311 / 2,049 ms | 243 MB |
+| 1.1 GB (300 MB) | | 88 / 97 ms | 332 / 2,026 ms | 317 MB |
+
+Everything searches read stays in memory only from about 1.5 GB of Postgres memory up. Below that, about 1 MB a question comes from disk, whatever the size. Full-text ranking reads the whole passage heap on most questions, so once it does not fit, each question pushes out pages the next one needs. On the small instance, then, expect about 130 reads of 8 KB per question from gp3. At gp3's latency of about 1 ms that is roughly 0.1 to 0.15 s a question, against the 0.6 s between Spec 10's measured 4.4 s page p95 and its 5 s limit. The laptop disk hides this cost, so the timings above do not show it. Full-text time itself is CPU-bound, and the CPU is the same on both classes: 2 vCPUs at the same credit rate. Raising shared buffers makes the small instance worse: with 960 MB of buffers in 2 GB, a pass ran for over 30 minutes without finishing, against 2.5 minutes with the default.
+
+The passage heap is what tips the balance: the vector index and the full-text index alone are 400 MB. A full-text search that ranked without reading every matching row would fit the small instance with room to grow, and would also cut the full-text p95 of about 2 s. That is a Spec 05 change, not a sizing one.
+
+| Option | Per month | Notes |
+| --- | --- | --- |
+| `db.t4g.medium` on demand (before) | $47.45 + $2.30 storage = **$49.75** | Matches the measured $49.85. Everything in memory with about 2 GB to spare |
+| **`db.t4g.small` on demand (chosen by the owner, October 17, 2026)** | $23.36 + $2.30 = **$25.66** | $0.032 an hour. Saves $24.09 a month. Searches read about 1 MB a question from disk, about 0.1 to 0.15 s |
+| `db.t4g.medium`, 1-year Reserved Instance, no upfront | $34.31 + $2.30 = **$36.61** | Considered, not taken. $0.047 an hour. It would have saved $13.14 a month and kept everything in memory; the owner took the small instance's larger saving and its 0.1 to 0.15 s instead |
+| `db.t4g.small`, 1-year Reserved Instance, no upfront | $16.79 + $2.30 = **$19.09** | Not bought. $0.023 an hour, $201 over the year, a later purchase for the owner to decide. Worth it only after two weeks on the small instance without a slow-answers alarm. RDS reservations are size-flexible within the family, so the reservation would still cover half of a `db.t4g.medium` if the database goes back |
+| `db.t4g.micro` | $11.68 + $2.30 | 1 GB. It was the beta's first size: FreeableMemory sat under 200 MB and swap grew |
+| Less storage or fewer backup days | under $1 | 20 GB is the gp3 minimum for RDS Postgres, and its 3,000 IOPS are included. Backup storage beyond the free 20 GB came to $0.009 to $0.018 a day after the October 13 to 16 loads, and it ages out with the 7-day window |
+| A smaller vector index (binary or fewer dimensions) | not measured | It would not help: the heap, not the vector index, is what does not fit |
+
+Prices are us-east-2 list prices for single-zone PostgreSQL over 730 hours, October 2026.
+
+**After the change.** The resize restarts the database: a few minutes without it, and the cache starts empty. Afterwards, restart the web service so its warm-up searches run (`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). For the next two weeks, watch the database's ReadIOPS during questions (expect a few hundred reads a question; sustained ReadIOPS while nobody is asking means something else is wrong) and the `wt-v1-slow-answers` alarm. Compare the page p95 in `wt report beta` with the 4.4 s on medium. Go back if the page p95 passes 4.8 s, or when servable passages grow by a fifth (about 170,000), since each one adds to the heap that full-text ranking reads. **Rollback:** set `db_instance_class` back to `db.t4g.medium` and apply. That is another restart of a few minutes.
+
+### Small line items and idle resources (October 17, 2026)
+
+A read-only scan of the account on October 17, 2026, for the small fixed lines and for anything billing while unused. Cost Explorer has charges in us-east-2, us-west-2 (the KMS replica only), us-east-1 (cents) and global (the Route 53 health check), and nothing for September. The October total to the 16th was $39.93, with October 14 to 16 at $5.57 to $5.76 a day.
+
+**Nothing idle was found.** In us-east-2, us-west-2 and us-east-1: no EC2 instances (the batch host is destroyed), no EBS volumes or snapshots, no AMIs, no RDS manual snapshots, no NAT gateway or interface endpoints, and no unattached Elastic IPs (both are the load balancer's). The ECR repository holds 11 images (0.46 GB) under its keep-20 rule, every log group keeps 30 days, the models bucket has no old versions and no bucket has an unfinished multipart upload. Earlier October lines that have stopped: the alpha's `db.t4g.micro` ($4.15) and the batch host's `t3.small` and its EBS volume ($0.29).
+
+| Item | Cost a month | Decision |
+| --- | --- | --- |
+| IAM Identity Center customer-managed key `mrk-a21c...` in us-east-2 and its replica in us-west-2, from Identity Center's second region (us-west-2) | $2.00 | **Owner, in the console:** if a second Identity Center region is not needed, remove us-west-2 from Identity Center, switch its encryption to the AWS-owned key, then schedule deletion of the replica and the primary key. This changes a security setting, so it is not in Terraform and was not done here |
+| Secrets Manager: six project secrets and RDS's master secret, two more pending | $2.80 to $3.60 | Kept (owner, October 17): Specs 00, 01 and 02 name Secrets Manager. Moving the project secrets to SSM Parameter Store SecureString would save about $3.20 |
+| `wt-v1/youtube_api_key`, never read: only the batch host's role may read it | $0.40 | Kept: the batch host needs it when YouTube ingestion runs |
+| IAM Access Analyzer `wt-unused-access`: 25 roles and 1 user | about $5.20 after the 30-day trial, at the top of the $2 to $5 range above | Kept (owner, October 17): PB3.6 requires it |
+| CloudWatch: 14 alarms and 9 custom metrics | about $0.40 | Inside the free 10 alarms and 10 metrics, apart from 4 alarms |
+| ECR, 0.46 GB | under $0.05 | Lifecycle rule already in place |
+
+**Changed in Terraform.** `modules/storage` gains lifecycle rules: replaced versions in the models bucket expire after 30 days, keeping the last two, and the transcripts and models buckets abort multipart uploads left after 7 days. Neither saves anything today, since the models bucket has no old versions and neither bucket has a stale upload. They stop a model re-upload (1.2 GB a copy, $0.03 a month each) or a failed transcript upload from billing indefinitely.
+
 ### Totals by daily questions
 
-A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.medium` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $50 more), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
+A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.small` are not enough: the model assumes a second web task ($85, which UB3.3's two zones need anyway) and a `db.t4g.large` (about $70 more than the small), so the fixed cost becomes about $320. Load balancer, WAF request and log charges grow with traffic but stay a few dollars at these volumes.
 
 | Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 100 | 3,000 | $162 | $21 | $186 | **$348** | **$207** | $0.069 |
-| 1,000 | 30,000 | $1,620 | $210 | $186 | **$1,806** | **$396** | $0.013 |
+| 100 | 3,000 | $162 | $21 | $100 | **$262** | **$121** | $0.040 |
+| 1,000 | 30,000 | $1,620 | $210 | $100 | **$1,720** | **$310** | $0.010 |
 | 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
 
-Below about 1,000 questions a day the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 110 to about 900 questions a day.
+Below about 480 questions a day (after the switch) the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 60 to about 480 questions a day.
 
 ### Monthly ceiling and the actions at 80% and 100%
 

@@ -6,19 +6,34 @@ This tab holds the words the product and its letters use. Page copy goes in `cop
 
 File: `copy/home.md`.
 
-- Tagline: What have Zen teachers said about the question you are living with?
+- Heading: Find what Zen teachers have said about your question
+- Guide, under the heading How to use this site, as a numbered list: 1. Type a question about your practice or your life, in your own words. 2. Press Ask. 3. Read short parts of talks, called excerpts. Each one shows the teacher's name and where it comes from. Then the link: Why this site exists (to the About section Why this exists). The guide replaced the tagline on October 17, 2026, after the first private-beta testers, among them an older reader and a reader whose first language is not English, said they could not tell what the site does or how to use it. The tagline "What have Zen teachers said about the question you are living with?" stays on the holding site and the link preview image.
 - Question label: Your question
 - Help text under the box: Write it the way you would say it. For example: I keep judging myself during zazen.
 - Button: Ask
-- Line under the button: Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.
+- Line under the button: An answer takes a few seconds.
 - Privacy line, in `copy/privacy_line.md`, its one source: the footer, the home page and the invitation `wt tester invite` prints all read it, and a test fails if they differ (Spec 11, PB3.1). It states only what the system enforces: Unless you choose counts only, your questions are kept for 180 days with obvious personal details, such as email addresses and phone numbers, removed. Kept questions can be read at any time by the site code, the owner and approved team members. Questions are also sent to a language model provider to check them and to find and summarize excerpts. With counts only, the text of a question is deleted after 24 hours and only counts remain. You can delete all your questions at any time. Then the link: Read how this works
-- Example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
+- Examples, under the heading Examples and the line "Not sure what to ask? Press one of these.": example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
 
 ## About page
 
 File: `copy/about.md`. The page opens with a two-sentence summary, then short sections with these headings.
 
 **Summary.** Wheel Turning helps you find what Zen teachers and foundational texts have said about the questions that come up in practice. Every answer is made of short excerpts, each with its source, and the site writes none of the excerpts itself.
+
+**Why this exists.** (anchor `why`) Written in the owner's voice and signed with the owner's name. I built Wheel Turning because I wanted to learn from Soto Zen teachers in the United States, and I could not find what I was looking for.
+
+The talks were spread across many sangha websites, each in its own format. When I found a talk on my topic, I often could not tell if it spoke to the part I cared about. To know, I had to listen for 30 minutes or more. That time is never wasted. But it does not always answer the question in front of you.
+
+I came to see that others have the same problem. Students want to learn. Teachers, as they prepare their own talks, want to know what others have said. Tens of thousands of talks exist outside of published books, and almost none of them can be searched.
+
+So I built a place where these talks can be found. Here you can find a talk, the part of it that speaks to your question, and the teacher and sangha who offered it. You can give dana to that sangha on its own giving page, so the teaching can keep being offered.
+
+A talk that shares the Dharma, the Buddha's teaching, is said to turn the wheel of the Dharma. That is where the name comes from. I hope this site helps these talks reach further, so that all beings can find the insight that carries them to the other shore. The other shore is an old Buddhist image for awakening.
+
+To teachers and sanghas whose talks are here: thank you. This site exists only because of your teaching, and it works best with your blessing. You can tell us how you want your talks used, or have them removed, on the rights page. Rights and removal
+
+\[Owner's name\]
 
 **What this is.** You describe a question from your practice. The site finds excerpts from recorded talks and from texts such as the Platform Sutra and the Dhammapada. It shows the closest matches first, each under its teacher's name, so you can see how different teachers approach the same difficulty. It does not speak for any teacher.
 

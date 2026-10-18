@@ -10,7 +10,7 @@ Implements the web parts of M5 and M7: the Axum application in `wt-api`, server-
 | `GET /join/{token}` | None | Exchanges an invite token for a session cookie and redirects to `/` | This spec |
 | `GET /rights` | None | The Rights and removal page: the plain promise, the status of every source, and the removal form. An optional `?excerpt=<id>` prefills the form | Spec 08 |
 | `POST /rights/request` | None | Stores a removal or report request. Rate limited to 5 per hour per address, with a honeypot field | Spec 08 |
-| `GET /` | Session | Home: tagline, question box, the logging policy line and three example questions | This spec |
+| `GET /` | Session | Home: heading, a three-step guide, question box, the logging policy line and three example questions | This spec |
 | `POST /ask` | Session | Runs the query path, persists the answer, and responds `303` to `/a/{answer_id}` | Specs 05 and 06 |
 | `GET /a/{answer_id}` | Session, owner only | Answer page, re-rendered from the database | This spec, Specs 05 and 08 |
 | `POST /a/{answer_id}/dana` | Session, owner only | Returns the dana split fragment for the entered amounts and logs `split_computed` | Spec 05 |
@@ -178,7 +178,7 @@ Layout:
 5. Below 900px the right side holds a Menu button with a text label, never an icon alone. It opens a panel that slides in from the right, 85 percent of the screen wide up to 22rem, with a dimmed backdrop. The panel begins with the question field and then stacks the same three links in larger type, with a visible Close button at the top. It is built on a `<details>` element so it works without JavaScript, and a small script in `static/` adds Esc to close, a tap on the backdrop to close, and focus return to the Menu button.
 6. A "Skip to main content" link is the first focusable element on every page.
 7. The viewport tag is `width=device-width, initial-scale=1`. The page never disables zoom or sets a maximum scale.
-8. The home page opens with the tagline in the serif face, 2rem on phones and 2.75rem from 900px, then the question box (a textarea of at least 3 rows, full width) with an Ask button, then the logging policy line and three example questions as plain links. No images.
+8. The home page opens with its heading in the serif face, 2rem on phones and 2.75rem from 900px, then a numbered three-step guide headed How to use this site with a link to Why this exists on the About page (Spec 09), then the question box (a textarea of at least 3 rows, full width) with an Ask button, then the logging policy line and three example questions as plain links. No images.
 9. Every other section opens with an H2 in the serif face and a short paragraph. Vertical rhythm is 3rem between sections, with a thin rule between major ones.
 10. A list of dated items, such as the talks cited, shows the date small and muted above the linked title.
 11. The dana panel is a full-width band inside the container with a tinted background, a 3px top rule in the dana color, the heading "Dana" and a primary button "Show split". On phones the amount fields stack.

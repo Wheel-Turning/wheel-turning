@@ -1,7 +1,8 @@
-- Tagline: What have Zen teachers said about the question you are living with?
+- Heading: Find what Zen teachers have said about your question
+- Guide, under the heading How to use this site, as a numbered list: 1. Type a question about your practice or your life, in your own words. 2. Press Ask. 3. Read short parts of talks, called excerpts. Each one shows the teacher's name and where it comes from. Then the link: Why this site exists (to the About section Why this exists). The guide replaced the tagline on October 17, 2026, after the first private-beta testers, among them an older reader and a reader whose first language is not English, said they could not tell what the site does or how to use it. The tagline "What have Zen teachers said about the question you are living with?" stays on the holding site and the link preview image.
 - Question label: Your question
 - Help text under the box: Write it the way you would say it. For example: I keep judging myself during zazen.
 - Button: Ask
-- Line under the button: Answers are short excerpts, each with a link to where it came from and, when the teacher allows it, to the full transcript.
+- Line under the button: An answer takes a few seconds.
 - Privacy line: the text of `copy/privacy_line.md`, the line's one source, then the link: Read how this works
-- Example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?
+- Examples, under the heading Examples and the line "Not sure what to ask? Press one of these.": example questions, one link each, for the owner to replace with real ones: I keep judging myself during zazen. / How do I stay with grief without being swallowed by it? / What is the difference between practice and trying to improve myself?

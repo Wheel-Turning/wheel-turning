@@ -49,9 +49,18 @@ variable "migrate_image_tag" {
 # Spec 01's sizes, raised from the M1 minimum (db.t4g.micro, 0.5 vCPU / 1 GB) for the beta: the
 # HNSW index over about 137,000 passages needs the database's memory, and the task holds the
 # embedder and four reranker sessions.
+#
+# db.t4g.medium (4 GB) to db.t4g.small (2 GB) on October 17, 2026, to save $24 a month (docs/cost.md,
+# "Database size"). Searches read the half-precision vector index (372 MB, migration 0043), the
+# passage heap that full-text ranking reads (231 MB) and the full-text index. On a copy of the
+# 143,223 servable passages, all of that stayed in memory only from about 1.5 GB of Postgres
+# memory up. A small leaves Postgres about 1.3 GB, so expect about 1 MB of disk reads a
+# question, roughly 0.1 to 0.15 s on gp3. The CPU is the same: 2 vCPUs at the same credit rate.
+# Go back to db.t4g.medium if the page p95 in `wt report beta` passes 4.8 s, or once servable
+# passages reach about 170,000.
 variable "db_instance_class" {
   type    = string
-  default = "db.t4g.medium"
+  default = "db.t4g.small"
 }
 
 variable "db_deletion_protection" {
@@ -60,14 +69,18 @@ variable "db_deletion_protection" {
   default     = true
 }
 
+# 1 vCPU / 3 GB since October 17, 2026 (was 2 vCPU / 8 GB). With `[ranking] ranker = "model"` the
+# task loads only the int8 embedder and used at most 0.88 GB on the beta, and one question's
+# embedding takes 77 ms at the 95th percentile on 1 vCPU (docs/cost.md). Switching the ranker to "onnx" also
+# loads rerank_sessions copies of the cross-encoder and needs 2048 / 8192 again.
 variable "web_cpu" {
   type    = number
-  default = 2048
+  default = 1024
 }
 
 variable "web_memory" {
   type    = number
-  default = 8192
+  default = 3072
 }
 
 variable "llm_model" {
