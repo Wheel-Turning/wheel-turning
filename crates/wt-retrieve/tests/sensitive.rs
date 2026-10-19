@@ -12,7 +12,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
 use wt_ml::{Embedder, FakeEmbedder, MlError};
-use wt_retrieve::sensitive::triage::{self, Confidence, Relevance, Risk, Triage, Verdict};
+use wt_retrieve::sensitive::triage::{
+    self, Confidence, Relevance, Risk, Triage, TriageError, Verdict,
+};
 use wt_retrieve::sensitive::{Exemplars, SensitiveConfig};
 use wt_retrieve::{Level, Sensitivity};
 
@@ -206,7 +208,7 @@ impl Embedder for DownEmbedder {
 
 /// A gate that answers a fixed verdict, fails, or hangs, and counts its calls.
 struct FakeGate {
-    reply: Mutex<Result<Verdict, String>>,
+    reply: Mutex<Result<Verdict, TriageError>>,
     hang: bool,
     calls: AtomicUsize,
 }
@@ -230,7 +232,16 @@ impl FakeGate {
     }
     fn fails() -> Self {
         Self {
-            reply: Mutex::new(Err("the monthly language-model cap is reached".into())),
+            reply: Mutex::new(Err(TriageError::Failed(
+                "the monthly language-model cap is reached".into(),
+            ))),
+            hang: false,
+            calls: AtomicUsize::new(0),
+        }
+    }
+    fn declines() -> Self {
+        Self {
+            reply: Mutex::new(Err(TriageError::Declined)),
             hang: false,
             calls: AtomicUsize::new(0),
         }
@@ -248,7 +259,7 @@ impl FakeGate {
 
 #[async_trait]
 impl Triage for FakeGate {
-    async fn triage(&self, _: &str) -> Result<Verdict, String> {
+    async fn triage(&self, _: &str) -> Result<Verdict, TriageError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if self.hang {
             tokio::time::sleep(Duration::from_secs(3600)).await;
@@ -343,6 +354,33 @@ async fn a_failing_slow_or_capped_gate_degrades_and_leaves_the_rules_to_decide()
         assert!(t.degraded, "triage_degraded");
         assert_eq!(t.verdict, None);
         assert_eq!(t.raise(s.classify(SAD, &e).await.level), Level::Distress);
+    }
+}
+
+#[tokio::test]
+async fn a_declined_classification_fails_closed_as_out_of_scope() {
+    // Spec 11, PB2.0 second comparison: a model that declines to classify must not let the
+    // question through. It is routed as out_of_scope, and an acute question stays acute.
+    let (s, e) = scripted(&[]).await;
+    for (q, level) in [
+        (PLAIN, Level::OutOfScope),
+        (SAD, Level::OutOfScope),
+        (
+            "I have the pills ready and I am going to kill myself tonight",
+            Level::Acute,
+        ),
+    ] {
+        let gate = FakeGate::declines();
+        let t = triage::run(Some(&gate), s.triage_settings(), q).await;
+        assert_eq!(gate.calls(), 1);
+        assert!(t.declined);
+        assert!(!t.degraded, "a refusal is not triage_degraded");
+        assert_eq!(t.verdict, None);
+        assert_eq!(
+            all_layers(&s, &e, &FakeGate::declines(), q).await,
+            level,
+            "{q}"
+        );
     }
 }
 

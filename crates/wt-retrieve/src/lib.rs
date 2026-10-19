@@ -30,7 +30,7 @@ pub use config::{ExcerptConfig, Ranker, RankingConfig, RetrievalConfig};
 pub use progress::{Progress, Silent, Step};
 pub use query::{Mode, NamedDetector, ParsedQuery, QueryError};
 pub use select::Chosen;
-pub use sensitive::triage::{Relevance, Triage, Triaged};
+pub use sensitive::triage::{Relevance, Triage, TriageError, Triaged};
 pub use sensitive::{Classified, Level, Sensitivity};
 
 use select::SelectInput;
