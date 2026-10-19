@@ -101,6 +101,8 @@ Configuration comes from environment variables, with tunable parameters in two T
 | `WT_COUNT_ONLY_TTL_HOURS` | `24` | Hours a question is kept in count-only mode before it is deleted. See Spec 06. |
 | `WT_LOG` | `info` | Log filter. Logs are JSON in non-dev environments. |
 
+**Chosen models (Spec 11, PB2.0, October 19, 2026).** Every stage runs on `claude-haiku-4-5`, the value of `WT_LLM_MODEL`, and `llm_stage_models` in `infra/terraform/envs/v1` sets no per-stage key. In the second comparison, Claude Haiku 5.5 failed its rule for triage, ranking, summary and the verifier. Excerpts passed the automated measures, and move only if the owner's 30-excerpt review also passes; that would set `excerpt = "claude-haiku-5-5"`. Run ids are in Spec 11, PB2.0.
+
 ## AWS topology
 
 The v1 footprint is small on purpose. One web service, one database and three buckets carry everything, and a small batch host exists only while the owner's PC is transcribing, as the PC's route into the database.
