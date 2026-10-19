@@ -8,17 +8,19 @@ What a question costs, what the site costs before anyone asks one, and the month
 
 ### Model cost per question, by stage
 
-"Before" is Spec 10's baseline on the live stack (October 15, 2026, Claude Haiku 4.5 at $1 and $5 per million input and output tokens). "After" assumes every stage moves to Claude Haiku 5.5 ($0.10 and $0.50, a tenth of the price) and uses about 30% more tokens for the same work, so each stage costs about 0.13 of what it did. Only stages that pass their rule in PB2.0 move; a stage that stays on Haiku 4.5 keeps its "before" figure. The session evaluating PB2.0 replaces "after" with its measured eval runs.
+"Before" is Spec 10's baseline on the live stack (October 15, 2026, Claude Haiku 4.5 at $1 and $5 per million input and output tokens). "Eval, Haiku 4.5" is the mean of the two PB2.0 baseline runs on the 50-question set (October 18, 2026, runs `6dab5a3c` and `bb8e6450`, $0.0495 and $0.0478 a question), from each call's logged `est_cost_usd`. `wt eval run` asks without the triage gate, so that row is from the live figure. "After" assumes every stage moves to Claude Haiku 5.5 ($0.10 and $0.50, a tenth of the price) and uses about 30% more tokens for the same work, so each stage costs about 0.13 of what it did. Only stages that pass their rule in PB2.0 move; a stage that stays on Haiku 4.5 keeps its "before" figure.
 
-| Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | After (Haiku 5.5, estimate) |
-| --- | --- | --- | --- |
-| Triage gate (`sensitive`) | 1 | $0.002 | $0.0003 |
-| Ranking (`rank`) | 6 | $0.019 | $0.0025 |
-| Excerpt cutting (`excerpt`) | 8 to 10 | $0.013 | $0.0017 |
-| Summary (`synth`) | 1 to 2 | $0.012 | $0.0016 |
-| Verifier (`verify`) | 4 to 12 | $0.008 | $0.0010 |
-| **Mean per question** | 20 to 30 | **$0.054** | **$0.0070** |
-| 95th percentile | | $0.061 | about $0.008 |
+No stage has moved yet. The first PB2.0 comparison (Spec 11, PB2.0) found every stage on Haiku 5.5 cut off at `max_tokens`, because Haiku 5.5 thinks by default. Its single-stage runs cost $0.0021 a question for ranking, $0.0016 for excerpts and $0.0015 for the summary, against $0.0188, $0.0122 and $0.0111 on 4.5 (0.11 to 0.13 of the price). Those include thinking tokens, and the summary figure stops at the cut-off, so they bear out the estimate but do not replace it. The rerun with `thinking_off` replaces "after" with measured figures.
+
+| Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | Eval, Haiku 4.5 | After (Haiku 5.5, estimate) |
+| --- | --- | --- | --- | --- |
+| Triage gate (`sensitive`) | 1 | $0.002 | not asked | $0.0003 |
+| Ranking (`rank`) | 6 | $0.019 | $0.0188 | $0.0025 |
+| Excerpt cutting (`excerpt`) | 8 to 9 | $0.013 | $0.0122 | $0.0017 |
+| Summary (`synth`) | 1 to 2 | $0.012 | $0.0111 | $0.0016 |
+| Verifier (`verify`) | 7 to 8 | $0.008 | $0.0066 | $0.0010 |
+| **Mean per question** | about 24 | **$0.054** | **$0.049**, $0.051 with triage | **$0.0070** |
+| 95th percentile | | $0.061 | | about $0.008 |
 
 The after-mean is within Spec 10's target of $0.010. Its workstreams (a cheaper ranker, excerpts without a model call, one verifier call) would lower it further and are not counted here.
 

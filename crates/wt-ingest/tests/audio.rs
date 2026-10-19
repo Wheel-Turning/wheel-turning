@@ -1183,6 +1183,7 @@ async fn a_real_talk_makes_no_model_call_until_real_data_is_allowed() {
                 output_per_mtok: 5.0,
                 sampling: true,
                 max_prompt_tokens: None,
+                thinking_off: false,
             }],
         },
         Arc::new(PgLedger::new(fx.pool.clone(), 25.0)),

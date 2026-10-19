@@ -8,7 +8,8 @@
 //! `WT_LLM_REAL_DATA_OK=true`. Logs carry the stage, model, token counts and a hash of the
 //! request, never its text. 429, 529 and 5xx responses retry with backoff up to three times. A
 //! reply that does not match the type gets one repair attempt. A model whose price holds only up
-//! to a prompt size (`max_prompt_tokens`) is never sent a longer prompt (Spec 11, PB2.0).
+//! to a prompt size (`max_prompt_tokens`) is never sent a longer prompt, and a model that thinks
+//! by default is told not to where the table says `thinking_off` (Spec 11, PB2.0).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -246,6 +247,10 @@ pub struct ModelPrice {
     /// the table has no price for it, so the client refuses it. `None` is no limit.
     #[serde(default)]
     pub max_prompt_tokens: Option<u64>,
+    /// Send `thinking: {type: "disabled"}`: the model thinks by default, its thinking tokens
+    /// count against `max_tokens`, and every stage's budget is sized for a reply without it.
+    #[serde(default)]
+    pub thinking_off: bool,
 }
 
 /// `config/llm_prices.toml`.
@@ -770,6 +775,9 @@ impl ClaudeClient {
         });
         if price.sampling {
             body["temperature"] = json!(0);
+        }
+        if price.thinking_off {
+            body["thinking"] = json!({ "type": "disabled" });
         }
         let text = body.to_string();
         if let Some(max) = price.max_prompt_tokens {
