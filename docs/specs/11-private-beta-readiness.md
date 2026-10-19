@@ -138,7 +138,7 @@ Build this only if PB1.1 cannot land before the beta.
 4. **The GitHub workflow** keeps its fresh-database run and is renamed "audit smoke test", so it is not mistaken for the real audit.
 
 **Acceptance.**
-- [ ] The scheduled task runs nightly and writes its report to the log group.
+- [x] The scheduled task runs nightly and writes its report to the log group. (October 19, 2026: schedule `wt-v1-audit-nightly`, `cron(17 10 * * ? *)` UTC, ran at 10:18 UTC on October 18 and 19; streams `audit/audit/53966d67…` and `audit/audit/5a91360c…` in `/wt-v1/admin` hold the JSON report.)
 - [ ] A one-off run with a command that exits 1 produces an SNS email.
 - [x] `wt audit --fail-on warning` exits non-zero on a planted warning in a test database. (`audit_fail_on_warning_exits_one_on_a_planted_warning`.)
 
