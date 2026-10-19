@@ -620,6 +620,44 @@ are one-time copies, done once, with the owner's go-ahead.
    of the database cutover (PB1.1). Keep `data/objects` and `data/records` until runbook §10 is
    retired with PB1.1.
 
+### Terraform hygiene (roadmap UB3.9)
+
+Egress by port, load balancer access logs, the `wt-v1` dashboard, the `wt-v1-web-memory` alarm,
+Database Insights (Standard), storage autoscaling to 100 GB and cost allocation tags. Applied by
+the owner, in this order, since the deploy role must be able to read each new resource before
+`deploy.yml` can plan again:
+
+1. `infra/terraform/github-oidc`: the deploy role may manage the `wt-v1-alb-logs-<account>`
+   bucket and the `wt-v1` dashboard.
+2. `infra/terraform/envs/v1`, with `-var image_tag=$(terraform output -raw image_tag)`. The plan
+   replaces the web and batch security groups' all-protocol egress rules with port rules; open
+   connections survive (security groups are stateful), and a request in the second between the
+   two may fail once. Expect no restart of the database: Database Insights and the storage
+   ceiling apply online.
+3. `infra/terraform/account`: activates `project` and `env` as cost allocation tags. They show in
+   Cost Explorer's "Tag" grouping from the next day's data.
+4. Check: `/healthz` answers through Cloudflare; one question gets an answer with a summary (the
+   web task still reaches the Claude API, SES and the database); after 10 minutes,
+   `aws s3 ls s3://wt-v1-alb-logs-904883674947/alb/ --recursive` lists log files; the `wt-v1`
+   dashboard shows data in every panel that has traffic.
+
+To undo the egress change, restore the two `-1` rules in `modules/network/main.tf` and apply.
+
+Service quotas worth knowing (WA REL01-BP01), read with the owner's profile and recorded here
+when checked:
+
+```bash
+aws service-quotas get-service-quota --service-code fargate --quota-code L-3032A538  # on-demand vCPUs
+aws sesv2 get-account                                                                # sending quota, sandbox status
+aws service-quotas list-service-quotas --service-code rds --query "Quotas[?QuotaName=='Total storage for all DB instances'].Value"
+```
+
+| Quota | Value | Checked |
+| --- | --- | --- |
+| Fargate on-demand vCPUs | not yet recorded | |
+| SES daily sending quota and rate | not yet recorded | |
+| RDS total storage | not yet recorded | |
+
 ## 13. Alarms, incidents and outages
 
 Spec 11, PB4.2 to PB4.4. Every alarm emails the `wt-v1-alarms` topic (us-east-2; the health
@@ -684,8 +722,12 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 - **Means:** less than 2 GiB free on the database volume.
 - **First check:** the largest tables (`pg_total_relation_size`) and whether a reload left
   copies behind.
-- **Fix:** raise the allocated storage in the `database` module and apply (RDS grows it
-  online). Drop leftovers only after a snapshot.
+- **Fix:** storage autoscaling grows the volume on its own once free space stays under 10% for
+  5 minutes, at most once every 6 hours, up to `max_allocated_storage_gb` (100 GB). So a single
+  alarm that clears within the hour needs nothing more. If it stays in alarm, the volume is at
+  its ceiling or still inside the 6-hour wait: raise `max_allocated_storage_gb` or
+  `allocated_storage_gb` in the `database` module and apply. Drop leftovers only after a
+  snapshot.
 - **Scale to zero:** no. If writes have started failing, put up the maintenance page.
 
 #### `wt-v1-scratch-not-empty`
@@ -707,6 +749,17 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 - **Fix:** deploy the last good `image_tag`, or fix the setting the error names (procedure 12).
   Put up the maintenance page while it is down.
 - **Scale to zero:** it already serves nothing.
+
+#### `wt-v1-web-memory`
+
+- **Means:** the web task's memory has been above 85% of its 3 GB for 15 minutes. Fargate stops
+  a task that runs out, and the embedder lives in that memory.
+- **First check:** the `wt-v1` dashboard's CPU and memory panel against requests: a climb with
+  traffic is load, a climb without it is a leak. Then `config/retrieval.toml`: a cross-encoder
+  ranker (`ranker = "onnx"`) needs 2 vCPU / 8 GB (Spec 01, "The beta deployment").
+- **Fix:** raise `web_memory` (with a matching `web_cpu`) in `infra/terraform/envs/v1` and
+  deploy. A leak: deploy the last good `image_tag` and record it in `docs/bugs.md`.
+- **Scale to zero:** no.
 
 #### `wt-v1-healthz-unreachable`
 

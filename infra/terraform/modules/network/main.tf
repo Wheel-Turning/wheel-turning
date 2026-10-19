@@ -209,11 +209,26 @@ resource "aws_vpc_security_group_ingress_rule" "web_from_alb" {
   referenced_security_group_id = aws_security_group.alb.id
 }
 
-resource "aws_vpc_security_group_egress_rule" "web_out" {
+# Egress by port (roadmap UB3.9, WA SEC05-BP02). Everything the web, migrate, eval and audit
+# tasks call is HTTPS: AWS APIs (S3 through the gateway endpoint, ECR, Secrets Manager, Logs,
+# SES, SNS), the Claude API and the help-link check. The database is the one other destination.
+# Security groups do not filter DNS to the VPC resolver.
+resource "aws_vpc_security_group_egress_rule" "web_https_out" {
   security_group_id = aws_security_group.web.id
-  description       = "AWS APIs, the Claude API and the database"
-  ip_protocol       = "-1"
+  description       = "HTTPS: AWS APIs and the Claude API"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "web_to_db" {
+  security_group_id            = aws_security_group.web.id
+  description                  = "To the database"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.db.id
 }
 
 resource "aws_security_group" "batch" {
@@ -223,11 +238,25 @@ resource "aws_security_group" "batch" {
   tags        = { Name = "${var.name}-batch" }
 }
 
-resource "aws_vpc_security_group_egress_rule" "batch_out" {
+# The batch host also fetches media and feeds, some over plain HTTP, and installs packages, so it
+# keeps port 80 as well.
+resource "aws_vpc_security_group_egress_rule" "batch_web_out" {
+  for_each          = { https = 443, http = 80 }
   security_group_id = aws_security_group.batch.id
-  description       = "AWS APIs, media sources and the database"
-  ip_protocol       = "-1"
+  description       = each.key == "https" ? "HTTPS: SSM, AWS APIs and media sources" : "HTTP: media sources and feeds"
+  ip_protocol       = "tcp"
+  from_port         = each.value
+  to_port           = each.value
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "batch_to_db" {
+  security_group_id            = aws_security_group.batch.id
+  description                  = "To the database"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.db.id
 }
 
 resource "aws_security_group" "db" {

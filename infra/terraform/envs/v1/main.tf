@@ -123,7 +123,8 @@ module "service" {
   cloudflare_only        = var.cloudflare_only
   alb_public_ipv4        = var.alb_public_ipv4
   # Cloudflare appends the client and the load balancer appends Cloudflare's edge.
-  forwarded_hops = var.cloudflare_only ? 2 : 1
+  forwarded_hops     = var.cloudflare_only ? 2 : 1
+  access_logs_bucket = module.storage.alb_logs_bucket
 
   llm = {
     model           = var.llm_model

@@ -139,6 +139,12 @@ variable "forwarded_hops" {
   default     = 1
 }
 
+variable "access_logs_bucket" {
+  description = "Bucket for the load balancer's access logs (under alb/). Empty turns them off."
+  type        = string
+  default     = ""
+}
+
 variable "health_check_grace_seconds" {
   description = "Time a new task has to copy and load the models before load balancer checks count."
   type        = number
@@ -569,6 +575,13 @@ resource "aws_lb" "this" {
   security_groups            = [var.security_group_ids["alb"]]
   drop_invalid_header_fields = true
   idle_timeout               = 60
+
+  # Roadmap UB3.9 (WA SEC04-BP01): one gzip file per node every 5 minutes, kept 30 days.
+  access_logs {
+    bucket  = var.access_logs_bucket
+    prefix  = "alb"
+    enabled = var.access_logs_bucket != ""
+  }
 }
 
 resource "aws_lb_target_group" "web" {

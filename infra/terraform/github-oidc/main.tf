@@ -287,7 +287,9 @@ data "aws_iam_policy_document" "deploy" {
       "s3:PutEncryptionConfiguration", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration",
       "s3:PutBucketTagging",
     ]
-    resources = local.bucket_arns
+    # The access-log bucket is managed like the others but stays out of the workload boundary:
+    # no workload role touches it.
+    resources = concat(local.bucket_arns, ["arn:aws:s3:::${var.name}-alb-logs-${local.account}"])
   }
 
   # ---- Secrets: create and describe, never read ----------------------------------------------
@@ -510,6 +512,12 @@ data "aws_iam_policy_document" "deploy_observability" {
       "arn:aws:cloudwatch:${local.region}:${local.account}:alarm:${var.name}-*",
       "arn:aws:cloudwatch:us-east-1:${local.account}:alarm:${var.name}-*",
     ]
+  }
+  statement {
+    sid     = "Dashboard"
+    actions = ["cloudwatch:GetDashboard", "cloudwatch:PutDashboard", "cloudwatch:DeleteDashboards"]
+    # Dashboard ARNs carry no region.
+    resources = ["arn:aws:cloudwatch::${local.account}:dashboard/${var.name}"]
   }
   statement {
     sid       = "HealthCheckCreate"
