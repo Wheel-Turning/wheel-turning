@@ -104,15 +104,17 @@ User stories:
 6. **Tests make no network calls (rule 9).** A shared contract test suite runs against the local store and an in-process fake. Whether the S3 client is also tested against a MinIO container is open question 4.
 
 **Acceptance.**
-- [ ] The contract suite passes for the local store and the fake.
-- [ ] A takedown of a synthetic talk leaves zero keys and zero versions under its prefixes in the fake.
+- [x] The contract suite passes for the local store and the fake. (October 19, 2026: `wt-core/tests/store_contract.rs`, six tests, objects and records on both stores.)
+- [x] A takedown of a synthetic talk leaves zero keys and zero versions under its prefixes in the fake. (October 19, 2026: `a_takedown_leaves_no_keys_and_no_versions_under_its_prefixes_in_a_versioned_bucket` in `wt-db/tests/takedown.rs`.)
 - [ ] `wt objects sync` reports matching counts and hashes for the PC's objects and records.
-- [ ] `wt audit` reports a planted object under a withdrawn talk's prefix.
+- [x] `wt audit` reports a planted object under a withdrawn talk's prefix. (October 19, 2026: `takedown_completeness_reports_an_object_planted_in_the_bucket_under_a_withdrawn_talk` in `wt-db/tests/audit.rs`, on the fake bucket.)
 - [ ] Runbook §10 (local backups) is retired once both PB1.1 and PB1.2 are done.
 
 ### PB1.3 Fallback while two databases remain (B15, WA REL09-BP01, REL09-BP03)
 
 Build this only if PB1.1 cannot land before the beta.
+
+**Waived by the owner on October 19, 2026.** PB1.1 landed (#191): RDS is the one source of truth and the PC database is read-only, so there are no two databases to keep in step. Its acceptance items below are not required for the beta.
 
 1. **Rights commands act on both databases.** Every rights command takes `--also <url>` or `WT_OTHER_DATABASE_URL`: takedown, `teacher opt-out`, exclusion, display level and `talks_basis`.
    - The action is applied to each database in its own transaction.
@@ -121,8 +123,8 @@ Build this only if PB1.1 cannot land before the beta.
 3. **A stale-backup check.** The nightly audit (PB1.4) reports a warning when the newest PC backup object is more than 36 hours old.
 
 **Acceptance.**
-- [ ] A takedown with `--also` removes a synthetic talk from both test databases, and parity passes.
-- [ ] A forced failure on the second database exits non-zero and names the database.
+- Waived: A takedown with `--also` removes a synthetic talk from both test databases, and parity passes.
+- Waived: A forced failure on the second database exits non-zero and names the database.
 
 ### PB1.4 The nightly audit runs on RDS (A1, WA H1)
 
@@ -166,8 +168,8 @@ Build this only if PB1.1 cannot land before the beta.
 4. **A guard test.** A new check in `wt-core/tests/repo_guards.rs` fails on `std::env::var` outside `wt_core::config` and test code. Any exceptions are named in the test.
 
 **Acceptance.**
-- [ ] Startup in prod with `WT_PUBLIC_URL` and no `WT_MAIL_FROM` exits with an error naming `WT_MAIL_FROM`.
-- [ ] The guard test passes on the changed code and fails on a planted `std::env::var` in `wt-api`.
+- [x] Startup in prod with `WT_PUBLIC_URL` and no `WT_MAIL_FROM` exits with an error naming `WT_MAIL_FROM`. (October 19, 2026: `config::tests::prod_requires_the_mail_keys` and `mail_keys_are_set_together_in_any_environment`.)
+- [x] The guard test passes on the changed code and fails on a planted `std::env::var` in `wt-api`. (October 19, 2026: `configuration_is_read_only_by_the_loader` passes on main; with a `std::env::var` planted in `wt-api/src/lib.rs` it failed and named the line.)
 
 ### PB1.7 No public promise of a time to act (B14)
 
@@ -282,8 +284,8 @@ This is blocked on open question 2: serve fewer excerpts, require the summary to
    - Final wording is the owner's, through Spec 09.
 
 **Acceptance.**
-- [ ] A test feeds a draft containing an em dash and finds none in the stored summary, while a quotation containing one is unchanged.
-- [ ] View tests cover the singular and plural forms of the three counts.
+- [x] A test feeds a draft containing an em dash and finds none in the stored summary, while a quotation containing one is unchanged. (October 19, 2026: `em_dashes_leave_model_text_and_stay_in_quotations` in `wt-synth/tests/synth.rs`.)
+- [x] View tests cover the singular and plural forms of the three counts. (October 19, 2026: `view::tests::the_top_line_counts_teachers_teachings_and_excerpts`.)
 
 ### PB2.4 No summary fails silently (B4)
 
@@ -356,7 +358,7 @@ User stories:
 - Whether the provider must be named is open question 7.
 
 **Acceptance.**
-- [ ] Each statement on the page cites the spec item or setting that enforces it, in the PR description.
+- [x] Each statement on the page cites the spec item or setting that enforces it, in the PR description. (October 19, 2026: the "Statement / Enforced by" table in #185.)
 
 ### PB3.3 Washington health-data handling (L3)
 
@@ -398,7 +400,7 @@ User stories:
 - `Permissions-Policy: camera=(), microphone=(), geolocation=(), browsing-topics=()`.
 
 **Acceptance.**
-- [ ] Page tests assert all three headers in prod mode, and no HSTS header in dev.
+- [x] Page tests assert all three headers in prod mode, and no HSTS header in dev. (October 19, 2026: `pages_need_a_session_and_every_response_carries_the_headers` in `wt-api/tests/pages.rs`.)
 
 ### PB3.6 Edge protection and detection (WA M1, M2, SEC03-BP04)
 
