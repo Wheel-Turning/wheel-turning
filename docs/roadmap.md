@@ -169,7 +169,7 @@ Marketable to everyone: "it is up, fast and safe." The reliability findings of t
 | UB3.10 | Commission a light external penetration test, so the public site is checked by someone other than its builder | WA SEC11-BP03 | M, Owner |
 | UB3.11 | Shorten the model timeout on the request path (the client allows 600 s), so one slow model call cannot hold a web connection | WA REL05-BP05 | S |
 | UB3.12 | Decide whether the summary is written only when the reader asks for it, so the summary and verifier cost is paid only by readers who want it | Cost review of October 15 | S, Owner decision |
-| UB3.13 | Trial a Cloudflare Tunnel in place of the load balancer and its public addresses, so about $35 to $40 a month is saved and Cloudflare's free protection backs up the WAF | Cost review of October 15, WA M1 | M |
+| UB3.13 | Trial a Cloudflare Tunnel in place of the load balancer and its public addresses, so about $16 to $20 a month more is saved after the Cloudflare proxy (designed in `docs/adr-edge-cost.md`, "Follow-on"; T1 decided (a); built after the a + d cutover) | Cost review of October 15, WA M1 | M |
 | UB3.14 | Benchmark the web task on ARM, and schedule scale-to-zero between test rounds and overnight, so fixed AWS cost falls without slowing answers | WA SUS05-BP02, COST04-BP04 | S |
 
 ### UB4. Feedback that teaches us
