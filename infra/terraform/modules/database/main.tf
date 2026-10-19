@@ -1,5 +1,5 @@
 # Spec 01 database: RDS Postgres 16 with a parameter group and a subnet group. Encrypted, 7-day
-# backups, rds.force_ssl=1, no public access. The vector extension is created by migration.
+# backups, rds.force_ssl=1, no public access, storage that grows on its own up to a ceiling. The vector extension is created by migration.
 # RDS owns the master password in Secrets Manager, so it never passes through Terraform.
 
 variable "name" {
@@ -23,6 +23,12 @@ variable "instance_class" {
 variable "allocated_storage_gb" {
   type    = number
   default = 20
+}
+
+variable "max_allocated_storage_gb" {
+  description = "Ceiling for storage autoscaling: RDS grows the volume online when free space runs low, up to this. Roadmap UB3.9 (WA SUS04-BP04)."
+  type        = number
+  default     = 100
 }
 
 variable "backup_retention_days" {
@@ -70,9 +76,10 @@ resource "aws_db_instance" "this" {
   engine_version = "16"
   instance_class = var.instance_class
 
-  allocated_storage = var.allocated_storage_gb
-  storage_type      = "gp3"
-  storage_encrypted = true
+  allocated_storage     = var.allocated_storage_gb
+  max_allocated_storage = var.max_allocated_storage_gb
+  storage_type          = "gp3"
+  storage_encrypted     = true
 
   db_name                     = "wt"
   username                    = "wt_admin"
@@ -91,7 +98,12 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot        = var.skip_final_snapshot
   final_snapshot_identifier  = var.skip_final_snapshot ? null : "${var.name}-final"
 
-  performance_insights_enabled = false
+  # Roadmap UB3.9 (WA PERF03-BP03): CloudWatch Database Insights in Standard mode, which replaced
+  # the Performance Insights console on July 31, 2026. Seven days of DB load and per-query
+  # metrics are free; turning it on needs no restart.
+  performance_insights_enabled          = true
+  performance_insights_retention_period = 7
+  database_insights_mode                = "standard"
 
   # A size change applies at once instead of in the next maintenance window; it restarts the
   # instance, a few minutes without the database.

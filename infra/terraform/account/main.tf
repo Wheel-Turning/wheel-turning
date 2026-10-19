@@ -91,3 +91,14 @@ resource "aws_ce_anomaly_subscription" "email" {
     }
   }
 }
+
+# Roadmap UB3.9 (WA COST03-BP02): the default_tags every stack sets become cost allocation tags,
+# so Cost Explorer can group spend by project and environment. A tag can be activated only after
+# it has appeared on a billed resource, which both have since October 2026.
+resource "aws_ce_cost_allocation_tag" "this" {
+  for_each = toset(keys(local.tags))
+  provider = aws.us_east_1
+
+  tag_key = each.key
+  status  = "Active"
+}

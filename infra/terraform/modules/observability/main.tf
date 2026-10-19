@@ -200,6 +200,31 @@ resource "aws_cloudwatch_metric_alarm" "no_healthy_web_task" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
+# The service module names the cluster var.name and the service "<name>-web". AWS/ECS publishes
+# service CPU and memory without Container Insights.
+locals {
+  ecs_dimensions = { ClusterName = var.name, ServiceName = "${var.name}-web" }
+}
+
+# Roadmap UB3.9 (WA REL06-BP01): the embedder lives in the task's memory, so running out of it
+# kills the task. A task scaled to zero publishes nothing, which is not breaching.
+resource "aws_cloudwatch_metric_alarm" "web_memory" {
+  alarm_name          = "${var.name}-web-memory"
+  alarm_description   = "Web task memory above 85% for 15 minutes. Runbook 13."
+  namespace           = "AWS/ECS"
+  metric_name         = "MemoryUtilization"
+  dimensions          = local.ecs_dimensions
+  statistic           = "Maximum"
+  period              = 300
+  evaluation_periods  = 3
+  datapoints_to_alarm = 3
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 85
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+}
+
 # Checks the path a tester takes: public DNS, the certificate, the load balancer and the app.
 # Three checker regions, the minimum, keep the request rate on /healthz low.
 resource "aws_route53_health_check" "healthz" {
@@ -421,6 +446,97 @@ resource "aws_cloudwatch_metric_alarm" "slow_answers" {
   ok_actions          = [aws_sns_topic.alarms.arn]
 
   depends_on = [aws_cloudwatch_log_metric_filter.answer]
+}
+
+# ---------------------------------------------------------------------------------------------
+# Roadmap UB3.9 (WA OPS08-BP05): one dashboard with what the alarms watch, so the first check of
+# any alarm starts in one place. Dashboards are free up to three per account.
+# ---------------------------------------------------------------------------------------------
+
+locals {
+  region = data.aws_region.current.region
+
+  dashboard_widgets = [
+    {
+      title = "Requests and 5xx (load balancer)"
+      stat  = "Sum"
+      metrics = [
+        ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", var.alb_arn_suffix],
+        ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", var.alb_arn_suffix],
+        ["AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", var.alb_arn_suffix],
+      ]
+    },
+    {
+      title   = "Healthy web tasks"
+      stat    = "Minimum"
+      metrics = [["AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", var.alb_arn_suffix, "TargetGroup", var.target_group_arn_suffix]]
+    },
+    {
+      title = "Web task CPU and memory (%)"
+      stat  = "Maximum"
+      metrics = [
+        ["AWS/ECS", "CPUUtilization", "ClusterName", var.name, "ServiceName", "${var.name}-web"],
+        ["AWS/ECS", "MemoryUtilization", "ClusterName", var.name, "ServiceName", "${var.name}-web"],
+      ]
+    },
+    {
+      title   = "Answer time p95 (ms)"
+      stat    = "p95"
+      metrics = [[local.answer_namespace, "AskMilliseconds"]]
+    },
+    {
+      title = "Model calls and failures"
+      stat  = "Sum"
+      metrics = [
+        [local.answer_namespace, "LlmCalls"],
+        [local.answer_namespace, "LlmCallFailures"],
+        [local.answer_namespace, "SummariesFailed"],
+        [local.answer_namespace, "RankerFallback"],
+      ]
+    },
+    {
+      title = "Database CPU (%) and connections"
+      stat  = "Average"
+      metrics = [
+        ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", var.db_identifier],
+        ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", var.db_identifier],
+      ]
+    },
+    {
+      title   = "Database free storage (bytes)"
+      stat    = "Minimum"
+      metrics = [["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", var.db_identifier]]
+    },
+    {
+      title   = "Database freeable memory (bytes)"
+      stat    = "Minimum"
+      metrics = [["AWS/RDS", "FreeableMemory", "DBInstanceIdentifier", var.db_identifier]]
+    },
+  ]
+}
+
+data "aws_region" "current" {}
+
+resource "aws_cloudwatch_dashboard" "this" {
+  dashboard_name = var.name
+  dashboard_body = jsonencode({
+    widgets = [for i, w in local.dashboard_widgets : {
+      type   = "metric"
+      x      = (i % 2) * 12
+      y      = floor(i / 2) * 6
+      width  = 12
+      height = 6
+      properties = {
+        title   = w.title
+        region  = local.region
+        stat    = w.stat
+        period  = 300
+        view    = "timeSeries"
+        stacked = false
+        metrics = w.metrics
+      }
+    }]
+  })
 }
 
 output "log_group_names" {
