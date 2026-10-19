@@ -18,4 +18,10 @@ rto = "rto" # recovery time objective, in Spec 11 recovery targets
 
 [files]
 # Sensitive-question rules list common misspellings on purpose, and the fixture uses them.
-extend-exclude = ["config/sensitive.toml", "crates/wt-retrieve/tests/fixtures/sensitive_questions.toml"]
+# The Well-Architected ledger copies AWS's page slugs, which the WA Tool uses as choice ids,
+# misspellings included ("decomissioning", "unsucessful"); correcting them breaks the import.
+extend-exclude = [
+  "config/sensitive.toml",
+  "crates/wt-retrieve/tests/fixtures/sensitive_questions.toml",
+  "docs/well-architected/bp-ledger.csv",
+]
