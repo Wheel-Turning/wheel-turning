@@ -29,6 +29,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B21](#b21-the-gpu-worker-and-alpha-server-live-outside-the-repo) | 2026-10-15 | The GPU worker and alpha server live outside the repo | open (debt) |
 | [B22](#b22-thin-tests-for-the-cli-and-ml-crates-and-timing-based-tests) | 2026-10-15 | Thin tests for the CLI and ML crates, and timing-based tests | open (debt) |
 | [B23](#b23-very-large-modules) | 2026-10-15 | Very large modules | open (debt) |
+| [B24](#b24-two-sfzc-transcripts-were-saved-cut-short) | 2026-10-19 | Two SFZC transcripts were saved cut short | diagnosed |
 
 ## B1. A question about Shakyamuni returns talks, not texts
 
@@ -577,3 +578,29 @@ Growth by feature.
 ### Fix
 
 Split each when it is next changed, for example the `wt-api` handlers by page. Not worth a change of its own.
+
+## B24. Two SFZC transcripts were saved cut short
+
+- Found: October 18, 2026, by `wt audit` against RDS (`student_speech`: "not readable JSON"), during the PB1.2 copy of objects to S3.
+- Talks: `04483a81-ff03-4bb7-8bb9-0b88fe241393` ("Ignorance and Vow - New Friends") and `e0319aa7-c21e-46fe-be3d-611ded7fde73` ("A Sesshin of Illness"), both from `sfzc`.
+
+### Expected
+
+Each talk's transcript object (`transcripts/<talk>/v1.json`) is complete JSON, so extraction and the later stages can read it and the talk reaches `ready`.
+
+### Actual
+
+Both objects end partway through: one at column 195,584 ("EOF while parsing an object"), the other at column 99,840 ("EOF while parsing a value"). Both talks have sat at `extracting` since October 12. Their `extract` jobs keep failing on the parse error and are requeued (two and three attempts so far). The audio and correct stages had succeeded on October 11.
+
+The copy to S3 on October 18 verified every object byte for byte against the PC, so the PC's files were already cut short. The S3 copies are the same truncated files.
+
+### Cause
+
+Both talks were transcribed on the GPU worker on October 11, at 05:48 and 14:24 UTC. That was the day #91 ("Objects: replace transcripts whole, so no job reads one half written") changed `infra/gpu-worker/run.sh` to stage each sync and replace files whole. Before it, the two-minute sync unpacked straight into `data/objects`, so a transcript copied while the worker was still writing it, or a transfer cut off partway, could land half written. These two are the files that slipped through before the fix. No transcript written since has been truncated (the October 18 audit found only these two).
+
+### Fix
+
+- Transcribe both talks again. `wt asr requeue` queues `audio` with `retranscribe` for any talk whose transcript does not record the current Whisper model, and a truncated transcript records none. A dry run with `WT_WHISPER_MODEL` set to `ggml-large-v3-turbo.bin` (the model the GPU run used) must count exactly these two talks before anything is queued.
+- Run the audio worker against RDS. The new transcripts go straight to S3 (PB1.2), so the GPU sync path is not involved.
+- Confirm both talks reach `ready` and that `wt audit` shows no `student_speech` findings.
+- The parse failure only ever surfaced as a requeued `extract` job. A transcript that cannot be parsed now fails the nightly audit (`student_speech`, Spec 11, PB1.4), which alerts the owner.
