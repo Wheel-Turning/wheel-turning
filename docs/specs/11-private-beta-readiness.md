@@ -224,10 +224,24 @@ User stories:
 
 No stage passes, all for one cause: Claude Haiku 5.5 thinks by default (effort medium), its thinking tokens count against `max_tokens`, and every stage's budget is sized for Haiku 4.5, which does not think unless asked. The price table's `thinking_off` now sends `thinking: {type: "disabled"}` to it, which the API accepts at effort high or below. Every stage stays on Haiku 4.5 until the comparison is rerun on an image with that change; the per-stage keys stay empty. The summary, verifier and excerpt rules also need the owner's blind pairs, claim audit and 30 excerpts, which the rerun's `wt eval export-review` pages are for.
 
+**Second comparison (October 19, 2026, image `main-8549de533cec`, with `thinking_off`, on `db.t4g.small`).** Same method as the first, with two fresh Haiku 4.5 baselines on this stack, because the database resize and the new image both landed after the first round. No call was cut off at `max_tokens`. Shares below are on 50 questions; the ranking counts are on the 49 questions every file ranked.
+
+| Run | Run id | Result | Rule |
+| --- | --- | --- | --- |
+| Baseline 3, all Haiku 4.5 | `fac84c01` | 1,208 judged 7+; 36 summaries shown; 40.8% of drafted sentences kept; $0.0481 a question | |
+| Baseline 4, all Haiku 4.5 | `be505d57` | 1,207 judged 7+; 38 shown; 42.9% kept; $0.0488 a question | |
+| Ranking on 5.5 | `9f9abea4` | 805 judged 7+ (67% of 4.5's). With Haiku 4.5's scores as a fixed judge, its top 10 average 8.50 against 8.95 and 8.93, and its rank agreement with that judge is 0.85 against 0.99. $0.0024 a question against $0.0188 | Fails |
+| Excerpts on 5.5 | `03b0ca81` | 36 summaries shown; 36.9% of drafted sentences kept; judged 7+ unchanged (1,220); $0.0014 a question against $0.0121 | Passes the automated measures; waits for the owner's 30 excerpts |
+| Summary on 5.5 | `46a06783` | 21 shown against 36 and 38; 26 answers had every sentence rejected, against 11 and 9, mostly references to excerpts that do not exist (109 sentences, against 48 and 40); $0.0014 a question against $0.0110 | Fails (fewer summaries) |
+| Verifier on 5.5 | `3ecbb600` | 16.9% of drafted sentences kept, against 40.8% and 42.9%; 215 rejected as unsupported, against 43 and 41; 26 shown; $0.0012 a question against $0.0067 | Fails (keeps 24 points fewer) |
+| Triage on 5.5, gate set, two runs | | 49 of 51 routed right in both. All 6 acute and all 11 notice pages right, nothing wrongly stopped. In both runs the model declined to classify the same two harmful out-of-scope questions (`g27`, `g40`), so the gate degraded and the questions were answered. On 4.5, 51 of 51 in both | Fails: a refusal must not let a harmful question through |
+
+**Result.** Every stage stays on Haiku 4.5 for now, and `llm_stage_models` stays empty. Excerpts are the one candidate: if the owner's "cut off or missing context" rate on 30 excerpts from `03b0ca81` is within 5 points of `fac84c01`'s, `excerpt = "claude-haiku-5-5"` goes into `infra/terraform/envs/v1/variables.tf`. That saves about $0.0107 a question. Triage could move once a refusal fails closed (a declined classification routes the question as sensitive) and both gate passes come back clean. The review pages (`review-B3`, `review-S-EXCERPT`, `review-S-SYNTH`, `review-S-VERIFY`) are in `s3://wt-v1-transcripts-904883674947/eval-reviews/pb20r3/`; they quote transcripts and stay out of git. Round 2 cost $12.63 in model calls, plus $2.54 for runs the resize interrupted.
+
 **Acceptance.**
-- [ ] The eval runs and comparisons for each stage are recorded in the PR. (First round recorded above; the rerun with `thinking_off` is still to do.)
+- [x] The eval runs and comparisons for each stage are recorded in the PR. (Both rounds above; the second is in the PR that records it, with `thinking_off`.)
 - [x] Each stage's model is set by its own key, and a test shows the fallback to `WT_LLM_MODEL`. (`wt-core` `config::tests::stage_models_fall_back_to_the_default_and_fail_when_neither_is_set`.)
-- [ ] Mean model cost per question on the 50-question set is reported before and after. (Before: $0.0495 and $0.0478 over the four answer stages, in `docs/cost.md`. After waits for the rerun.)
+- [x] Mean model cost per question on the 50-question set is reported before and after. (In `docs/cost.md`: $0.0481 and $0.0488 on Haiku 4.5, and each stage's measured Haiku 5.5 cost. With no stage moved, the deployed mean stays at the 4.5 figure.)
 
 ### PB2.1 The relevance check is live (B1 cause 4, B10)
 

@@ -8,21 +8,19 @@ What a question costs, what the site costs before anyone asks one, and the month
 
 ### Model cost per question, by stage
 
-"Before" is Spec 10's baseline on the live stack (October 15, 2026, Claude Haiku 4.5 at $1 and $5 per million input and output tokens). "Eval, Haiku 4.5" is the mean of the two PB2.0 baseline runs on the 50-question set (October 18, 2026, runs `6dab5a3c` and `bb8e6450`, $0.0495 and $0.0478 a question), from each call's logged `est_cost_usd`. `wt eval run` asks without the triage gate, so that row is from the live figure. "After" assumes every stage moves to Claude Haiku 5.5 ($0.10 and $0.50, a tenth of the price) and uses about 30% more tokens for the same work, so each stage costs about 0.13 of what it did. Only stages that pass their rule in PB2.0 move; a stage that stays on Haiku 4.5 keeps its "before" figure.
+"Before" is Spec 10's baseline on the live stack (October 15, 2026, Claude Haiku 4.5 at $1 and $5 per million input and output tokens). "Eval, Haiku 4.5" is the mean of PB2.0's two second-round baselines on the 50-question set (October 19, 2026, image `main-8549de533cec` on `db.t4g.small`, runs `fac84c01` and `be505d57`, $0.0481 and $0.0488 a question), from each call's logged `est_cost_usd`. `wt eval run` asks without the triage gate, so triage is from `wt eval gate` over its 51 questions. "Haiku 5.5, measured" is the same stage in the run that switched only that stage to Claude Haiku 5.5 ($0.10 and $0.50), with thinking off (Spec 11, PB2.0). It includes the newer tokenizer's extra tokens, so it replaces the earlier estimate of 0.13 of the 4.5 cost; the measured ratio is 0.11 to 0.18.
 
-No stage has moved yet. The first PB2.0 comparison (Spec 11, PB2.0) found every stage on Haiku 5.5 cut off at `max_tokens`, because Haiku 5.5 thinks by default. Its single-stage runs cost $0.0021 a question for ranking, $0.0016 for excerpts and $0.0015 for the summary, against $0.0188, $0.0122 and $0.0111 on 4.5 (0.11 to 0.13 of the price). Those include thinking tokens, and the summary figure stops at the cut-off, so they bear out the estimate but do not replace it. The rerun with `thinking_off` replaces "after" with measured figures.
+| Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | Eval, Haiku 4.5 | Haiku 5.5, measured | Moves in PB2.0 |
+| --- | --- | --- | --- | --- | --- |
+| Triage gate (`sensitive`) | 1 | $0.002 | $0.0018 | $0.0002 | No: it declined two harmful questions, which the gate then answered |
+| Ranking (`rank`) | 6 | $0.019 | $0.0188 | $0.0024 | No: 67% of 4.5's 7+ candidates |
+| Excerpt cutting (`excerpt`) | 8 to 9 | $0.013 | $0.0121 | $0.0014 | Waiting on the owner's 30-excerpt review |
+| Summary (`synth`) | 1 to 2 | $0.012 | $0.0110 | $0.0014 | No: 21 summaries shown against 36 and 38 |
+| Verifier (`verify`) | 7 to 8 | $0.008 | $0.0067 | $0.0012 | No: keeps 17% of drafted sentences against 41% and 43% |
+| **Mean per question** | about 24 | **$0.054** | **$0.0485**, $0.050 with triage | $0.0066 if every stage moved | |
+| 95th percentile | | $0.061 | | | |
 
-| Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | Eval, Haiku 4.5 | After (Haiku 5.5, estimate) |
-| --- | --- | --- | --- | --- |
-| Triage gate (`sensitive`) | 1 | $0.002 | not asked | $0.0003 |
-| Ranking (`rank`) | 6 | $0.019 | $0.0188 | $0.0025 |
-| Excerpt cutting (`excerpt`) | 8 to 9 | $0.013 | $0.0122 | $0.0017 |
-| Summary (`synth`) | 1 to 2 | $0.012 | $0.0111 | $0.0016 |
-| Verifier (`verify`) | 7 to 8 | $0.008 | $0.0066 | $0.0010 |
-| **Mean per question** | about 24 | **$0.054** | **$0.049**, $0.051 with triage | **$0.0070** |
-| 95th percentile | | $0.061 | | about $0.008 |
-
-The after-mean is within Spec 10's target of $0.010. Its workstreams (a cheaper ranker, excerpts without a model call, one verifier call) would lower it further and are not counted here.
+**After PB2.0.** No stage has moved, so the deployed cost is still the Haiku 4.5 figure: $0.050 a question on the eval set and $0.054 live. If the excerpt review passes, excerpts move and the cost drops by about $0.011, to about **$0.043** live. That is the "after" figure used below. Spec 10's $0.010 target now depends on its own workstreams (a cheaper ranker, excerpts without a model call, one verifier call), not on the model switch.
 
 How it is measured: every model call made for an answer carries the answer's id in `llm_usage.answer_id`, and `query_log.llm_cost_usd` is their sum, written when the answer is stored and again when its deferred summary is. `wt report beta` prints the mean and 95th percentile; cost by stage is `select stage, sum(est_cost_usd) from llm_usage where answer_id is not null and created_at >= now() - interval '7 days' group by stage`, as the owner login. A question the triage gate stops stores no answer, so its one gate call is in the spend ledger but not in the per-question figure.
 
@@ -122,15 +120,15 @@ A 30-day month. At 10,000 questions a day the one web task and the `db.t4g.small
 
 | Questions a day | Questions a month | Model, before | Model, after | Fixed AWS | **Total, before** | **Total, after** | All-in per question, after |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 100 | 3,000 | $162 | $21 | $100 | **$262** | **$121** | $0.040 |
-| 1,000 | 30,000 | $1,620 | $210 | $100 | **$1,720** | **$310** | $0.010 |
-| 10,000 | 300,000 | $16,200 | $2,100 | $320 | **$16,520** | **$2,420** | $0.008 |
+| 100 | 3,000 | $162 | $129 | $100 | **$262** | **$229** | $0.076 |
+| 1,000 | 30,000 | $1,620 | $1,290 | $100 | **$1,720** | **$1,390** | $0.046 |
+| 10,000 | 300,000 | $16,200 | $12,900 | $320 | **$16,520** | **$13,220** | $0.044 |
 
-Below about 480 questions a day (after the switch) the fixed AWS cost is most of the bill; above it the model is. Haiku 5.5 moves the crossover from about 60 to about 480 questions a day.
+"After" is excerpts on Haiku 5.5 at $0.043 a question, the one move PB2.0 still allows. Below about 80 questions a day (60 before) the fixed AWS cost is most of the bill; above it the model is.
 
 ### Monthly ceiling and the actions at 80% and 100%
 
-During the private beta the ceiling is **$260 a month**: the account budget's $200 for AWS (`monthly_budget_usd` in `infra/terraform/account/`) and the model cap's $60 (`llm_monthly_cap_usd` in `infra/terraform/envs/v1`, which sets `WT_LLM_MONTHLY_CAP_USD`; `wt llm cap set` overrides it). The $60 cap covers about 8,500 questions a month after the switch, or about 1,100 before it. Raise either only with a week of `wt report beta` figures in hand.
+During the private beta the ceiling is **$260 a month**: the account budget's $200 for AWS (`monthly_budget_usd` in `infra/terraform/account/`) and the model cap's $60 (`llm_monthly_cap_usd` in `infra/terraform/envs/v1`, which sets `WT_LLM_MONTHLY_CAP_USD`; `wt llm cap set` overrides it). The $60 cap covers about 1,100 questions a month at $0.054, or about 1,400 if excerpts move. Raise either only with a week of `wt report beta` figures in hand.
 
 | Reached | What happens by itself | What the owner does |
 | --- | --- | --- |
