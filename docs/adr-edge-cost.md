@@ -68,7 +68,7 @@ Decided October 17, 2026: 1 yes, 2 yes, 3 yes: the Tunnel (UB3.13) stays on the 
 
 ## Follow-on: a Cloudflare Tunnel in place of the load balancer (b, UB3.13)
 
-Status: **designed, T1 decided, not built.** Written October 17, 2026. The owner chose T1 (a) the same day: an owner-only `infra/terraform/edge` root with Cloudflare's provider and the maintenance Worker. The build starts once PR 204's three edge stages are applied; read live again after the decision, the load balancer was still `ipv4`, the VPC had no IPv6 block and `app` resolved straight to the load balancer. T2 is open; the build follows the recommendation (T-D last) unless the owner says otherwise.
+Status: **designed, T1 and T2 decided, not built.** Written October 17, 2026. The owner chose T1 (a) the same day: an owner-only `infra/terraform/edge` root with Cloudflare's provider and the maintenance Worker. The build starts once PR 204's three edge stages are applied; read live again after the decision, the load balancer was still `ipv4`, the VPC had no IPv6 block and `app` resolved straight to the load balancer. The owner chose T2's recommendation on October 19: the IPv6-only stage last (T-D), with the database's change scheduled as below.
 
 ### What the load balancer does today, and what replaces it
 
@@ -138,7 +138,8 @@ Each stage is one apply, or one change at Cloudflare, and each is undone by the 
 | T-A | Tunnel created at Cloudflare (`cf` CLI, by hand, or Terraform under T1 (a)); its token in Secrets Manager; the `cloudflared` sidecar, the container health check and `http_response` events deployed. The load balancer still serves every tester; the tunnel's public hostname is a test name such as `tunnel-test.wheelturning.org` | Remove the sidecar with the next apply |
 | T-B | `app` and `demo` CNAMEs repointed at Cloudflare from the load balancer to `<tunnel id>.cfargotunnel.com`, still proxied; `WT_FORWARDED_HOPS=1` | Point the CNAMEs back at the load balancer (it keeps serving): seconds, and `WT_FORWARDED_HOPS=2` again |
 | T-C, a week later | `edge = "tunnel"`: load balancer, target group, listeners, ACM certificate, its alarms and the origin header removed; the two new alarms and the maintenance Worker in place | `edge = "alb"` recreates the load balancer under a new DNS name in about 10 minutes; the CNAMEs go back to it |
-| T-D, optional | Web task into IPv6-only subnets, RDS dual-stack | The service back to the public subnets with `assign_public_ip = true` |
+| T-D1, a quiet hour | IPv6 /64s on the private subnets (free, no effect on running traffic), a manual RDS snapshot, the maintenance page up, then RDS `network_type = "DUAL"`. AWS lists this change as "Downtime is possible" (`USER_ModifyInstance.Settings`), and the database is single-zone, so the site is treated as down until RDS reports `available` again | `network_type = "IPV4"`, same precautions. Nothing uses the IPv6 address yet, so the web task is unaffected either way |
+| T-D2, the next day | Web task into the IPv6-only subnets with no public address; mirrored `aws-cli` and `cloudflared` images through ECR's dual-stack URI; `AWS_USE_DUALSTACK_ENDPOINT=true`. A task that cannot start never turns healthy and the circuit breaker keeps the old one | The service back to the public subnets with `assign_public_ip = true`: one apply |
 
 ### Decisions for the owner
 
@@ -146,7 +147,7 @@ T1. **The maintenance page without a load balancer.** Decided October 17, 2026: 
    - (a) **Terraform keeps the switch** (recommended). A separate Terraform root, `infra/terraform/edge`, applied only by the owner, holds the Cloudflare side under Cloudflare's provider: the tunnel and its route, the `app` and `demo` records, and the maintenance Worker and its routes, which `maintenance = true` creates. PB4.4 item 4 then reads "a Terraform variable `maintenance` that makes Cloudflare answer every path with a fixed page", and `maintenance.tftest.hcl` moves to that root with a mocked provider. It needs a Cloudflare API token limited to the `wheelturning.org` zone (DNS edit, Workers routes edit) and the account's Tunnel and Workers scripts, kept on the owner's machine only. `deploy.yml` never sees it. The records set by hand today move into Terraform's state with `terraform import`.
    - (b) **By hand at Cloudflare.** The Worker is deployed once with the `cf` CLI and its route added or removed in the dashboard. No new token, but PB4.4's ticked item and its test are rewritten to a runbook step that nothing tests, and the switch leaves the plan-and-apply record.
    - (c) **No Tunnel.** Stay on a + d at $21.
-T2. **The task's address.** End with the IPv6-only stage (T-D, about $3.65 more saved, RDS changes network type), or keep the address and stop at T-C.
+T2. **The task's address.** End with the IPv6-only stage (T-D, about $3.65 more saved, RDS changes network type), or keep the address and stop at T-C. Decided October 19, 2026: T-D, last, in two steps (T-D1 and T-D2 above) so the database change never shares an apply with the web task's move.
 
 ## Sources
 
