@@ -6,7 +6,9 @@
 //!
 //! The verdict can raise the level the other layers set and never lower it ([`Triaged::raise`]).
 //! A call that fails, times out after `triage_timeout_s` or finds the spend cap reached leaves
-//! the other layers to decide and logs `triage_degraded`. Question text is never logged.
+//! the other layers to decide and logs `triage_degraded`. A model that declines to classify the
+//! question fails closed instead: the question is routed as `out_of_scope` (Spec 11, PB2.0
+//! second comparison, October 19, 2026). Question text is never logged.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +17,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use wt_core::config::LlmStage;
-use wt_extract::{DataClass, LlmClient, LlmRequest, complete_json};
+use wt_extract::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 
 use super::{Level, TriageSettings};
 
@@ -132,12 +134,26 @@ impl Verdict {
     }
 }
 
+/// Why the gate gave no verdict.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TriageError {
+    /// The model declined to classify the question (`stop_reason` `refusal`). The gate fails
+    /// closed: the question is routed as `out_of_scope`.
+    #[error("the model declined to classify the question")]
+    Declined,
+    /// The call failed, the reply did not parse or the cap was reached: the other layers
+    /// decide.
+    #[error("{0}")]
+    Failed(String),
+}
+
 /// The gate. The web app and `wt sensitive redteam` back it with [`LlmTriage`]; tests use
-/// fakes. An error leaves the other layers to decide.
+/// fakes. A failure leaves the other layers to decide; a declined classification routes the
+/// question as `out_of_scope`.
 #[async_trait]
 pub trait Triage: Send + Sync {
     /// The verdict on `question`.
-    async fn triage(&self, question: &str) -> Result<Verdict, String>;
+    async fn triage(&self, question: &str) -> Result<Verdict, TriageError>;
 }
 
 /// What the gate returned for one question.
@@ -147,6 +163,8 @@ pub struct Triaged {
     pub verdict: Option<Verdict>,
     /// The gate was off, failed, timed out or found the cap reached: `triage_degraded`.
     pub degraded: bool,
+    /// The model declined to classify the question, so it is routed as `out_of_scope`.
+    pub declined: bool,
 }
 
 impl Triaged {
@@ -160,12 +178,31 @@ impl Triaged {
         Self {
             verdict: None,
             degraded: true,
+            declined: false,
         }
     }
 
-    /// `level` raised by the verdict, never lowered.
+    /// For a model that declined to classify the question.
+    pub fn declined() -> Self {
+        Self {
+            verdict: None,
+            degraded: false,
+            declined: true,
+        }
+    }
+
+    /// The level the gate set: its verdict's, or `out_of_scope` when the model declined.
+    pub fn level(&self) -> Option<Level> {
+        match self.verdict {
+            Some(v) => Some(v.level()),
+            None if self.declined => Some(Level::OutOfScope),
+            None => None,
+        }
+    }
+
+    /// `level` raised by the gate, never lowered.
     pub fn raise(&self, level: Level) -> Level {
-        self.verdict.map_or(level, |v| level.max(v.level()))
+        self.level().map_or(level, |g| level.max(g))
     }
 
     /// The verdict's relevance, stored in `query_log.relevance`.
@@ -198,7 +235,16 @@ pub async fn run(gate: Option<&dyn Triage>, settings: TriageSettings, question: 
             Triaged {
                 verdict: Some(verdict),
                 degraded: false,
+                declined: false,
             }
+        }
+        Ok(Err(TriageError::Declined)) => {
+            tracing::warn!(
+                triage_declined = true,
+                level = Level::OutOfScope.as_str(),
+                "triage_declined: the model declined to classify, so the question is out of scope"
+            );
+            Triaged::declined()
         }
         Ok(Err(e)) => {
             tracing::warn!(triage_degraded = true, reason = "error", error = %e, "triage_degraded");
@@ -251,7 +297,7 @@ pub fn wrap(question: &str) -> String {
 
 #[async_trait]
 impl Triage for LlmTriage {
-    async fn triage(&self, question: &str) -> Result<Verdict, String> {
+    async fn triage(&self, question: &str) -> Result<Verdict, TriageError> {
         let req = LlmRequest {
             stage: LlmStage::Sensitive,
             system: PROMPT.to_owned(),
@@ -260,7 +306,10 @@ impl Triage for LlmTriage {
         };
         complete_json(self.llm.as_ref(), &req, self.class)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| match e {
+                LlmError::Refusal => TriageError::Declined,
+                e => TriageError::Failed(e.to_string()),
+            })
     }
 }
 
@@ -300,16 +349,18 @@ mod tests {
     fn a_verdict_raises_and_never_lowers() {
         let gate = Triaged {
             verdict: Some(verdict(Risk::None, false)),
-            degraded: false,
+            ..Triaged::default()
         };
         assert_eq!(gate.raise(Level::Distress), Level::Distress);
         let gate = Triaged {
             verdict: Some(verdict(Risk::Dangerous, false)),
-            degraded: false,
+            ..Triaged::default()
         };
         assert_eq!(gate.raise(Level::Medical), Level::OutOfScope);
         assert_eq!(gate.raise(Level::Acute), Level::Acute);
         assert_eq!(Triaged::degraded().raise(Level::Medical), Level::Medical);
+        assert_eq!(Triaged::declined().raise(Level::None), Level::OutOfScope);
+        assert_eq!(Triaged::declined().raise(Level::Acute), Level::Acute);
     }
 
     #[test]
@@ -357,5 +408,46 @@ mod tests {
             run(None, TriageSettings::default(), "q").await,
             Triaged::degraded()
         );
+    }
+
+    #[tokio::test]
+    async fn a_declined_classification_fails_closed_as_out_of_scope() {
+        let llm = Arc::new(FakeLlm::scripted(vec![Err(LlmError::Refusal)]));
+        let gate = LlmTriage::new(llm.clone());
+        assert_eq!(
+            gate.triage("a synthetic question").await,
+            Err(TriageError::Declined)
+        );
+
+        let llm = Arc::new(FakeLlm::scripted(vec![Err(LlmError::Refusal)]));
+        let gate = LlmTriage::new(llm.clone());
+        let t = run(
+            Some(&gate),
+            TriageSettings::default(),
+            "a synthetic question",
+        )
+        .await;
+        assert_eq!(t, Triaged::declined());
+        assert!(!t.degraded, "a refusal is an answer, not a degraded gate");
+        assert_eq!(t.relevance(), None);
+        assert_eq!(t.raise(Level::None), Level::OutOfScope);
+        assert_eq!(t.raise(Level::Distress), Level::OutOfScope);
+        assert_eq!(t.raise(Level::Acute), Level::Acute);
+        assert_eq!(
+            llm.seen.lock().unwrap().len(),
+            1,
+            "a refusal is not repaired"
+        );
+
+        // Any other failure still degrades and leaves the other layers to decide.
+        let gate = LlmTriage::new(Arc::new(FakeLlm::scripted(vec![Err(LlmError::Truncated)])));
+        let t = run(
+            Some(&gate),
+            TriageSettings::default(),
+            "a synthetic question",
+        )
+        .await;
+        assert_eq!(t, Triaged::degraded());
+        assert_eq!(t.raise(Level::None), Level::None);
     }
 }

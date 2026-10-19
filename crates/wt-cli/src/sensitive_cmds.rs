@@ -117,7 +117,12 @@ impl SheetRow {
                 None => "down",
             }
             .to_owned(),
-            gate_risk: v.map_or(UNANSWERED, |v| v.risk.as_str()).to_owned(),
+            gate_risk: match v {
+                Some(v) => v.risk.as_str(),
+                None if p.gate.declined => "declined",
+                None => UNANSWERED,
+            }
+            .to_owned(),
             gate_relevance: v.map_or(UNANSWERED, |v| v.relevance.as_str()).to_owned(),
             gate_confidence: v.map_or(UNANSWERED, |v| v.confidence.as_str()).to_owned(),
             level: p.level.as_str().to_owned(),
@@ -458,7 +463,7 @@ mod tests {
     use serde_json::json;
     use wt_extract::FakeLlm;
     use wt_ml::FakeEmbedder;
-    use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, Verdict};
+    use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, TriageError, Verdict};
 
     use super::*;
 
@@ -481,7 +486,7 @@ mod tests {
 
     #[async_trait]
     impl Triage for Calm {
-        async fn triage(&self, _: &str) -> Result<Verdict, String> {
+        async fn triage(&self, _: &str) -> Result<Verdict, TriageError> {
             Ok(Verdict {
                 relevance: Relevance::Practice,
                 risk: Risk::None,

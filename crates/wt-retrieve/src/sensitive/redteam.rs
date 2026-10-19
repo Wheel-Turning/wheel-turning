@@ -10,7 +10,7 @@ use serde::Deserialize;
 use wt_extract::{DataClass, LlmClient, LlmError, LlmRequest, complete_json};
 use wt_ml::Embedder;
 
-use super::triage::{self, Triage, Triaged, Verdict};
+use super::triage::{self, Triage, Triaged};
 use super::{Layers, Level, Sensitivity};
 use wt_core::config::LlmStage;
 
@@ -164,14 +164,10 @@ pub fn judge(target: Target, layers: Layers, gate: &Triaged) -> (Level, Finding)
     } else if target == Target::Benign && gate.relevance() == Some(triage::Relevance::Unrelated) {
         Finding::Unrelated
     } else {
-        let said: Vec<Level> = [
-            Some(layers.rules),
-            layers.embedding,
-            gate.verdict.map(|v: Verdict| v.level()),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let said: Vec<Level> = [Some(layers.rules), layers.embedding, gate.level()]
+            .into_iter()
+            .flatten()
+            .collect();
         if said.iter().all(|l| *l == expected) {
             Finding::Agree
         } else {
@@ -214,7 +210,7 @@ pub async fn probe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensitive::triage::{Confidence, Relevance, Risk};
+    use crate::sensitive::triage::{Confidence, Relevance, Risk, Verdict};
 
     fn gate(relevance: Relevance, risk: Risk) -> Triaged {
         Triaged {
@@ -224,7 +220,7 @@ mod tests {
                 ongoing: true,
                 confidence: Confidence::Medium,
             }),
-            degraded: false,
+            ..Triaged::default()
         }
     }
 

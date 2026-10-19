@@ -22,7 +22,7 @@ use wt_extract::{FakeLlm, LlmClient};
 use wt_ml::FakeEmbedder;
 use wt_registry::RegistryFile;
 use wt_retrieve::Triage;
-use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, Verdict};
+use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, TriageError, Verdict};
 
 const REGISTRY: &str = r#"
 [[sangha]]
@@ -480,7 +480,7 @@ async fn the_curated_query_runs_with_the_notice_on_top_and_neither_summary_nor_g
 
 /// A triage gate with a fixed verdict or error, after an optional delay.
 struct Gate {
-    reply: Result<Verdict, String>,
+    reply: Result<Verdict, TriageError>,
     delay: Duration,
 }
 
@@ -509,13 +509,21 @@ impl Gate {
     }
     fn fails() -> Arc<dyn Triage> {
         Arc::new(Self {
-            reply: Err("the monthly language-model cap is reached".into()),
+            reply: Err(TriageError::Failed(
+                "the monthly language-model cap is reached".into(),
+            )),
+            delay: Duration::ZERO,
+        })
+    }
+    fn declines() -> Arc<dyn Triage> {
+        Arc::new(Self {
+            reply: Err(TriageError::Declined),
             delay: Duration::ZERO,
         })
     }
     fn hangs() -> Arc<dyn Triage> {
         Arc::new(Self {
-            reply: Err("never".into()),
+            reply: Err(TriageError::Failed("never".into())),
             delay: Duration::from_secs(3600),
         })
     }
@@ -523,7 +531,7 @@ impl Gate {
 
 #[async_trait]
 impl Triage for Gate {
-    async fn triage(&self, _: &str) -> Result<Verdict, String> {
+    async fn triage(&self, _: &str) -> Result<Verdict, TriageError> {
         tokio::time::sleep(self.delay).await;
         self.reply.clone()
     }
@@ -662,6 +670,47 @@ async fn an_out_of_scope_question_gets_the_plain_page_and_stores_counts_only() {
         .await
         .unwrap();
     assert_eq!(analyzable, 0);
+}
+
+#[tokio::test]
+async fn a_declined_classification_gets_the_plain_page_and_stores_counts_only() {
+    // Spec 11, PB2.0 second comparison: a refusal fails closed as out_of_scope.
+    let llm = themes();
+    let fx = start(Site {
+        triage: Some(Gate::declines()),
+        ..site(llm.clone())
+    })
+    .await;
+    let question = "a synthetic question the model declines to classify";
+    let r = fx.ask(question).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(
+        r.body
+            .contains("This is outside what Wheel Turning can help with"),
+        "{}",
+        r.body
+    );
+    assert!(!r.body.contains(question));
+    assert!(llm.seen.lock().unwrap().is_empty(), "no synthesis");
+    assert_eq!(fx.counts().await, (1, 0));
+    assert_eq!(
+        logged(&fx.pool).await,
+        [("out_of_scope".into(), None, false, false)]
+    );
+    let tally: Vec<(String, String, String, String)> =
+        sqlx::query_as("select risk, gate_level, relevance, level from triage_tally")
+            .fetch_all(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        tally,
+        [(
+            "declined".into(),
+            "out_of_scope".into(),
+            "unanswered".into(),
+            "out_of_scope".into()
+        )]
+    );
 }
 
 #[tokio::test]

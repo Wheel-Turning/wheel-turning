@@ -15,12 +15,18 @@ pub async fn tally(pool: &PgPool, layers: Layers, degraded: bool, gate: Triaged,
         None if degraded => "down",
         None => "skipped",
     };
+    // A declined classification has no verdict but sets a level: `declined`, `out_of_scope`.
+    let unanswered = if gate.declined {
+        "declined"
+    } else {
+        UNANSWERED
+    };
     let v = gate.verdict;
     let t = wt_db::triage::Tally {
         rules: layers.rules.as_str(),
         embedding,
-        risk: v.map_or(UNANSWERED, |v| v.risk.as_str()),
-        gate_level: v.map_or(UNANSWERED, |v| v.level().as_str()),
+        risk: v.map_or(unanswered, |v| v.risk.as_str()),
+        gate_level: gate.level().map_or(UNANSWERED, Level::as_str),
         relevance: v.map_or(UNANSWERED, |v| v.relevance.as_str()),
         confidence: v.map_or(UNANSWERED, |v| v.confidence.as_str()),
         level: level.as_str(),

@@ -334,6 +334,8 @@ pub struct GateReport {
     pub banner_correct: usize,
     /// The gate did not answer (off, failed, timed out or capped).
     pub gate_degraded: usize,
+    /// The model declined to classify, so the question was routed as `out_of_scope`.
+    pub gate_declined: usize,
     /// The embedder was down.
     pub sensitivity_degraded: usize,
     /// By the first route each question allows.
@@ -362,6 +364,7 @@ pub fn report(results: &[GateResult]) -> GateReport {
             r.banner_correct += usize::from(ok);
         }
         r.gate_degraded += usize::from(o.triaged.degraded);
+        r.gate_declined += usize::from(o.triaged.declined);
         r.sensitivity_degraded += usize::from(o.sensitivity_degraded);
         if !route_ok && x.question.route == [Route::NoticePage] {
             r.missed_notice.push(x.label());
@@ -410,7 +413,11 @@ fn miss(x: &GateResult) -> Miss {
             None if o.layers.rules == Level::Acute => "skipped",
             None => "down",
         },
-        gate_risk: v.map_or(UNANSWERED, |v| v.risk.as_str()),
+        gate_risk: match v {
+            Some(v) => v.risk.as_str(),
+            None if o.triaged.declined => "declined",
+            None => UNANSWERED,
+        },
         gate_relevance: v.map_or(UNANSWERED, |v| v.relevance.as_str()),
     }
 }
@@ -442,8 +449,8 @@ pub fn render(r: &GateReport) -> String {
     }
     let _ = writeln!(
         s,
-        "Gate degraded: {}; embedder down: {}",
-        r.gate_degraded, r.sensitivity_degraded
+        "Gate degraded: {}; gate declined: {}; embedder down: {}",
+        r.gate_degraded, r.gate_declined, r.sensitivity_degraded
     );
     let _ = writeln!(s, "\nBy expected route:");
     for (route, row) in &r.by_route {
@@ -490,7 +497,7 @@ mod tests {
     use std::path::Path;
 
     use wt_ml::FakeEmbedder;
-    use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, Verdict};
+    use wt_retrieve::sensitive::triage::{Confidence, Relevance, Risk, TriageError, Verdict};
     use wt_retrieve::sensitive::{Exemplars, SensitiveConfig, normalize};
 
     use super::*;
@@ -511,7 +518,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Triage for Scripted {
-        async fn triage(&self, _question: &str) -> Result<Verdict, String> {
+        async fn triage(&self, _question: &str) -> Result<Verdict, TriageError> {
             Ok(self.0)
         }
     }
@@ -520,8 +527,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Triage for Failing {
-        async fn triage(&self, _question: &str) -> Result<Verdict, String> {
-            Err("down".into())
+        async fn triage(&self, _question: &str) -> Result<Verdict, TriageError> {
+            Err(TriageError::Failed("down".into()))
         }
     }
 
