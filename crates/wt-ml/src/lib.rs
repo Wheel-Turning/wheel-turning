@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
+use ort::environment::Environment;
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
@@ -98,23 +99,21 @@ impl OnnxSettings {
     }
 }
 
-/// Whether ONNX Runtime loaded, kept for the process: the runtime loads only once, so a second
-/// model sees the first attempt's outcome.
-static RUNTIME: OnceLock<Result<(), String>> = OnceLock::new();
+/// The ONNX Runtime environment, kept for the process: the runtime loads only once, so a second
+/// model shares the first one's environment, or sees its failure.
+static RUNTIME: OnceLock<Result<Environment, String>> = OnceLock::new();
 
-/// Loads ONNX Runtime once per process.
-fn load_runtime(path: Option<&Path>) -> Result<(), MlError> {
+/// Loads ONNX Runtime once per process and returns the environment every session is built in.
+fn load_runtime(path: Option<&Path>) -> Result<Environment, MlError> {
     RUNTIME
-        .get_or_init(|| match path {
-            Some(p) => ort::init_from(p)
-                .map(|b| {
-                    b.with_name("wt").commit();
-                })
-                .map_err(|e| format!("loading {}: {e}", p.display())),
-            None => {
-                ort::init().with_name("wt").commit();
-                Ok(())
-            }
+        .get_or_init(|| {
+            let builder = match path {
+                Some(p) => {
+                    ort::init_from(p).map_err(|e| format!("loading {}: {e}", p.display()))?
+                }
+                None => ort::init(),
+            };
+            builder.with_name("wt").build().map_err(|e| e.to_string())
         })
         .clone()
         .map_err(MlError::Runtime)
@@ -170,8 +169,8 @@ fn load_model(settings: &OnnxSettings) -> Result<(Session, Tokenizer), MlError> 
             )));
         }
     }
-    load_runtime(settings.runtime.as_deref())?;
-    let session = Session::builder()
+    let env = load_runtime(settings.runtime.as_deref())?;
+    let session = Session::builder(&env)
         .map_err(runtime_err)?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(runtime_err)?
