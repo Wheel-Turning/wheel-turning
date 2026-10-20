@@ -441,7 +441,7 @@ User stories:
 3. **Deploy the form.** The next image deploys the single feedback form from #164.
 
 **Acceptance.**
-- [ ] `wt report feedback` runs against RDS as the analyst and prints notes without their questions unless flagged.
+- [x] `wt report feedback` runs against RDS as the analyst and prints notes without their questions unless flagged. (October 20, 2026, 01:17 UTC: `wt report feedback --since 30d --notes` as `wt_analyst_login` through the forward exits 0 and prints the counts; no tester has left a note in that window, so `notes` is empty. That a note never shows an unflagged question is checked by `reports_run_as_the_analyst_and_never_show_an_unflagged_question` in `wt-cli/tests/commands.rs`, which passed in main's CI at `2dfe869`.)
 
 ### PB4.2 Alerts reach the owner (B16, WA OPS10-BP04)
 
