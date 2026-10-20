@@ -387,6 +387,11 @@ Owner's decision of October 17, 2026 (`docs/adr-edge-cost.md`): Cloudflare proxi
 `demo`, its Free Managed Ruleset and one rate rule replace the AWS WAF web ACL, and the load
 balancer loses its public IPv4 addresses. The edge drops from about $37 to about $21 a month.
 
+Done: stage A on October 19, 2026, and the Cloudflare settings, proxying, stage B and stage C on
+October 20. `cloudflare_only = true` and `alb_public_ipv4 = false` are now the defaults in
+`variables.tf`, so plain applies keep them; the stage steps below are kept for a rebuild or a
+rollback. Step 8's next-day checks and burst test are still to do.
+
 Three Terraform variables in `infra/terraform/envs/v1` carry it, applied by hand in this order,
 since the deploy role cannot change the VPC, the load balancer's address type or listener rules:
 
