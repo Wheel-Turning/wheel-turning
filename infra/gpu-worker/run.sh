@@ -131,7 +131,7 @@ step "clear what an earlier round left"
 step "work: $WORKERS workers"
 LIMIT=()
 [ "$HOURS" != 0 ] && LIMIT=(timeout "${HOURS}h")
-"${LIMIT[@]}" "${SSH[@]}" -o ExitOnForwardFailure=yes -R "" "$HOST" \
+"${LIMIT[@]}" "${SSH[@]}" -o ExitOnForwardFailure=yes -R "$DB_PORT:localhost:$DB_PORT" "$HOST" \
   "bash ~/wt/infra/gpu-worker/work.sh $WORKERS" || echo "work.sh ended with an error"
 step "copy transcripts back"
 sync_objects
