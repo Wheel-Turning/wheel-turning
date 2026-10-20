@@ -108,7 +108,7 @@ User stories:
 - [x] A takedown of a synthetic talk leaves zero keys and zero versions under its prefixes in the fake. (October 19, 2026: `a_takedown_leaves_no_keys_and_no_versions_under_its_prefixes_in_a_versioned_bucket` in `wt-db/tests/takedown.rs`.)
 - [x] `wt objects sync` reports matching counts and hashes for the PC's objects and records. (October 20, 2026, dry runs against `wt-v1-transcripts-904883674947` and `wt-records-904883674947`: objects 13,219 on the PC, 13,219 matched and verified by SHA-256, none differing or mismatched, 22 only in the bucket; records 20, 20 matched and verified. Both report `complete: true`.)
 - [x] `wt audit` reports a planted object under a withdrawn talk's prefix. (October 19, 2026: `takedown_completeness_reports_an_object_planted_in_the_bucket_under_a_withdrawn_talk` in `wt-db/tests/audit.rs`, on the fake bucket.)
-- [ ] Runbook §10 (local backups) is retired once both PB1.1 and PB1.2 are done.
+- [x] Runbook §10 (local backups) is retired once both PB1.1 and PB1.2 are done. (October 20, 2026: §10 now records the retirement and its shutdown steps, which are the owner's: clear `pc_backup_bucket` and apply, then disable the "Wheel Turning backup" task. The bucket stays until the PC database's final archive, about November 2.)
 
 ### PB1.3 Fallback while two databases remain (B15, WA REL09-BP01, REL09-BP03)
 
