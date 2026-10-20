@@ -422,16 +422,23 @@ User stories:
    - `WT_FORWARDED_HOPS=2`: the public forms' limit counts the address Cloudflare saw, not Cloudflare's own.
    - The ask stream (server-sent events) is verified to work through Cloudflare.
    - What this gives up: the AWS Common rule group (OWASP-style rules and size limits), which has no free Cloudflare equivalent, and AWS WAF's per-rule metrics and sampled requests. Cloudflare decrypts every request, so the About page says so.
-2. **Detection in `infra/terraform/account`.**
+2. **Then a Cloudflare Tunnel in place of the load balancer** (roadmap UB3.13). Owner's decisions of October 17 and 19, 2026 (`docs/adr-edge-cost.md`, "Follow-on", T1 (a) and T2), cut over in stages T-A to T-D2 (runbook §12, "The Cloudflare Tunnel"):
+   - A `cloudflared` container in the web task dials out to Cloudflare and carries `app` and `demo` to `wt-api` on `localhost`. It starts only once `wt-api` passes a container health check (`wt-api --healthcheck`), which also gates deploys and replaces failing tasks in place of the target group. The tunnel token lives in Secrets Manager (`wt-v1/cloudflare_tunnel_token`) and reaches only `cloudflared`.
+   - Once the tunnel carries all traffic (`edge = "tunnel"`), the load balancer, its certificate, its listeners, the origin header and its two alarms are gone, and the web security group admits nothing inbound. `WT_FORWARDED_HOPS=1`: Cloudflare writes the client into `X-Forwarded-For` and `cloudflared` adds nothing.
+   - Cloudflare's side (the tunnel, its routes, the app's DNS records and the maintenance Worker) is in `infra/terraform/edge`, which only the owner applies with a Cloudflare API token that never reaches CI. Zone settings, the managed ruleset, the rate rule and the transform rule stay as in item 1.
+   - Last, the web task runs in IPv6-only subnets with no public IPv4 address, reaching AWS, the model API and Cloudflare over IPv6, with the database in dual-stack mode.
+   - What this gives up: an AWS-side certificate and TLS endpoint, and 5xx answers that Cloudflare gives when the task is unreachable are not in the 5xx alarm (the running-task and health check alarms cover that case).
+3. **Detection in `infra/terraform/account`.**
    - GuardDuty on.
    - IAM Access Analyzer for external and unused access.
    - CloudTrail metric filters with alarms to SNS for root sign-in and IAM policy changes.
-3. **Cost.** Detection costs about $3 to $6 a month. The Cloudflare edge is free and saves about $15 a month on the load balancer's addresses and AWS WAF. Both are recorded in `docs/cost.md`.
+4. **Cost.** Detection costs about $3 to $6 a month. The Cloudflare edge is free and saves about $15 a month on the load balancer's addresses and AWS WAF; the tunnel saves about $20 more (the load balancer and the task's address, less a $0.40 secret). All are recorded in `docs/cost.md`.
 
 **Acceptance.**
 - [ ] Terraform validates and applies. (October 17, 2026: `terraform validate` and `terraform test` pass, and `terraform plan` against the live state shows each cutover stage. The owner applies them per runbook §12, "The edge".)
 - [ ] A burst of 400 requests from one address is blocked by Cloudflare once 20 arrive within 10 seconds.
-- [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (`modules/service/tests/edge.tftest.hcl` checks the listener offline.)
+- [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (`modules/service/tests/edge.tftest.hcl` checks the listener offline.) After the tunnel's stage T-C: the web security group has no inbound rule and nothing answers on the old load balancer name.
+- [ ] Behind the tunnel, one question streams to its answer page on `app` and `demo`, and a deploy waits for the new task's container health check. (`modules/service/tests/tunnel.tftest.hcl` checks each stage's task and service offline; `crates/wt-api/tests/healthcheck.rs` the check itself.)
 - [x] The public forms' limit counts the client behind Cloudflare. (`behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw` in `wt-api/tests/site.rs`.)
 - [x] A test IAM policy change triggers the alarm. (October 19, 2026: an unattached policy `wt-alarm-test-pb36` was created and deleted at 23:24 UTC; `wt-account-iam-policy-change` went to ALARM at 23:27 and back to OK at 23:42, with its action on `wt-v1-alarms`.)
 
@@ -501,12 +508,12 @@ User stories:
 1. **A runbook entry per alarm**, covering the six existing alarms and PB1.4, PB3.6 and PB4.3's: what it means, the first check, the fix, and when to scale to zero.
 2. **A ten-line incident procedure** and `docs/incidents/TEMPLATE.md`.
 3. **A security contacts list**, kept privately, with its location named in the runbook.
-4. **A maintenance page.** A Terraform variable `maintenance` that, when true, makes the load balancer answer every path with a fixed page.
+4. **A maintenance page.** A Terraform variable `maintenance` that, when true, makes every path answer with a fixed page: from the load balancer while it carries the traffic, and from a Cloudflare Worker (`infra/terraform/edge`) once the Cloudflare Tunnel does (PB3.6 item 2).
 5. **An email template** for telling testers about an outage.
 
 **Acceptance.**
 - [x] The runbook names every alarm in Terraform. A test compares the two lists. (`crates/wt-core/tests/runbook_alarms.rs`.)
-- [x] Setting `maintenance = true` in a plan shows the fixed response. (`infra/terraform/modules/service/tests/maintenance.tftest.hcl`, run in CI.)
+- [x] Setting `maintenance = true` in a plan shows the fixed response. (`infra/terraform/modules/service/tests/maintenance.tftest.hcl`, run in CI; behind the tunnel, `infra/terraform/modules/edge/tests/edge.tftest.hcl` routes both hostnames to the Worker's 503 page.)
 
 ### PB4.5 Recovery and availability targets (WA M4)
 

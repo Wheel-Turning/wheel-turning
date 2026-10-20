@@ -33,16 +33,28 @@ locals {
   # The versioned, Object Lock records bucket from infra/terraform/records, its own stack so
   # rebuilding v1 never touches it (Spec 11, PB1.2, question 3).
   records_bucket = "wt-records-${data.aws_caller_identity.current.account_id}"
+
+  # The Cloudflare Tunnel stages (variable `edge`).
+  load_balancer = var.edge != "tunnel"
+  tunnel        = var.edge != "alb"
+  # Cloudflare appends the client to X-Forwarded-For. In front of the load balancer, the load
+  # balancer then appends Cloudflare's edge; through the tunnel, cloudflared appends nothing.
+  forwarded_hops = contains(["tunnel_live", "tunnel"], var.edge) ? 1 : (var.cloudflare_only ? 2 : 1)
 }
 
 module "network" {
   source = "../../modules/network"
   name   = local.name
 
+  ipv6_web     = var.db_dual_stack
+  web_from_alb = local.load_balancer
+  # cloudflared reaches Cloudflare's edge on 7844; the edge's addresses are in Cloudflare's ranges.
+  tunnel_egress = local.tunnel ? var.cloudflare_ranges : { ipv4 = [], ipv6 = [] }
+
   # Behind Cloudflare only its ranges reach the load balancer, over HTTPS; Cloudflare redirects
   # HTTP itself (docs/adr-edge-cost.md). IPv4 ranges matter only while the load balancer has
-  # public IPv4 addresses.
-  alb_ingress = var.cloudflare_only ? {
+  # public IPv4 addresses. Without the load balancer, nothing.
+  alb_ingress = !local.load_balancer ? { ipv4 = [], ipv6 = [], ports = [] } : var.cloudflare_only ? {
     ipv4  = var.alb_public_ipv4 ? var.cloudflare_ranges.ipv4 : []
     ipv6  = var.cloudflare_ranges.ipv6
     ports = [443]
@@ -70,6 +82,7 @@ module "database" {
   security_group_id   = module.network.security_group_ids["db"]
   instance_class      = var.db_instance_class
   deletion_protection = var.db_deletion_protection
+  dual_stack          = var.db_dual_stack
 }
 
 module "observability" {
@@ -78,6 +91,7 @@ module "observability" {
   alert_email = var.alert_email
   # Spec 11, PB4.2: a second recipient, once the owner names one.
   second_alert_email = var.second_alert_email
+  load_balancer      = local.load_balancer
   alb_arn_suffix     = module.service.alb_arn_suffix
   db_identifier      = module.database.identifier
   scratch_bucket     = module.storage.bucket_names["scratch"]
@@ -122,9 +136,12 @@ module "service" {
   maintenance            = var.maintenance
   cloudflare_only        = var.cloudflare_only
   alb_public_ipv4        = var.alb_public_ipv4
-  # Cloudflare appends the client and the load balancer appends Cloudflare's edge.
-  forwarded_hops     = var.cloudflare_only ? 2 : 1
-  access_logs_bucket = module.storage.alb_logs_bucket
+  forwarded_hops         = local.forwarded_hops
+  access_logs_bucket     = module.storage.alb_logs_bucket
+  load_balancer          = local.load_balancer
+  tunnel                 = local.tunnel
+  web_ipv6_only          = var.web_ipv6_only
+  web_ipv6_subnet_ids    = module.network.web_ipv6_subnet_ids
 
   llm = {
     model           = var.llm_model

@@ -1,0 +1,17 @@
+// The maintenance page (Spec 11, PB4.4), served by Cloudflare while `maintenance` is on. Every
+// path, /healthz included, gets the same 503, so the health check alarm says the site is down.
+const PAGE = ${page};
+
+export default {
+  async fetch() {
+    return new Response(PAGE, {
+      status: 503,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "retry-after": "600",
+        "x-robots-tag": "noindex",
+      },
+    });
+  },
+};

@@ -1,10 +1,10 @@
 output "dns_records_for_cloudflare" {
-  description = "Create each at Cloudflare. The certificate validation records are DNS-only (grey cloud); the app's hostnames are proxied (orange cloud) from the edge cutover on."
+  description = "Create each at Cloudflare. The certificate validation records are DNS-only (grey cloud); the app's hostnames are proxied (orange cloud) from the edge cutover on, and the edge stack (infra/terraform/edge) holds them once imported. Empty without the load balancer."
   value = concat(module.service.certificate_validation_records, [for name in concat([var.domain_name], var.alternate_domain_names) : {
     name  = name
     type  = "CNAME"
     value = module.service.alb_dns_name
-  }])
+  } if local.load_balancer])
 }
 
 output "cloudflare_origin_header" {
