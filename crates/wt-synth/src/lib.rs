@@ -441,33 +441,41 @@ pub async fn summarize(
     }
 
     let names = filter::name_words(aliases);
-    let (mut kept, mut unused) =
-        match round(llm, input, &names, settings, class, None, &mut out).await {
-            Ok(k) => k,
-            Err(done) => return done,
-        };
+    let mut draft = match round(llm, input, &names, settings, class, None, &mut out).await {
+        Ok(d) => d,
+        Err(done) => return done,
+    };
     // A draft that loses its headline gets one revision that is told why each sentence went
     // (October 15, 2026: on the beta every summary was lost this way). The summary is written
     // after the page is shown, so the second call costs the reader no wait.
-    if !kept.iter().any(|c| c.part == SummaryPart::Headline) && !out.dropped.is_empty() {
+    if !draft.kept.iter().any(|c| c.part == SummaryPart::Headline) && !out.dropped.is_empty() {
         let first = out.dropped.clone();
         match round(llm, input, &names, settings, class, Some(&first), &mut out).await {
-            Ok(k) => (kept, unused) = k,
+            Ok(d) => draft = d,
             Err(done) => return done,
         }
     }
-    let cited: Vec<usize> = kept.iter().flat_map(Candidate::excerpts).collect();
-    let unused = unused
-        .iter()
-        .filter(|(i, _)| !cited.contains(i))
-        .map(|&(i, reason)| StoredUnused {
-            passage_id: input.excerpts[i].passage_id,
-            reason,
-        })
-        .collect();
+    let unused = draft.unused(input.excerpts.len());
+    let unlisted = input.excerpts.len() - draft.cited().len() - unused.len();
+    if unlisted > 0 {
+        // Spec 11, PB2.2: the draft neither cited these nor listed them as unused.
+        tracing::info!(
+            target: "wt_synth",
+            unlisted,
+            offered = input.excerpts.len(),
+            "summary excerpts unaccounted for"
+        );
+    }
     let summary = StoredSummary {
-        unused,
-        sentences: kept
+        unused: unused
+            .into_iter()
+            .map(|(i, reason)| StoredUnused {
+                passage_id: input.excerpts[i].passage_id,
+                reason,
+            })
+            .collect(),
+        sentences: draft
+            .kept
             .into_iter()
             .map(|c| StoredSentence {
                 part: c.part,
@@ -491,9 +499,49 @@ pub async fn summarize(
     out
 }
 
-/// One draft: generation, the filters and the verifier. The sentences the verifier kept with the
-/// excerpts the draft listed as unused, or the finished synthesis when a call failed. `revise`
-/// holds the drops a revision is told about.
+/// What one draft left after the filters and the verifier.
+struct Round {
+    /// The sentences the verifier kept.
+    kept: Vec<Candidate>,
+    /// The excerpts the draft listed as unused, by offered position.
+    listed: Vec<(usize, UnusedReason)>,
+    /// The offered positions any drafted sentence cited, kept or not.
+    drafted: Vec<usize>,
+}
+
+impl Round {
+    /// Distinct excerpt positions the kept sentences cite.
+    fn cited(&self) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        for i in self.kept.iter().flat_map(Candidate::excerpts) {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+        out
+    }
+
+    /// Spec 11, PB2.2: each offered excerpt no kept sentence cites, with why, in offered order.
+    /// The draft's own reason comes first. An excerpt the draft cited, whose every citing
+    /// sentence or citation the checks dropped, is `dropped`. One the draft neither cited nor
+    /// listed is left out, as the miss it is.
+    fn unused(&self, offered: usize) -> Vec<(usize, UnusedReason)> {
+        let cited = self.cited();
+        (0..offered)
+            .filter(|i| !cited.contains(i))
+            .filter_map(|i| match self.listed.iter().find(|(j, _)| *j == i) {
+                Some(&(_, reason)) => Some((i, reason)),
+                None => self
+                    .drafted
+                    .contains(&i)
+                    .then_some((i, UnusedReason::Dropped)),
+            })
+            .collect()
+    }
+}
+
+/// One draft: generation, the filters and the verifier, or the finished synthesis when a call
+/// failed. `revise` holds the drops a revision is told about.
 async fn round(
     llm: &dyn LlmClient,
     input: &SummaryInput,
@@ -502,7 +550,7 @@ async fn round(
     class: DataClass,
     revise: Option<&[Dropped]>,
     out: &mut Synthesis,
-) -> Result<(Vec<Candidate>, Vec<(usize, UnusedReason)>), Synthesis> {
+) -> Result<Round, Synthesis> {
     out.calls += 1;
     let request = LlmRequest {
         stage: LlmStage::Synth,
@@ -523,7 +571,8 @@ async fn round(
         Ok(Err(e)) => return Err(fail(std::mem::take(out), "synth", e)),
         Err(_) => return Err(timed_out(std::mem::take(out), "synth")),
     };
-    let unused = unused_positions(&drafted.unused, input.excerpts.len());
+    let listed = unused_positions(&drafted.unused, input.excerpts.len());
+    let drafted_cites = drafted_positions(&drafted, input.excerpts.len());
     let candidates = filter_draft(drafted, input, names, settings, &mut out.dropped);
     out.calls += candidates.len();
     let verdicts = join_all(
@@ -551,7 +600,11 @@ async fn round(
             }
         }
     }
-    Ok((kept, unused))
+    Ok(Round {
+        kept,
+        listed,
+        drafted: drafted_cites,
+    })
 }
 
 /// Records a failed model call on the synthesis and logs it; a spend cap that stopped the call is
@@ -578,6 +631,27 @@ fn unused_positions(list: &[DraftUnused], offered: usize) -> Vec<(usize, UnusedR
             && !out.iter().any(|(j, _)| *j == i)
         {
             out.push((i, u.reason.into()));
+        }
+    }
+    out
+}
+
+/// The offered positions the draft's sentences cite, each once, before any check.
+fn drafted_positions(d: &SummaryDraft, offered: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    let sentences = d
+        .headline
+        .iter()
+        .chain(&d.framing)
+        .chain(&d.agree)
+        .chain(&d.differ)
+        .chain(&d.keep_in_mind)
+        .chain(&d.sum_up);
+    for c in sentences.flat_map(|s| &s.cites) {
+        if let Some(i) = position(&c.excerpt, offered)
+            && !out.contains(&i)
+        {
+            out.push(i);
         }
     }
     out
@@ -625,6 +699,12 @@ fn generation_message(input: &SummaryInput) -> String {
     for (_, name, labels) in &teachers {
         text.push_str(&format!("- {name}: {}\n", labels.join(", ")));
     }
+    // Spec 11, PB2.2: drafts left excerpts neither cited nor listed, so the list is spelled out.
+    let all: Vec<String> = (0..input.excerpts.len()).map(label).collect();
+    text.push_str(&format!(
+        "\nEach of {} appears in a sentence's cites or under unused.\n",
+        all.join(", ")
+    ));
     text
 }
 

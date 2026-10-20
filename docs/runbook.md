@@ -334,6 +334,12 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   pass `["wt","eval","export-review","--run","<id>","--out","/out/<id>/review.html"]`; the task
   copies `/out` to `s3://wt-v1-transcripts-904883674947/eval-reviews/`, and the owner downloads it
   with `aws s3 cp` (the page quotes transcripts: never share it by public link).
+  The metrics are `["wt","eval","report","--run","<id>","--json"]`, in the same log stream;
+  Spec 11, PB2.2 reads `summary_use` there. The claim audit is the reviewer's: they rate the
+  summary lines on the review page and save `ratings.json`, and the owner loads it through the
+  batch host forward as `wt_owner_login` (the task has no way to read a local file):
+  `wt eval import-ratings --run <id> --file ratings.json --reviewer "<name>"`. The report's
+  `claims` then counts verdicts, and any `invented` fails synthesis.
 - Logins: `wt_analyst_login` (aggregate reports) and `wt_audit_login` (the read-only nightly
   audit) take their passwords from `wt-v1/db_wt_analyst_login` and `wt-v1/db_wt_audit_login`.
   Create or reset each once with the `wt-v1-admin` task, which injects every login password:

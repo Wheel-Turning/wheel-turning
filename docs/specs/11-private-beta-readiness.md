@@ -267,8 +267,10 @@ This is blocked on open question 2: serve fewer excerpts, require the summary to
 
 **Diagnosis first.** Pull the stored draft and `llm_usage` rows for answer `40fc360b`. Record whether "Where the talks agree" and "Where they differ" sentences were written and then dropped by the verifier.
 
+**Finding (October 19, 2026).** Runs `fac84c01` and `be505d57` left 75 of 313 and 82 of 332 excerpts neither cited nor listed. The list was the model's alone: an excerpt the draft cited in a sentence the filters or the verifier then dropped was on neither side, since the model had cited it. The code now lists such an excerpt with the reason `dropped`, the report counts it apart, and the request names every excerpt label. An excerpt the draft neither cites nor lists is still a miss, logged as `summary excerpts unaccounted for`.
+
 **Acceptance (recommended option).**
-- [ ] On the 50-question set, every served excerpt is cited by the summary or listed as unused with a reason.
+- [ ] On the 50-question set, every served excerpt is cited by the summary or listed as unused with a reason (`off_topic`, `duplicate`, or the code's `dropped`).
 - [ ] The claim audit still shows no unsupported sentence.
 - [ ] Answers with three or more teachers show at least one agree or differ sentence in at least 60% of cases, or the shortfall is reported with its cause.
 

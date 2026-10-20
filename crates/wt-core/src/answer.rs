@@ -81,8 +81,8 @@ impl StoredSentence {
 pub struct StoredSummary {
     /// Sentences, headline first.
     pub sentences: Vec<StoredSentence>,
-    /// Excerpts the model left out of the summary, with why (Spec 11, PB2.2). Empty on answers
-    /// stored before PB2.2.
+    /// Excerpts no shown sentence cites, with why (Spec 11, PB2.2). Empty on answers stored
+    /// before PB2.2.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused: Vec<StoredUnused>,
 }
@@ -107,7 +107,8 @@ impl StoredSummary {
     }
 }
 
-/// Why the model left an excerpt out of the summary (Spec 11, PB2.2).
+/// Why an excerpt is not in the summary (Spec 11, PB2.2): the model's reason, or that the checks
+/// dropped the sentences citing it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnusedReason {
@@ -115,6 +116,9 @@ pub enum UnusedReason {
     OffTopic,
     /// It says what another excerpt the summary cites already says.
     Duplicate,
+    /// The draft cited it, but the filters or the verifier dropped every sentence or citation
+    /// that did. The code records this one, never the model.
+    Dropped,
 }
 
 impl UnusedReason {
@@ -123,6 +127,7 @@ impl UnusedReason {
         match self {
             UnusedReason::OffTopic => "off_topic",
             UnusedReason::Duplicate => "duplicate",
+            UnusedReason::Dropped => "dropped",
         }
     }
 }

@@ -291,7 +291,7 @@ async fn a_run_answers_every_question_as_the_eval_tester_with_timings() {
     let u = &r.summary_use;
     assert_eq!(
         u.excerpts,
-        u.cited + u.off_topic + u.duplicate + u.neither,
+        u.cited + u.off_topic + u.duplicate + u.dropped + u.neither,
         "{u:?}"
     );
     assert!(u.cited >= 2, "{u:?}");
