@@ -84,7 +84,7 @@ User stories:
 - [x] A synthetic talk advances from cleared to ready through a worker pointed at a test database named `rds-v1`. (`wt-ingest/tests/pipeline.rs`.)
 - [x] A worker with `WT_DATABASE_NAME=rds-v1` refuses to start against a database named `pc`, and the reverse. (`wt-cli/tests/commands.rs`, `wt-db/src/identity.rs`.)
 - [x] Catch-up on two test databases copies a talk changed on the source, leaves the target's `tester`, `query_log`, `feedback` and `takedown_request` row counts unchanged, and skips a talk withdrawn on the target. (`wt-db/tests/catch_up.rs`.)
-- [ ] After the real catch-up, `wt rights parity` reports no unsafe difference, and the PC database refuses writes.
+- [x] After the real catch-up, `wt rights parity` reports no unsafe difference, and the PC database refuses writes. (October 19, 2026, 23:44 UTC: parity RDS against the PC exits 0 with no differences at all, 8,834 talks, 426 teachers, 5 takedowns on each side; on the PC, `default_transaction_read_only` is `on` and a `create temp table` fails with "cannot execute CREATE TABLE in a read-only transaction".)
 
 ### PB1.2 Objects and records move to S3 (B19, WA H1)
 
@@ -139,7 +139,7 @@ Build this only if PB1.1 cannot land before the beta.
 
 **Acceptance.**
 - [x] The scheduled task runs nightly and writes its report to the log group. (October 19, 2026: schedule `wt-v1-audit-nightly`, `cron(17 10 * * ? *)` UTC, ran at 10:18 UTC on October 18 and 19; streams `audit/audit/53966d67…` and `audit/audit/5a91360c…` in `/wt-v1/admin` hold the JSON report.)
-- [ ] A one-off run with a command that exits 1 produces an SNS email.
+- [x] A one-off run with a command that exits 1 produces an SNS email. (October 19, 2026: task `20fd13c4…` with `--backup-bucket wt-no-such-bucket` stopped with exit code 1 at 23:34 UTC; `wt-v1-audit-failed` triggered once and `wt-v1-alarms` delivered the notification.)
 - [x] `wt audit --fail-on warning` exits non-zero on a planted warning in a test database. (`audit_fail_on_warning_exits_one_on_a_planted_warning`.)
 
 ### PB1.5 Removal emails reach anyone (WA REL01-BP04, #165)
@@ -253,8 +253,8 @@ No stage passes, all for one cause: Claude Haiku 5.5 thinks by default (effort m
 2. **Log which ranker served.** Every answer logs which ranker served it, `llm`, `onnx` or `none (fallback)`, for PB4.3's alarm.
 
 **Acceptance.**
-- [ ] Ten eval questions on the live stack show ranked order and no "not installed" notice.
-- [ ] A forced ranker timeout logs `none (fallback)` and the page says so.
+- [x] Ten eval questions on the live stack show ranked order and no "not installed" notice. (October 19, 2026: `wt eval run --set practitioner@2 --limit 10` on `wt-v1-eval`, run `fbe991a8`: 10 of 10 answers `ranker_served` = `llm`, none `rerank_degraded`, rerank 1.9 to 2.3 s, no "not installed" in the log.)
+- [x] A forced ranker timeout logs `none (fallback)` and the page says so. (October 19, 2026: `a_ranker_timeout_falls_back_and_the_page_says_so` in `wt-api/tests/pages.rs`, with `rerank_timeout_s = 1` and a slow ranker, and `ask::tests::the_ranker_is_named_by_its_setting_or_as_the_fallback`. Not forced on the live stack: the deployed config has no override for the timeout.)
 
 ### PB2.2 The summary uses what the page shows (B10)
 
@@ -270,9 +270,9 @@ This is blocked on open question 2: serve fewer excerpts, require the summary to
 **Finding (October 19, 2026).** Runs `fac84c01` and `be505d57` left 75 of 313 and 82 of 332 excerpts neither cited nor listed. The list was the model's alone: an excerpt the draft cited in a sentence the filters or the verifier then dropped was on neither side, since the model had cited it. The code now lists such an excerpt with the reason `dropped`, the report counts it apart, and the request names every excerpt label. An excerpt the draft neither cites nor lists is still a miss, logged as `summary excerpts unaccounted for`.
 
 **Acceptance (recommended option).**
-- [ ] On the 50-question set, every served excerpt is cited by the summary or listed as unused with a reason (`off_topic`, `duplicate`, or the code's `dropped`).
-- [ ] The claim audit still shows no unsupported sentence.
-- [ ] Answers with three or more teachers show at least one agree or differ sentence in at least 60% of cases, or the shortfall is reported with its cause.
+- [ ] On the 50-question set, every served excerpt is cited by the summary or listed as unused with a reason (`off_topic`, `duplicate`, or the code's `dropped`). (**Not met before #223**, October 19, 2026: `wt eval report` on `fac84c01` counts 313 excerpts served with a shown summary, 212 cited, 16 off topic, 10 duplicate and 75 neither; `be505d57` counts 332, 221, 16, 13 and 82 neither; #223 adds `dropped`, so a new 50-question run is needed.)
+- [ ] The claim audit still shows no unsupported sentence. (Not measured yet, October 19, 2026: neither `fac84c01` nor `be505d57` has claim-audit rows.)
+- [x] Answers with three or more teachers show at least one agree or differ sentence in at least 60% of cases, or the shortfall is reported with its cause. (October 19, 2026: 32 of 47 (68%) on `fac84c01` and 34 of 47 (72%) on `be505d57`.)
 
 ### PB2.3 The page reads cleanly (B10)
 
@@ -425,7 +425,7 @@ User stories:
 - [ ] A burst of 400 requests from one address is blocked by Cloudflare once 20 arrive within 10 seconds.
 - [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (`modules/service/tests/edge.tftest.hcl` checks the listener offline.)
 - [x] The public forms' limit counts the client behind Cloudflare. (`behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw` in `wt-api/tests/site.rs`.)
-- [ ] A test IAM policy change triggers the alarm.
+- [x] A test IAM policy change triggers the alarm. (October 19, 2026: an unattached policy `wt-alarm-test-pb36` was created and deleted at 23:24 UTC; `wt-account-iam-policy-change` went to ALARM at 23:27 and back to OK at 23:42, with its action on `wt-v1-alarms`.)
 
 ## PB4. The owner can learn from the beta
 
@@ -443,7 +443,7 @@ User stories:
 3. **Deploy the form.** The next image deploys the single feedback form from #164.
 
 **Acceptance.**
-- [ ] `wt report feedback` runs against RDS as the analyst and prints notes without their questions unless flagged.
+- [x] `wt report feedback` runs against RDS as the analyst and prints notes without their questions unless flagged. (October 20, 2026, 01:17 UTC: `wt report feedback --since 30d --notes` as `wt_analyst_login` through the forward exits 0 and prints the counts; no tester has left a note in that window, so `notes` is empty. That a note never shows an unflagged question is checked by `reports_run_as_the_analyst_and_never_show_an_unflagged_question` in `wt-cli/tests/commands.rs`, which passed in main's CI at `2dfe869`.)
 
 ### PB4.2 Alerts reach the owner (B16, WA OPS10-BP04)
 
