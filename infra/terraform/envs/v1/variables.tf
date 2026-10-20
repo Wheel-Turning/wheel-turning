@@ -139,13 +139,13 @@ variable "mail_from" {
 variable "cloudflare_only" {
   description = "Cloudflare proxies the app's hostnames and is the only way in: the listener needs the origin header and the security group admits only Cloudflare's ranges (docs/adr-edge-cost.md, runbook edge cutover). Set only after the hostnames are proxied and the transform rule exists."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "alb_public_ipv4" {
   description = "Give the load balancer public IPv4 addresses. False saves two addresses ($7.30 a month) and needs cloudflare_only, since testers on IPv4 then reach the site only through Cloudflare."
   type        = bool
-  default     = true
+  default     = false
 
   validation {
     condition     = var.alb_public_ipv4 || var.cloudflare_only
