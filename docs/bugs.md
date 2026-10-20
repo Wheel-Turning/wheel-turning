@@ -29,7 +29,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B21](#b21-the-gpu-worker-and-alpha-server-live-outside-the-repo) | 2026-10-15 | The GPU worker and alpha server live outside the repo | open (debt) |
 | [B22](#b22-thin-tests-for-the-cli-and-ml-crates-and-timing-based-tests) | 2026-10-15 | Thin tests for the CLI and ML crates, and timing-based tests | open (debt) |
 | [B23](#b23-very-large-modules) | 2026-10-15 | Very large modules | open (debt) |
-| [B24](#b24-two-sfzc-transcripts-were-saved-cut-short) | 2026-10-19 | Two SFZC transcripts were saved cut short | diagnosed |
+| [B24](#b24-two-sfzc-transcripts-were-saved-cut-short) | 2026-10-19 | Two SFZC transcripts were saved cut short | fixed |
 | [B25](#b25-the-gpu-worker-writes-transcripts-to-the-pc-not-s3) | 2026-10-19 | The GPU worker writes transcripts to the PC, not S3 | open |
 
 ## B1. A question about Shakyamuni returns talks, not texts
@@ -606,6 +606,13 @@ Both talks were transcribed on the GPU worker on October 11, at 05:48 and 14:24 
 - Copy the new objects to S3 afterwards with `wt objects sync --from data/objects --apply`. The GPU worker still writes to the PC rather than S3 ([B25](#b25-the-gpu-worker-writes-transcripts-to-the-pc-not-s3)).
 - Confirm both talks reach `ready` and that `wt audit` shows no `student_speech` findings.
 - The parse failure only ever surfaced as a requeued `extract` job. A transcript that cannot be parsed now fails the nightly audit (`student_speech`, Spec 11, PB1.4), which alerts the owner.
+
+### Result (October 19, 2026)
+
+- One Lambda A10, launched at 21:56 UTC and terminated at 23:01 UTC (about $1.40), transcribed both talks in three minutes once `run.sh`'s database tunnel was fixed (#222).
+- `wt objects sync --apply` copied the two new `v2.json` files to S3 and verified them (248 KB and 306 KB, against 196 KB and 100 KB for the cut-short `v1.json` files).
+- A worker on the PC, limited to `sfzc` with these two talks' jobs moved to the front, took both through correction, extraction, resolution and indexing. Both reached `ready` at 01:09 UTC on October 20: "Ignorance and Vow - New Friends" with 31 passages and "A Sesshin of Illness" with 38.
+
 
 ## B25. The GPU worker writes transcripts to the PC, not S3
 
