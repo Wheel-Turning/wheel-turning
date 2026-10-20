@@ -210,29 +210,29 @@ speech.
 - [ ] The disclosure copy (Spec 09) matches what the logging code stores.
 - [ ] SSZ's permission note and speaker-release line are recorded (Spec 00, blockers).
 
-## 10. Local backups and disk space, until the database moves to RDS
+## 10. Local backups (retired) and disk space
 
-While the real data lives on the owner's PC (the `wt-m3-ssz` container and `data/`), a nightly job
-copies it off the machine (owner's decision of October 12, 2026).
+Retired on October 20, 2026 (Spec 11, PB1.2): the database is on RDS (PB1.1) and objects and records
+are in S3 (PB1.2), so the PC holds nothing that is not already kept off the machine. RDS keeps
+encrypted automated backups (procedure 6 restores one), and the transcripts and records buckets
+are versioned. The nightly PC backup of October 12, 2026 is no longer needed.
 
-1. Setup, once. An S3 bucket in us-east-2 with versioning on and all public access blocked; its
-   lifecycle from `scripts/ops/backup-bucket-lifecycle.json`
-   (`aws s3api put-bucket-lifecycle-configuration --bucket <bucket> --lifecycle-configuration
-   file://scripts/ops/backup-bucket-lifecycle.json`); an IAM user `wt-backup` allowed only
-   `s3:ListBucket` on the bucket and `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` on its
-   objects, never `s3:DeleteObjectVersion`; and its key in the AWS CLI profile `wt-backup`.
-2. Nightly. `WT_BACKUP_BUCKET=<bucket> scripts/ops/backup-local.sh` dumps the database, checks the
-   dump lists, uploads it under `db/`, mirrors `data/objects` with deletions and copies
-   `data/records`. A scheduled task runs it at 03:00; `data/backups/last-success` holds the time
-   of the last good run and `data/backups/backup.log` the history.
-3. Takedowns. Database dumps and every older object version expire after seven days, so taken-down
-   material leaves the backups within the seven days the takedown note (procedure 3) promises.
-4. Restore. Download a dump with `aws s3 cp s3://<bucket>/db/<file> .`, restore it into a fresh
-   pgvector container with `pg_restore -d wt --no-owner <file>`, copy `objects/` and `records/`
-   back into `data/`, then follow procedure 6 to replay takedowns recorded after the dump.
-5. Disk. Each worktree keeps its own `target/` of 20 to 120 GB. `scripts/dev/clean-idle-targets.sh`
+1. Shut it off, in this order, so the nightly audit does not warn about a backup that stopped on
+   purpose:
+   1. Set `pc_backup_bucket = ""` in `infra/terraform/envs/v1` and `infra/terraform/github-oidc`
+      and apply both (§12, "Terraform hygiene", for the order). The audit task then runs without
+      `--backup-bucket`, and `pc_backup_stale` is no longer checked.
+   2. Disable the PC's "Wheel Turning backup" scheduled task (`scripts/ops/backup-local.sh`):
+      `schtasks /Change /TN "Wheel Turning backup" /DISABLE`.
+2. Keep the backup bucket until the PC database is archived (§12, "Moving the pipeline to RDS",
+   step 6: a final `pg_dump` to that bucket, about November 2, 2026). Then deactivate the
+   `wt-backup` key (well-architected finding M3) and let the bucket's lifecycle rule expire the
+   rest. Restoring that archive: `aws s3 cp s3://<bucket>/db/<file> .`, then `pg_restore -d wt
+   --no-owner <file>` into a fresh pgvector container.
+3. Disk. Each worktree keeps its own `target/` of 20 to 120 GB. `scripts/dev/clean-idle-targets.sh`
    clears every worktree's `target/` that has not been built for 12 hours, never the main
-   checkout's; a scheduled task runs it daily, and `--dry-run` shows what it would clear.
+   checkout's; the "Wheel Turning cleanup" scheduled task runs it daily, and `--dry-run` shows
+   what it would clear. This step is not retired.
 
 ## 11. When SSZ's files arrive
 
@@ -623,8 +623,8 @@ are one-time copies, done once, with the owner's go-ahead.
    logged talk's prefixes, then `wt audit`: `takedown_completeness` must have no findings.
 5. After. Keep both variables set for every later `wt` command, in `.env` too, so no command
    writes to `data/objects` or `data/records` again; pointing the worker at the buckets is part
-   of the database cutover (PB1.1). Keep `data/objects` and `data/records` until runbook §10 is
-   retired with PB1.1.
+   of the database cutover (PB1.1). Keep `data/objects` and `data/records` until the PC database
+   is archived (§10, step 2).
 
 ### Terraform hygiene (roadmap UB3.9)
 
@@ -871,7 +871,7 @@ with a nonzero exit code or fails to start (Spec 11, PB1.4; §12, "Nightly audit
 - **Fix:** a fail check (`consent_drift`, `serving_parity`, `opted_out_served`,
   `takedown_completeness` and the rest in Spec 07) is a rights incident: follow the incident
   procedure below. A warning is upkeep: `takedown_request_overdue` is procedure 3,
-  `pc_backup_stale` is §10 (the PC's 03:00 backup has not run), `crisis_link_dead` means a help
+  `pc_backup_stale` means the PC's 03:00 backup has not run (§10: retired, so clear `pc_backup_bucket` instead of fixing the backup), `crisis_link_dead` means a help
   link on the support page needs correcting in `support_text.html`, and the rest are in Spec 07.
   A broken task: `aws ecs describe-tasks` for its `stoppedReason`, and `wt db create-login --role
   wt_audit` (§12) if the login was refused.
