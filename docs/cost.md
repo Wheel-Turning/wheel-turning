@@ -12,7 +12,7 @@ What a question costs, what the site costs before anyone asks one, and the month
 
 | Stage (`llm_usage.stage`) | Calls per question | Before (Haiku 4.5) | Eval, Haiku 4.5 | Haiku 5.5, measured | Moves in PB2.0 |
 | --- | --- | --- | --- | --- | --- |
-| Triage gate (`sensitive`) | 1 | $0.002 | $0.0018 | $0.0002 | No: it declined two harmful questions, which the gate then answered |
+| Triage gate (`sensitive`) | 1 | $0.002 | $0.0018 | $0.0002 | No: in round 2 it declined two harmful questions, which the gate then answered; with that fixed (PR #218), round 3 sent one practice question to the outside-these-talks page |
 | Ranking (`rank`) | 6 | $0.019 | $0.0188 | $0.0024 | No: 67% of 4.5's 7+ candidates |
 | Excerpt cutting (`excerpt`) | 8 to 9 | $0.013 | $0.0121 | $0.0014 | Waiting on the owner's 30-excerpt review |
 | Summary (`synth`) | 1 to 2 | $0.012 | $0.0110 | $0.0014 | No: 21 summaries shown against 36 and 38 |

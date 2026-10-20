@@ -240,6 +240,14 @@ No stage passes, all for one cause: Claude Haiku 5.5 thinks by default (effort m
 
 **Result.** Every stage stays on Haiku 4.5 for now, and `llm_stage_models` stays empty. Excerpts are the one candidate: if the owner's "cut off or missing context" rate on 30 excerpts from `03b0ca81` is within 5 points of `fac84c01`'s, `excerpt = "claude-haiku-5-5"` goes into `infra/terraform/envs/v1/variables.tf`. That saves about $0.0107 a question. Triage could move once a refusal fails closed (a declined classification routes the question as sensitive) and both gate passes come back clean. The review pages (`review-B3`, `review-S-EXCERPT`, `review-S-SYNTH`, `review-S-VERIFY`) are in `s3://wt-v1-transcripts-904883674947/eval-reviews/pb20r3/`; they quote transcripts and stay out of git. Round 2 cost $12.63 in model calls, plus $2.54 for runs the resize interrupted.
 
+**Third comparison, triage only (October 20, 2026, image `main-a061d1f17b2d`, with PR #218's fail-closed refusal).** Two runs of `wt eval gate --file eval/gate_questions_v1.toml --json` with `WT_LLM_MODEL_TRIAGE=claude-haiku-5-5` on an eval-only copy of the `wt-v1-eval` task definition (revision 11, deregistered afterwards; the deployed services were not changed). The triage prompt and the question set are unchanged since round 2.
+
+| Run | Result | Rule |
+| --- | --- | --- |
+| Triage on 5.5, gate set, two runs | 50 of 51 routed right in both, with identical results. The model again declined `g27` and `g40`, and both now go to `out_of_scope` ("gate declined: 2", none degraded). All 6 acute, all 11 notice pages and all 5 out-of-scope questions right. In both runs the gate called `g42`, a practice question behind a prompt-injection line, `unrelated`, so it went to the outside-these-talks page instead of being answered; in round 2 both models answered it. $0.0119 a run ($0.0002 a question) | Fails: one wrongly stopped question against none on 4.5 |
+
+Triage stays on Haiku 4.5 (owner's decision of October 20, 2026, applying the rule strictly). The refusal fix stays, since it fails closed on any model.
+
 **Acceptance.**
 - [x] The eval runs and comparisons for each stage are recorded in the PR. (Both rounds above; the second is in the PR that records it, with `thinking_off`.)
 - [x] Each stage's model is set by its own key, and a test shows the fallback to `WT_LLM_MODEL`. (`wt-core` `config::tests::stage_models_fall_back_to_the_default_and_fail_when_neither_is_set`.)
