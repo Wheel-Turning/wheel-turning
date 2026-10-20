@@ -151,6 +151,70 @@ async fn unused_excerpts_are_stored_with_their_reason() {
     assert_eq!(summary.cited(), vec![pid(1), pid(2)]);
 }
 
+/// Spec 11, PB2.2: an excerpt the draft cited only in sentences the verifier dropped is stored as
+/// unused, `dropped`, rather than left neither cited nor listed (October 19, 2026: a quarter of
+/// the 50-question set's excerpts were neither).
+#[tokio::test]
+async fn an_excerpt_whose_citing_sentences_are_dropped_is_unused_dropped() {
+    // Headline, agree, differ, sum-up: the two citing E3 fail the verifier.
+    let llm = FakeLlm::new(vec![
+        Ok(good_draft()),
+        yes(),
+        yes(),
+        no("kindness"),
+        no("kindness"),
+    ]);
+    let out = run(&llm).await;
+    let summary = out.summary.expect("a summary");
+    assert_eq!(summary.cited(), vec![pid(1), pid(2)]);
+    assert_eq!(
+        summary.unused,
+        vec![StoredUnused {
+            passage_id: pid(3),
+            reason: UnusedReason::Dropped,
+        }]
+    );
+}
+
+/// The draft's own reason stands over `dropped`, and an excerpt it neither cites nor lists stays
+/// off the list, so the report counts it as the miss it is.
+#[tokio::test]
+async fn the_drafts_reason_comes_first_and_an_unlisted_excerpt_stays_a_miss() {
+    let listed = json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [], "agree": [], "keep_in_mind": [], "sum_up": null,
+        "differ": [s(DIFFER, &[("E2", 1, 2), ("E3", 1, 2)])],
+        "unused": [{"excerpt": "E3", "reason": "duplicate"}],
+    });
+    let llm = FakeLlm::new(vec![Ok(listed), yes(), no("kindness")]);
+    let summary = run(&llm).await.summary.expect("a summary");
+    assert_eq!(
+        summary.unused,
+        vec![StoredUnused {
+            passage_id: pid(3),
+            reason: UnusedReason::Duplicate,
+        }]
+    );
+
+    let unlisted = json!({
+        "headline": s(HEADLINE, &[("E1", 2, 2), ("E2", 2, 2)]),
+        "framing": [], "agree": [], "differ": [], "keep_in_mind": [], "sum_up": null,
+    });
+    let llm = FakeLlm::new(vec![Ok(unlisted), yes()]);
+    let summary = run(&llm).await.summary.expect("a summary");
+    assert!(summary.unused.is_empty(), "{:?}", summary.unused);
+    // The request names every excerpt that must be cited or listed.
+    let seen = llm.seen.lock().unwrap();
+    assert!(
+        seen[0]
+            .0
+            .user
+            .contains("Each of E1, E2, E3 appears in a sentence's cites or under unused."),
+        "{}",
+        seen[0].0.user
+    );
+}
+
 /// Spec 11, PB2.3: an em dash in a drafted sentence is gone before the verifier sees it and
 /// from the stored summary, while a quotation holding one keeps it.
 #[tokio::test]

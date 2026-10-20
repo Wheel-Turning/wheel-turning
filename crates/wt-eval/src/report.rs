@@ -168,6 +168,9 @@ pub struct SummaryUse {
     pub off_topic: usize,
     /// Listed as unused, `duplicate`.
     pub duplicate: usize,
+    /// Listed as unused, `dropped`: the draft cited it, the checks dropped every sentence that
+    /// did. Recorded since October 19, 2026; earlier answers count these as `neither`.
+    pub dropped: usize,
     /// Neither cited nor listed: what the acceptance item counts as a miss.
     pub neither: usize,
     /// Standard answers from three or more teachers.
@@ -204,8 +207,11 @@ fn summary_use(answers: &[RunAnswer]) -> SummaryUse {
                 continue;
             }
             match summary.unused.iter().find(|x| x.passage_id == *p) {
-                Some(x) if x.reason == UnusedReason::OffTopic => u.off_topic += 1,
-                Some(_) => u.duplicate += 1,
+                Some(x) => match x.reason {
+                    UnusedReason::OffTopic => u.off_topic += 1,
+                    UnusedReason::Duplicate => u.duplicate += 1,
+                    UnusedReason::Dropped => u.dropped += 1,
+                },
                 None => u.neither += 1,
             }
         }
@@ -616,8 +622,8 @@ pub fn render(r: &Report) -> String {
     let u = &r.summary_use;
     let _ = writeln!(
         s,
-        "  Excerpts served with a summary: {}; cited {}, unused off topic {}, unused duplicate {}, neither {} (0 passes)",
-        u.excerpts, u.cited, u.off_topic, u.duplicate, u.neither
+        "  Excerpts served with a summary: {}; cited {}, unused off topic {}, unused duplicate {}, unused dropped by the checks {}, neither {} (0 passes)",
+        u.excerpts, u.cited, u.off_topic, u.duplicate, u.dropped, u.neither
     );
     let _ = writeln!(
         s,
