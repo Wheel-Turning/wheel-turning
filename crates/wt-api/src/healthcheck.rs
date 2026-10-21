@@ -13,9 +13,6 @@ pub const TIMEOUT: Duration = Duration::from_secs(3);
 /// Why the check failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {
-    /// `WT_BIND` is not a socket address.
-    #[error("WT_BIND is not an address and port: {0:?}")]
-    Bind(String),
     /// The server could not be reached or did not answer in time.
     #[error("no answer from {addr}: {source}")]
     Io {
@@ -29,23 +26,17 @@ pub enum ProbeError {
     Status(String),
 }
 
-/// Where to check: the port of `WT_BIND` (default `127.0.0.1:8080`, as `wt_core::config`) on the
-/// loopback address of the same family, since an unspecified address cannot be connected to.
-///
-/// # Errors
-///
-/// [`ProbeError::Bind`] when the value is not an address and port.
-pub fn target(bind: Option<&str>) -> Result<SocketAddr, ProbeError> {
-    let bind = bind.unwrap_or("127.0.0.1:8080");
-    let addr: SocketAddr = bind
-        .parse()
-        .map_err(|_| ProbeError::Bind(bind.to_owned()))?;
-    let ip = match addr.ip() {
+/// Where to check: the server's bind address (`wt_core::config::bind_from_env`), with an
+/// unspecified address replaced by the loopback address of the same family, since an
+/// unspecified address cannot be connected to.
+#[must_use]
+pub fn target(bind: SocketAddr) -> SocketAddr {
+    let ip = match bind.ip() {
         IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
         IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
         ip => ip,
     };
-    Ok(SocketAddr::new(ip, addr.port()))
+    SocketAddr::new(ip, bind.port())
 }
 
 /// Sends `GET /healthz` to `addr` and succeeds only on a 200.

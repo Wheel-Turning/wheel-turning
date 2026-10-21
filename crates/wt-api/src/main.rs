@@ -12,8 +12,7 @@ use wt_core::telemetry::{LogOutput, init_logging};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
-        let bind = std::env::var("WT_BIND").ok();
-        let addr = wt_api::healthcheck::target(bind.as_deref())?;
+        let addr = wt_api::healthcheck::target(wt_core::config::bind_from_env()?);
         wt_api::healthcheck::probe(addr, wt_api::healthcheck::TIMEOUT)?;
         return Ok(());
     }

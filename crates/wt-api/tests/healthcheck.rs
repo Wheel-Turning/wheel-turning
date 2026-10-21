@@ -58,21 +58,8 @@ fn nothing_listening_fails() {
 
 #[test]
 fn the_target_is_the_bind_port_on_loopback() {
-    assert_eq!(
-        target(Some("0.0.0.0:8080")).unwrap(),
-        "127.0.0.1:8080".parse().unwrap()
-    );
-    assert_eq!(
-        target(Some("[::]:9000")).unwrap(),
-        "[::1]:9000".parse().unwrap()
-    );
-    assert_eq!(
-        target(Some("10.0.0.5:8080")).unwrap(),
-        "10.0.0.5:8080".parse().unwrap()
-    );
-    assert_eq!(target(None).unwrap(), "127.0.0.1:8080".parse().unwrap());
-    assert!(matches!(
-        target(Some("localhost")),
-        Err(ProbeError::Bind(_))
-    ));
+    let at = |s: &str| -> SocketAddr { s.parse().unwrap() };
+    assert_eq!(target(at("0.0.0.0:8080")), at("127.0.0.1:8080"));
+    assert_eq!(target(at("[::]:9000")), at("[::1]:9000"));
+    assert_eq!(target(at("10.0.0.5:8080")), at("10.0.0.5:8080"));
 }
