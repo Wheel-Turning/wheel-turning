@@ -294,7 +294,7 @@ The owner role can still read every table, as the logging list says, so this sec
 ## Acceptance criteria
 
 - [x] `/healthz` returns success only when the database answers. (`wt-api/tests/healthz.rs`.)
-- [x] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs. (`wt-api/tests/pages.rs`; the server has no request logger, and `/join` logs nothing.)
+- [x] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs. (`wt-api/tests/pages.rs`; `/join` logs nothing itself, and since October 20, 2026 the request logger names the route `/join/[redacted]`, checked in `wt-api/tests/log_scrubber.rs`.)
 - [x] A state-changing request without a valid CSRF token is rejected. (`wt-api/tests/pages.rs`.)
 - [x] `POST /ask` persists an answer, responds `303` to the permalink, and the permalink is readable only by the tester who asked. (`wt-api/tests/pages.rs`.)
 - [ ] Snapshot tests with `insta` cover the answer page for standard, named, thin coverage, none found, and multi-named cases.

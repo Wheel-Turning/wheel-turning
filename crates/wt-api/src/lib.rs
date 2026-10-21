@@ -16,6 +16,7 @@ pub mod limits;
 pub mod mail;
 pub mod privacy;
 pub mod progress;
+mod request_log;
 pub mod rights;
 pub mod sensitive;
 pub mod session;
@@ -240,6 +241,7 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             security_headers,
         ))
+        .layer(middleware::from_fn(request_log::log))
         .with_state(state)
 }
 
@@ -504,10 +506,15 @@ impl FromRequestParts<AppState> for Session {
             .verify_cookie(value, chrono::Utc::now().timestamp())
             .ok_or_else(not_found_page)?;
         match wt_db::tester::active(&state.pool, tester).await {
-            Ok(true) => Ok(Session {
-                tester,
-                cookie: value.to_owned(),
-            }),
+            Ok(true) => {
+                if let Some(slot) = parts.extensions.get::<request_log::TesterSlot>() {
+                    slot.set(tester);
+                }
+                Ok(Session {
+                    tester,
+                    cookie: value.to_owned(),
+                })
+            }
             Ok(false) => Err(not_found_page()),
             Err(e) => Err(server_error("checking the session", &e)),
         }

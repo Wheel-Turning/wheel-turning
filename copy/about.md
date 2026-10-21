@@ -35,6 +35,8 @@ Then the switch and the button Delete all my questions now. Under them: You can 
 
 Your question, and the excerpts found for it, are sent to a language model provider to check the question for sensitive topics, to check which excerpts fit it and where to cut them, and to write the summary. Under its current terms, the provider does not train on what it receives and deletes it after no more than 30 days. It may keep a request longer if it flags it for a misuse review. The provider can change, and this page will say so if its terms do.
 
+The site also keeps a technical log of each page you open: the kind of page, the time, whether it worked and how long it took, marked with your tester number but never your questions or the excerpts. It is kept for 30 days and read to count visits and fix problems.
+
 Student voices from recorded classes are never stored. When a teacher answers a student's question, the question is shown before the answer in a lightly edited form, with names and identifying details removed, and labeled "Student". To make that edit, the student's question is sent to the same provider under the same terms, and only the edited text is kept.
 
 For any other privacy request, such as asking what we hold about you, write to hello@wheelturning.org.
