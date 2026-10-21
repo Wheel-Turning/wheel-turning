@@ -116,6 +116,10 @@ resource "aws_instance" "this" {
     id      = aws_launch_template.this[0].id
     version = aws_launch_template.this[0].latest_version
   }
+
+  # The instance gets its Name from the launch template; without it here a plan reads the tag as
+  # drift and strips it, and scripts/worker-setup.ps1 finds the host by that tag.
+  tags = { Name = "${var.name}-batch" }
 }
 
 output "instance_id" {
