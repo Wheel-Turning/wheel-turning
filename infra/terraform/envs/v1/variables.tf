@@ -185,7 +185,7 @@ variable "edge" {
     The cloudflare_tunnel_token secret must hold a value before any tunnel stage.
   EOT
   type        = string
-  default     = "alb"
+  default     = "tunnel_live"
 
   validation {
     condition     = contains(["alb", "tunnel_test", "tunnel_live", "tunnel"], var.edge)
