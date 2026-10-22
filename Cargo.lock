@@ -5177,7 +5177,7 @@ dependencies = [
  "aws-smithy-http-client",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "testcontainers",
  "thiserror",
  "tokio",
@@ -5322,7 +5322,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "ort",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror",
  "tokenizers",
  "tokio",
