@@ -1,8 +1,9 @@
-//! Spec 07, Observability: one structured line per request, with a request id, the tester, the
-//! matched route template, the status and the latency. It never carries the raw path, the query
-//! string, headers, cookies or a body, so question text, passage text and invite tokens cannot
-//! reach it. Testers are told about it on the About page (Spec 09, owner's decision of October 20,
-//! 2026).
+//! Spec 07, Observability: one `http_response` event per request, with a request id, the tester,
+//! the route as declared, the status and the time to the response's head. It never carries the
+//! raw path, the query string, headers, cookies or a body, so question text, passage text, answer
+//! ids and invite tokens cannot reach it. The 5xx-rate alarm counts these events
+//! (`docs/adr-edge-cost.md`, Tunnel follow-on), and testers are told about them on the About page
+//! (Spec 09, owner's decision of October 20, 2026).
 
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -24,14 +25,10 @@ impl TesterSlot {
     }
 }
 
-/// The route a log line names: the matched template, with the invite route's token placeholder
-/// shown as Spec 06 writes it, or `fallback` for a path no route matched.
+/// The route a log line names: the declared template, such as `/join/{token}`, or `fallback` for
+/// a path no route matched.
 fn route_label(matched: Option<&MatchedPath>) -> &str {
-    match matched.map(MatchedPath::as_str) {
-        Some("/join/{token}") => "/join/[redacted]",
-        Some(route) => route,
-        None => "fallback",
-    }
+    matched.map_or("fallback", MatchedPath::as_str)
 }
 
 /// A fresh request id: 8 random bytes from the operating system, as hex.
@@ -43,13 +40,9 @@ fn request_id() -> String {
     }
 }
 
-/// Logs `event = "request"` once the response is ready. The load balancer's `/healthz` probe is
-/// left out, since it would outnumber every tester's requests and says nothing about them.
+/// Logs `event = "http_response"` once the response's head is ready.
 pub(crate) async fn log(mut request: Request, next: Next) -> Response {
     let route = route_label(request.extensions().get::<MatchedPath>()).to_owned();
-    if route == "/healthz" {
-        return next.run(request).await;
-    }
     let method = request.method().as_str().to_owned();
     let slot = TesterSlot::default();
     request.extensions_mut().insert(slot.clone());
@@ -58,14 +51,14 @@ pub(crate) async fn log(mut request: Request, next: Next) -> Response {
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let tester = slot.0.get().map(ToString::to_string);
     tracing::info!(
-        event = "request",
+        event = "http_response",
         request_id = %request_id(),
         tester = tester.as_deref(),
         method = %method,
         route = %route,
         status = response.status().as_u16(),
         ms,
-        "request"
+        "responded"
     );
     response
 }

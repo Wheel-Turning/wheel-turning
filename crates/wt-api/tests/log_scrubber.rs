@@ -337,11 +337,32 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     assert_eq!(settled.len(), 1, "{settled:?}");
     assert_eq!(settled[0]["summary_status"], "no_key");
     assert!(settled[0]["answer_id"].is_string());
+    // The 5xx-rate alarm behind the Cloudflare Tunnel reads one `http_response` per request,
+    // naming the declared route, never the path (which holds the invite token).
+    let responses = events("http_response");
+    assert!(
+        responses
+            .iter()
+            .all(|v| v["route"].is_string() && v["status"].is_u64() && v["ms"].is_u64()),
+        "{responses:?}"
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|v| v["route"] == "/join/{token}" && v["status"] == 303),
+        "the invite link's response was logged by its route: {responses:?}"
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|v| v["route"] == "/ask" && v["status"] == 303),
+        "{responses:?}"
+    );
     let ranked = events("ranker_served");
     assert_eq!(ranked.len(), 1, "{ranked:?}");
     assert_eq!(ranked[0]["ranker"], "none (fallback)", "no reranker here");
-    // Spec 07: one request line per request, naming the route template and the tester.
-    let requests = events("request");
+    // Spec 07: the same events carry the request id, the method and the tester.
+    let requests = &responses;
     let line = |method: &str, route: &str| -> Vec<&serde_json::Value> {
         requests
             .iter()
@@ -361,7 +382,7 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     assert_eq!(line("POST", "/ask").len(), 2);
     assert_eq!(line("GET", "/a/{answer}").len(), 1);
     assert!(!line("GET", "/a/{answer}/summary").is_empty());
-    let joins = line("GET", "/join/[redacted]");
+    let joins = line("GET", "/join/{token}");
     assert_eq!(joins.len(), 2, "{requests:?}");
     assert!(
         joins.iter().all(|v| v["tester"].is_null()),

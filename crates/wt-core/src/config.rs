@@ -191,6 +191,29 @@ impl fmt::Debug for KeyLookup {
     }
 }
 
+/// `WT_BIND` alone, for `wt-api --healthcheck`, which checks a running server and must not
+/// depend on the rest of the configuration.
+///
+/// # Errors
+///
+/// [`ConfigError::Invalid`] when the value is not a host and port.
+pub fn bind_from_env() -> Result<SocketAddr, ConfigError> {
+    parse_bind(
+        std::env::var("WT_BIND")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+    )
+}
+
+/// `WT_BIND`, `127.0.0.1:8080` when unset.
+fn parse_bind(value: Option<String>) -> Result<SocketAddr, ConfigError> {
+    let text = value.unwrap_or_else(|| "127.0.0.1:8080".to_owned());
+    text.parse().map_err(|_| ConfigError::Invalid {
+        key: "WT_BIND",
+        reason: format!("expected host:port, got {text:?}"),
+    })
+}
+
 impl Config {
     /// Loads the configuration from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
@@ -230,11 +253,7 @@ impl Config {
             check_database_url("DATABASE_URL_ANALYST", url, env)?;
         }
 
-        let bind_text = get("WT_BIND").unwrap_or_else(|| "127.0.0.1:8080".to_owned());
-        let bind = bind_text.parse().map_err(|_| ConfigError::Invalid {
-            key: "WT_BIND",
-            reason: format!("expected host:port, got {bind_text:?}"),
-        })?;
+        let bind = parse_bind(get("WT_BIND"))?;
 
         let session_secret = get("WT_SESSION_SECRET").map(Secret::new);
         if session_secret.is_none() && !env.is_dev() {

@@ -1,6 +1,6 @@
 # ADR: a cheaper edge for the private beta
 
-Status: **accepted, a + d.** Written and approved October 17, 2026. The owner chose to replace Spec 11 PB3.6's AWS WAF with Cloudflare's free protection, to put Cloudflare in the request path with a line on the About page, and to make the load balancer IPv6-only. "What was built" lists the changes. The owner cuts over by hand (runbook §12, "The edge"). The Tunnel follow-on (b, UB3.13) is designed in "Follow-on" below; T1 is decided (a), and it is built after the a + d cutover.
+Status: **accepted, a + d.** Written and approved October 17, 2026. The owner chose to replace Spec 11 PB3.6's AWS WAF with Cloudflare's free protection, to put Cloudflare in the request path with a line on the About page, and to make the load balancer IPv6-only. "What was built" lists the changes. The owner cuts over by hand (runbook §12, "The edge"). The Tunnel follow-on (b, UB3.13) is designed and built in "Follow-on" below; the owner cuts it over by hand (runbook §12, "The Cloudflare Tunnel").
 
 ## Context
 
@@ -68,7 +68,7 @@ Decided October 17, 2026: 1 yes, 2 yes, 3 yes: the Tunnel (UB3.13) stays on the 
 
 ## Follow-on: a Cloudflare Tunnel in place of the load balancer (b, UB3.13)
 
-Status: **designed, T1 and T2 decided, not built.** Written October 17, 2026. The owner chose T1 (a) the same day: an owner-only `infra/terraform/edge` root with Cloudflare's provider and the maintenance Worker. The build starts once PR 204's three edge stages are applied; read live again after the decision, the load balancer was still `ipv4`, the VPC had no IPv6 block and `app` resolved straight to the load balancer. The owner chose T2's recommendation on October 19: the IPv6-only stage last (T-D), with the database's change scheduled as below.
+Status: **built, not cut over.** Designed October 17, 2026, built October 20 after the a + d cutover finished that day ("What was built for the Tunnel" below); the owner cuts over by hand, per runbook §12, "The Cloudflare Tunnel". The owner chose T1 (a) the same day: an owner-only `infra/terraform/edge` root with Cloudflare's provider and the maintenance Worker. The build starts once PR 204's three edge stages are applied; read live again after the decision, the load balancer was still `ipv4`, the VPC had no IPv6 block and `app` resolved straight to the load balancer. The owner chose T2's recommendation on October 19: the IPv6-only stage last (T-D), with the database's change scheduled as below.
 
 ### What the load balancer does today, and what replaces it
 
@@ -140,6 +140,21 @@ Each stage is one apply, or one change at Cloudflare, and each is undone by the 
 | T-C, a week later | `edge = "tunnel"`: load balancer, target group, listeners, ACM certificate, its alarms and the origin header removed; the two new alarms and the maintenance Worker in place | `edge = "alb"` recreates the load balancer under a new DNS name in about 10 minutes; the CNAMEs go back to it |
 | T-D1, a quiet hour | IPv6 /64s on the private subnets (free, no effect on running traffic), a manual RDS snapshot, the maintenance page up, then RDS `network_type = "DUAL"`. AWS lists this change as "Downtime is possible" (`USER_ModifyInstance.Settings`), and the database is single-zone, so the site is treated as down until RDS reports `available` again | `network_type = "IPV4"`, same precautions. Nothing uses the IPv6 address yet, so the web task is unaffected either way |
 | T-D2, the next day | Web task into the IPv6-only subnets with no public address; mirrored `aws-cli` and `cloudflared` images through ECR's dual-stack URI; `AWS_USE_DUALSTACK_ENDPOINT=true`. A task that cannot start never turns healthy and the circuit breaker keeps the old one | The service back to the public subnets with `assign_public_ip = true`: one apply |
+
+### What was built for the Tunnel
+
+Built October 20, 2026, to the design above, with T1 (a) and T2 as decided. Where the build differs from the design, the line says so.
+
+1. **`wt-api`.** `wt-api --healthcheck` sends `GET /healthz` to the port in `WT_BIND` on the loopback address and exits 0 only on a 200 (`crates/wt-api/src/healthcheck.rs`, tested in `tests/healthcheck.rs`). A middleware writes one `http_response` event per request with the declared route (never the path), the status and the milliseconds; `tests/log_scrubber.rs` checks that the invite link's response is logged as `/join/{token}`. `WT_FORWARDED_HOPS=1` behind the tunnel was checked against cloudflared's source (2026.10): it forwards with a plain round trip and never touches `X-Forwarded-For`.
+2. **`envs/v1`.** `edge` runs `alb`, `tunnel_test`, `tunnel_live`, `tunnel`; `db_dual_stack` (T-D1) and `web_ipv6_only` (T-D2) follow, each refused out of order. `WT_FORWARDED_HOPS` is 1 from `tunnel_live`. A read-only `terraform plan` against the live state on October 20 showed the first apply after merge adding the secret, the two metric filters and the two new alarms and moving the load balancer's pieces in state, with no change to the task or service; `tunnel_test` replacing the task definition and adding the tunnel egress; and `tunnel` removing the load balancer, certificate, listeners, origin header and the two load balancer alarms, with the service updated in place.
+3. **`modules/service`.** `tunnel` adds `cloudflared` (2026.10.0, the newest release over two weeks old), the container health check and the mirrored images; `load_balancer = false` removes the load balancer and its pieces, which gained `moved` blocks so nothing is replaced; `web_ipv6_only` moves the task, pulls through ECR's dual-stack name and sets `AWS_USE_DUALSTACK_ENDPOINT`. `tests/tunnel.tftest.hcl` covers each stage. Different from the design: the two mirrored images live in the existing `wt-v1` repository under `mirror-` tags, protected by their own lifecycle rule, rather than a new repository, because the workload permissions boundary allows image pulls from `wt-v1` only and widening it means applying `github-oidc` too.
+4. **`modules/network`.** Not in the design: the web security group allowed only tcp 443 out, and `cloudflared` needs 7844 (TCP and UDP), so the tunnel stages open 7844 to Cloudflare's published ranges only. `web_from_alb = false` drops the web group's one inbound rule at T-C. `ipv6_web` adds IPv6 to the private subnets and two IPv6-only web subnets.
+5. **`modules/database`.** `dual_stack` sets `network_type = "DUAL"`.
+6. **`modules/observability`.** `wt-v1-web-5xx-rate` and `wt-v1-no-running-web-task` exist from the first apply, so they prove themselves beside the load balancer's two before those go at T-C.
+7. **`modules/secrets` and `modules/iam`.** `wt-v1/cloudflare_tunnel_token`, created empty, and the web execution role's grant to inject it.
+8. **`infra/terraform/edge` and `modules/edge`.** The tunnel (Cloudflare generates its secret, so none sits in state), its routes, the `app`, `demo` and `tunnel-test` records and the maintenance Worker, whose routes `maintenance` adds. `tests/edge.tftest.hcl` covers the switch and the record targets. CI validates the root and runs the module's tests with a mocked provider; Dependabot watches the root.
+9. **Not in Terraform.** The `dualStackIPv6` ECS account setting, which AWS's guide lists for IPv6 on Fargate, is a runbook step at T-D2 if the task needs it: as a Terraform resource every `deploy.yml` plan would need to read account settings.
+10. **Docs.** Spec 11 PB3.6 (item 2 and two acceptance items) and PB4.4 item 4, Spec 01, runbook §5, §12 ("The Cloudflare Tunnel") and §13 (two alarm entries, the maintenance page), and `docs/cost.md`.
 
 ### Decisions for the owner
 

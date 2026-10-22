@@ -1,5 +1,8 @@
 # Spec 01 service: ECR repository, ECS cluster, Fargate service, load balancer, ACM certificate,
-# HTTPS listener. Health check on /healthz, HTTP redirects to HTTPS.
+# HTTPS listener. Health check on /healthz, HTTP redirects to HTTPS. With `tunnel`, a cloudflared
+# sidecar carries the app's hostnames from Cloudflare instead, and with `load_balancer = false`
+# the load balancer, its certificate and listeners are gone (the Cloudflare Tunnel follow-on in
+# docs/adr-edge-cost.md).
 #
 # Three task definitions run the same image:
 # - web: the always-on service, connecting as wt_web_login. Its models container copies the ONNX
@@ -18,6 +21,11 @@
 # group admits only Cloudflare's ranges (envs/v1). Without `alb_public_ipv4` the load balancer has
 # no public IPv4 address and Cloudflare reaches it over IPv6. Cloudflare's managed rules and rate
 # rule replace the AWS WAF web ACL that Spec 11 PB3.6 first specified.
+#
+# Tunnel (docs/adr-edge-cost.md, "Follow-on"): `tunnel` adds the cloudflared container, a
+# container health check on wt-api, and the mirrored outside images; `load_balancer = false`
+# removes the load balancer and its pieces; `web_ipv6_only` runs the task in IPv6-only subnets
+# with no public IPv4 address. envs/v1's `edge` and `web_ipv6_only` set these in stages.
 
 variable "name" {
   type = string
@@ -133,8 +141,59 @@ variable "alb_public_ipv4" {
   default     = true
 }
 
+variable "load_balancer" {
+  description = "Run the load balancer, its certificate and listeners. False once the Cloudflare Tunnel carries all traffic."
+  type        = bool
+  default     = true
+}
+
+variable "tunnel" {
+  description = "Run cloudflared beside wt-api, with a container health check, so the Cloudflare Tunnel can carry the app's hostnames. Needs the cloudflare_tunnel_token secret to hold a value."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = var.tunnel || var.load_balancer
+    error_message = "Something must carry the traffic: keep the load balancer or turn on the tunnel."
+  }
+}
+
+variable "web_ipv6_only" {
+  description = "Run the web task in web_ipv6_subnet_ids with no public IPv4 address. Needs the tunnel and no load balancer, and a database in dual-stack mode."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.web_ipv6_only || (var.tunnel && !var.load_balancer)
+    error_message = "An IPv6-only web task needs the tunnel and no load balancer."
+  }
+}
+
+variable "web_ipv6_subnet_ids" {
+  description = "The IPv6-only subnets for web_ipv6_only."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = !var.web_ipv6_only || length(var.web_ipv6_subnet_ids) > 0
+    error_message = "web_ipv6_only needs the IPv6-only subnets."
+  }
+}
+
+variable "mirror_tags" {
+  description = "Tags in this module's repository holding copies of the outside images the web task runs with the tunnel (runbook 12). Tags are immutable, so each pins one image."
+  type = object({
+    cloudflared = string
+    aws_cli     = string
+  })
+  default = {
+    cloudflared = "mirror-cloudflared-2026.10.0"
+    aws_cli     = "mirror-aws-cli-2.31.0"
+  }
+}
+
 variable "forwarded_hops" {
-  description = "WT_FORWARDED_HOPS: proxies that append to X-Forwarded-For. 1 for the load balancer alone, 2 with Cloudflare in front."
+  description = "WT_FORWARDED_HOPS: proxies that append to X-Forwarded-For. 1 for the load balancer alone or Cloudflare through the tunnel, 2 for Cloudflare in front of the load balancer."
   type        = number
   default     = 1
 }
@@ -146,7 +205,7 @@ variable "access_logs_bucket" {
 }
 
 variable "health_check_grace_seconds" {
-  description = "Time a new task has to copy and load the models before load balancer checks count."
+  description = "Time a new task has to copy and load the models before load balancer or container health checks count."
   type        = number
   default     = 300
 }
@@ -267,12 +326,22 @@ resource "aws_ecr_repository" "this" {
 resource "aws_ecr_lifecycle_policy" "this" {
   repository = aws_ecr_repository.this.name
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the 20 most recent images"
-      selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 20 }
-      action       = { type = "expire" }
-    }]
+    rules = [
+      {
+        # Copies of outside images the web task runs (runbook 12): never expired by the next
+        # rule, which would otherwise push them out after 20 deploys.
+        rulePriority = 1
+        description  = "Keep the 10 most recent mirrored images"
+        selection    = { tagStatus = "tagged", tagPrefixList = ["mirror-"], countType = "imageCountMoreThan", countNumber = 10 }
+        action       = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep the 20 most recent images"
+        selection    = { tagStatus = "any", countType = "imageCountMoreThan", countNumber = 20 }
+        action       = { type = "expire" }
+      },
+    ]
   })
 }
 
@@ -283,6 +352,126 @@ resource "aws_ecs_cluster" "this" {
     name  = "containerInsights"
     value = "disabled" # costs extra; logs and ALB metrics cover v1
   }
+}
+
+# ---------------------------------------------------------------------------------------------
+# The web task's containers
+# ---------------------------------------------------------------------------------------------
+
+locals {
+  # ECR's dual-stack name, which an IPv6-only task must pull through.
+  web_repository_url = var.web_ipv6_only ? replace(replace(aws_ecr_repository.this.repository_url, ".dkr.ecr.", ".dkr-ecr."), ".amazonaws.com/", ".on.aws/") : aws_ecr_repository.this.repository_url
+  # With the tunnel, both outside images come from copies in this repository (`mirror-` tags,
+  # pushed by hand per runbook 12), so an IPv6-only task never needs Docker Hub or public.ecr.aws.
+  web_models_image = var.tunnel ? "${local.web_repository_url}:${var.mirror_tags.aws_cli}" : var.models_image
+
+  models_container = {
+    name      = "models"
+    image     = local.web_models_image
+    essential = false
+    command = [
+      "s3", "sync", "s3://${var.bucket_names["models"]}/", "/models/", "--only-show-errors",
+      "--exclude", "*",
+      "--include", "${var.models.embed}/*",
+      "--include", "${var.models.rerank}/*",
+    ]
+    mountPoints = [{ sourceVolume = "models", containerPath = "/models" }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = var.log_group_names["web"]
+        awslogs-region        = local.region
+        awslogs-stream-prefix = "models"
+      }
+    }
+  }
+
+  web_container = merge({
+    name         = "web"
+    image        = "${local.web_repository_url}:${coalesce(local.web_tag, "none")}"
+    essential    = true
+    command      = ["wt-api"]
+    portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
+    dependsOn    = [{ containerName = "models", condition = "SUCCESS" }]
+    mountPoints  = [{ sourceVolume = "models", containerPath = "/models", readOnly = true }]
+    environment = concat(local.common_env, local.db_env, local.llm_stage_env, [
+      { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
+      { name = "WT_DB_USER", value = "wt_web_login" },
+      { name = "WT_MODEL_DIR", value = "/models" },
+      { name = "WT_EMBED_MODEL", value = var.models.embed },
+      { name = "WT_RERANK_MODEL", value = var.models.rerank },
+      { name = "WT_LLM_MODEL", value = var.llm.model },
+      { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
+      { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
+      { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
+      # Cloudflare, the load balancer or both are the only way in, so X-Forwarded-For names the
+      # client: the entry forwarded_hops from the end. cloudflared adds no entry of its own.
+      { name = "WT_TRUST_FORWARDED_FOR", value = "true" },
+      { name = "WT_FORWARDED_HOPS", value = tostring(var.forwarded_hops) },
+      # Removal requests are confirmed by an emailed link (Spec 08).
+      { name = "WT_MAIL_FROM", value = var.mail_from },
+      { name = "WT_PUBLIC_URL", value = "https://${var.domain_name}" },
+      { name = "WT_ALERT_TOPIC_ARN", value = var.alert_topic_arn },
+      ], var.web_ipv6_only ? [
+      # An IPv6-only task reaches SES, SNS and S3 through their dual-stack names.
+      { name = "AWS_USE_DUALSTACK_ENDPOINT", value = "true" },
+    ] : [])
+    secrets = [
+      { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
+      { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
+      { name = "ANTHROPIC_API_KEY", valueFrom = var.secret_arns["anthropic_api_key"] },
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = var.log_group_names["web"]
+        awslogs-region        = local.region
+        awslogs-stream-prefix = "web"
+      }
+    }
+    }, { for k, v in {
+      # With the tunnel there is no target group: ECS replaces a task whose /healthz fails, and a
+      # deploy waits for the new task to turn healthy. The image has no shell, so wt-api checks
+      # itself. An image older than this check fails it, so roll back no further than the first
+      # image that has it (runbook 12, "The Cloudflare Tunnel").
+      healthCheck = {
+        command     = ["CMD", "/usr/local/bin/wt-api", "--healthcheck"]
+        interval    = 15
+        timeout     = 5
+        retries     = 3
+        startPeriod = 300 # the model copy and load; the most ECS allows
+      }
+  } : k => v if var.tunnel })
+
+  # cloudflared dials out to Cloudflare and carries the app's hostnames to wt-api on localhost.
+  # It starts only once wt-api is healthy, so a new task joins the tunnel only when it can answer,
+  # and stops first, draining open requests for up to 90 seconds.
+  cloudflared_container = {
+    name              = "cloudflared"
+    image             = "${local.web_repository_url}:${var.mirror_tags.cloudflared}"
+    essential         = true
+    command           = ["tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "run"]
+    dependsOn         = [{ containerName = "web", condition = "HEALTHY" }]
+    memoryReservation = 64
+    stopTimeout       = 120
+    environment = [
+      { name = "TUNNEL_EDGE_IP_VERSION", value = var.web_ipv6_only ? "6" : "auto" },
+      { name = "TUNNEL_GRACE_PERIOD", value = "90s" },
+    ]
+    # The token lets whoever holds it serve the app's hostnames. It is set out of band from the
+    # edge stack (runbook 12) and never appears in a task definition or a log.
+    secrets = [{ name = "TUNNEL_TOKEN", valueFrom = var.secret_arns["cloudflare_tunnel_token"] }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = var.log_group_names["web"]
+        awslogs-region        = local.region
+        awslogs-stream-prefix = "cloudflared"
+      }
+    }
+  }
+
+  web_containers = concat([local.models_container, local.web_container], var.tunnel ? [local.cloudflared_container] : [])
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -308,69 +497,7 @@ resource "aws_ecs_task_definition" "web" {
     name = "models"
   }
 
-  container_definitions = jsonencode([
-    {
-      name      = "models"
-      image     = var.models_image
-      essential = false
-      command = [
-        "s3", "sync", "s3://${var.bucket_names["models"]}/", "/models/", "--only-show-errors",
-        "--exclude", "*",
-        "--include", "${var.models.embed}/*",
-        "--include", "${var.models.rerank}/*",
-      ]
-      mountPoints = [{ sourceVolume = "models", containerPath = "/models" }]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = var.log_group_names["web"]
-          awslogs-region        = local.region
-          awslogs-stream-prefix = "models"
-        }
-      }
-    },
-    {
-      name         = "web"
-      image        = "${aws_ecr_repository.this.repository_url}:${coalesce(local.web_tag, "none")}"
-      essential    = true
-      command      = ["wt-api"]
-      portMappings = [{ containerPort = var.web_port, protocol = "tcp" }]
-      dependsOn    = [{ containerName = "models", condition = "SUCCESS" }]
-      mountPoints  = [{ sourceVolume = "models", containerPath = "/models", readOnly = true }]
-      environment = concat(local.common_env, local.db_env, local.llm_stage_env, [
-        { name = "WT_BIND", value = "0.0.0.0:${var.web_port}" },
-        { name = "WT_DB_USER", value = "wt_web_login" },
-        { name = "WT_MODEL_DIR", value = "/models" },
-        { name = "WT_EMBED_MODEL", value = var.models.embed },
-        { name = "WT_RERANK_MODEL", value = var.models.rerank },
-        { name = "WT_LLM_MODEL", value = var.llm.model },
-        { name = "ANTHROPIC_WORKSPACE_ID", value = var.llm.workspace_id },
-        { name = "WT_LLM_REAL_DATA_OK", value = tostring(var.llm.real_data_ok) },
-        { name = "WT_LLM_MONTHLY_CAP_USD", value = tostring(var.llm.monthly_cap_usd) },
-        # The load balancer is the only way in, so X-Forwarded-For names the client: the entry
-        # forwarded_hops from the end (the load balancer's, or Cloudflare's in front of it).
-        { name = "WT_TRUST_FORWARDED_FOR", value = "true" },
-        { name = "WT_FORWARDED_HOPS", value = tostring(var.forwarded_hops) },
-        # Removal requests are confirmed by an emailed link (Spec 08).
-        { name = "WT_MAIL_FROM", value = var.mail_from },
-        { name = "WT_PUBLIC_URL", value = "https://${var.domain_name}" },
-        { name = "WT_ALERT_TOPIC_ARN", value = var.alert_topic_arn },
-      ])
-      secrets = [
-        { name = "WT_DB_PASSWORD", valueFrom = var.secret_arns["db_wt_web_login"] },
-        { name = "WT_SESSION_SECRET", valueFrom = var.secret_arns["session_secret"] },
-        { name = "ANTHROPIC_API_KEY", valueFrom = var.secret_arns["anthropic_api_key"] },
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = var.log_group_names["web"]
-          awslogs-region        = local.region
-          awslogs-stream-prefix = "web"
-        }
-      }
-    },
-  ])
+  container_definitions = jsonencode(local.web_containers)
 }
 
 # One-off evaluation runs (Spec 07) on the deployed stack: the image, models, config and database
@@ -567,6 +694,8 @@ resource "aws_ecs_task_definition" "admin" {
 # ---------------------------------------------------------------------------------------------
 
 resource "aws_lb" "this" {
+  count = var.load_balancer ? 1 : 0
+
   name                       = var.name
   load_balancer_type         = "application"
   internal                   = false
@@ -585,6 +714,8 @@ resource "aws_lb" "this" {
 }
 
 resource "aws_lb_target_group" "web" {
+  count = var.load_balancer ? 1 : 0
+
   name                 = "${var.name}-web"
   vpc_id               = var.vpc_id
   target_type          = "ip"
@@ -603,6 +734,8 @@ resource "aws_lb_target_group" "web" {
 }
 
 resource "aws_acm_certificate" "this" {
+  count = var.load_balancer ? 1 : 0
+
   domain_name               = var.domain_name
   subject_alternative_names = var.alternate_domain_names
   validation_method         = "DNS"
@@ -614,7 +747,9 @@ resource "aws_acm_certificate" "this" {
 
 # Waits until the validation CNAME (output certificate_validation_records) exists at Cloudflare.
 resource "aws_acm_certificate_validation" "this" {
-  certificate_arn = aws_acm_certificate.this.arn
+  count = var.load_balancer ? 1 : 0
+
+  certificate_arn = aws_acm_certificate.this[0].arn
 
   timeouts {
     create = "2h"
@@ -625,6 +760,8 @@ resource "aws_acm_certificate_validation" "this" {
 # the `cloudflare_origin_header` output). It sits in state and in the listener rule; it proves a
 # request came through this zone's Cloudflare, not who sent it.
 resource "random_password" "origin_header" {
+  count = var.load_balancer ? 1 : 0
+
   length  = 40
   special = false
 }
@@ -640,7 +777,7 @@ locals {
     message_body     = local.maintenance_page
     } : {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.web.arn
+    target_group_arn = one(aws_lb_target_group.web[*].arn)
     status_code      = null
     message_body     = null
   }
@@ -658,11 +795,13 @@ locals {
 }
 
 resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.this.arn
+  count = var.load_balancer ? 1 : 0
+
+  load_balancer_arn = aws_lb.this[0].arn
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.this.certificate_arn
+  certificate_arn   = aws_acm_certificate_validation.this[0].certificate_arn
 
   # `maintenance` swaps the forward for a fixed 503 page on every path, /healthz included, so the
   # health check alarms say the site is down while it is (runbook 13).
@@ -684,13 +823,15 @@ resource "aws_lb_listener" "https" {
 # Exists before `cloudflare_only` is set, so turning it on changes only the default action and no
 # request through Cloudflare is ever refused in between.
 resource "aws_lb_listener_rule" "from_cloudflare" {
-  listener_arn = aws_lb_listener.https.arn
+  count = var.load_balancer ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
   priority     = 10
 
   condition {
     http_header {
       http_header_name = local.origin_header_name
-      values           = [random_password.origin_header.result]
+      values           = [random_password.origin_header[0].result]
     }
   }
 
@@ -710,7 +851,9 @@ resource "aws_lb_listener_rule" "from_cloudflare" {
 }
 
 resource "aws_lb_listener" "http_redirect" {
-  load_balancer_arn = aws_lb.this.arn
+  count = var.load_balancer ? 1 : 0
+
+  load_balancer_arn = aws_lb.this[0].arn
   port              = 80
   protocol          = "HTTP"
 
@@ -738,23 +881,30 @@ resource "aws_ecs_service" "web" {
 
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
-  health_check_grace_period_seconds  = var.health_check_grace_seconds
+  # Covers the load balancer's checks and the container health check alike.
+  health_check_grace_period_seconds = var.health_check_grace_seconds
 
   deployment_circuit_breaker {
     enable   = true
     rollback = true
   }
 
+  # No NAT gateway in v1: the task's own public IPv4 address is its way out, until it moves to
+  # IPv6-only subnets and goes out over IPv6. The security group allows no inbound but the load
+  # balancer, and nothing at all behind the tunnel.
   network_configuration {
-    subnets          = var.public_subnet_ids
+    subnets          = var.web_ipv6_only ? var.web_ipv6_subnet_ids : var.public_subnet_ids
     security_groups  = [var.security_group_ids["web"]]
-    assign_public_ip = true # no NAT gateway in v1; the security group allows no inbound but the ALB
+    assign_public_ip = !var.web_ipv6_only
   }
 
-  load_balancer {
-    target_group_arn = aws_lb_target_group.web.arn
-    container_name   = "web"
-    container_port   = var.web_port
+  dynamic "load_balancer" {
+    for_each = aws_lb_target_group.web
+    content {
+      target_group_arn = load_balancer.value.arn
+      container_name   = "web"
+      container_port   = var.web_port
+    }
   }
 
   depends_on = [aws_lb_listener.https]
@@ -786,15 +936,16 @@ output "task_definition_families" {
 }
 
 output "alb_dns_name" {
-  value = aws_lb.this.dns_name
+  description = "Null without the load balancer."
+  value       = one(aws_lb.this[*].dns_name)
 }
 
 output "alb_arn_suffix" {
-  value = aws_lb.this.arn_suffix
+  value = one(aws_lb.this[*].arn_suffix)
 }
 
 output "target_group_arn_suffix" {
-  value = aws_lb_target_group.web.arn_suffix
+  value = one(aws_lb_target_group.web[*].arn_suffix)
 }
 
 output "cloudflare_origin_header" {
@@ -802,15 +953,56 @@ output "cloudflare_origin_header" {
   sensitive   = true
   value = {
     name  = local.origin_header_name
-    value = random_password.origin_header.result
+    value = one(random_password.origin_header[*].result)
   }
 }
 
 output "certificate_validation_records" {
   description = "Add each as a DNS-only CNAME at Cloudflare."
-  value = [for o in aws_acm_certificate.this.domain_validation_options : {
+  value = [for o in flatten(aws_acm_certificate.this[*].domain_validation_options) : {
     name  = o.resource_record_name
     type  = o.resource_record_type
     value = o.resource_record_value
   }]
+}
+
+# The load balancer and its pieces gained a count (`load_balancer`); these keep them in place.
+moved {
+  from = aws_lb.this
+  to   = aws_lb.this[0]
+}
+
+moved {
+  from = aws_lb_target_group.web
+  to   = aws_lb_target_group.web[0]
+}
+
+moved {
+  from = aws_acm_certificate.this
+  to   = aws_acm_certificate.this[0]
+}
+
+moved {
+  from = aws_acm_certificate_validation.this
+  to   = aws_acm_certificate_validation.this[0]
+}
+
+moved {
+  from = random_password.origin_header
+  to   = random_password.origin_header[0]
+}
+
+moved {
+  from = aws_lb_listener.https
+  to   = aws_lb_listener.https[0]
+}
+
+moved {
+  from = aws_lb_listener_rule.from_cloudflare
+  to   = aws_lb_listener_rule.from_cloudflare[0]
+}
+
+moved {
+  from = aws_lb_listener.http_redirect
+  to   = aws_lb_listener.http_redirect[0]
 }

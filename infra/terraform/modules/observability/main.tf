@@ -9,6 +9,11 @@
 #
 # Route 53 publishes health check metrics only in us-east-1, so that alarm and its topic live
 # there, through the aws.us_east_1 provider.
+#
+# Behind the Cloudflare Tunnel (docs/adr-edge-cost.md) the two load balancer alarms go with the
+# load balancer (`load_balancer = false`). Two alarms that need no load balancer exist from the
+# start, so they prove themselves before the old ones go: the 5xx rate from the web service's own
+# `http_response` events, and no running web task from the service's AWS/ECS metrics.
 
 variable "name" {
   type = string
@@ -29,12 +34,22 @@ variable "log_retention_days" {
   default = 30
 }
 
+variable "load_balancer" {
+  description = "Whether the load balancer exists, and with it its two alarms."
+  type        = bool
+  default     = true
+}
+
 variable "alb_arn_suffix" {
-  type = string
+  description = "Null without the load balancer."
+  type        = string
+  default     = null
 }
 
 variable "target_group_arn_suffix" {
-  type = string
+  description = "Null without the load balancer."
+  type        = string
+  default     = null
 }
 
 variable "health_check_fqdn" {
@@ -81,6 +96,7 @@ resource "aws_sns_topic_subscription" "second_email" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_5xx_rate" {
+  count               = var.load_balancer ? 1 : 0
   alarm_name          = "${var.name}-alb-5xx-rate"
   alarm_description   = "More than 5% of requests returned a 5xx over 10 minutes."
   comparison_operator = "GreaterThanThreshold"
@@ -184,6 +200,7 @@ resource "aws_cloudwatch_metric_alarm" "scratch_not_empty" {
 # The 5xx alarm stays quiet when nobody is using the app. This one does not: the target group
 # reports zero healthy hosts whenever the web task is down or failing /healthz.
 resource "aws_cloudwatch_metric_alarm" "no_healthy_web_task" {
+  count               = var.load_balancer ? 1 : 0
   alarm_name          = "${var.name}-no-healthy-web-task"
   alarm_description   = "No healthy web task behind the load balancer for 5 minutes."
   namespace           = "AWS/ApplicationELB"
@@ -204,6 +221,27 @@ resource "aws_cloudwatch_metric_alarm" "no_healthy_web_task" {
 # service CPU and memory without Container Insights.
 locals {
   ecs_dimensions = { ClusterName = var.name, ServiceName = "${var.name}-web" }
+}
+
+# The load balancer's HealthyHostCount without a load balancer: AWS/ECS publishes the service's
+# CPU every minute while a task runs, so no sample for 5 minutes means no task is running. ECS
+# replaces a task that fails its container health check, so a task that cannot answer /healthz
+# does not stay running.
+resource "aws_cloudwatch_metric_alarm" "no_running_web_task" {
+  alarm_name          = "${var.name}-no-running-web-task"
+  alarm_description   = "No web task running for 5 minutes. Runbook 13."
+  namespace           = "AWS/ECS"
+  metric_name         = "CPUUtilization"
+  dimensions          = local.ecs_dimensions
+  statistic           = "SampleCount"
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 5
+  comparison_operator = "LessThanThreshold"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
 }
 
 # Roadmap UB3.9 (WA REL06-BP01): the embedder lives in the task's memory, so running out of it
@@ -300,6 +338,9 @@ locals {
     SummariesSettled = "{ $.event = \"summary_settled\" }"
     SummariesFailed  = "{ ($.event = \"summary_settled\") && ($.summary_status != \"shown\") && ($.summary_status != \"not_attempted\") }"
     RankerFallback   = "{ ($.event = \"ranker_served\") && ($.ranker = \"none (fallback)\") }"
+    # One http_response per request, from wt-api itself, so it works behind any front.
+    HttpResponses    = "{ $.event = \"http_response\" }"
+    HttpServerErrors = "{ ($.event = \"http_response\") && ($.status >= 500) }"
   }
 }
 
@@ -315,6 +356,50 @@ resource "aws_cloudwatch_log_metric_filter" "answer" {
     value     = each.key == "AskMilliseconds" ? "$.ms" : "1"
     unit      = each.key == "AskMilliseconds" ? "Milliseconds" : "Count"
   }
+}
+
+# The load balancer's 5xx alarm without a load balancer: the share of wt-api's own responses
+# that were 5xx. A 502 or 530 that Cloudflare or cloudflared answers because the task is
+# unreachable never reaches the log; no-running-web-task and healthz-unreachable cover that.
+resource "aws_cloudwatch_metric_alarm" "web_5xx_rate" {
+  alarm_name          = "${var.name}-web-5xx-rate"
+  alarm_description   = "More than 5% of the web service's responses were 5xx over 10 minutes. Runbook 13."
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 5
+  evaluation_periods  = 2
+  datapoints_to_alarm = 2
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
+
+  metric_query {
+    id          = "rate"
+    expression  = "IF(responses > 0, 100 * FILL(errors, 0) / responses, 0)"
+    label       = "5xx percent"
+    return_data = true
+  }
+
+  metric_query {
+    id = "responses"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "HttpResponses"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  metric_query {
+    id = "errors"
+    metric {
+      namespace   = local.answer_namespace
+      metric_name = "HttpServerErrors"
+      period      = 300
+      stat        = "Sum"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_metric_filter.answer]
 }
 
 resource "aws_cloudwatch_metric_alarm" "model_failures" {
@@ -549,4 +634,15 @@ output "log_group_arns" {
 
 output "alarm_topic_arn" {
   value = aws_sns_topic.alarms.arn
+}
+
+# The two load balancer alarms gained a count (`load_balancer`); these keep them in place.
+moved {
+  from = aws_cloudwatch_metric_alarm.alb_5xx_rate
+  to   = aws_cloudwatch_metric_alarm.alb_5xx_rate[0]
+}
+
+moved {
+  from = aws_cloudwatch_metric_alarm.no_healthy_web_task
+  to   = aws_cloudwatch_metric_alarm.no_healthy_web_task[0]
 }

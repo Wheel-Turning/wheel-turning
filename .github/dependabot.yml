@@ -42,6 +42,7 @@ updates:
     directories:
       - /infra/terraform/account
       - /infra/terraform/bootstrap
+      - /infra/terraform/edge
       - /infra/terraform/github-oidc
       - /infra/terraform/envs/*
     schedule:

@@ -12,6 +12,7 @@ pub mod ask;
 pub mod chrome;
 pub mod excerpt;
 pub mod feedback;
+pub mod healthcheck;
 pub mod limits;
 pub mod mail;
 pub mod privacy;
@@ -255,7 +256,8 @@ pub struct Health {
 }
 
 /// Reports whether the service and its database are healthy. Returns 503 when the database does
-/// not answer, so the load balancer stops sending traffic.
+/// not answer, so the load balancer, or the container health check behind the Cloudflare Tunnel,
+/// takes the task out of service.
 async fn healthz(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
     match wt_db::ping(&state.pool).await {
         Ok(()) => (

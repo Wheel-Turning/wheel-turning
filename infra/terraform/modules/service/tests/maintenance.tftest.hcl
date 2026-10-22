@@ -25,13 +25,14 @@ variables {
   admin_task_role_arn = "arn:aws:iam::000000000000:role/admin-task"
   log_group_names     = { web = "/wt-test/web", admin = "/wt-test/admin" }
   secret_arns = {
-    db_wt_web_login      = "arn:secret:web"
-    db_wt_owner_login    = "arn:secret:owner"
-    db_wt_pipeline_login = "arn:secret:pipeline"
-    db_wt_analyst_login  = "arn:secret:analyst"
-    db_wt_audit_login    = "arn:secret:audit"
-    session_secret       = "arn:secret:session"
-    anthropic_api_key    = "arn:secret:anthropic"
+    db_wt_web_login         = "arn:secret:web"
+    db_wt_owner_login       = "arn:secret:owner"
+    db_wt_pipeline_login    = "arn:secret:pipeline"
+    db_wt_analyst_login     = "arn:secret:analyst"
+    db_wt_audit_login       = "arn:secret:audit"
+    session_secret          = "arn:secret:session"
+    anthropic_api_key       = "arn:secret:anthropic"
+    cloudflare_tunnel_token = "arn:secret:tunnel"
   }
   bucket_names   = { transcripts = "t", scratch = "s", models = "m" }
   records_bucket = "r"
@@ -48,7 +49,7 @@ run "forwards_by_default" {
   command = plan
 
   assert {
-    condition     = aws_lb_listener.https.default_action[0].type == "forward"
+    condition     = aws_lb_listener.https[0].default_action[0].type == "forward"
     error_message = "Without maintenance the listener forwards to the web task."
   }
 }
@@ -61,22 +62,22 @@ run "maintenance_answers_with_the_fixed_page" {
   }
 
   assert {
-    condition     = aws_lb_listener.https.default_action[0].type == "fixed-response"
+    condition     = aws_lb_listener.https[0].default_action[0].type == "fixed-response"
     error_message = "maintenance = true must answer with a fixed response."
   }
 
   assert {
-    condition     = aws_lb_listener.https.default_action[0].fixed_response[0].status_code == "503"
+    condition     = aws_lb_listener.https[0].default_action[0].fixed_response[0].status_code == "503"
     error_message = "The maintenance page answers 503."
   }
 
   assert {
-    condition     = strcontains(aws_lb_listener.https.default_action[0].fixed_response[0].message_body, "Down for maintenance")
+    condition     = strcontains(aws_lb_listener.https[0].default_action[0].fixed_response[0].message_body, "Down for maintenance")
     error_message = "The maintenance page says the site is down for maintenance."
   }
 
   assert {
-    condition     = length(aws_lb_listener.https.default_action[0].fixed_response[0].message_body) <= 1024
+    condition     = length(aws_lb_listener.https[0].default_action[0].fixed_response[0].message_body) <= 1024
     error_message = "The load balancer allows at most 1,024 bytes of fixed response."
   }
 }

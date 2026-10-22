@@ -172,6 +172,44 @@ variable "cloudflare_ranges" {
   }
 }
 
+variable "edge" {
+  description = <<-EOT
+    What carries testers' traffic from Cloudflare (docs/adr-edge-cost.md, "Follow-on"; runbook 12,
+    "The Cloudflare Tunnel"), in the order the stages run:
+    - alb: the load balancer alone.
+    - tunnel_test: the load balancer serves testers; the web task also runs cloudflared, reachable
+      only on the edge stack's test hostname.
+    - tunnel_live: the edge stack points the app's hostnames at the tunnel; the load balancer
+      stays for a rollback. WT_FORWARDED_HOPS drops to 1.
+    - tunnel: the load balancer, its certificate and its alarms are gone.
+    The cloudflare_tunnel_token secret must hold a value before any tunnel stage.
+  EOT
+  type        = string
+  default     = "alb"
+
+  validation {
+    condition     = contains(["alb", "tunnel_test", "tunnel_live", "tunnel"], var.edge)
+    error_message = "edge is one of alb, tunnel_test, tunnel_live or tunnel."
+  }
+}
+
+variable "db_dual_stack" {
+  description = "Stage T-D1: IPv6 on the private subnets, two IPv6-only subnets for the web task, and the database in dual-stack mode. AWS says the database change may cause downtime: apply in a quiet hour with a snapshot taken and the maintenance page up (runbook 12)."
+  type        = bool
+  default     = false
+}
+
+variable "web_ipv6_only" {
+  description = "Stage T-D2: the web task in the IPv6-only subnets with no public IPv4 address. Needs edge = tunnel and db_dual_stack."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.web_ipv6_only || (var.edge == "tunnel" && var.db_dual_stack)
+    error_message = "web_ipv6_only needs edge = \"tunnel\" and db_dual_stack = true."
+  }
+}
+
 variable "pc_backup_bucket" {
   description = "The PC's nightly backup bucket (runbook §10), which the audit checks for a dump under 36 hours old (Spec 11, PB1.3). Set to \"\" once the PC keeps no database."
   type        = string

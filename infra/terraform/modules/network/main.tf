@@ -4,8 +4,10 @@
 # sits in private subnets with no route to the internet.
 #
 # The VPC and the public subnets also carry an Amazon-provided IPv6 block, so the load balancer can
-# drop its public IPv4 addresses behind Cloudflare (docs/adr-edge-cost.md). Nothing else takes an
-# IPv6 address: tasks and the batch host keep IPv4 only.
+# drop its public IPv4 addresses behind Cloudflare (docs/adr-edge-cost.md). Tasks and the batch
+# host keep IPv4 only, until `ipv6_web`: then the private subnets gain IPv6 for a dual-stack
+# database, and two IPv6-only subnets take the web task, which reaches the internet over IPv6 with
+# no public IPv4 address (the Cloudflare Tunnel follow-on, stages T-D1 and T-D2).
 
 variable "name" {
   description = "Name prefix for every resource."
@@ -15,6 +17,12 @@ variable "name" {
 variable "cidr_block" {
   type    = string
   default = "10.40.0.0/16"
+}
+
+variable "ipv6_web" {
+  description = "IPv6 on the private subnets (for a dual-stack database) and two IPv6-only subnets for the web task."
+  type        = bool
+  default     = false
 }
 
 data "aws_availability_zones" "available" {
@@ -64,7 +72,24 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.this.id
   availability_zone = local.azs[count.index]
   cidr_block        = cidrsubnet(var.cidr_block, 8, 100 + count.index)
-  tags              = { Name = "${var.name}-private-${local.azs[count.index]}", tier = "private" }
+  # RDS's dual-stack mode needs IPv6 on every subnet of its subnet group. Still no route out.
+  ipv6_cidr_block = var.ipv6_web ? cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, 100 + count.index) : null
+  tags            = { Name = "${var.name}-private-${local.azs[count.index]}", tier = "private" }
+}
+
+# The web task's subnets once it gives up its public IPv4 address: IPv6 only, routed to the
+# internet gateway through the public route table. Fargate supports IPv6-only tasks in us-east-2;
+# its image pulls go through ECR's dual-stack names.
+resource "aws_subnet" "web_ipv6" {
+  count                                          = var.ipv6_web ? length(local.azs) : 0
+  vpc_id                                         = aws_vpc.this.id
+  availability_zone                              = local.azs[count.index]
+  ipv6_native                                    = true
+  ipv6_cidr_block                                = cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, 50 + count.index)
+  assign_ipv6_address_on_creation                = true
+  enable_resource_name_dns_aaaa_record_on_launch = true
+  private_dns_hostname_type_on_launch            = "resource-name"
+  tags                                           = { Name = "${var.name}-web-ipv6-${local.azs[count.index]}", tier = "web-ipv6" }
 }
 
 resource "aws_route_table" "public" {
@@ -87,6 +112,12 @@ resource "aws_route" "public_internet_ipv6" {
 resource "aws_route_table_association" "public" {
   count          = length(aws_subnet.public)
   subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "web_ipv6" {
+  count          = length(aws_subnet.web_ipv6)
+  subnet_id      = aws_subnet.web_ipv6[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
@@ -115,7 +146,8 @@ resource "aws_vpc_endpoint" "s3" {
 # - the load balancer accepts HTTPS (and HTTP, for the redirect) from the addresses below and
 #   talks only to the web tasks. Once Cloudflare fronts it, those are Cloudflare's ranges and
 #   HTTPS only (envs/v1 `cloudflare_only`)
-# - the web tasks accept traffic only from the load balancer
+# - the web tasks accept traffic only from the load balancer, and from nothing at all once the
+#   Cloudflare Tunnel replaces it (`web_from_alb = false`): cloudflared dials out instead
 # - the batch host accepts no inbound traffic
 # - the database accepts 5432 only from the web and batch security groups
 # One-off tasks (migrations, logins) run in the web security group.
@@ -140,7 +172,26 @@ variable "alb_ingress" {
   }
 }
 
+variable "web_from_alb" {
+  description = "Admit the load balancer to the web tasks. False once the Cloudflare Tunnel is the only way in."
+  type        = bool
+  default     = true
+}
+
+variable "tunnel_egress" {
+  description = "Cloudflare's ranges the web task's cloudflared may reach on 7844 (TCP and UDP, the tunnel's port). Empty without the tunnel."
+  type = object({
+    ipv4 = list(string)
+    ipv6 = list(string)
+  })
+  default = { ipv4 = [], ipv6 = [] }
+}
+
 locals {
+  tunnel_egress = merge(
+    { for p in setproduct(["tcp", "udp"], var.tunnel_egress.ipv4) : "${p[0]} ${p[1]}" => { protocol = p[0], ipv4 = p[1], ipv6 = null } },
+    { for p in setproduct(["tcp", "udp"], var.tunnel_egress.ipv6) : "${p[0]} ${p[1]}" => { protocol = p[0], ipv4 = null, ipv6 = p[1] } },
+  )
   alb_ingress_ipv4 = { for p in setproduct(var.alb_ingress.ports, var.alb_ingress.ipv4) : "${p[0]} ${p[1]}" => p }
   alb_ingress_ipv6 = { for p in setproduct(var.alb_ingress.ports, var.alb_ingress.ipv6) : "${p[0]} ${p[1]}" => p }
 }
@@ -201,6 +252,7 @@ resource "aws_security_group" "web" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "web_from_alb" {
+  count                        = var.web_from_alb ? 1 : 0
   security_group_id            = aws_security_group.web.id
   description                  = "From the load balancer"
   ip_protocol                  = "tcp"
@@ -220,6 +272,29 @@ resource "aws_vpc_security_group_egress_rule" "web_https_out" {
   from_port         = 443
   to_port           = 443
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+# Once the web task is IPv6-only, the same calls go over IPv6.
+resource "aws_vpc_security_group_egress_rule" "web_https_out_ipv6" {
+  count             = var.ipv6_web ? 1 : 0
+  security_group_id = aws_security_group.web.id
+  description       = "HTTPS over IPv6: AWS APIs and the Claude API"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv6         = "::/0"
+}
+
+# cloudflared's connections to Cloudflare's edge.
+resource "aws_vpc_security_group_egress_rule" "web_tunnel_out" {
+  for_each          = local.tunnel_egress
+  security_group_id = aws_security_group.web.id
+  description       = "Cloudflare Tunnel (${upper(each.value.protocol)})"
+  ip_protocol       = each.value.protocol
+  from_port         = 7844
+  to_port           = 7844
+  cidr_ipv4         = each.value.ipv4
+  cidr_ipv6         = each.value.ipv6
 }
 
 resource "aws_vpc_security_group_egress_rule" "web_to_db" {
@@ -303,4 +378,14 @@ output "public_subnet_ids" {
 
 output "private_subnet_ids" {
   value = aws_subnet.private[*].id
+}
+
+output "web_ipv6_subnet_ids" {
+  description = "The IPv6-only subnets for the web task; empty without `ipv6_web`."
+  value       = aws_subnet.web_ipv6[*].id
+}
+
+moved {
+  from = aws_vpc_security_group_ingress_rule.web_from_alb
+  to   = aws_vpc_security_group_ingress_rule.web_from_alb[0]
 }
