@@ -138,6 +138,8 @@ speech.
   A database password changes in the database first (`alter role ... password`), then in the
   secret. On the PC, update `.env`.
 - A new `WT_SESSION_SECRET` signs out every tester; their invite links still work.
+- The Cloudflare Tunnel token (`wt-v1/cloudflare_tunnel_token`) changes only with the tunnel:
+  §12, "The Cloudflare Tunnel", "Rotating the tunnel token".
 - An invite token is shown once and stored only as a hash. To replace one, revoke the tester and
   invite them again, then send the new link privately:
 
@@ -299,10 +301,14 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 - Site: `https://app.wheelturning.org`, also `https://demo.wheelturning.org` (Cloudflare DNS, set
   by hand to the load balancer; `terraform output dns_records_for_cloudflare`). From the edge
   cutover below, both are proxied by Cloudflare and the load balancer answers only Cloudflare.
+  From the Cloudflare Tunnel's stage T-B, the edge stack (`infra/terraform/edge`) holds both
+  records and points them at the tunnel.
 - Web service: Fargate, 1 vCPU / 3 GB, one task. Its `models` container copies
   `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-904883674947/` into the
   task before `wt-api` starts; startup takes about a minute. A new model goes to that bucket
-  (`aws s3 sync models/<dir> s3://wt-v1-models-904883674947/<dir>`), then a redeploy.
+  (`aws s3 sync models/<dir> s3://wt-v1-models-904883674947/<dir>`), then a redeploy. From the
+  Cloudflare Tunnel's stage T-A a third container, `cloudflared`, joins the tunnel once `wt-api`
+  passes its container health check (below, "The Cloudflare Tunnel").
 - Settings: `WT_ENV=prod` (Secure cookies), the session secret, database password and Claude key
   from Secrets Manager (`wt-v1/*`), the language model settings from the `llm_*` variables in
   `infra/terraform/envs/v1/variables.tf`. Config files (`config/`) are baked into the image, so a
@@ -461,6 +467,142 @@ Cloudflare's ranges change rarely; `cloudflare_ranges` holds the copy read on Oc
 Compare it with `https://www.cloudflare.com/ips-v4` and `ips-v6` before each edge change and
 every few months, since a new Cloudflare range missing here makes the site fail for some
 testers.
+
+### The Cloudflare Tunnel
+
+Owner's decisions of October 17 and 19, 2026 (`docs/adr-edge-cost.md`, "Follow-on", T1 (a) and
+T2): a `cloudflared` container in the web task carries `app` and `demo` from Cloudflare, the load
+balancer goes, and last the task gives up its public IPv4 address. The edge drops from about $21
+to about $0.40 a month. Cloudflare's proxy, managed ruleset and rate rule stay as they are.
+
+Two stacks carry it, both applied only by the owner:
+
+- `infra/terraform/edge`: the tunnel, its routes, the `app`, `demo` and `tunnel-test` DNS
+  records and the maintenance Worker. It needs a Cloudflare API token in `CLOUDFLARE_API_TOKEN`,
+  kept in the password manager and set only in the shell that applies. Create it once in the
+  Cloudflare dashboard (My Profile, API Tokens, Custom token) with Account: Cloudflare Tunnel
+  Edit and Workers Scripts Edit; Zone `wheelturning.org`: Zone Read, DNS Edit and Workers Routes
+  Edit. CI never sees it.
+- `infra/terraform/envs/v1`, with the variables `edge`, `db_dual_stack` and `web_ipv6_only`.
+
+| Stage | edge stack | envs/v1 | What changes |
+| --- | --- | --- | --- |
+| T-A | first apply | `edge = "tunnel_test"` | The tunnel exists; the web task runs `cloudflared`, the container health check and the mirrored images; only `tunnel-test.wheelturning.org` goes through the tunnel |
+| T-B | `app_via_tunnel = true` | `edge = "tunnel_live"` | `app` and `demo` go through the tunnel; `WT_FORWARDED_HOPS=1`; the load balancer stays, idle |
+| T-C, a week later | | `edge = "tunnel"` | The load balancer, its certificate, its listeners and its two alarms are gone; the web security group has no inbound rule |
+| T-D1, a quiet hour | | `db_dual_stack = true` | IPv6 on the private subnets, two IPv6-only subnets, the database in dual-stack mode |
+| T-D2, the next day | | `web_ipv6_only = true` | The web task in the IPv6-only subnets, with no public IPv4 address |
+
+Every envs/v1 apply below runs from `infra/terraform/envs/v1` with `$T` from "The edge" above,
+plus the stage's variables. Once a stage holds, commit its variables as the defaults in that
+stack's `variables.tf`, so `deploy.yml` and the next plain apply keep them.
+
+**Before T-A.**
+
+1. Merge and deploy this change through `deploy.yml`, so the image has `wt-api --healthcheck`
+   and writes `http_response` events. Then `terraform apply $T` once, which adds the
+   `wt-v1/cloudflare_tunnel_token` secret (empty), the two new alarms and their metric filters,
+   and moves the load balancer's pieces in state without touching them. From here
+   `wt-v1-web-5xx-rate` and `wt-v1-no-running-web-task` run beside the load balancer's alarms.
+2. Copy the two outside images into the `wt-v1` repository, from a machine with Docker (the
+   lifecycle rule never expires `mirror-` tags):
+
+   ```bash
+   R=904883674947.dkr.ecr.us-east-2.amazonaws.com/wt-v1
+   aws ecr get-login-password | docker login --username AWS --password-stdin ${R%%/*}
+   docker pull --platform linux/amd64 cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+   docker tag cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07 $R:mirror-cloudflared-2026.10.0
+   docker push $R:mirror-cloudflared-2026.10.0
+   docker pull --platform linux/amd64 public.ecr.aws/aws-cli/aws-cli:2.31.0
+   docker tag public.ecr.aws/aws-cli/aws-cli:2.31.0 $R:mirror-aws-cli-2.31.0
+   docker push $R:mirror-aws-cli-2.31.0
+   ```
+
+   A new version later is a new tag here and in `mirror_tags` (`modules/service`).
+3. The edge stack, first time: `terraform init`, then bring the two existing records into its
+   state so it does not try to create them again. The zone ID is in `cf zones list --name
+   wheelturning.org`, each record's ID in
+   `cf dns records list -z wheelturning.org --name app.wheelturning.org --type CNAME` (and
+   `demo`):
+
+   ```bash
+   terraform import 'module.edge.cloudflare_dns_record.app["app.wheelturning.org"]' <zone id>/<record id>
+   terraform import 'module.edge.cloudflare_dns_record.app["demo.wheelturning.org"]' <zone id>/<record id>
+   terraform plan
+   ```
+
+   The plan must change nothing on those two records (a proxied CNAME to the load balancer) and
+   create the tunnel, its configuration, the `tunnel-test` record and the maintenance Worker.
+
+**Cutover.**
+
+1. T-A, edge stack: `terraform apply`. Then put the token into Secrets Manager without it
+   touching a file or the shell history:
+
+   ```bash
+   aws secretsmanager put-secret-value --secret-id wt-v1/cloudflare_tunnel_token --secret-string "$(cf tunnels token get $(terraform output -raw tunnel_id) -q)"
+   ```
+
+   Check the secret holds the token alone (`aws secretsmanager get-secret-value ... --query
+   'length(SecretString)'` prints about 180, not a JSON document).
+2. T-A, envs/v1: `terraform apply $T -var edge=tunnel_test`. The new task starts `cloudflared`
+   only once `wt-api` passes its health check, about two minutes in. Check: the service reaches a
+   steady state; `cf tunnels connections list <tunnel id>` shows four connections;
+   `curl -sI https://tunnel-test.wheelturning.org/healthz` answers 200 with a `cf-ray` header;
+   from a browser, `https://tunnel-test.wheelturning.org/join/<a test invite>` signs in and one
+   question streams to its answer page (the invite cookie is per hostname, so this is a separate
+   test sign-in). Testers still use the load balancer.
+3. T-B, in a quiet hour, envs/v1 first, then the edge stack, within a few minutes of each
+   other: `terraform apply $T -var edge=tunnel_live` (the client address is then counted one
+   hop from the end, which through the load balancer is Cloudflare's edge: coarse for the few
+   minutes until the next step, never forgeable), then in `infra/terraform/edge`
+   `terraform apply -var app_via_tunnel=true`. Check: `curl -sI https://app.wheelturning.org/healthz`
+   answers 200; the load balancer's `RequestCount` falls to zero within minutes; one question
+   streams to its answer page on `app` and on `demo`; the rights form sends its email.
+4. A week on T-B with no `wt-v1-web-5xx-rate`, `wt-v1-no-running-web-task` or
+   `wt-v1-healthz-unreachable` alarm that the tunnel caused: T-C,
+   `terraform apply $T -var edge=tunnel`. Check the site as in step 3. Leave the two
+   `_…acm-validations.aws` CNAMEs at Cloudflare: they cost nothing, and a rollback's new
+   certificate for the same names validates through them.
+5. T-D1, in a quiet hour: take a manual snapshot
+   (`aws rds create-db-snapshot --db-instance-identifier wt-v1 --db-snapshot-identifier wt-v1-before-dual-stack`)
+   and wait for it to be `available`; put up the maintenance page (§13); then
+   `terraform apply $T -var edge=tunnel -var db_dual_stack=true`. AWS lists the network type
+   change as one that may cause downtime. Wait until
+   `aws rds describe-db-instances --db-instance-identifier wt-v1 --query 'DBInstances[0].[DBInstanceStatus,NetworkType]'`
+   prints `available` and `DUAL`, take the maintenance page down, and check one question.
+6. T-D2, the next day: `terraform apply $T -var edge=tunnel -var db_dual_stack=true -var web_ipv6_only=true`.
+   The new task pulls through ECR's dual-stack name and has no IPv4 address at all. If it never
+   turns healthy, the circuit breaker keeps the old task; read the stopped task's reason. One
+   possible cause is the account setting AWS's guide asks for IPv6 on Fargate:
+   `aws ecs put-account-setting-default --name dualStackIPv6 --value enabled`, then apply again.
+   Check: one question with a summary (the model API over IPv6), the rights form's email (SES),
+   an answer page that reads a transcript (S3), and `WT_ALERT_TOPIC_ARN=… wt alerts test` from
+   the PC still reaches the topic; the next day, the `wt-v1-alarms` topic shows no failures.
+
+**Rollback.** Undo the latest stage first.
+
+- After T-D2: `terraform apply $T -var edge=tunnel -var db_dual_stack=true` (the task goes back
+  to the public subnets with an address).
+- After T-D1: with the maintenance page up, `terraform apply $T -var edge=tunnel`
+  (`network_type` back to `IPV4`).
+- After T-C: `terraform apply $T -var edge=tunnel_live` recreates the load balancer under a new
+  DNS name, its certificate (compare its validation records, `terraform output
+  dns_records_for_cloudflare`, with the CNAMEs left at Cloudflare) and its alarms, in about 10
+  minutes; then roll back T-B. The origin header gets a new value: update the transform rule.
+- After T-B: in `infra/terraform/edge`, `terraform apply -var app_via_tunnel=false` (the records
+  point at the load balancer again within seconds), then `terraform apply $T -var edge=tunnel_test`.
+- After T-A: `terraform apply $T` (edge `alb`). The tunnel itself can stay.
+- Rolling back to an image older than this change fails its health check from T-A on, since it
+  has no `--healthcheck`: roll back to the first image that has it, or set `edge = "alb"` first.
+
+**Rotating the tunnel token.** `cf tunnels token get` prints the same token until the tunnel is
+replaced; to change it, `terraform apply -replace=module.edge.cloudflare_zero_trust_tunnel_cloudflared.web`
+in `infra/terraform/edge` (the records follow the new tunnel id), put the new token as in step
+1, then force a new web deployment
+(`aws ecs update-service --cluster wt-v1 --service wt-v1-web --force-new-deployment`). The site is
+down between the replace and the new task joining, about three minutes, so do it in a quiet hour
+with the maintenance page up.
 
 ### The database's name
 
@@ -693,8 +835,8 @@ question or passage text. To read one event in CloudWatch Logs Insights:
 fields @timestamp, event, stage, error, ms | filter event = "llm_call_failed" | sort @timestamp desc
 ```
 
-**Scale to zero** stops the web task, so testers get the load balancer's 503 and nothing is
-served. Use it only when serving is itself the harm: a passage that must not be served is being
+**Scale to zero** stops the web task, so testers get an error page (the load balancer's 503,
+or Cloudflare's 530 behind the tunnel) and nothing is served. Use it only when serving is itself the harm: a passage that must not be served is being
 served, a secret has leaked, or spend keeps climbing past the cap. For anything else prefer the
 maintenance page below, which tells testers what is happening.
 
@@ -712,7 +854,9 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 
 #### `wt-v1-alb-5xx-rate`
 
-- **Means:** more than 5% of requests returned a 5xx over two 5-minute periods.
+- **Means:** more than 5% of requests returned a 5xx over two 5-minute periods. It exists only
+  while the load balancer does (until the tunnel's stage T-C); `wt-v1-web-5xx-rate` counts the
+  same from the web service's own log.
 - **First check:** `/wt-v1/web` for `"level":"ERROR"` lines in the window, and the ECS service's
   events for task restarts.
 - **Fix:** a bad deploy is rolled back by deploying the previous `image_tag`; a database error
@@ -753,12 +897,39 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 
 #### `wt-v1-no-healthy-web-task`
 
-- **Means:** no web task has passed `/healthz` for 5 minutes. The site is down.
+- **Means:** no web task has passed `/healthz` for 5 minutes. The site is down. It exists only
+  while the load balancer does (until the tunnel's stage T-C); `wt-v1-no-running-web-task`
+  replaces it.
 - **First check:** the ECS service's events and the stopped task's reason, then the `models`
   and `web` log streams for the start-up error: a missing model, a secret without a value, the
   database refusing the login, a setting the web server refuses to start without.
 - **Fix:** deploy the last good `image_tag`, or fix the setting the error names (procedure 12).
   Put up the maintenance page while it is down.
+- **Scale to zero:** it already serves nothing.
+
+#### `wt-v1-web-5xx-rate`
+
+- **Means:** more than 5% of the web service's responses were 5xx over two 5-minute periods,
+  counted from its `http_response` log events. Errors that Cloudflare or `cloudflared` answer
+  because the task cannot be reached (502, 530) are not in the log; `wt-v1-no-running-web-task`
+  and `wt-v1-healthz-unreachable` catch those.
+- **First check:** `/wt-v1/web` for `"level":"ERROR"` lines in the window, and which routes
+  failed: `fields route, status | filter event = "http_response" and status >= 500 | stats count() by route`.
+- **Fix:** as for `wt-v1-alb-5xx-rate`: deploy the previous `image_tag` for a bad deploy; a
+  database error goes to the database alarms.
+- **Scale to zero:** no. Put up the maintenance page if it lasts more than 15 minutes.
+
+#### `wt-v1-no-running-web-task`
+
+- **Means:** the web service has had no running task for 5 minutes: the site is down. Behind the
+  tunnel ECS replaces a task whose `/healthz` fails its container health check, so a task that
+  keeps failing shows as gaps here. It also fires while the service is scaled to zero.
+- **First check:** the ECS service's events and the stopped task's reason (an essential
+  container exited, or failed its health check), then the `models`, `web` and `cloudflared` log
+  streams: a missing model, a secret without a value (the tunnel token included), the database
+  refusing the login, `cloudflared` unable to reach Cloudflare on 7844.
+- **Fix:** deploy the last good `image_tag` (no older than the first with `--healthcheck`), or
+  fix the setting the error names. Put up the maintenance page while it is down.
 - **Scale to zero:** it already serves nothing.
 
 #### `wt-v1-web-memory`
@@ -776,14 +947,18 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 
 - **Means:** Route 53 has not reached `https://app.wheelturning.org/healthz` from outside AWS
   for 3 minutes. It also fires while the maintenance page is up, by design.
-- **First check:** whether `wt-v1-no-healthy-web-task` fired too (the app) or not (Cloudflare,
-  DNS, the certificate or the load balancer). Cloudflare's status page and its Security Events
-  for blocked `/healthz` requests come next.
+- **First check:** whether `wt-v1-no-running-web-task` (or, with the load balancer,
+  `wt-v1-no-healthy-web-task`) fired too (the app) or not (Cloudflare, DNS, the tunnel, the
+  certificate or the load balancer). Cloudflare's status page and its Security Events for
+  blocked `/healthz` requests come next; behind the tunnel, `cf tunnels connections list <tunnel
+  id>` shows whether `cloudflared` is connected.
 - **Fix:** the app: as above. DNS: the CNAME at Cloudflare must be proxied and match
   `terraform output dns_records_for_cloudflare`, and the transform rule must still set the origin
   header (without it the load balancer answers 403). The certificate: ACM renews it while its
-  validation CNAME stays DNS-only at Cloudflare. A Cloudflare outage takes the site down; if it
-  lasts, roll the edge back (§12, "The edge").
+  validation CNAME stays DNS-only at Cloudflare. The tunnel: no connections means `cloudflared`
+  is down or cannot reach Cloudflare (its log stream says which); a forced new deployment
+  restarts it. A Cloudflare outage takes the site down; if it lasts, roll the edge back (§12,
+  "The edge"; behind the tunnel only once the load balancer is back, "The Cloudflare Tunnel").
 - **Scale to zero:** no.
 
 #### `wt-v1-model-failures`
@@ -913,13 +1088,26 @@ git), with a copy in the owner's password manager under "Wheel Turning security 
 
 ### The maintenance page
 
-`maintenance = true` makes the load balancer answer every path, `/healthz` included, with a fixed
-503 page saying the site is down for maintenance. The web task keeps running behind it. From
-`infra/terraform/envs/v1`:
+A fixed 503 page saying the site is down for maintenance, on every path, `/healthz` included,
+while the web task keeps running. Which stack serves it depends on what carries the traffic
+(§12, "The Cloudflare Tunnel").
+
+From the tunnel's stage T-B on, Cloudflare serves it: `maintenance = true` in
+`infra/terraform/edge` routes `app` and `demo` to the `wt-v1-maintenance` Worker. From that
+directory, with `CLOUDFLARE_API_TOKEN` set:
+
+```bash
+terraform apply -var maintenance=true
+```
+
+Apply again without it to end it. `terraform test` in `infra/terraform/modules/edge` checks the
+switch offline.
+
+Before T-B, the load balancer serves it: from `infra/terraform/envs/v1`,
 
 ```bash
 terraform apply -var maintenance=true -var image_tag=$(terraform output -raw image_tag)
 ```
 
-Apply again with `-var maintenance=false` to end it. `terraform test` in
-`infra/terraform/modules/service` checks the switch offline.
+and `-var maintenance=false` to end it; `terraform test` in `infra/terraform/modules/service`
+checks that switch.

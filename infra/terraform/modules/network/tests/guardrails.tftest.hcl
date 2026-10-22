@@ -100,8 +100,8 @@ run "the_database_admits_only_compute" {
 
   assert {
     condition = (
-      aws_vpc_security_group_ingress_rule.web_from_alb.from_port == var.web_port &&
-      aws_vpc_security_group_ingress_rule.web_from_alb.cidr_ipv4 == null
+      aws_vpc_security_group_ingress_rule.web_from_alb[0].from_port == var.web_port &&
+      aws_vpc_security_group_ingress_rule.web_from_alb[0].cidr_ipv4 == null
     )
     error_message = "The web tasks must admit only the load balancer."
   }
@@ -126,5 +126,29 @@ run "cloudflare_only_admits_its_ranges_on_https" {
   assert {
     condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.alb_ipv6 : r.from_port == 443])
     error_message = "Behind Cloudflare the load balancer admits HTTPS only."
+  }
+}
+
+run "behind_the_tunnel_the_web_tasks_admit_nothing" {
+  command = plan
+
+  variables {
+    web_from_alb  = false
+    tunnel_egress = { ipv4 = ["198.41.128.0/17"], ipv6 = ["2606:4700::/32"] }
+  }
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.web_from_alb) == 0
+    error_message = "Once the Cloudflare Tunnel carries all traffic, nothing may reach the web tasks."
+  }
+
+  assert {
+    condition     = alltrue([for r in aws_vpc_security_group_egress_rule.web_tunnel_out : r.from_port == 7844 && r.to_port == 7844])
+    error_message = "cloudflared reaches Cloudflare on 7844 only."
+  }
+
+  assert {
+    condition     = length(aws_vpc_security_group_egress_rule.web_tunnel_out) == 4
+    error_message = "TCP and UDP to each of Cloudflare's ranges given, and nowhere else."
   }
 }

@@ -128,6 +128,8 @@ data "aws_iam_policy_document" "web_exec" {
       var.secret_arns["db_wt_web_login"],
       var.secret_arns["session_secret"],
       var.secret_arns["anthropic_api_key"],
+      # Injected only while the web task runs cloudflared (envs/v1 `edge`).
+      var.secret_arns["cloudflare_tunnel_token"],
     ]
   }
 }

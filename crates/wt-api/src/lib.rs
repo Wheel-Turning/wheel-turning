@@ -12,6 +12,7 @@ pub mod ask;
 pub mod chrome;
 pub mod excerpt;
 pub mod feedback;
+pub mod healthcheck;
 pub mod limits;
 pub mod mail;
 pub mod privacy;
@@ -28,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use askama::Template;
-use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, FromRequestParts, MatchedPath, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -240,7 +241,30 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             security_headers,
         ))
+        .layer(middleware::from_fn(log_response))
         .with_state(state)
+}
+
+/// One `http_response` event per request, for the 5xx-rate alarm (`docs/adr-edge-cost.md`,
+/// Tunnel follow-on): the route as declared, never the path, which can hold an invite token or
+/// an answer id, plus the status and the time to the response's head. A request no route
+/// matched logs the route `fallback`.
+async fn log_response(request: Request, next: Next) -> Response {
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| "fallback".to_owned(), |p| p.as_str().to_owned());
+    let started = std::time::Instant::now();
+    let response = next.run(request).await;
+    let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    tracing::info!(
+        event = "http_response",
+        route = %route,
+        status = response.status().as_u16(),
+        ms,
+        "responded"
+    );
+    response
 }
 
 /// The `/healthz` response body.
@@ -253,7 +277,8 @@ pub struct Health {
 }
 
 /// Reports whether the service and its database are healthy. Returns 503 when the database does
-/// not answer, so the load balancer stops sending traffic.
+/// not answer, so the load balancer, or the container health check behind the Cloudflare Tunnel,
+/// takes the task out of service.
 async fn healthz(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
     match wt_db::ping(&state.pool).await {
         Ok(()) => (

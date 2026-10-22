@@ -48,6 +48,12 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
+variable "dual_stack" {
+  description = "RDS dual-stack mode, so an IPv6-only web task can connect (Cloudflare Tunnel follow-on, stage T-D1). Every subnet in the group needs IPv6 first. AWS lists the change as one that may cause downtime: apply it in a quiet hour with the maintenance page up."
+  type        = bool
+  default     = false
+}
+
 resource "aws_db_subnet_group" "this" {
   name       = var.name
   subnet_ids = var.private_subnet_ids
@@ -86,6 +92,7 @@ resource "aws_db_instance" "this" {
   manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
+  network_type           = var.dual_stack ? "DUAL" : "IPV4"
   vpc_security_group_ids = [var.security_group_id]
   parameter_group_name   = aws_db_parameter_group.this.name
   publicly_accessible    = false

@@ -1,4 +1,6 @@
-//! The `wt-api` binary: loads configuration, then serves the web app on `WT_BIND`.
+//! The `wt-api` binary: loads configuration, then serves the web app on `WT_BIND`. With
+//! `--healthcheck` it instead checks a running server's `/healthz` and exits (the container
+//! health check).
 
 use std::sync::Arc;
 
@@ -9,6 +11,11 @@ use wt_core::telemetry::{LogOutput, init_logging};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
+        let addr = wt_api::healthcheck::target(wt_core::config::bind_from_env()?);
+        wt_api::healthcheck::probe(addr, wt_api::healthcheck::TIMEOUT)?;
+        return Ok(());
+    }
     let config = Config::from_env().context("loading configuration")?;
     init_logging(config.env, &config.log, LogOutput::Stdout)?;
     // Spec 11, PB1.6: in prod a removal request must always be confirmable by email.

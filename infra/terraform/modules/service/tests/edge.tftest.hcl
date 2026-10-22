@@ -35,13 +35,14 @@ variables {
   admin_task_role_arn = "arn:aws:iam::000000000000:role/admin-task"
   log_group_names     = { web = "/wt-test/web", admin = "/wt-test/admin" }
   secret_arns = {
-    db_wt_web_login      = "arn:secret:web"
-    db_wt_owner_login    = "arn:secret:owner"
-    db_wt_pipeline_login = "arn:secret:pipeline"
-    db_wt_analyst_login  = "arn:secret:analyst"
-    db_wt_audit_login    = "arn:secret:audit"
-    session_secret       = "arn:secret:session"
-    anthropic_api_key    = "arn:secret:anthropic"
+    db_wt_web_login         = "arn:secret:web"
+    db_wt_owner_login       = "arn:secret:owner"
+    db_wt_pipeline_login    = "arn:secret:pipeline"
+    db_wt_analyst_login     = "arn:secret:analyst"
+    db_wt_audit_login       = "arn:secret:audit"
+    session_secret          = "arn:secret:session"
+    anthropic_api_key       = "arn:secret:anthropic"
+    cloudflare_tunnel_token = "arn:secret:tunnel"
   }
   bucket_names   = { transcripts = "t", scratch = "s", models = "m" }
   records_bucket = "r"
@@ -58,17 +59,17 @@ run "open_to_all_by_default" {
   command = plan
 
   assert {
-    condition     = aws_lb_listener.https.default_action[0].type == "forward"
+    condition     = aws_lb_listener.https[0].default_action[0].type == "forward"
     error_message = "Without cloudflare_only the listener forwards every request."
   }
 
   assert {
-    condition     = aws_lb_listener_rule.from_cloudflare.action[0].type == "forward"
+    condition     = aws_lb_listener_rule.from_cloudflare[0].action[0].type == "forward"
     error_message = "The origin header rule exists from the start, so turning cloudflare_only on refuses nothing that came through Cloudflare."
   }
 
   assert {
-    condition     = aws_lb.this.ip_address_type == "dualstack"
+    condition     = aws_lb.this[0].ip_address_type == "dualstack"
     error_message = "The load balancer keeps public IPv4 by default."
   }
 
@@ -88,22 +89,22 @@ run "cloudflare_only_refuses_requests_without_the_header" {
   }
 
   assert {
-    condition     = aws_lb_listener.https.default_action[0].type == "fixed-response" && aws_lb_listener.https.default_action[0].fixed_response[0].status_code == "403"
+    condition     = aws_lb_listener.https[0].default_action[0].type == "fixed-response" && aws_lb_listener.https[0].default_action[0].fixed_response[0].status_code == "403"
     error_message = "A request without the origin header gets a 403."
   }
 
   assert {
-    condition     = aws_lb_listener_rule.from_cloudflare.action[0].type == "forward"
+    condition     = aws_lb_listener_rule.from_cloudflare[0].action[0].type == "forward"
     error_message = "A request with the origin header reaches the web task."
   }
 
   assert {
-    condition     = one(flatten([for c in aws_lb_listener_rule.from_cloudflare.condition : [for h in c.http_header : h.http_header_name]])) == "X-WT-Origin"
+    condition     = one(flatten([for c in aws_lb_listener_rule.from_cloudflare[0].condition : [for h in c.http_header : h.http_header_name]])) == "X-WT-Origin"
     error_message = "The rule matches the X-WT-Origin header."
   }
 
   assert {
-    condition     = aws_lb.this.ip_address_type == "dualstack-without-public-ipv4"
+    condition     = aws_lb.this[0].ip_address_type == "dualstack-without-public-ipv4"
     error_message = "alb_public_ipv4 = false drops the public IPv4 addresses."
   }
 
@@ -122,12 +123,12 @@ run "maintenance_behind_cloudflare" {
   }
 
   assert {
-    condition     = aws_lb_listener_rule.from_cloudflare.action[0].type == "fixed-response" && aws_lb_listener_rule.from_cloudflare.action[0].fixed_response[0].status_code == "503"
+    condition     = aws_lb_listener_rule.from_cloudflare[0].action[0].type == "fixed-response" && aws_lb_listener_rule.from_cloudflare[0].action[0].fixed_response[0].status_code == "503"
     error_message = "Requests through Cloudflare get the maintenance page."
   }
 
   assert {
-    condition     = strcontains(aws_lb_listener_rule.from_cloudflare.action[0].fixed_response[0].message_body, "Down for maintenance")
+    condition     = strcontains(aws_lb_listener_rule.from_cloudflare[0].action[0].fixed_response[0].message_body, "Down for maintenance")
     error_message = "The maintenance page says the site is down for maintenance."
   }
 
