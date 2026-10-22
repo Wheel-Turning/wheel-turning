@@ -34,6 +34,8 @@ const MODEL: &str = "fake-embed";
 const QUERY: &str = "How does zazen meet the quokkaflux of anger";
 /// An acute question with a word no code path would print (Spec 11, PB3.4).
 const ACUTE: &str = "I want to end my life because of the zembrolt anger";
+/// A query string no code path would print: the request log names the route, never the URL.
+const URL_QUERY: &str = "glimmerwhorl";
 const PASSAGE: &str = "When anger arises, notice the quokkaflux warmth and breathe with it.";
 
 #[derive(Clone, Default)]
@@ -257,6 +259,23 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
         ),
     )
     .await;
+    // Spec 07: a request with a distinctive query string, on a route and on no route.
+    let (_, _, about_page) = send(
+        &app,
+        with_cookie(Request::get(format!("/about?q={URL_QUERY}")), &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    // Spec 09: testers are told about the request log.
+    assert!(about_page.contains("technical log of each page you open"));
+    send(
+        &app,
+        Request::get(format!("/nowhere/{URL_QUERY}?q={URL_QUERY}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
     // A request that fails and a bad token both log what they log.
     send(
         &app,
@@ -342,6 +361,37 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     let ranked = events("ranker_served");
     assert_eq!(ranked.len(), 1, "{ranked:?}");
     assert_eq!(ranked[0]["ranker"], "none (fallback)", "no reranker here");
+    // Spec 07: the same events carry the request id, the method and the tester.
+    let requests = &responses;
+    let line = |method: &str, route: &str| -> Vec<&serde_json::Value> {
+        requests
+            .iter()
+            .filter(|v| v["method"] == method && v["route"] == route)
+            .collect()
+    };
+    let about = line("GET", "/about");
+    assert_eq!(about.len(), 1, "{requests:?}");
+    assert_eq!(about[0]["status"], 200);
+    assert!(about[0]["ms"].is_u64());
+    assert_eq!(about[0]["request_id"].as_str().map(str::len), Some(16));
+    let tester: String = sqlx::query_scalar("select id::text from tester where label = 'owner'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(about[0]["tester"], tester.as_str());
+    assert_eq!(line("POST", "/ask").len(), 2);
+    assert_eq!(line("GET", "/a/{answer}").len(), 1);
+    assert!(!line("GET", "/a/{answer}/summary").is_empty());
+    let joins = line("GET", "/join/{token}");
+    assert_eq!(joins.len(), 2, "{requests:?}");
+    assert!(
+        joins.iter().all(|v| v["tester"].is_null()),
+        "no session yet"
+    );
+    let nowhere = line("GET", "fallback");
+    assert_eq!(nowhere.len(), 1);
+    assert_eq!(nowhere[0]["status"], 404);
+    assert!(nowhere[0]["tester"].is_null());
     for (what, secret) in [
         ("query text", "quokkaflux"),
         ("query text", QUERY),
@@ -350,6 +400,7 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
         ("invite token", token.as_str()),
         ("session cookie", cookie.as_str()),
         ("CSRF token", token_field.as_str()),
+        ("URL query string", URL_QUERY),
     ] {
         assert!(
             !logs.contains(secret),

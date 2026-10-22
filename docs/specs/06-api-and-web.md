@@ -36,7 +36,7 @@ The PRD puts accounts out of scope, so access is an invite link and a cookie.
 3. The cookie value is the tester id and issue time, signed with HMAC-SHA256 under `WT_SESSION_SECRET`. It is `HttpOnly`, `Secure` outside `dev`, `SameSite=Lax`, with a 30-day lifetime.
 4. Middleware verifies the signature on every request and checks that the tester is not revoked, with a 60-second cache. It updates `last_seen_at` at most once an hour.
 5. State-changing routes are `POST` and require a CSRF token, an HMAC of the session value rendered into each form as a hidden field.
-6. The token never appears in logs. The request logger records the path as `/join/[redacted]`.
+6. The token never appears in logs. The request logger records the route template, `/join/{token}`, never the path.
 7. Every response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'none'`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), browsing-topics=()`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`. In `WT_ENV=prod` only, it also carries `Strict-Transport-Security: max-age=31536000` (Spec 11, PB3.5). And `/robots.txt` disallows everything. There are no inline scripts.
 
 ## Answer page structure
@@ -294,7 +294,7 @@ The owner role can still read every table, as the logging list says, so this sec
 ## Acceptance criteria
 
 - [x] `/healthz` returns success only when the database answers. (`wt-api/tests/healthz.rs`.)
-- [x] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs. (`wt-api/tests/pages.rs`; the server has no request logger, and `/join` logs nothing.)
+- [x] A valid invite token sets a correctly flagged cookie and redirects. An invalid or revoked token returns the same generic `404`. The token never appears in logs. (`wt-api/tests/pages.rs`; `/join` logs nothing itself, and since October 20, 2026 the request logger names the route by its template, `/join/{token}`, checked in `wt-api/tests/log_scrubber.rs`.)
 - [x] A state-changing request without a valid CSRF token is rejected. (`wt-api/tests/pages.rs`.)
 - [x] `POST /ask` persists an answer, responds `303` to the permalink, and the permalink is readable only by the tester who asked. (`wt-api/tests/pages.rs`.)
 - [ ] Snapshot tests with `insta` cover the answer page for standard, named, thin coverage, none found, and multi-named cases.

@@ -17,6 +17,7 @@ pub mod limits;
 pub mod mail;
 pub mod privacy;
 pub mod progress;
+mod request_log;
 pub mod rights;
 pub mod sensitive;
 pub mod session;
@@ -29,7 +30,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use askama::Template;
-use axum::extract::{ConnectInfo, FromRequestParts, MatchedPath, Path, Query, Request, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -241,30 +242,8 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             security_headers,
         ))
-        .layer(middleware::from_fn(log_response))
+        .layer(middleware::from_fn(request_log::log))
         .with_state(state)
-}
-
-/// One `http_response` event per request, for the 5xx-rate alarm (`docs/adr-edge-cost.md`,
-/// Tunnel follow-on): the route as declared, never the path, which can hold an invite token or
-/// an answer id, plus the status and the time to the response's head. A request no route
-/// matched logs the route `fallback`.
-async fn log_response(request: Request, next: Next) -> Response {
-    let route = request
-        .extensions()
-        .get::<MatchedPath>()
-        .map_or_else(|| "fallback".to_owned(), |p| p.as_str().to_owned());
-    let started = std::time::Instant::now();
-    let response = next.run(request).await;
-    let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    tracing::info!(
-        event = "http_response",
-        route = %route,
-        status = response.status().as_u16(),
-        ms,
-        "responded"
-    );
-    response
 }
 
 /// The `/healthz` response body.
@@ -529,10 +508,15 @@ impl FromRequestParts<AppState> for Session {
             .verify_cookie(value, chrono::Utc::now().timestamp())
             .ok_or_else(not_found_page)?;
         match wt_db::tester::active(&state.pool, tester).await {
-            Ok(true) => Ok(Session {
-                tester,
-                cookie: value.to_owned(),
-            }),
+            Ok(true) => {
+                if let Some(slot) = parts.extensions.get::<request_log::TesterSlot>() {
+                    slot.set(tester);
+                }
+                Ok(Session {
+                    tester,
+                    cookie: value.to_owned(),
+                })
+            }
             Ok(false) => Err(not_found_page()),
             Err(e) => Err(server_error("checking the session", &e)),
         }
