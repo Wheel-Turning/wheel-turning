@@ -36,7 +36,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::{Form, Json, Router};
+use axum::{Extension, Form, Json, Router};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use wt_core::ids::{AnswerId, SanghaId, TalkId, TesterId};
@@ -242,7 +242,10 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             security_headers,
         ))
-        .layer(middleware::from_fn(request_log::log))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            request_log::log,
+        ))
         .with_state(state)
 }
 
@@ -547,13 +550,21 @@ pub(crate) fn csrf_refused() -> Response {
 
 /// `GET /join/{token}`: exchanges an invite token for the session cookie. Any failure is the
 /// same 404, with no hint. The token is never logged.
-async fn join(State(state): State<AppState>, Path(token): Path<String>) -> Response {
+async fn join(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    slot: Option<Extension<request_log::TesterSlot>>,
+) -> Response {
     let hash = session::token_hash(&token);
     let tester = match wt_db::tester::by_token_hash(&state.pool, &hash).await {
         Ok(Some(t)) => t,
         Ok(None) => return not_found_page(),
         Err(e) => return server_error("joining", &e),
     };
+    // The invite's own request is the tester's first page view (Spec 07, Usage report).
+    if let Some(Extension(slot)) = slot {
+        slot.set(tester);
+    }
     let value = state
         .site
         .keys

@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select method as \"method!\", route as \"route!\", page_views as \"page_views!\",\n                  testers as \"testers!\", errors as \"errors!\"\n           from usage_routes($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "method!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "route!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "page_views!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "testers!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "errors!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "70c911b89856d27ce393c7cf8488f777922b03d614ee57bf3997532e0557090f"
+}

@@ -8,10 +8,13 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use axum::extract::{MatchedPath, Request};
+use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use wt_core::ids::TesterId;
+use wt_db::page_view::PageView;
+
+use crate::AppState;
 
 /// Where the session extractor records the signed-in tester for the request's log line. The
 /// logger puts an empty one in each request's extensions; a verified [`crate::Session`] fills it.
@@ -40,26 +43,49 @@ fn request_id() -> String {
     }
 }
 
-/// Logs `event = "http_response"` once the response's head is ready.
-pub(crate) async fn log(mut request: Request, next: Next) -> Response {
+/// Logs `event = "http_response"` once the response's head is ready. A request that carried a
+/// tester is also stored as a page view (Spec 07, Usage report), in a task of its own so the
+/// insert never delays or fails the response.
+pub(crate) async fn log(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let route = route_label(request.extensions().get::<MatchedPath>()).to_owned();
     let method = request.method().as_str().to_owned();
     let slot = TesterSlot::default();
     request.extensions_mut().insert(slot.clone());
     let started = Instant::now();
+    let at = chrono::Utc::now();
     let response = next.run(request).await;
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let tester = slot.0.get().map(ToString::to_string);
+    let status = response.status().as_u16();
+    let tester = slot.0.get().copied();
     tracing::info!(
         event = "http_response",
         request_id = %request_id(),
-        tester = tester.as_deref(),
+        tester = tester.map(|t| t.to_string()).as_deref(),
         method = %method,
         route = %route,
-        status = response.status().as_u16(),
+        status,
         ms,
         "responded"
     );
+    if let Some(tester) = tester {
+        let view = PageView {
+            tester,
+            method,
+            route,
+            status,
+            ms,
+            at,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = wt_db::page_view::record(&state.pool, &view).await {
+                tracing::warn!(error = %e, "recording a page view");
+            }
+        });
+    }
     response
 }
 

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select purge_page_views(make_interval(days => $1)) as \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d5bc580f6aca65631946608fe2dc92140de87dbf24e2fec1bf74930015adb110"
+}

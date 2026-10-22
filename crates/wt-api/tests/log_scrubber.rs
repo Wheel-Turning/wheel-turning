@@ -384,9 +384,44 @@ async fn no_log_line_carries_query_text_passage_text_tokens_or_cookies() {
     assert!(!line("GET", "/a/{answer}/summary").is_empty());
     let joins = line("GET", "/join/{token}");
     assert_eq!(joins.len(), 2, "{requests:?}");
+    let named: Vec<_> = joins.iter().map(|v| v["tester"].clone()).collect();
     assert!(
-        joins.iter().all(|v| v["tester"].is_null()),
-        "no session yet"
+        named.contains(&serde_json::Value::from(tester.as_str())),
+        "the invite names the tester it signs in: {named:?}"
+    );
+    assert!(
+        named.iter().any(serde_json::Value::is_null),
+        "an unknown token names no one: {named:?}"
+    );
+    // Spec 07, Usage report: each request with a tester is a page view, by route template.
+    let mut routes: Vec<(String, String)> = Vec::new();
+    for _ in 0..50 {
+        routes = sqlx::query_as(
+            "select method, route from page_view p join tester t on t.id = p.tester_id
+             where t.label = 'owner' order by p.created_at",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        if routes.len() == requests.iter().filter(|v| !v["tester"].is_null()).count() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let has = |m: &str, r: &str| routes.iter().any(|(rm, rr)| rm == m && rr == r);
+    assert_eq!(
+        routes.first().map(|(_, r)| r.as_str()),
+        Some("/join/{token}")
+    );
+    assert!(has("GET", "/about") && has("POST", "/ask") && has("GET", "/a/{answer}"));
+    assert!(
+        !has("GET", "fallback"),
+        "a request without a session is not stored"
+    );
+    assert_eq!(
+        routes.len(),
+        requests.iter().filter(|v| !v["tester"].is_null()).count(),
+        "one page view per request with a tester: {routes:?}"
     );
     let nowhere = line("GET", "fallback");
     assert_eq!(nowhere.len(), 1);

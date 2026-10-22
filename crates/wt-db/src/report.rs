@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use sqlx::PgPool;
-use sqlx::types::chrono::{DateTime, Utc};
+use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 
 use crate::DbError;
 
@@ -783,6 +783,123 @@ pub async fn beta(pool: &PgPool, since: DateTime<Utc>) -> Result<BetaReport, DbE
             feedback_reasons,
         },
     ))
+}
+
+/// `wt report usage` (Spec 07, Usage report): what each tester did, by label, never question
+/// text or a tester's id.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageReport {
+    /// The start of the period.
+    pub since: DateTime<Utc>,
+    /// Every tester other than `eval`, active or not.
+    pub testers: Vec<UsageTester>,
+    /// Page views per method and route template.
+    pub routes: Vec<UsageRoute>,
+    /// Activity per UTC day.
+    pub days: Vec<UsageDay>,
+}
+
+/// One tester's activity since the start of the period.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageTester {
+    /// How the owner knows them.
+    pub label: String,
+    /// Whether the invite was revoked.
+    pub revoked: bool,
+    /// When the invite was made.
+    pub invited: DateTime<Utc>,
+    /// The last request with their session.
+    pub last_seen: Option<DateTime<Utc>>,
+    /// Whether they ever used the invite.
+    pub opened: bool,
+    /// Requests with their session.
+    pub page_views: i32,
+    /// Runs of page views with no gap over 30 minutes.
+    pub visits: i32,
+    /// UTC days with a page view or a question.
+    pub days_active: i32,
+    /// The first page view.
+    pub first_view: Option<DateTime<Utc>>,
+    /// The last page view.
+    pub last_view: Option<DateTime<Utc>>,
+    /// Questions asked.
+    pub questions: i32,
+    /// Questions answered.
+    pub answered: i32,
+    /// Questions they flagged.
+    pub flagged: i32,
+    /// Feedback submissions.
+    pub feedback: i32,
+    /// Dana link clicks.
+    pub dana_clicks: i32,
+}
+
+/// Page views of one route template.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageRoute {
+    /// The HTTP method.
+    pub method: String,
+    /// The route template, such as `/a/{answer}`.
+    pub route: String,
+    /// Requests.
+    pub page_views: i32,
+    /// Testers who made them.
+    pub testers: i32,
+    /// Responses with status 500 or above.
+    pub errors: i32,
+}
+
+/// Activity on one UTC day.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageDay {
+    /// The day.
+    pub day: NaiveDate,
+    /// Testers with a page view or a question.
+    pub active_testers: i32,
+    /// Page views.
+    pub page_views: i32,
+    /// Questions.
+    pub questions: i32,
+}
+
+/// `wt report usage` since `since`, through the `usage_*` functions `wt_analyst` may run.
+pub async fn usage(pool: &PgPool, since: DateTime<Utc>) -> Result<UsageReport, DbError> {
+    let testers = sqlx::query_as!(
+        UsageTester,
+        r#"select label as "label!", revoked as "revoked!", invited as "invited!", last_seen,
+                  opened as "opened!", page_views as "page_views!", visits as "visits!",
+                  days_active as "days_active!", first_view, last_view,
+                  questions as "questions!", answered as "answered!", flagged as "flagged!",
+                  feedback as "feedback!", dana_clicks as "dana_clicks!"
+           from usage_testers($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    let routes = sqlx::query_as!(
+        UsageRoute,
+        r#"select method as "method!", route as "route!", page_views as "page_views!",
+                  testers as "testers!", errors as "errors!"
+           from usage_routes($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    let days = sqlx::query_as!(
+        UsageDay,
+        r#"select day as "day!", active_testers as "active_testers!",
+                  page_views as "page_views!", questions as "questions!"
+           from usage_days($1)"#,
+        since
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(UsageReport {
+        since,
+        testers,
+        routes,
+        days,
+    })
 }
 
 #[cfg(test)]

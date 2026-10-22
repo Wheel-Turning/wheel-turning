@@ -227,8 +227,11 @@ pub async fn delete(
 /// PB2.4). Writing one takes at most four model calls of 20 seconds each.
 pub const SUMMARY_LOST_AFTER: Duration = Duration::from_secs(600);
 
+/// How long page views are kept: the 30 days the About page states (Spec 07, Usage report).
+pub const PAGE_VIEW_RETENTION_DAYS: u32 = 30;
+
 /// The purge, every hour from start-up. Expiry is to the hour; Spec 06 asks for at least
-/// nightly. It also marks deferred summaries still pending after [`SUMMARY_LOST_AFTER`] as
+/// nightly. It also deletes page views older than [`PAGE_VIEW_RETENTION_DAYS`], and marks deferred summaries still pending after [`SUMMARY_LOST_AFTER`] as
 /// lost, so no answer stays pending (Spec 11, PB2.4).
 pub async fn purge_loop(pool: PgPool, retention_days: u32) {
     let mut every = tokio::time::interval(Duration::from_secs(3600));
@@ -238,6 +241,11 @@ pub async fn purge_loop(pool: PgPool, retention_days: u32) {
             Ok(0) => {}
             Ok(n) => tracing::info!(questions = n, "purged expired question text"),
             Err(e) => tracing::warn!(error = %e, "purging expired question text"),
+        }
+        match wt_db::page_view::purge(&pool, PAGE_VIEW_RETENTION_DAYS).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(page_views = n, "purged old page views"),
+            Err(e) => tracing::warn!(error = %e, "purging old page views"),
         }
         settle_lost_summaries(&pool).await;
     }
