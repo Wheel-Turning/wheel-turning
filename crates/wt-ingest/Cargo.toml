@@ -36,7 +36,7 @@ tokio = { workspace = true, features = ["sync"] }
 toml = "1"
 tracing.workspace = true
 unicode-normalization = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 percent-encoding = "2"
 url = "2"
 
