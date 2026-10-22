@@ -21,7 +21,7 @@ aws-config = { version = "1", default-features = false, features = ["behavior-ve
 aws-sdk-sesv2 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
 aws-smithy-http-client = { version = "1", default-features = false, features = ["rustls-ring"] }
 axum.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 getrandom = "0.3"
 hmac = "0.13"
