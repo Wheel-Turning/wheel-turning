@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select day as \"day!\", active_testers as \"active_testers!\",\n                  page_views as \"page_views!\", questions as \"questions!\"\n           from usage_days($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "day!",
+        "type_info": "Date",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "active_testers!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "page_views!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "questions!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5da9b08aa2a983416504dcd96d9c6320fac1b758c7342a27a68c8c1e1238d694"
+}

@@ -365,6 +365,12 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   wt report feedback --since 7d --notes
   ```
 
+- Usage: what each tester did, by label, is `wt report usage --since 7d` in the same window, as
+  the analyst (Spec 07, Usage report). It prints JSON with each tester's page views, visits,
+  days active, questions, flags, feedback and dana clicks, page views per route and activity
+  per day, and never a question's text. Page views go back 30 days; older ones are purged. A
+  flagged question is read with `wt report flagged`.
+
 - Nightly audit: the `wt-v1-audit` task runs `wt audit --fail-on warning --check-links` (plus
   `--backup-bucket` while the PC keeps its database) against RDS as `wt_audit_login`, started by
   the `wt-v1-audit-nightly` schedule at 10:17 UTC. Its JSON report is in the `/wt-v1/admin` log

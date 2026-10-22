@@ -147,6 +147,15 @@ pub(crate) enum ReportCommand {
         #[arg(long, default_value = "7d", value_parser = parse_since)]
         since: chrono::Duration,
     },
+    /// What each tester did (Spec 07, Usage report): page views, visits, days active, questions,
+    /// feedback and dana clicks by label, plus page views per route and activity per day. Never
+    /// question text or a tester's id.
+    Usage {
+        /// How far back: a number with d (days) or h (hours), for example 7d. Page views go back
+        /// at most 30 days.
+        #[arg(long, default_value = "7d", value_parser = parse_since)]
+        since: chrono::Duration,
+    },
 }
 
 /// A pool connected as `wt_analyst` through `DATABASE_URL_ANALYST`, refused when the role can
@@ -400,6 +409,10 @@ pub(crate) async fn report(ctx: &Ctx, command: ReportCommand) -> anyhow::Result<
         ReportCommand::Beta { since } => {
             let from = chrono::Utc::now() - since;
             commands::print_json(&wt_db::report::beta(&pool, from).await?)?;
+        }
+        ReportCommand::Usage { since } => {
+            let from = chrono::Utc::now() - since;
+            commands::print_json(&wt_db::report::usage(&pool, from).await?)?;
         }
     }
     Ok(())

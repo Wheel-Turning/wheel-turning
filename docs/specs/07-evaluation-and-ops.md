@@ -120,6 +120,18 @@ Built October 20, 2026. `wt-api`'s request logger writes one `event = "http_resp
 
 The weekly beta report (Spec 11 PB4.6) is `wt report beta --since 7d`, run as `wt_analyst`. It prints JSON totals only, never question text or a tester's id, and counts count-only and stopped questions too: active testers and returning testers (questions in two or more distinct weeks since the beta began); questions asked and answered and the median per active tester; feedback submissions, the share marked helpful and submissions per reason; dana link clicks per answer and the share of active testers with a click; answers by `summary_status` with their shares, and the share of answers that tried for a summary that showed one; model cost per answer, mean and 95th percentile, from `query_log.llm_cost_usd`; and the median and 95th percentile time to the first progress event and to the page. Evaluation runs are left out. Tested on synthetic data in `wt-db/tests/beta_report.rs`.
 
+### Usage report
+
+Owner's decisions of October 20 and 21, 2026: measure how each beta tester uses the site, by the tester's label, with question text opened only for flagged questions as before. Everything here stays within the About page's line on the technical log (Spec 09). It covers the pages a tester opens and nothing else. There is no third-party analytics service, no script in the page that reports clicks, scrolling or reading time, and no cookie beyond the session.
+
+1. **Page views.** The request logger also writes each request that carries a tester to `page_view` (Spec 02): the tester, `method`, the route template, `status`, `ms` and the time. A request without a session is not stored. `/join/{token}` records the tester it signs in, so the first row of a tester who opened the invite is their join. The insert runs after the response is sent and never delays or fails a request; a failed insert is a warning in the log.
+2. **Retention.** The hourly purge (Spec 06) deletes `page_view` rows older than 30 days, which the About page promises, through `purge_page_views(interval)`.
+3. **`wt report usage --since 7d`.** It runs as `wt_analyst` through `usage_*` functions and prints JSON. Evaluation runs (`eval`) are left out. Times are UTC.
+   - Per tester, by label: invited, revoked, last seen, whether they ever opened the invite, page views, visits (page views with no gap over 30 minutes), days active, first and last page view, questions asked and answered, flagged questions, feedback submissions and dana link clicks. Testers with no activity in the window are listed too, so a tester who never opened the invite shows.
+   - Per route template: page views, testers and responses with status 500 or above.
+   - Per day: active testers (a page view or a question), page views and questions.
+   - It never prints question text, a feedback note or a tester's id. A flagged question is read with `wt report flagged`, as before.
+
 Log-based metrics in CloudWatch cover ask latency, `synthesis_failed`, `rerank_degraded`, 5xx responses, dead jobs and audit failures. Alarms are defined in Spec 01.
 
 Every answer logs one `summary_settled` event when its summary settles, with `event = "summary_settled"`, `summary_status` and `answer_id`, never the question (Spec 11, PB2.4): at once for an answer whose summary is inline or not attempted, when the deferred summary is stored, or from the hourly purge as `deferred_lost`.
@@ -148,6 +160,9 @@ The runbook is `docs/runbook.md`, written as the work is built, and it contains 
 - [x] A takedown stub blocks re-ingest of the same source video, and `wt takedown --replay` reapplies all recorded scopes after a simulated restore. (`wt-ingest/tests/classify.rs`, `wt-db/tests/takedown.rs`.)
 - [x] The `StoreRegistry` guard test fails when a table with a `talk_id` column is added without registration. (`wt-db/tests/store_registry.rs`.)
 - [x] The log scrubber test passes. (`wt-api/tests/log_scrubber.rs`, every target at trace level.)
+- [x] A request with a session writes one `page_view` row with its route template and no raw path; a request without one, and `/healthz`, write none; `/join/{token}` writes the tester it signs in. (`wt-api/tests/log_scrubber.rs`: one row per request line that names a tester, the first one the join, none for the unmatched request. `/healthz` never carries a session, so it is never stored.)
+- [x] `purge_page_views` removes rows older than the retention and keeps newer ones. (`wt-db/tests/usage_report.rs`, as `wt_web`, which can insert and purge but not select.)
+- [x] `wt report usage` on synthetic data, as `wt_analyst`, gives each figure above, lists a tester with no activity, leaves out `eval`, and prints no question text, note or tester id. (`wt-db/tests/usage_report.rs`.)
 - [x] `docs/runbook.md` exists with every procedure above.
 - [ ] `nightly.yml` runs `wt audit` in the deployed environment and fails the workflow on a failing check. (The workflow runs nightly and on demand, and fails on a failing check. With the `WT_AUDIT_DATABASE_URL` secret it audits that database; without it, a freshly migrated one. Open until an environment is deployed and the secret is set.)
 - [ ] `docs/gate-a.md` records a pass, with a named reviewer, before the M5 branch merges.

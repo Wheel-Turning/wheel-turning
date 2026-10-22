@@ -27,6 +27,7 @@ pub mod job;
 pub mod license;
 pub mod llm;
 pub mod locator;
+pub mod page_view;
 pub mod parity;
 pub mod privacy;
 pub mod public_forms;
