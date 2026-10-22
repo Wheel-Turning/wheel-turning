@@ -499,6 +499,10 @@ Two stacks carry it, both applied only by the owner:
 | T-D1, a quiet hour | | `db_dual_stack = true` | IPv6 on the private subnets, two IPv6-only subnets, the database in dual-stack mode |
 | T-D2, the next day | | `web_ipv6_only = true` | The web task in the IPv6-only subnets, with no public IPv4 address |
 
+Done so far: T-A and T-B on October 22, 2026 (T-B at 17:34 UTC). `edge = "tunnel_live"` and
+`app_via_tunnel = true` are the defaults. T-C is due no earlier than October 29, if the week
+passes with no alarm the tunnel caused.
+
 Every envs/v1 apply below runs from `infra/terraform/envs/v1` with `$T` from "The edge" above,
 plus the stage's variables. Once a stage holds, commit its variables as the defaults in that
 stack's `variables.tf`, so `deploy.yml` and the next plain apply keep them.

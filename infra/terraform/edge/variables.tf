@@ -22,7 +22,7 @@ variable "test_hostname" {
 variable "app_via_tunnel" {
   description = "Stage T-B: point the app's hostnames at the tunnel instead of the load balancer. Set together with envs/v1's edge = \"tunnel_live\" (runbook 12, \"The Cloudflare Tunnel\")."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "maintenance" {
