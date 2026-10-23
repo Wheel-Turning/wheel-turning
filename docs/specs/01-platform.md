@@ -146,7 +146,7 @@ The account stack (`infra/terraform/account`) turns on GuardDuty with S3 data ev
 
 1. The web task role reads the models bucket and the database, Anthropic and session secrets. It cannot write to the transcripts or scratch buckets. It may publish to the alert topic and to nothing else in SNS.
 2. The batch host role reads and writes the transcripts and scratch buckets, reads the models bucket, and reads the database, Anthropic and YouTube secrets, and publishes to the alert topic only.
-3. Database access uses four roles. `dg_owner` runs migrations and is used only from CI and a developer machine. `dg_pipeline` writes pipeline tables and is used by the batch host and by the worker on the owner's PC through the port forward. `dg_web` reads the serving view and writes logs and is used by the web service. `dg_analyst` reads aggregate views only. Spec 02 defines the grants.
+3. Database access uses four roles. `wt_owner` runs migrations and is used only from CI and a developer machine. `wt_pipeline` writes pipeline tables and is used by the batch host and by the worker on the owner's PC through the port forward. `wt_web` reads the serving view and writes logs and is used by the web service. `wt_analyst` reads aggregate views only. Spec 02 defines the grants.
 4. The database security group accepts port 5432 only from the web and batch security groups. The web security group accepts traffic only from the load balancer, and the load balancer only from Cloudflare; once the Cloudflare Tunnel carries all traffic, the web security group accepts nothing inbound. Outbound, the web security group allows tcp 443 and the database only, and the batch security group tcp 80, 443 and the database. The batch host accepts no inbound traffic. The owner's PC reaches the database through an SSM port forward via the batch host, so its connections arrive from the batch security group and need no new rule.
 5. Connections to Postgres require TLS outside `dev`, with `sslmode=require` in `DATABASE_URL`.
 6. No static AWS keys exist anywhere. Compute uses roles. CI uses OIDC. The transcription worker on the owner's PC uses the owner's SSO profile, which gives short-lived credentials.
@@ -157,7 +157,7 @@ The account stack (`infra/terraform/account`) turns on GuardDuty with S3 data ev
 Three GitHub Actions workflows cover the lifecycle.
 
 1. `ci.yml` runs on every pull request and every push to `main`. Jobs: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --workspace` with Docker available for Postgres containers, `cargo sqlx prepare --check` against a migrated database, `cargo deny check`, `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS="-D warnings"` so a broken intra-doc link fails, `cargo machete` for unused dependencies, Terraform `fmt -check`, `validate` and `tflint`, `ruff` on the Python sidecar and scripts (with the pydocstyle `D` rules), `gitleaks` over the full history, `actionlint` and `zizmor` on the workflows, and `typos`. Cargo commands run with `--locked`, third-party actions are pinned to commit SHAs, and Cargo and target directories are cached. A final `ci ok` job passes only when every other job passes, and it is the one check the `main` ruleset requires.
-2. `deploy.yml` runs on a version tag or by hand. It builds the container image, pushes it to ECR, runs `terraform plan` and holds for manual approval, applies, then runs migrations as a one-off ECS task under `dg_owner` before the new service revision starts taking traffic. After the apply it smoke-tests the deploy: the service's primary deployment completed and runs the new image tag (the circuit breaker can roll back silently), `/healthz` reports ok over HTTPS, plain HTTP redirects to HTTPS, and an unknown path returns 404.
+2. `deploy.yml` runs on a version tag or by hand. It builds the container image, pushes it to ECR, runs `terraform plan` and holds for manual approval, applies, then runs migrations as a one-off ECS task under `wt_owner` before the new service revision starts taking traffic. After the apply it smoke-tests the deploy: the service's primary deployment completed and runs the new image tag (the circuit breaker can roll back silently), `/healthz` reports ok over HTTPS, plain HTTP redirects to HTTPS, and an unknown path returns 404.
 3. `nightly.yml`, the "audit smoke test", runs `wt audit` on a freshly migrated database to prove the binary works end to end. The audit of the live database is the `wt-v1-audit` ECS task (Terraform `modules/audit`): EventBridge Scheduler starts it daily at 10:17 UTC, it runs `wt audit --fail-on warning` as the read-only `wt_audit_login`, and an EventBridge rule emails the alarm topic when it exits nonzero or fails to start (Spec 11, PB1.4). Spec 07 lists the checks.
 
 The `Dockerfile` is multi-stage. The final image holds the `wt` binary, the ONNX Runtime shared library located through `ORT_DYLIB_PATH`, and nothing else. Models are not baked into the image. The service downloads them from the models bucket at start into ephemeral storage and refuses to serve until they load.
@@ -175,7 +175,7 @@ M0, foundation
 
 M1, AWS baseline
 
-- [ ] `terraform apply` from an empty account creates the stack and `terraform destroy` removes it cleanly.
+- [ ] `terraform apply` from an empty account creates the stack and `terraform destroy` removes it cleanly. (Not run; needs a spare AWS account (B16).)
 - [x] `/healthz` answers over HTTPS through the load balancer. (Behind the Cloudflare Tunnel, through Cloudflare: runbook §12, "The Cloudflare Tunnel", checks it at each stage.)
 - [x] A test proves the database accepts connections from the web and batch security groups and from nothing else.
 - [x] A check script reads the scratch bucket lifecycle configuration and asserts a one-day expiry rule exists.
@@ -196,7 +196,7 @@ Decisions of October 3, 2026.
 Acceptance criteria:
 
 - [x] `terraform plan` shows the certificate, the DNS validation record and the alias, and `https://demo.wheelturning.org/healthz` answers after apply. (Checked October 13, 2026 with the beta deploy. DNS stays at Cloudflare, so the validation record and the CNAME are Terraform outputs copied there by hand. `app.wheelturning.org` is the primary name and `demo.` an alternate on the same certificate.)
-- [ ] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed. (Published October 16, 2026, message 5d843c6d; tick once the owner sees it.)
+- [x] A test message from `wt alerts test` reaches the owner's address after the subscription is confirmed. (Published October 16, 2026, message 5d843c6d; tick once the owner sees it.) (SNS notices from the nightly audit and the alarms reach the owner's address (inbox, October 19 to 23, 2026); `wt alerts test` was published October 16 to the one confirmed subscriber.)
 - [x] The web role can publish to the alert topic and to nothing else in SNS. (IAM simulation, October 16, 2026, after adding `sns:Publish` on the alert topic to the workload boundary in `infra/terraform/github-oidc`.)
 
 ## Recovery and availability targets
@@ -245,11 +245,11 @@ The owner develops on Windows. The repository, its shell scripts and the Terrafo
 
 Acceptance criteria:
 
-- [ ] A fresh clone inside WSL 2 passes the M0 commands in `CLAUDE.md` with no manual changes.
-- [ ] `docs/windows.md` lists the installs, the file locations and the commands that differ, and is checked by running it on a clean machine or a clean WSL distribution.
+- [ ] A fresh clone inside WSL 2 passes the M0 commands in `CLAUDE.md` with no manual changes. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] `docs/windows.md` lists the installs, the file locations and the commands that differ, and is checked by running it on a clean machine or a clean WSL distribution. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 More acceptance criteria for Windows:
 
-- [ ] `.gitattributes` exists with the line-ending rules, and a clone on Windows produces the same migration checksums as a clone on Linux.
-- [ ] `wt db migrate` and `cargo test --workspace` pass on a Windows clone with the settings above.
-- [ ] A Windows clone with long paths on builds without path errors.
+- [ ] `.gitattributes` exists with the line-ending rules, and a clone on Windows produces the same migration checksums as a clone on Linux. (Partly done: `.gitattributes` exists with LF rules for every text file and `*.sql`. A checksum comparison between a Windows and a Linux clone is not recorded.)
+- [ ] `wt db migrate` and `cargo test --workspace` pass on a Windows clone with the settings above. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A Windows clone with long paths on builds without path errors. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)

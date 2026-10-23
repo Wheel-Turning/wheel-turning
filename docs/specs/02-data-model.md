@@ -269,7 +269,7 @@ The `work` check enforces the PRD rule that only public-domain or openly license
 
 ## Serving views and database roles
 
-The serving views are the only objects the web role may read for passage content. A view runs with its owner's privileges, so `dg_web` needs no grant on the underlying tables. `servable_passage` is not a `security_barrier` view: a barrier view is planned as a subquery, which keeps `order by embedding <=> $1 limit k` off the HNSW index, and the web role runs only fixed queries from application code (decision of October 5, 2026; migration `0012_servable_passage_without_barrier.sql`).
+The serving views are the only objects the web role may read for passage content. A view runs with its owner's privileges, so `wt_web` needs no grant on the underlying tables. `servable_passage` is not a `security_barrier` view: a barrier view is planned as a subquery, which keeps `order by embedding <=> $1 limit k` off the HNSW index, and the web role runs only fixed queries from application code (decision of October 5, 2026; migration `0012_servable_passage_without_barrier.sql`).
 
 ```sql
 create view servable_passage as
@@ -306,10 +306,10 @@ Roles are created by migration as `NOLOGIN` group roles. An ops command, `wt db 
 
 | Role | Used by | Grants |
 | --- | --- | --- |
-| `dg_owner` | Migrations from CI and a developer machine | Owns all objects |
-| `dg_pipeline` | Batch host and CLI | Read and write on source, talk, transcript, segment, passage, citation, job, glossary, registry and log tables. Insert and read on `speaker_consent`. No access to `query_log` text. |
-| `dg_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. Select on `teacher_alias` and update on `tester.last_seen_at`. A tester's own answer is read only through functions scoped to one answer and one tester, which run as the owner: `tester_answer`, `tester_answer_query`, `answer_shows_passage` and `tester_answer_purged` (decision of October 13, 2026; migration `0040_web_scoped_reads.sql`). No select on `query_log`, `answer` or `answer_passage`, so inserts take ids made by the caller rather than `returning`. |
-| `dg_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`, `feedback_notes()` and the beta report's functions (`beta_questions`, `beta_returning_testers`, `beta_link_clicks`, `beta_feedback`, `beta_feedback_reasons`; migration `0048_beta_report.sql`, Spec 11 PB4.6). None of them returns question text or a tester's id. Nothing else. |
+| `wt_owner` | Migrations from CI and a developer machine | Owns all objects |
+| `wt_pipeline` | Batch host and CLI | Read and write on source, talk, transcript, segment, passage, citation, job, glossary, registry and log tables. Insert and read on `speaker_consent`. No access to `query_log` text. |
+| `wt_web` | Web service | Select on `servable_passage`, `servable_citation`, `teacher`, `sangha`, `work`, `work_locator` and `tester`. Insert on `query_log`, `answer`, `answer_passage`, `feedback` and `dana_event`. Execute on `flag_query(uuid)`, which sets `flagged` and `flagged_at` on one row. No direct update on `query_log`. Select on `teacher_alias` and update on `tester.last_seen_at`. A tester's own answer is read only through functions scoped to one answer and one tester, which run as the owner: `tester_answer`, `tester_answer_query`, `answer_shows_passage` and `tester_answer_purged` (decision of October 13, 2026; migration `0040_web_scoped_reads.sql`). No select on `query_log`, `answer` or `answer_passage`, so inserts take ids made by the caller rather than `returning`. |
+| `wt_analyst` | Aggregate reports | Select on the aggregate views in the operational tables section and execute on `flagged_queries()`, `feedback_notes()` and the beta report's functions (`beta_questions`, `beta_returning_testers`, `beta_link_clicks`, `beta_feedback`, `beta_feedback_reasons`; migration `0048_beta_report.sql`, Spec 11 PB4.6). None of them returns question text or a tester's id. Nothing else. |
 
 ## Operational tables
 
@@ -503,7 +503,7 @@ create function flagged_queries() returns setof query_log
   language sql security definer set search_path = public as
   $$ select * from query_log where flagged $$;
 revoke all on function flagged_queries() from public;
-grant execute on function flagged_queries() to dg_analyst;
+grant execute on function flagged_queries() to wt_analyst;
 ```
 
 The web role flags a query through a second function, so it never needs select on `query_log` to name the row (migration `0013_flag_query.sql`, decision of October 5, 2026):
@@ -517,7 +517,7 @@ create function flag_query(query_id uuid) returns boolean
        returning 1)
      select exists (select 1 from flagged) $$;
 revoke all on function flag_query(uuid) from public;
-grant execute on function flag_query(uuid) to dg_web;
+grant execute on function flag_query(uuid) to wt_web;
 ```
 
 The `eval_rating.passage_id` column carries no foreign key on purpose. After a takedown the rating row survives as a record of what was rated, and the passage is gone.
@@ -576,9 +576,9 @@ Acceptance criteria, each as a database integration test that connects as the na
 - [x] Updating or deleting a `speaker_consent` row raises.
 - [x] Inserting a segment of kind `qa_student` fails.
 - [x] `servable_passage` returns no rows for a talk that is not `ready`, whose consent is not `granted`, or whose rights holder is `unknown`.
-- [x] `dg_web` cannot select from `passage`, `talk`, `segment` or `query_log`, cannot update `query_log` directly, and `flag_query()` flags exactly the row it names. (Tested as `wt_web`, its name since `0010`.)
+- [x] `wt_web` cannot select from `passage`, `talk`, `segment` or `query_log`, cannot update `query_log` directly, and `flag_query()` flags exactly the row it names. (Tested as `wt_web`, its name since `0010`.)
 - [x] Every library function the web service calls runs as `wt_web`, a tester reads only their own answer, and `wt_web` still cannot select from `query_log`, `answer` or `answer_passage`. (`wt-db/tests/web_role.rs`, after the AWS deploy of October 13, 2026 showed the alpha's superuser connection had hidden missing grants.)
-- [x] `dg_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows. (Tested as `wt_analyst`, its name since `0010`.)
+- [x] `wt_analyst` cannot select from `query_log`, can select the aggregate views, and `flagged_queries()` returns only flagged rows. (Tested as `wt_analyst`, its name since `0010`.)
 - [x] A vector query on `servable_passage` uses the HNSW index in `EXPLAIN` on a table with 10,000 synthetic rows.
 - [x] `.sqlx` offline query data is committed and `cargo sqlx prepare --check` passes.
 
@@ -696,10 +696,10 @@ donation_note = "The site asks people to email a named individual and has no giv
 
 Acceptance criteria:
 
-- [ ] The seed loads 13 sanghas, all unverified, with 2 of kind `contact`.
+- [ ] The seed loads 13 sanghas, all unverified, with 2 of kind `contact`. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] The constraint rejects `donation_verified` on a sangha whose kind is not `page`. (`wt-cli/tests/commands.rs`.)
-- [ ] `check-links` prints the table and writes the CSV, and a test proves it never sets the verified flag.
+- [ ] `check-links` prints the table and writes the CSV, and a test proves it never sets the verified flag. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] `verify` requires `--by` and records the date and name. (`wt-cli/tests/commands.rs`.)
-- [ ] Two failed checks in a row unverify a link, and the audit warns when a link is older than `link_review_days`.
+- [ ] Two failed checks in a row unverify a link, and the audit warns when a link is older than `link_review_days`. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] A sangha of kind `contact` produces no give button, appears in `excluded` in the split, and the dana panel shows its note. (`wt-api/tests/pages.rs`; the constraint keeps a contact page unverified, so it never gets a give link.)
-- [ ] A grep test finds no `@` in any registry seed file.
+- [ ] A grep test finds no `@` in any registry seed file. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
