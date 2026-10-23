@@ -153,8 +153,8 @@ Build this only if PB1.1 cannot land before the beta.
 3. **Bounces and complaints** go to an SNS topic, and the runbook says how to read them.
 
 **Acceptance.**
-- [ ] A removal request from an unverified address receives its confirmation email.
-- [ ] DMARC reports `pass` for a test message.
+- [x] A removal request from an unverified address receives its confirmation email. (October 23, 2026: SES us-east-2 has production access on, and only the `wheelturning.org` domain is a verified identity. A test message from `rights@wheelturning.org` reached the owner's Gmail address, which is not a verified identity. The confirmation email itself goes through the same SES sender; the removal form was not submitted.)
+- [x] DMARC reports `pass` for a test message. (October 23, 2026: Gmail's `Authentication-Results` on the same message read `dkim=pass` for `wheelturning.org`, `spf=pass` for `mail.wheelturning.org`, and `dmarc=pass (p=NONE)`. The policy is still `p=none`.)
 
 ### PB1.6 The web server refuses to start without its settings (B17)
 
