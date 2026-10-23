@@ -125,11 +125,11 @@ Talks with several speakers, and talks whose metadata names nobody, often say wh
 
 Acceptance criteria (for when it is built):
 
-- [ ] On synthetic word timelines, a self-introduction naming a registered teacher yields a strong proposal for that speaker; a host introduction followed by a 60-second turn yields a proposal for the next speaker; a name not in the registry yields nothing, and that name appears in no proposal, log line or report.
-- [ ] Two teachers bound to one voice, or one teacher bound to two voices, yields conflicting weak proposals and no assignment.
-- [ ] The step never writes `teacher_id` or `speaker_teacher_id`; only `wt talk assign-speaker` does, and a talk stays held until then.
-- [ ] A confirmed two-teacher talk serves each passage under its own teacher, with that teacher's rights basis and display level, and an opt-out by one teacher removes only that teacher's passages.
-- [ ] No speaker embedding is stored anywhere, checked by a schema and object-store scan.
+- [ ] On synthetic word timelines, a self-introduction naming a registered teacher yields a strong proposal for that speaker; a host introduction followed by a 60-second turn yields a proposal for the next speaker; a name not in the registry yields nothing, and that name appears in no proposal, log line or report. (Not built: the code has no `speaker_teacher_id` and no speaker proposal step.)
+- [ ] Two teachers bound to one voice, or one teacher bound to two voices, yields conflicting weak proposals and no assignment. (Not built: see the first item of this list.)
+- [ ] The step never writes `teacher_id` or `speaker_teacher_id`; only `wt talk assign-speaker` does, and a talk stays held until then. (Not built: see the first item of this list.)
+- [ ] A confirmed two-teacher talk serves each passage under its own teacher, with that teacher's rights basis and display level, and an opt-out by one teacher removes only that teacher's passages. (Not built: see the first item of this list.)
+- [ ] No speaker embedding is stored anywhere, checked by a schema and object-store scan. (Not built: see the first item of this list.)
 
 ## Aligned source transcripts
 
@@ -376,7 +376,7 @@ Decisions of October 6, 2026, made while building the index step and the embedde
 
 M4 is done when every item below passes in CI with fakes, and one synthetic talk has run through a real worker, a real Postgres and real ONNX models.
 
-- [ ] `SourceAdapter` gains `fetch_media` and `fetch_captions`, taking a `&Talk<Consented>` (Spec 03). With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts. (Moved from M3, decision of October 5, 2026. The media fetch and the third-party refusal are done in `wt_ingest::media` and tested in `wt-ingest/tests/audio.rs`. October 13, 2026: Vimeo's text tracks are read inside the Vimeo media fetch and saved in scratch as a reference, `wt-ingest/tests/vimeo_media.rs`; computing word error rate against them is still open, so this item stays open.)
+- [ ] `SourceAdapter` gains `fetch_media` and `fetch_captions`, taking a `&Talk<Consented>` (Spec 03). With `WT_ALLOW_THIRD_PARTY_FETCH` unset, any `third_party` fetch returns `ThirdPartyFetchDisabled` and no subprocess starts. (Moved from M3, decision of October 5, 2026. The media fetch and the third-party refusal are done in `wt_ingest::media` and tested in `wt-ingest/tests/audio.rs`. October 13, 2026: Vimeo's text tracks are read inside the Vimeo media fetch and saved in scratch as a reference, `wt-ingest/tests/vimeo_media.rs`; computing word error rate against them is still open, so this item stays open.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] With no usable media route (Spec 03, Seattle Soto Zen sources item 2), a talk stays at `needs_review` with reason `no_media` and nothing is fetched. (Moved from M3, decision of October 5, 2026. `wt-ingest/tests/audio.rs`.)
 - [x] `ScratchGuard` deletes scratch on success, on a returned error and on panic. A test injects each failure. (`ScratchDir` in `wt-core::scratch`; a repository guard also fails on an audio file written outside it.)
 - [x] After an `audio` job finishes in any outcome, nothing remains under `WT_SCRATCH_DIR` for that talk. (`wt-ingest/tests/audio.rs`: success, a failed step, a talk held for review, no media.)

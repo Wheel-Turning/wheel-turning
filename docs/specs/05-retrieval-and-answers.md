@@ -216,13 +216,13 @@ A synthetic fixture corpus with planted relevant passages across at least five f
 
 M5, retrieval and assembly
 
-- [ ] Full-text-only, vector-only and fused retrieval each return the planted relevant passages for the fixture queries, and fusion beats either alone on a mixed query.
-- [ ] Retrieval code reads only `servable_passage`. A test connects as `dg_web` and confirms a direct read of `passage` is denied, and a grep test fails on any other table name in `wt-retrieve` queries.
-- [ ] Selection never pads. Fixtures with candidates from one, two and four teachers produce exactly that teacher count, and the count is stored.
+- [ ] Full-text-only, vector-only and fused retrieval each return the planted relevant passages for the fixture queries, and fusion beats either alone on a mixed query. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] Retrieval code reads only `servable_passage`. A test connects as `wt_web` and confirms a direct read of `passage` is denied, and a grep test fails on any other table name in `wt-retrieve` queries. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] Selection never pads. Fixtures with candidates from one, two and four teachers produce exactly that teacher count, and the count is stored. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] Per-teacher cap, source ceiling, near-duplicate gap and MMR each have a test that fails when the rule is removed. (`wt-retrieve` `select` unit tests.)
 - [x] Named mode filters to the named teacher, suspends the three-teacher target, produces the `NamedNone` and `NamedFew` notices from fixtures, and never returns another teacher's passage. (`wt-retrieve/tests/retrieve.rs`.)
 - [x] The ranking invariance test shuffles sangha, donation, profile and volume fields in the fixture database and asserts identical passage order out of retrieval and selection. (`wt-retrieve/tests/retrieve.rs`; the schema has no profile or volume fields, so sangha listing and donation fields are what it shuffles.)
-- [ ] Assembly tests cover source link formats for both platforms, the lead-in offset, no give button for unlisted or unverified sanghas, footnote numbering across passages, and texts excluded from the teacher count.
+- [ ] Assembly tests cover source link formats for both platforms, the lead-in offset, no give button for unlisted or unverified sanghas, footnote numbering across passages, and texts excluded from the teacher count. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] Source links follow rule 2 as amended on October 12, 2026: a talk with an `aligned` or `text` transcript links to its source transcript with a text fragment built from the passage's first and last four words, shows no link to this site's transcript, and is served at `excerpts` even when its teacher is at `full`; an `asr` talk links to the recording at the right second and, at `full`, to this site's transcript with the machine label. (`wt-api` `tests/references.rs` on a real Postgres, with the transcript stored through `wt_db::transcript::store` as the `audio` job stores it; `view` unit tests for the fragment's encoding, `transcript_url` and the `reviewed` label. The fragment uses the excerpt's first and last four words, since the page shows the excerpt, rule 8.)
 - [x] The References list renders closed, holds one MLA entry per distinct talk and per distinct work and locator in alphabetical order by citation sort key, uses `citation_name` when set and the display name uninverted otherwise, carries the confidence word after each text entry, and every footnote marker and passage metadata line links to its entry. (`wt-api` `tests/references.rs`; `view` unit tests for MLA dates and the talk and text entry forms; `wt-cli` `tests/commands.rs` for `wt teacher cite` and `--sheet`.)
 - [x] Each `link_style` of Spec 03 (Seattle Soto Zen sources item 4) renders the right link: `vimeo` gives the page address with `#t=<seconds>s`, and `none` gives the "starts at h:mm:ss" text. (Moved from M3, decision of October 5, 2026.) (`view` unit tests: the link style follows the platform, `youtube` and `vimeo` timed, `engagewisdom` and `rss`, a podcast-only match, with "starts at".)
@@ -238,7 +238,7 @@ M6, synthesis
 - [x] A theme containing a teacher alias or a quotation mark is dropped before the verifier is called. (`wt-synth/tests/synth.rs`.)
 - [x] A generation timeout and a verifier failure each leave a fully rendered answer without a synthesis line. (`wt-api/tests/pages.rs`.)
 - [x] Named mode makes no synthesis call. (`wt-api/tests/pages.rs`.)
-- [ ] On the claim-audit sample, no theme that a reviewer marks invented survives the filters and verifier.
+- [ ] On the claim-audit sample, no theme that a reviewer marks invented survives the filters and verifier. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 M6, the summary (owner's decision of October 12, 2026)
 

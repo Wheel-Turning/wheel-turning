@@ -150,7 +150,7 @@ The runbook is `docs/runbook.md`, written as the work is built, and it contains 
 
 ## Acceptance criteria
 
-- [ ] A full `wt eval run` of the 50-question set completes without code changes, and `wt eval report` prints every metric listed above. (The report's metrics are tested in `wt-eval/tests/eval.rs`. The owner approved the 30 draft questions on October 13, 2026; open until `practitioner@2` runs in full.)
+- [ ] A full `wt eval run` of the 50-question set completes without code changes, and `wt eval report` prints every metric listed above. (The report's metrics are tested in `wt-eval/tests/eval.rs`. The owner approved the 30 draft questions on October 13, 2026; open until `practitioner@2` runs in full.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] `wt eval gate` scores the route of every question in a gate set, with the misses that matter most (a missed notice page, an over-gated practice question) apart. (`wt-eval` `gate` unit tests, with a scripted gate over the shipped rules.)
 - [x] `wt eval export-review` produces a standalone HTML file that works offline, and `wt eval import-ratings` loads its output into `eval_rating` and `claim_audit`. (`wt-eval/tests/eval.rs`.)
 - [x] A 20-answer claim audit imports and the report counts supported, drifting and invented claims. (`wt-eval/tests/eval.rs`.)
@@ -164,5 +164,5 @@ The runbook is `docs/runbook.md`, written as the work is built, and it contains 
 - [x] `purge_page_views` removes rows older than the retention and keeps newer ones. (`wt-db/tests/usage_report.rs`, as `wt_web`, which can insert and purge but not select.)
 - [x] `wt report usage` on synthetic data, as `wt_analyst`, gives each figure above, lists a tester with no activity, leaves out `eval`, and prints no question text, note or tester id. (`wt-db/tests/usage_report.rs`.)
 - [x] `docs/runbook.md` exists with every procedure above.
-- [ ] `nightly.yml` runs `wt audit` in the deployed environment and fails the workflow on a failing check. (The workflow runs nightly and on demand, and fails on a failing check. With the `WT_AUDIT_DATABASE_URL` secret it audits that database; without it, a freshly migrated one. Open until an environment is deployed and the secret is set.)
-- [ ] `docs/gate-a.md` records a pass, with a named reviewer, before the M5 branch merges.
+- [ ] `nightly.yml` runs `wt audit` in the deployed environment and fails the workflow on a failing check. (The workflow runs nightly and on demand, and fails on a failing check. With the `WT_AUDIT_DATABASE_URL` secret it audits that database; without it, a freshly migrated one. Open until an environment is deployed and the secret is set.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] `docs/gate-a.md` records a pass, with a named reviewer, before the M5 branch merges. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)

@@ -208,13 +208,13 @@ default_sangha = "San Francisco Zen Center"
 
 Acceptance criteria for licensed sources:
 
-- [ ] `capture` stores the snapshot and hash and inserts evidence with `allowed = false`.
-- [ ] `approve` refuses any code outside `allowed_license_codes`, including every noncommercial and no-derivatives variant by default.
-- [ ] A licensed talk cannot reach `cleared` without evidence, and cannot appear in `servable_passage` unless that evidence is `allowed`. Both are database tests.
-- [ ] `apply` on a YouTube source skips videos that are not flagged `creativeCommon`.
-- [ ] Setting evidence to `allowed = false` stops the talk's next job and removes it from the serving view.
+- [ ] `capture` stores the snapshot and hash and inserts evidence with `allowed = false`. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] `approve` refuses any code outside `allowed_license_codes`, including every noncommercial and no-derivatives variant by default. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A licensed talk cannot reach `cleared` without evidence, and cannot appear in `servable_passage` unless that evidence is `allowed`. Both are database tests. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] `apply` on a YouTube source skips videos that are not flagged `creativeCommon`. (Superseded: no `creativeCommon` check exists in the code.)
+- [ ] Setting evidence to `allowed = false` stops the talk's next job and removes it from the serving view. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] `RssAdapter` passes feed fixtures, sends the identifying `User-Agent`, honors the delay, and never fetches a path that `robots.txt` disallows.
-- [ ] `wt takedown --sangha <name>` removes every talk of a sangha and logs each one.
+- [ ] `wt takedown --sangha <name>` removes every talk of a sangha and logs each one. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 ## Noncommercial conditions
 
@@ -239,13 +239,13 @@ Enforcement:
 
 Acceptance criteria:
 
-- [ ] Startup fails when `commercial_use = true` and an NC-cleared talk exists, and passes once that talk is withdrawn.
-- [ ] The loader rejects an allow-list containing an NC code when `commercial_use = true`.
-- [ ] The template test fails on a planted external script tag and passes on the real templates.
-- [ ] A tester with no dana events can use every route.
-- [ ] A passage from a licensed talk renders speaker, sangha, license name, license link and an excerpt marker.
-- [ ] An export flagged for sharing is refused for a ShareAlike source and carries license codes per line otherwise.
-- [ ] The runbook has a funding-source log entry template.
+- [ ] Startup fails when `commercial_use = true` and an NC-cleared talk exists, and passes once that talk is withdrawn. (Superseded: no `commercial_use` setting exists in the code.)
+- [ ] The loader rejects an allow-list containing an NC code when `commercial_use = true`. (Superseded: no `commercial_use` setting exists in the code.)
+- [ ] The template test fails on a planted external script tag and passes on the real templates. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A tester with no dana events can use every route. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A passage from a licensed talk renders speaker, sangha, license name, license link and an excerpt marker. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] An export flagged for sharing is refused for a ShareAlike source and carries license codes per line otherwise. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] The runbook has a funding-source log entry template. (Not done: the runbook has no funding-source log entry.)
 
 ## First license read, October 2, 2026
 
@@ -355,7 +355,7 @@ where t.state = 'ready'
   );
 ```
 
-The grants for the new objects follow the pattern above: `dg_web` selects `rights_setting` and nothing writes it except `dg_pipeline`.
+The grants for the new objects follow the pattern above: `wt_web` selects `rights_setting` and nothing writes it except `wt_pipeline`.
 
 Audit additions: a servable passage whose teacher has `opted_out_at` set, or that matches an active exclusion, fails. A mandated talk served while `talks_basis` is `consent` fails. A teacher with mandated talks and no recorded notice after 14 days warns, and so does an overdue follow-up.
 
@@ -366,7 +366,7 @@ Acceptance criteria for mandated talks:
 - [x] The constraint rejects a mandated talk with no evidence, and the typestate cannot build a `Talk<Consented>` for an opted-out teacher or an excluded one. (`authorize` takes the speaker's `Standing`; `wt-core` unit tests and `wt-db/tests/mandate.rs`.)
 - [x] `wt teacher opt-out` removes the teacher's passages from the view at once, and the full form deletes passages, embeddings, segments and stored transcripts and adds person and content-hash exclusions. A later discovery run clears none of that teacher's talks. (Stored transcript objects in S3 are deleted with the transcript pipeline in M4, as for every takedown.)
 - [x] `--suspend-only` removes the teacher from serving and deletes nothing.
-- [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown. (The switch, the serving view's `rights_basis` and the takedown are tested in `wt-db/tests/mandate.rs`; the page wording is tested with the pages in Spec 06.)
+- [ ] `consent set --status granted` switches the teacher's talks to `speaker_consent` and the page wording changes to permission. `declined` and `withdrawn` run the teacher takedown. (The switch, the serving view's `rights_basis` and the takedown are tested in `wt-db/tests/mandate.rs`; the page wording is tested with the pages in Spec 06.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [ ] Moved to Spec 06 with the answer page (decision of October 5, 2026), except the last sentence, which stays here: A rendered mandated passage reads "Talk by" the teacher and sangha with a source link and a report link, and a test asserts that the words permission and licensed are absent. Student speech is still absent from every store.
 - [x] `wt rights notice-draft` produces a file from the template and sends nothing. (`wt-cli/tests/commands.rs`.)
 

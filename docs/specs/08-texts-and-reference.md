@@ -157,7 +157,7 @@ left join work w on w.id = wl.work_id
 left join servable_text_unit stu on stu.text_unit_id = c.text_unit_id;
 ```
 
-Grants in `0010`: `dg_pipeline` gets read and write on every new table. `dg_web` gets select on `servable_text_unit`, `person` and `person_alias` and nothing on `text_unit`, `text_edition` or `reference_asset`. `dg_analyst` gets no access to the new tables.
+Grants in `0010`: `wt_pipeline` gets read and write on every new table. `wt_web` gets select on `servable_text_unit`, `person` and `person_alias` and nothing on `text_unit`, `text_edition` or `reference_asset`. `wt_analyst` gets no access to the new tables.
 
 Because `license_evidence` now serves texts, the default `allowed_license_codes` in Spec 03 also includes `public-domain`. For a public-domain edition, the evidence is the page that supports the claim, such as the translator's death date or the publisher's public-domain statement, captured with `wt license capture` and approved by a person like any other evidence.
 
@@ -331,7 +331,7 @@ where e.state = 'ready' and e.excerptable and le.allowed
   and exists (select 1 from proof_check pc where pc.edition_id = e.id and pc.passed);
 ```
 
-The grants in `0010` extend to `proof_check` for `dg_pipeline` only.
+The grants in `0010` extend to `proof_check` for `wt_pipeline` only.
 
 As built (decisions of October 7, 2026):
 
@@ -491,7 +491,7 @@ Acceptance criteria:
 - [x] A work named only in the context, or only in `work_hint`, resolves `probable`. A `work_hint` matching no title or alias stays `unresolved`. (`wt-extract/tests/resolve.rs`.)
 - [x] A citation matching two works stays `unresolved`, and a stoplisted phrase never matches. (`wt-extract/tests/resolve.rs`; the stoplist against Postgres in `wt-ingest/tests/reference.rs`.)
 - [x] After a new link-out work, `wt reindex --citations` resolves a previously unresolved fixture citation of that work, and a rerun changes nothing. (The `resolve` job in `wt-ingest/tests/textjobs.rs`; the command's queueing, again after a stoplist change and not on a rerun, in `wt-cli/tests/commands.rs`.)
-- [ ] The answer page renders a work-level footnote with the work title, the "the work, not a passage" badge and the work's link-out, and renders a work with no `link_out_url` without a link. (With the answer page in M5.)
+- [ ] The answer page renders a work-level footnote with the work title, the "the work, not a passage" badge and the work's link-out, and renders a work with no `link_out_url` without a link. (With the answer page in M5.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 ## Quoted passages inline
 
@@ -535,14 +535,14 @@ Evaluation. Evaluation exports list each inline pair (the teacher's passage with
 
 Acceptance criteria:
 
-- [ ] Migration `0027` applies after `0026`, and `servable_citation` exposes `kind` and `quote_verified`.
-- [ ] On fixtures, a quotation sharing six or more consecutive words with its hand-listed unit gets `quote_match_words` of at least 6 and `quote_verified` true. The same lines in another translation, sharing fewer, get a lower count and stay a link.
-- [ ] Accents and punctuation do not change the count, and framing words around the quoted words do not lower it.
-- [ ] A reference, a case, a `probable` citation, a `series_label`, `llm` or `work_name` citation, and a citation whose edition is not served are never `quote_verified`, whatever their count.
-- [ ] `wt text fix` on the unit clears the measurement and `quote_verified` turns false. The next `wt reindex --citations` measures again, and a rerun with unchanged text changes no rows.
-- [ ] A citation indexed before `0027` gets its `kind` from `wt reindex --citations` without its passage being rebuilt.
-- [ ] The answer page renders a verified quotation collapsed under its footnote with its credit line, "Read in the text" and "Report this excerpt", respects both caps, and leaves the unit out of "From the texts". (With the answer page in M5.)
-- [ ] After a takedown of the edition, a permalink to an answer that showed the excerpt renders the footnote without it.
+- [ ] Migration `0027` applies after `0026`, and `servable_citation` exposes `kind` and `quote_verified`. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] On fixtures, a quotation sharing six or more consecutive words with its hand-listed unit gets `quote_match_words` of at least 6 and `quote_verified` true. The same lines in another translation, sharing fewer, get a lower count and stay a link. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] Accents and punctuation do not change the count, and framing words around the quoted words do not lower it. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A reference, a case, a `probable` citation, a `series_label`, `llm` or `work_name` citation, and a citation whose edition is not served are never `quote_verified`, whatever their count. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] `wt text fix` on the unit clears the measurement and `quote_verified` turns false. The next `wt reindex --citations` measures again, and a rerun with unchanged text changes no rows. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A citation indexed before `0027` gets its `kind` from `wt reindex --citations` without its passage being rebuilt. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] The answer page renders a verified quotation collapsed under its footnote with its credit line, "Read in the text" and "Report this excerpt", respects both caps, and leaves the unit out of "From the texts". (With the answer page in M5.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] After a takedown of the edition, a permalink to an answer that showed the excerpt renders the footnote without it. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 ## Guided loading
 
@@ -671,11 +671,11 @@ Acceptance criteria for URL ingestion:
 - [x] Loopback, private and link-local addresses are blocked, including through a redirect. (`wt-ingest/tests/url_fetch.rs` and `texts::web` unit tests.)
 - [x] Audio and video content types are refused. (`wt-ingest/tests/url_fetch.rs`.)
 - [x] A PDF served under an `.html` name is detected as a PDF by its signature. (`wt-ingest/tests/url_fetch.rs`.)
-- [ ] Fixtures convert correctly: an HTML page loses its navigation and footer, a DOCX keeps headings and paragraphs, and an EPUB works. DOC and RTF conversion through LibreOffice runs nightly where it is installed. (HTML, DOCX and EPUB pass in `url_fetch.rs`, `texts.rs` and `texts::convert`; LibreOffice conversion is not built.)
+- [ ] Fixtures convert correctly: an HTML page loses its navigation and footer, a DOCX keeps headings and paragraphs, and an EPUB works. DOC and RTF conversion through LibreOffice runs nightly where it is installed. (HTML, DOCX and EPUB pass in `url_fetch.rs`, `texts.rs` and `texts::convert`; LibreOffice conversion is not built.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] A crawl of an index fixture lists links, applies the pattern and the prefix scope, honors `--max-pages`, and requires a selection before importing. (`wt-ingest/tests/intake.rs`.)
 - [x] The manifest draft takes title and author from meta tags, never guesses a translator, and `--yes` applies only to born-digital HTML. (`wt-ingest/tests/url_fetch.rs` and `texts::url` unit tests.)
 - [x] An HTML unit's source link carries a text fragment, and a PDF unit's carries a page number. (`wt-ingest/tests/url_fetch.rs` and `pdf.rs`; `text_unit.source_anchor` holds the fragment, joined to the edition's source URL.)
-- [ ] A permission record without a grantor or URL prefixes violates the database constraint, needs a person's approval before use, and renders "Used with permission of" on the page. (The constraint and the approval: `url_fetch.rs`. The rendering comes with the page in M5.)
+- [ ] A permission record without a grantor or URL prefixes violates the database constraint, needs a person's approval before use, and renders "Used with permission of" on the page. (The constraint and the approval: `url_fetch.rs`. The rendering comes with the page in M5.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] Refresh is a no-op for an unchanged document. A changed one produces a diff and does not replace the served edition until approved. (`wt-ingest/tests/intake.rs`.)
 - [x] A local test server confirms the `User-Agent`, the per-host delay and the connection limit. (`wt-ingest/tests/url_fetch.rs`.)
 
@@ -708,7 +708,7 @@ Acceptance criteria for the source policy:
 
 - [x] Recording evidence with a host-wide prefix on an aggregator host is rejected. (`UrlPolicy::check_prefix`, used by `wt license capture` and `record-permission`; `wt-ingest/tests/url_fetch.rs`.)
 - [x] A fixture PDF whose first page carries a copyright notice naming another party is blocked as `third_party_notice`, and evidence naming that holder unblocks it. (`wt-ingest/tests/pdf.rs`; plain text in `wt-ingest/tests/notices.rs`.)
-- [ ] The notice scan covers HTML, PDF and DOCX, reading metadata and the first and last pages. (HTML, EPUB, text and PDF pages are scanned; DOCX and document metadata come with URL ingestion.)
+- [ ] The notice scan covers HTML, PDF and DOCX, reading metadata and the first and last pages. (HTML, EPUB, text and PDF pages are scanned; DOCX and document metadata come with URL ingestion.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 ## Mandated sources
 
@@ -802,7 +802,7 @@ where e.state = 'ready' and e.excerptable and le.allowed
        or exists (select 1 from source_policy sp where sp.key = e.source_key and sp.enabled));
 ```
 
-Grants: `dg_web` may insert into `takedown_request` and select `source_policy`, nothing more on the new tables. `dg_pipeline` has full access.
+Grants: `wt_web` may insert into `takedown_request` and select `source_policy`, nothing more on the new tables. `wt_pipeline` has full access.
 
 As built for texts (October 7, 2026):
 
@@ -823,11 +823,11 @@ Acceptance criteria for mandated sources:
 - [x] `wt source disable` removes every unit of that source from `servable_text_unit` immediately, tested within one session before and after. `enable` restores them. (`wt-ingest/tests/text_takedown.rs`.)
 - [x] `wt takedown --source` deletes units, embeddings, S3 raw copies and work files, writes `takedown_log`, and the `StoreRegistry` check finds nothing left. (`wt-ingest/tests/text_takedown.rs`; the takedown itself checks that no object of the edition is left, and the audit's `text_takedown_completeness` finds no units.)
 - [x] `GET /rights` works with no session, `POST /rights/request` stores a row, rate limits at 5 per hour per address and rejects a filled honeypot, and no other route is reachable without a session. (`wt-api/tests/site.rs` and `tests/pages.rs`. Spec 06 adds `/accessibility`, its report form and `/favicon.ico` to the routes that need none.)
-- [ ] Each text hit carries a "Report this excerpt" link whose form arrives prefilled.
-- [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent.
+- [ ] Each text hit carries a "Report this excerpt" link whose form arrives prefilled. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A rendered mandated excerpt shows the publisher, a source link and the stored attribution line, and a test asserts that the words permission and licensed are absent. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] A noticed document is flagged and listed under `flag`, quarantined on arrival under `hold`, and refused under `block`. (`wt-ingest/tests/notices.rs`.)
 - [x] A non-English document is skipped and reported. (`wt-ingest/tests/notices.rs`.)
-- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The audit side is built: `mandate_exposed` reads `[deployment] exposure` in `pipeline.toml`, `text_source_served_while_off` and `takedown_request_overdue`, all in `wt-db/tests/audit.rs`. The startup warning comes with the web server in M5.)
+- [ ] With `exposure = "public"` and a mandated source enabled, startup logs a warning and the audit warns. A disabled source with servable rows fails the audit, and a takedown request open for more than one business day warns. (The audit side is built: `mandate_exposed` reads `[deployment] exposure` in `pipeline.toml`, `text_source_served_while_off` and `takedown_request_overdue`, all in `wt-db/tests/audit.rs`. The startup warning comes with the web server in M5.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 
 ## Rights lifecycle
 
@@ -907,7 +907,7 @@ select sp.key, sp.publisher, sp.basis, sp.enabled,
 from source_policy sp;
 ```
 
-A trigger makes `rights_event` append-only, as for `speaker_consent`. Grants: `dg_web` may select `v_source_rights` and nothing else here, and `dg_pipeline` has full access.
+A trigger makes `rights_event` append-only, as for `speaker_consent`. Grants: `wt_web` may select `v_source_rights` and nothing else here, and `wt_pipeline` has full access.
 
 Audit additions: a source with `basis = 'mandate'` and no recorded request after 14 days warns, a request past its follow-up date warns, any servable text unit that matches an active exclusion fails the audit, and each refused attempt against an exclusion is logged for review.
 
@@ -915,9 +915,9 @@ Acceptance criteria for the rights lifecycle:
 
 - [x] `wt source add` with the default basis creates a mandate, the `source_policy` row and a `mandated` event. (`wt-db/tests/rights.rs`; the mandate's evidence points to the stored record of the decision.)
 - [x] `wt rights request`, `sent`, `grant` and `decline` each write the right event and update `permission_request`, and `wt rights ledger` prints them in order. (`wt-db/tests/rights.rs` and `wt-cli/tests/commands.rs`. `wt rights no-response` records silence the same way.)
-- [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent. (The evidence and the switch are tested in `wt-db/tests/rights.rs`; the rendering moves to Spec 06's credit-line snapshot tests, decision of October 5, 2026.)
+- [ ] `grant` creates permission evidence, switches the basis, and the rendered excerpt then reads "Used with permission of" the publisher. Before the grant, a test confirms permission language is absent. (The evidence and the switch are tested in `wt-db/tests/rights.rs`; the rendering moves to Spec 06's credit-line snapshot tests, decision of October 5, 2026.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] `decline` and a takedown remove the units and raw copies and add exclusions for the prefix, the work and each content hash. (Texts: `wt-ingest/tests/text_takedown.rs`, with `wt rights decline` running the source takedown.)
-- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited. (M3R covers `wt source add` and a direct fetch by prefix and host. The import now refuses the same work, a source URL under an excluded prefix, and the same file or unit by content hash at another address (`wt-ingest/tests/text_takedown.rs`). The crawl comes with URL ingestion.)
+- [ ] After a takedown, `wt source add`, a direct fetch, a crawl and an import of the same prefix, the same work, and the same file served from a different URL are each refused with the exclusion cited. (M3R covers `wt source add` and a direct fetch by prefix and host. The import now refuses the same work, a source URL under an excluded prefix, and the same file or unit by content hash at another address (`wt-ingest/tests/text_takedown.rs`). The crawl comes with URL ingestion.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] A compile-fail test shows the fetch functions cannot be called with a raw URL. (`wt-ingest/tests/fetch_target.rs`: `get`, `check_robots`, and building a `FetchTarget` around `Exclusions::clear`.)
 - [x] `wt exclusion lift` without evidence fails, and with evidence logs the lift and allows the source again. (The command requires `--evidence` and refuses an empty file.)
 - [x] A silent source stays a mandate, labeled as one, and `wt rights due` lists its follow-up.
@@ -931,20 +931,20 @@ Tests use synthetic fixtures: a fake epub, a fake html page and a fake csv gloss
 - [x] Migrations `0009` and `0010` apply cleanly after `0008`, and the existing Spec 02 tests still pass. (As `0021_texts_schema.sql`, which gathers the text parts of the planned `0009` to `0013` and `0018`, the rights parts having landed in `0015`; `wt-db/tests/migrations.rs` and `schema.rs`.)
 - [x] A `ready` edition without license evidence, without `excerptable`, or without a rights holder fails the `ready_requires_license` check. (`wt-db/tests/texts_schema.rs`.)
 - [x] `servable_text_unit` returns nothing for an edition that is not `ready`, whose evidence is not `allowed`, or that is not excerptable. (`wt-db/tests/texts_schema.rs`, with the proofread and source conditions too.)
-- [x] `dg_web` can select `servable_text_unit`, `person` and `person_alias`, and is denied on `text_unit`, `text_edition` and `reference_asset`. (As `wt_web`; `wt-db/tests/texts_schema.rs`.)
+- [x] `wt_web` can select `servable_text_unit`, `person` and `person_alias`, and is denied on `text_unit`, `text_edition` and `reference_asset`. (As `wt_web`; `wt-db/tests/texts_schema.rs`.)
 - [x] A dry run changes nothing in the database. An `--apply` run with unchanged files and manifest is a no-op. (`wt-ingest/tests/texts.rs`.)
 - [x] Section filtering excludes introduction, notes and translator material by default, and `include_sections` can restore a section. (`wt-ingest/tests/texts.rs` and `texts::extract` unit tests.)
 - [x] Each unit scheme (verse, numbered, paragraph, heading) produces the expected units and locators on its fixture. Over-long units split into `.a` and `.b`, and a duplicate locator fails the import. (`texts::units` unit tests; the numbered scheme end to end in `wt-ingest/tests/texts.rs`.)
 - [x] An import with evidence that is missing, not approved, or outside `allowed_license_codes` is refused, and a public-domain edition with approved evidence is accepted. (`wt-ingest/tests/texts.rs`.)
 - [x] A glossary import merges variants, reports a conflicting canonical form without overwriting it, and changes the glossary version so affected talks requeue. (`wt-ingest/tests/reference.rs`; `wt reference import` requeues through `requeue_after_glossary_change`, tested in Spec 04.)
 - [x] An alias list creates `person` rows and never creates teacher aliases. A lineage file creates edges, and `--link-teachers` links only exact name matches. (`wt-ingest/tests/reference.rs`.)
-- [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text". (The link is done and tested in `wt-ingest/tests/reference.rs`; the footnote renders with the answer page in M5.)
-- [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present.
-- [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search.
-- [ ] An alias list for Shakyamuni Buddha imports its specific and generic aliases, and a work imported with `attribution = "traditional"` is credited "Attributed to Shakyamuni Buddha". A traditional work with no author person is refused.
-- [ ] "What does Shakyamuni buddha say about suffering?", "What did the Buddha teach about anger?" and "What does the Tathagata say about craving?" run named-author mode for the Buddha. "What is Buddha nature?", "Amida Nyorai's vow" and "Who was the great sage of India?" run standard mode.
-- [ ] A summary sentence that names the Buddha as speaking is dropped, and one that says what a teacher says about his teaching passes.
-- [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work.
+- [ ] After a locator sync and `wt reindex --citations`, a fixture talk citing a hand-listed locator gets `text_unit_id` set, and its footnote renders "Read in the text". (The link is done and tested in `wt-ingest/tests/reference.rs`; the footnote renders with the answer page in M5.) (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] Text hits never appear in the teacher count, the source ceiling or the dana split. The ranking invariance test passes with texts present. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] Named-author mode filters text search to that author, runs talk retrieval with the name removed, and a teacher match takes precedence. Named-teacher mode runs no text search. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] An alias list for Shakyamuni Buddha imports its specific and generic aliases, and a work imported with `attribution = "traditional"` is credited "Attributed to Shakyamuni Buddha". A traditional work with no author person is refused. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] "What does Shakyamuni buddha say about suffering?", "What did the Buddha teach about anger?" and "What does the Tathagata say about craving?" run named-author mode for the Buddha. "What is Buddha nature?", "Amida Nyorai's vow" and "Who was the great sage of India?" run standard mode. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] A summary sentence that names the Buddha as speaking is dropped, and one that says what a teacher says about his teaching passes. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
+- [ ] The page shows each text hit with work, locator, author, translator, edition and license notice, with no give button. `GET /text/{unit_id}` shows at most two neighbors on each side and never a whole work. (Known gap, B18, October 23, 2026: no test or check for this item was found by name.)
 - [x] `wt intake` on a folder with no evidence marks it blocked and applies nothing. With evidence and a typed reviewer name it completes the walkthrough end to end. (`wt-ingest/tests/intake.rs`, with scripted answers.)
 - [x] `wt text link-out` creates a `work` and locators with no text rows. (`wt-ingest/tests/reference.rs`.)
 - [x] A guard test fails if git tracks any file under `data-inbox/`. (`wt-core/tests/repo_guards.rs`.)

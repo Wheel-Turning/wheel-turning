@@ -23,7 +23,7 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B15](#b15-rights-actions-run-by-hand-on-two-databases) | 2026-10-15 | Rights actions run by hand on two databases | open (debt) |
 | [B16](#b16-alerts-and-teardown-are-not-verified) | 2026-10-15 | Alerts and teardown are not verified | open (debt; `wt alerts test` reached the owner only, teardown not run) |
 | [B17](#b17-the-web-server-reads-configuration-outside-the-loader) | 2026-10-15 | The web server reads configuration outside the loader | fixed (Spec 11, PB1.6) |
-| [B18](#b18-spec-acceptance-items-do-not-match-the-code) | 2026-10-15 | Spec acceptance items do not match the code | open (debt) |
+| [B18](#b18-spec-acceptance-items-do-not-match-the-code) | 2026-10-15 | Spec acceptance items do not match the code | diagnosed (pass of October 23, 2026; gaps listed) |
 | [B19](#b19-the-pc-and-rds-are-both-sources-of-truth) | 2026-10-15 | The PC and RDS are both sources of truth | open (debt) |
 | [B20](#b20-major-dependency-updates-wait-unmerged) | 2026-10-15 | Major dependency updates wait unmerged | open (debt) |
 | [B21](#b21-the-gpu-worker-and-alpha-server-live-outside-the-repo) | 2026-10-15 | The GPU worker and alpha server live outside the repo | open (debt) |
@@ -487,6 +487,14 @@ Items were not ticked as work merged, and renames did not reach the acceptance l
 ### Fix
 
 One pass over every open item: tick it with the test or check that proves it, rewrite it if it names something renamed, or mark it a known gap. The gaps then go into the build plan.
+
+### Pass of October 23, 2026
+
+- The `dg_*` role names in Specs 01 to 08 now read `wt_*`.
+- Ticked with evidence: Spec 01 (alerts reach the owner), Spec 06 (`flag_query`, the favicon and icon routes).
+- Marked in place: every other open item in Specs 01 to 08 now says why it is open. "Not built" and "Superseded" were checked against the code (no `commercial_use`, no `creativeCommon`, no speaker proposal step, no `/text/{unit_id}` route, no "From the texts" section). "Known gap, B18" means only that no test or check was found by searching test names; the code may still be right, and a reader should check before building.
+- Still open after the pass: Spec 01: 6, Spec 02: 4, Spec 03: 19, Spec 04: 6, Spec 05: 5, Spec 06: 19, Spec 07: 3, Spec 08: 28 (90 in all). Specs 09 to 11 were not part of this pass.
+- Next: a second pass over the "Known gap" items, one spec at a time, ticking each that an existing test proves and writing a test for the rest that matter before the public beta.
 
 ## B19. The PC and RDS are both sources of truth
 
