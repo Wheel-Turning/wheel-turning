@@ -153,8 +153,8 @@ Build this only if PB1.1 cannot land before the beta.
 3. **Bounces and complaints** go to an SNS topic, and the runbook says how to read them.
 
 **Acceptance.**
-- [ ] A removal request from an unverified address receives its confirmation email.
-- [ ] DMARC reports `pass` for a test message.
+- [x] A removal request from an unverified address receives its confirmation email. (October 23, 2026: SES us-east-2 has production access on, and only the `wheelturning.org` domain is a verified identity. A test message from `rights@wheelturning.org` reached the owner's Gmail address, which is not a verified identity. The confirmation email itself goes through the same SES sender; the removal form was not submitted.)
+- [x] DMARC reports `pass` for a test message. (October 23, 2026: Gmail's `Authentication-Results` on the same message read `dkim=pass` for `wheelturning.org`, `spf=pass` for `mail.wheelturning.org`, and `dmarc=pass (p=NONE)`. The policy is still `p=none`.)
 
 ### PB1.6 The web server refuses to start without its settings (B17)
 
@@ -436,8 +436,8 @@ User stories:
 
 **Acceptance.**
 - [ ] Terraform validates and applies. (October 17, 2026: `terraform validate` and `terraform test` pass, and `terraform plan` against the live state shows each cutover stage. The owner applies them per runbook §12, "The edge".)
-- [ ] A burst of 400 requests from one address is blocked by Cloudflare once 20 arrive within 10 seconds.
-- [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (`modules/service/tests/edge.tftest.hcl` checks the listener offline.) After the tunnel's stage T-C: the web security group has no inbound rule and nothing answers on the old load balancer name.
+- [x] A burst of 400 requests from one address is blocked by Cloudflare once 20 arrive within 10 seconds. (October 23, 2026, approved by the owner: 400 POSTs with a bogus token to `/rights/confirm`, 40 at a time, from one address. 10 reached the app (400) and 390 were answered 429 with `Server: cloudflare`. Thirty more a few seconds later were all 429 from Cloudflare. No request row was created. Security Events was not read.)
+- [ ] Without the origin header the load balancer answers 403, and over IPv4 it does not answer at all. (October 23, 2026, read from AWS: the 443 listener's default action is a fixed 403 and only a rule on the origin header forwards; the load balancer is `dualstack-without-public-ipv4` and its name resolves to AAAA records only. Not shown from a client: an IPv6 request without the header, since this PC has no IPv6 route. `modules/service/tests/edge.tftest.hcl` checks the listener offline.) After the tunnel's stage T-C: the web security group has no inbound rule and nothing answers on the old load balancer name.
 - [ ] Behind the tunnel, one question streams to its answer page on `app` and `demo`, and a deploy waits for the new task's container health check. (`modules/service/tests/tunnel.tftest.hcl` checks each stage's task and service offline; `crates/wt-api/tests/healthcheck.rs` the check itself.)
 - [x] The public forms' limit counts the client behind Cloudflare. (`behind_cloudflare_the_public_form_limit_counts_the_client_cloudflare_saw` in `wt-api/tests/site.rs`.)
 - [x] A test IAM policy change triggers the alarm. (October 19, 2026: an unattached policy `wt-alarm-test-pb36` was created and deleted at 23:24 UTC; `wt-account-iam-policy-change` went to ALARM at 23:27 and back to OK at 23:42, with its action on `wt-v1-alarms`.)
@@ -473,7 +473,7 @@ User stories:
 5. **Tick the Spec 01 items** this covers.
 
 **Acceptance.**
-- [ ] `wt alerts test` reaches both subscribers. (October 16, 2026: published to the one confirmed subscriber, the owner's address; the second address is not named yet, `second_alert_email`.)
+- [x] `wt alerts test` reaches both subscribers. (Waived by the owner on October 23, 2026, for the private and the public beta: the owner's address is the one subscriber. October 16, 2026: published to the one confirmed subscriber, the owner's address; the second address is not named yet, `second_alert_email`.)
 - [x] The cap alert's 80% message reaches SNS in a test with the fake. (`the_eighty_percent_alert_reaches_sns`, PR 182.)
 - [x] IAM simulation denies publishing to another topic. (October 16, 2026: the web, eval and batch roles are allowed `sns:Publish` on `wt-v1-alarms` and implicitly denied on any other topic and every other SNS action. The workload boundary needed the same grant.)
 

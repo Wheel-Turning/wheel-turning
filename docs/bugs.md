@@ -12,17 +12,17 @@ Status is one of open, diagnosed, fixed or won't fix.
 | [B4](#b4-a-summary-did-not-load) | 2026-10-15 | A summary did not load | open |
 | [B5](#b5-cite-opens-a-pop-up-instead-of-scrolling-to-the-reference) | 2026-10-15 | Cite opens a pop-up instead of scrolling to the reference | open |
 | [B6](#b6-talks-with-audio-outside-ssz-have-no-listen-link) | 2026-10-15 | Talks with audio outside SSZ have no Listen link | open |
-| [B7](#b7-navigation-does-not-mark-the-current-page) | 2026-10-15 | Navigation does not mark the current page | open |
+| [B7](#b7-navigation-does-not-mark-the-current-page) | 2026-10-15 | Navigation does not mark the current page | fixed |
 | [B8](#b8-no-placeholder-research-search-page-for-priests) | 2026-10-15 | No placeholder research search page for priests | open |
-| [B9](#b9-the-privacy-line-is-not-fully-accurate) | 2026-10-15 | The privacy line is not fully accurate | open |
-| [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open |
+| [B9](#b9-the-privacy-line-is-not-fully-accurate) | 2026-10-15 | The privacy line is not fully accurate | fixed (Spec 11, PB3.1, #185) |
+| [B10](#b10-summaries-use-few-excerpts-and-say-little) | 2026-10-15 | Summaries use few excerpts and say little | open (em dashes, counts and sangha note fixed; unused excerpts: PB2.2) |
 | [B11](#b11-source-texts-are-not-in-search-answers-or-excerpt-references) | 2026-10-15 | Source texts are not in search, answers or excerpt references | open |
 | [B12](#b12-feedback-is-one-thin-form-not-a-structured-review-of-the-answer) | 2026-10-15 | Feedback is one thin form, not a structured review of the answer | open (backlog) |
 | [B13](#b13-every-excerpt-has-a-report-link) | 2026-10-15 | Every excerpt has a Report link | open |
-| [B14](#b14-public-copy-promises-a-time-for-acting-on-requests) | 2026-10-15 | Public copy promises a time for acting on requests | open |
+| [B14](#b14-public-copy-promises-a-time-for-acting-on-requests) | 2026-10-15 | Public copy promises a time for acting on requests | fixed |
 | [B15](#b15-rights-actions-run-by-hand-on-two-databases) | 2026-10-15 | Rights actions run by hand on two databases | open (debt) |
-| [B16](#b16-alerts-and-teardown-are-not-verified) | 2026-10-15 | Alerts and teardown are not verified | open (debt) |
-| [B17](#b17-the-web-server-reads-configuration-outside-the-loader) | 2026-10-15 | The web server reads configuration outside the loader | open (debt) |
+| [B16](#b16-alerts-and-teardown-are-not-verified) | 2026-10-15 | Alerts and teardown are not verified | open (debt; `wt alerts test` reached the owner only, teardown not run) |
+| [B17](#b17-the-web-server-reads-configuration-outside-the-loader) | 2026-10-15 | The web server reads configuration outside the loader | fixed (Spec 11, PB1.6) |
 | [B18](#b18-spec-acceptance-items-do-not-match-the-code) | 2026-10-15 | Spec acceptance items do not match the code | diagnosed (pass of October 23, 2026; gaps listed) |
 | [B19](#b19-the-pc-and-rds-are-both-sources-of-truth) | 2026-10-15 | The PC and RDS are both sources of truth | open (debt) |
 | [B20](#b20-major-dependency-updates-wait-unmerged) | 2026-10-15 | Major dependency updates wait unmerged | open (debt) |
@@ -175,6 +175,10 @@ Links to the current page stay live and look like every other link.
 ### Cause
 
 Not built.
+
+### Status
+
+Fixed. Checked October 23, 2026: `crates/wt-api/templates/base.html` sets `aria-current="page"` on the current link in both navigation lists.
 
 ## B8. No placeholder research search page for priests
 
@@ -391,6 +395,10 @@ Retention periods (24 hours, 180 days, the provider's 30 days) are not promises 
 ### Decision
 
 The internal target stays (owner, October 15, 2026). The alert and the audit check for a request open more than one business day remain as a private reminder to the owner. Only the public promise goes.
+
+### Status
+
+Fixed (Spec 11, PB1.7, #185). Checked October 23, 2026: `rights.html` and `rights_confirm.html` say requests are handled in the order they arrive and that timing can vary, with no stated time, and a copy test fails on "business day".
 
 ### Fix
 
