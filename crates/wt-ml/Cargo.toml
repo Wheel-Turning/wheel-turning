@@ -17,6 +17,6 @@ tokio = { workspace = true }
 sha2.workspace = true
 # ONNX Runtime is loaded at run time from WT_ORT_DYLIB (or ORT_DYLIB_PATH), so nothing is
 # downloaded at build time and CI builds without it. API 22 needs ONNX Runtime 1.22 or newer.
-ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-22"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-22"] }
 # Pure Rust: no oniguruma or C++ suffix-array builds.
 tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
