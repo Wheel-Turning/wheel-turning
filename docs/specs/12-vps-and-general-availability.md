@@ -50,7 +50,10 @@ Facts about the code are checked against `main` at 9e47434.
 ### A1. The server
 
 - x86-64 only. On arm64 the int8 embedder's vectors drift from the stored x86 ones (`docs/cost.md`, web task size), so an ARM plan is refused.
-- At least 4 vCPU, 8 GB of memory and 80 GB of disk, in a US region. Hetzner's CPX31 in Hillsboro, Oregon fits at about $15 a month with backups. The owner buys and owns the account. Claude never creates it.
+- At least 4 vCPU, 8 GB of memory and 60 GB of disk, in a US region.
+- **Provider: OVHcloud US, VPS-2, in Hillsboro, Oregon.** It has 4 vCores, 8 GB, 75 GB NVMe, unlimited traffic and daily backups included, from $8.50 a month (read November 2, 2026). VPS-3 (6 vCores, 12 GB, 100 GB) at $12.32 is the step up. Hetzner was the first choice, but its US prices rose in 2026: a CPX31 in Ashburn or Hillsboro now costs €62.99 a month, and a CPX32 in Germany €35.99.
+- OVHcloud has a REST API and a Terraform provider. The owner creates API credentials limited to this server's `/vps/<name>` routes and stores them in `.env`, so Claude can snapshot, reboot and reinstall it. Day-to-day changes go over SSH.
+- The owner buys and owns the account. Claude never creates it.
 - Ubuntu 24.04 LTS with unattended security upgrades, SSH by key only, password login off, `ufw` denying all inbound except SSH. The web service has no inbound port: Cloudflare reaches it only through the tunnel.
 
 ### A2. What runs on it
@@ -107,16 +110,16 @@ The owner's PC reaches the database through an SSH port forward to `127.0.0.1:54
 4. Move the tunnel token to the server's `cloudflared` and stop the ECS service. `/healthz` and a test question from the owner's browser must pass.
 5. Turn the maintenance Worker off.
 6. **Rollback window, 7 days.** RDS and the ECS service stay in place, scaled to zero, so going back is a token move and `desired_count = 1`. About $8 for the week.
-7. After 7 days, with the owner's approval: a final RDS snapshot kept 30 days, then `terraform destroy` of `envs/v1` compute, RDS, the load balancer and the batch host. `account/`, `records/` and the trimmed `github-oidc` stay.
+7. **Teardown.** The owner approved it on November 2, 2026, on one condition: Claude first confirms the site is fully working on the server. Before teardown, every Part A acceptance item that can be checked before teardown must pass, plus these checks on the live site: `/healthz`, a full question with summary and excerpts, a transcript page, a feedback post, a removal request with its confirmation email, a nightly audit, a nightly dump with a successful restore check, and a worker run through the SSH forward. The results go in `docs/incidents/` as the cutover record. Then, after the 7-day window: a final RDS snapshot kept 30 days, then `terraform destroy` of `envs/v1` compute, RDS, the load balancer and the batch host. `account/`, `records/` and the trimmed `github-oidc` stay.
 
 ### A9. Expected cost
 
 | Item | Per month |
 | --- | --- |
-| Server with provider backups | about $15 to $18 |
+| OVHcloud VPS-2 with its daily backup | from $8.50 (VPS-3: $12.32) |
 | S3 (records, transcripts, models, backups), SES, SNS, Route 53 check, CloudTrail | about $2 to $3 |
 | Cloudflare (tunnel, rules, Worker), Free plan | $0 |
-| **Fixed total** | **about $17 to $21** |
+| **Fixed total** | **about $11 to $16** |
 | Model spend | up to the $40 cap |
 
 GuardDuty and the unused-access analyzer (about $5 to $9) are switched off with the compute they watched. The external-access analyzer stays, as it is free.
@@ -137,10 +140,10 @@ GuardDuty and the unused-access analyzer (about $5 to $9) are switched off with 
 
 ### B3. Rate limits and the daily ceiling
 
-- **Per visitor:** 10 questions an hour, 30 a day.
-- **Per address** (`CF-Connecting-IP`): 30 questions an hour, so clearing cookies does not reset the limit.
+- **No hourly question limit** (owner's decision of November 2, 2026). The per-tester `ask_rate_per_hour` limit (Spec 06) is removed, and no per-visitor or per-address hourly limit replaces it. The public form limits per address (accessibility and rights reports) are unchanged.
 - **Daily ceiling:** model spend in one Pacific day may not exceed the monthly cap divided by the days in the month ($1.33 at $40). Past it, the day behaves like the monthly cap: excerpts serve, summaries pause until midnight Pacific. It is recorded once a day in `llm_alert` and emailed.
-- The Cloudflare rate rule stays as the outer limit.
+- The Cloudflare rate rule stays. It counts requests over 10 seconds and only stops floods; it is not a question quota.
+- With no hourly limit, the daily ceiling is the only guard on spend. One script can still use a whole day's share, after which summaries pause for everyone until midnight Pacific.
 
 ### B4. Mandated talks served as excerpts
 
@@ -157,7 +160,7 @@ GuardDuty and the unused-access analyzer (about $5 to $9) are switched off with 
 
 ### B6. EU, EEA and UK
 
-A Cloudflare custom rule (Free plan) matches `ip.src.country` in the 27 EU states, Iceland, Liechtenstein, Norway and the United Kingdom, and serves a static notice from the maintenance Worker's route: "Wheel Turning is not yet available in your region." The owner applies it in Cloudflare after seeing the rule. `/about`, `/rights`, `/terms` and the removal form (`POST /rights/request`) stay reachable from every country, so rights holders anywhere can ask for removal.
+A Cloudflare custom rule matches `ip.src.country` in the 27 EU states, Iceland, Liechtenstein, Norway and the United Kingdom on `app` and `demo`, and blocks the request. **Applied November 2, 2026** (zone custom ruleset `ac4c0f2e…`, rule `f143a87a…`). The Free plan refuses the `ip.src.is_in_european_union` field and custom block responses, so the rule lists the countries by code and shows Cloudflare's standard block page. A notice page ("Wheel Turning is not yet available in your region") needs a Worker on the blocked paths and is part of Part B. `/about`, `/rights`, `/terms` and the removal form (`POST /rights/request`) stay reachable from every country, so rights holders anywhere can ask for removal.
 
 ### B7. Legal pages (roadmap UB1.4, UB1.6)
 
@@ -178,10 +181,10 @@ Spec 09 changes: the privacy line for visitors, the home page without invite wor
 
 | # | Action | Before |
 | --- | --- | --- |
-| O1 | Buy the server (x86, 4 vCPU, 8 GB) and add Claude's deploy key | A8 |
-| O2 | Approve the AWS teardown after the 7-day window | A8 step 7 |
+| O1 | Buy the OVHcloud VPS-2 with Claude's SSH public key, and create scoped API credentials | A8 |
+| O2 | Approve the AWS teardown. Done November 2, 2026, on the condition in A8 step 7 | A8 step 7 |
 | O3 | Register the DMCA agent | Launch |
-| O4 | Apply the EU, EEA and UK rule in Cloudflare | Launch |
+| O4 | Apply the EU, EEA and UK rule in Cloudflare. Delegated to Claude and applied November 2, 2026 | Done |
 | O5 | Review every mandated source before launch (open question 1) | Launch |
 
 ## Build order
@@ -233,7 +236,7 @@ Part A and Part B are independent until launch and can run in parallel, in separ
 
 - [ ] A visitor with no cookie can ask a question and read the answer at `/`.
 - [ ] A visitor's question text is null after 24 hours unless kept or flagged.
-- [ ] The visitor and address limits return 429 with a wait time, and the daily ceiling pauses summaries until midnight Pacific.
+- [ ] No question is refused for an hourly limit, and the daily ceiling pauses summaries until midnight Pacific.
 - [ ] A mandated talk without consent, license or sangha grant is served at `excerpts`, with no transcript link, and its transcript page returns 404. A test fails otherwise.
 - [ ] An SSZ talk is still served in full.
 - [ ] A request from a blocked country gets the region notice, and `/rights` and the removal form still answer it.
