@@ -113,7 +113,7 @@ run "tunnel_beside_the_load_balancer" {
   }
 
   assert {
-    condition     = jsondecode(aws_ecs_task_definition.web.container_definitions)[0].image == "000000000000.dkr.ecr.us-east-2.amazonaws.com/wt-test:mirror-aws-cli-2.31.0" && jsondecode(aws_ecs_task_definition.web.container_definitions)[2].image == "000000000000.dkr.ecr.us-east-2.amazonaws.com/wt-test:mirror-cloudflared-2026.10.0"
+    condition     = jsondecode(aws_ecs_task_definition.web.container_definitions)[0].image == "000000000000.dkr.ecr.us-east-2.amazonaws.com/wt-test:mirror-aws-cli-2.31.0" && jsondecode(aws_ecs_task_definition.web.container_definitions)[2].image == "000000000000.dkr.ecr.us-east-2.amazonaws.com/wt-test:mirror-cloudflared-2026.10.3"
     error_message = "Both outside images come from the mirror tags in the module's own repository."
   }
 

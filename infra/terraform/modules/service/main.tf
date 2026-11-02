@@ -187,7 +187,7 @@ variable "mirror_tags" {
     aws_cli     = string
   })
   default = {
-    cloudflared = "mirror-cloudflared-2026.10.0"
+    cloudflared = "mirror-cloudflared-2026.10.3"
     aws_cli     = "mirror-aws-cli-2.31.0"
   }
 }

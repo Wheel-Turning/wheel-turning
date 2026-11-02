@@ -520,9 +520,9 @@ stack's `variables.tf`, so `deploy.yml` and the next plain apply keep them.
    ```bash
    R=904883674947.dkr.ecr.us-east-2.amazonaws.com/wt-v1
    aws ecr get-login-password | docker login --username AWS --password-stdin ${R%%/*}
-   docker pull --platform linux/amd64 cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
-   docker tag cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07 $R:mirror-cloudflared-2026.10.0
-   docker push $R:mirror-cloudflared-2026.10.0
+   docker pull --platform linux/amd64 cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+   docker tag cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39 $R:mirror-cloudflared-2026.10.3
+   docker push $R:mirror-cloudflared-2026.10.3
    docker pull --platform linux/amd64 public.ecr.aws/aws-cli/aws-cli:2.31.0
    docker tag public.ecr.aws/aws-cli/aws-cli:2.31.0 $R:mirror-aws-cli-2.31.0
    docker push $R:mirror-aws-cli-2.31.0
