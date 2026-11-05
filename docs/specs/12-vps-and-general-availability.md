@@ -50,27 +50,28 @@ Facts about the code are checked against `main` at 9e47434.
 ### A1. The server
 
 - x86-64 only. On arm64 the int8 embedder's vectors drift from the stored x86 ones (`docs/cost.md`, web task size), so an ARM plan is refused.
-- At least 4 vCPU, 8 GB of memory and 60 GB of disk, in a US region.
-- **Provider: OVHcloud US, VPS-2, in Hillsboro, Oregon.** It has 4 vCores, 8 GB, 75 GB NVMe, unlimited traffic and daily backups included, from $8.50 a month (read November 2, 2026). VPS-3 (6 vCores, 12 GB, 100 GB) at $12.32 is the step up. Hetzner was the first choice, but its US prices rose in 2026: a CPX31 in Ashburn or Hillsboro now costs €62.99 a month, and a CPX32 in Germany €35.99.
+- **Provider: OVHcloud US, VPS-1, in Hillsboro, Oregon** (owner's decision of November 4, 2026: "working but cheap"). It has 2 vCores, 4 GB, 40 GB NVMe, unlimited traffic and daily backups included, from $4.54 a month (read November 2, 2026). The memory budget in A10 is what makes 4 GB enough.
+- **Upgrade path.** OVHcloud resizes a VPS in place with one reboot. VPS-2 (4 vCores, 8 GB, 75 GB, $8.50) is the step up, taken when A10's alarm fires twice in a week. OVHcloud does not resize down, so the site starts on the smaller plan.
+- Hetzner was the first choice, but its US prices rose in 2026: a CPX31 in Ashburn or Hillsboro now costs €62.99 a month, and a CPX32 in Germany €35.99.
 - OVHcloud has a REST API and a Terraform provider. The owner creates API credentials limited to this server's `/vps/<name>` routes and stores them in `.env`, so Claude can snapshot, reboot and reinstall it. Day-to-day changes go over SSH.
 - The owner buys and owns the account. Claude never creates it.
 - Ubuntu 24.04 LTS with unattended security upgrades, SSH by key only, password login off, `ufw` denying all inbound except SSH. The web service has no inbound port: Cloudflare reaches it only through the tunnel.
 
 ### A2. What runs on it
 
-One `docker compose` project under `/srv/wheel-turning`, defined in `infra/vps/compose.yaml`:
+Three systemd services, installed natively rather than in Docker. That saves the 100 to 150 MB that `dockerd` and `containerd` hold on a 4 GB server. Unit files live in `infra/vps/systemd/`. Tests still use the `pgvector/pgvector:pg16` container (CLAUDE.md rule 9), so the server runs the same Postgres and pgvector versions from the PGDG apt repository.
 
-| Service | Image | Notes |
+| Service | Installed from | Notes |
 | --- | --- | --- |
-| `db` | `pgvector/pgvector:pg16`, the image the tests already use | Data on a named volume. `shared_buffers` 1 GB, so the 1.7 GB database and its indexes stay in memory (`docs/cost.md`, Database size). Listens on the compose network and on `127.0.0.1:5432` only |
-| `web` | `ghcr.io/<owner>/wt-v1:<tag>` | Same image as today. Models mounted read-only from `/srv/wheel-turning/models` |
-| `cloudflared` | `cloudflare/cloudflared`, pinned by digest | Runs the existing tunnel `wt-v1-web` with its token. The tunnel's ingress points at `http://web:8080` |
+| `postgresql@16-main` | PGDG apt: `postgresql-16`, `postgresql-16-pgvector` | Listens on `127.0.0.1:5432` only. Settings in A10 |
+| `wt-web` | The release binary from CI, in `/srv/wheel-turning/releases/<tag>/`, with `current` a symlink | Runs as an unprivileged `wt` user. Models read-only in `/srv/wheel-turning/models` |
+| `cloudflared` | Cloudflare's apt repository | Runs the existing tunnel `wt-v1-web` with its token. The tunnel's ingress points at `http://127.0.0.1:8080` |
 
 The database roles of Spec 02 are created exactly as on RDS. The admin role is a superuser here, so role-creating migrations (Spec 11, 0050) no longer need a separate admin task.
 
 ### A3. Secrets
 
-Secrets live in `/srv/wheel-turning/.env`, mode 0600, owned by root and read only by compose. They are the same keys `.env.example` lists, and the code still wraps each one in `wt_core::config::Secret`. Secrets Manager is retired for the server (open question 6).
+Secrets live in `/srv/wheel-turning/.env`, mode 0600, owned by root and loaded by the `wt-web` unit as its `EnvironmentFile`. They are the same keys `.env.example` lists, and the code still wraps each one in `wt_core::config::Secret`. Secrets Manager is retired for the server (open question 6).
 
 AWS stays for four things that cost cents: the records bucket (Object Lock), SES removal emails, SNS alerts and the backup bucket. One IAM user, `wt-vps`, holds a policy for exactly those actions, inside the existing permissions boundary. Its access key goes in `.env` and is rotated every 90 days (runbook).
 
@@ -78,7 +79,7 @@ AWS stays for four things that cost cents: the records bucket (Object Lock), SES
 
 - **Nightly dump.** A systemd timer runs `pg_dump -Fc` at 03:00 Pacific and uploads it to `s3://wt-backups-<account>/vps/` with server-side encryption. A lifecycle rule keeps 30 days. This meets the 24-hour data-loss target.
 - **Server snapshots.** The provider's daily backups are on as a second copy.
-- **Restore check.** The weekly timer restores the newest dump into a throwaway container, runs `wt audit` against it and emails the result through SNS. A failed restore is an alert.
+- **Restore check, off the server.** A second Postgres does not fit beside the live one in 4 GB. A weekly GitHub Actions job (`restore-check.yml`) reads the newest dump through the existing OIDC role, restores it into a `pgvector/pgvector:pg16` service container on the runner, runs `wt audit` against it and emails the result through SNS. A failed restore is an alert.
 - **Rebuild.** `infra/vps/bootstrap.sh` turns a fresh Ubuntu server into a running site from the newest dump. The twice-yearly drill (Spec 01) runs this script and times it against the 4-hour recovery target.
 
 ### A5. Alerts and the nightly jobs
@@ -89,14 +90,14 @@ Replacing CloudWatch:
 | --- | --- |
 | `wt-v1-healthz-unreachable` (Route 53 check on `/healthz`) | Kept unchanged. It checks the public path through Cloudflare, so it does not care where the app runs |
 | Log metric filters and the 5xx alarm | The web service counts 5xx answers itself and alerts through the existing `SnsAlerter` above 5% over 10 minutes |
-| ECS task alarms, memory alarm | A timer every 5 minutes alerts at 85% memory, 80% disk, or any compose service not running |
+| ECS task alarms, memory alarm | A timer every 5 minutes alerts on A10's memory thresholds, 80% disk, or any of the three services not running |
 | Nightly audit ECS task | The same `wt audit` on a systemd timer, with the same SNS email |
 | `purge_expired_queries` | Unchanged, on a timer |
 | CloudWatch Logs, 30 days | journald with a 30-day, 2 GB cap. Request logs keep the route template only, as today |
 
 ### A6. Deploys
 
-`deploy.yml` builds the image, pushes it to GHCR and deploys over SSH with a deploy key restricted to one command (`/srv/wheel-turning/deploy.sh <tag>`). The script runs migrations as `wt_owner_login`, starts the new web container, waits for `/healthz`, and returns to the previous tag if the check fails within 2 minutes. During the swap the maintenance Worker serves the 503 page (Spec 11, PB4.4).
+`deploy.yml` builds the release binary on an x86-64 runner, copies it over SSH with a deploy key restricted to one command (`/srv/wheel-turning/deploy.sh <tag>`), and keeps the last three releases. The script runs migrations as `wt_owner_login`, points `current` at the new release, restarts `wt-web`, waits for `/healthz`, and points back to the previous release if the check fails within 2 minutes. A migration that builds or rebuilds a vector index runs only in a maintenance window, with `maintenance_work_mem` raised for that session (A10). During the swap the maintenance Worker serves the 503 page (Spec 11, PB4.4).
 
 ### A7. The transcription worker
 
@@ -116,10 +117,34 @@ The owner's PC reaches the database through an SSH port forward to `127.0.0.1:54
 
 | Item | Per month |
 | --- | --- |
-| OVHcloud VPS-2 with its daily backup | from $8.50 (VPS-3: $12.32) |
+| OVHcloud VPS-1 with its daily backup | from $4.54 (VPS-2: $8.50) |
 | S3 (records, transcripts, models, backups), SES, SNS, Route 53 check, CloudTrail | about $2 to $3 |
+| GitHub Actions for the weekly restore check | $0 (free minutes) |
 | Cloudflare (tunnel, rules, Worker), Free plan | $0 |
-| **Fixed total** | **about $11 to $16** |
+| **Fixed total** | **about $7 to $8** |
+
+### A10. Memory budget on 4 GB
+
+The 1.5 GB that `docs/cost.md` gives Postgres was measured to avoid reads from RDS's gp3 volume, at about 1 ms each. What searches actually read is about 630 MB: the half-precision HNSW index (375 MB), the passage heap (231 MB) and the full-text index (25 MB). The full-precision embeddings are stored out of line and are read only by the student-question search. On local NVMe a cache miss costs about 0.1 ms, so the 130 misses a question that the small RDS showed would add about 15 ms, not 150. The plan keeps that 630 MB in the operating system's page cache, not in Postgres's own buffers.
+
+| Part | Budget | How |
+| --- | --- | --- |
+| Ubuntu, sshd, journald, `cloudflared` | 300 MB | No Docker. journald capped at 200 MB in memory |
+| `wt-web` | 800 MB, target 650 MB | M1 to M3 below |
+| Postgres processes and `shared_buffers` | 700 MB | `shared_buffers = 256MB`, `max_connections = 20`, `work_mem = 8MB`, `maintenance_work_mem = 128MB`, one autovacuum worker, `huge_pages = off`, `jit = off` |
+| Page cache for the database | about 2 GB | What is left. It holds the 630 MB search set with room for the rest of the 1.7 GB database |
+| Safety | zram swap of 1 GB (compressed, lz4) plus a 2 GB swap file at low `vm.swappiness = 10` | An answer slows down under pressure instead of a process being killed |
+
+Changes to the code, each measured before and after against the 50 practitioner questions, four at a time, reading peak resident memory (`VmHWM`) of `wt-web`:
+
+- **M1. ONNX Runtime arena off.** `OnnxSettings` gains `cpu_arena` (default `true`, `false` on the server). The session builder calls `with_memory_pattern(false)` and turns off the CPU memory arena, so activation buffers are freed after each run instead of held at their largest size. The 570 MB int8 model stays resident either way. Vectors must match the current build bit for bit on the 50 questions, or the change is dropped.
+- **M2. One inference thread.** `WT_ORT_THREADS=1` and two Tokio worker threads on a 2-vCore server. One embedding takes 54 ms on one vCPU against 49 ms on two (`docs/cost.md`), and it frees the second core for Postgres's full-text ranking.
+- **M3. Allocator.** The web binary uses `mimalloc` as its global allocator, or sets `MALLOC_ARENA_MAX=2` if `mimalloc` is refused by `cargo deny`. glibc's per-thread arenas hold freed memory from tokenizer and template work.
+- **M4. A narrow full-text table (Spec 05 change, owner's approval needed).** Full-text ranking reads the whole passage heap on most questions (`docs/cost.md`) because `tsv` sits in the wide `passage` row. A `passage_fts (passage_id, tsv)` table, kept by `wt-index` and read through the serving view, would cut that read from 231 MB to the size of the `tsv` values. It is not needed for launch. Build it only if the page p95 passes 4.8 s on the server.
+
+**Alarm.** The 5-minute timer of A5 alerts when available memory stays under 300 MB for 10 minutes, or when swap use passes 500 MB. Two alerts in one week mean resizing to VPS-2.
+
+**Measure before cutover.** Restore the dump on the new server, apply A10's settings, and run the 50 questions four at a time. Pass when `wt-web`'s peak stays under 800 MB, no swap is used at rest, and the page p95 stays under Spec 10's 5 s. If it fails after M1 to M3, resize to VPS-2 before cutover.
 | Model spend | up to the $40 cap |
 
 GuardDuty and the unused-access analyzer (about $5 to $9) are switched off with the compute they watched. The external-access analyzer stays, as it is free.
@@ -181,7 +206,7 @@ Spec 09 changes: the privacy line for visitors, the home page without invite wor
 
 | # | Action | Before |
 | --- | --- | --- |
-| O1 | Buy the OVHcloud VPS-2 with Claude's SSH public key, and create scoped API credentials | A8 |
+| O1 | Buy the OVHcloud VPS-1 with Claude's SSH public key, and create scoped API credentials | A8 |
 | O2 | Approve the AWS teardown. Done November 2, 2026, on the condition in A8 step 7 | A8 step 7 |
 | O3 | Register the DMCA agent | Launch |
 | O4 | Apply the EU, EEA and UK rule in Cloudflare. Delegated to Claude and applied November 2, 2026 | Done |
@@ -191,7 +216,7 @@ Spec 09 changes: the privacy line for visitors, the home page without invite wor
 
 Part A and Part B are independent until launch and can run in parallel, in separate sessions and branches:
 
-- **Part A:** A2 and A3 (compose, `.env` layout) → A4 and A5 (backups, timers) → A6 (deploy) → A7 (worker forward) → A8 cutover.
+- **Part A:** A2 and A3 (systemd units, `.env` layout), A10 measurement → A4 and A5 (backups, timers) → A6 (deploy) → A7 (worker forward) → A8 cutover.
 - **Part B:** B4 (excerpts cap, migration) → B1 and B2 (visitors, privacy default) → B3 (limits, ceiling) → B7, B8, B9 (pages and copy).
 - **Launch** when both parts are merged, the cutover is done and O3 to O5 are complete: B5's cap, then remove the invite gate in production.
 
@@ -224,6 +249,8 @@ Part A and Part B are independent until launch and can run in parallel, in separ
 ### Part A
 
 - [ ] `infra/vps/bootstrap.sh` builds a running site on a fresh Ubuntu 24.04 x86 server from the newest dump, and refuses to run on arm64.
+- [ ] A10's measurement passes on VPS-1: `wt-web` peak under 800 MB with four questions at a time, no swap at rest, page p95 under 5 s.
+- [ ] With M1, embeddings of the 50 practitioner questions match the current build exactly.
 - [ ] The web service has no inbound port. A scan from outside finds only SSH.
 - [ ] The nightly dump lands in S3, encrypted, and the weekly restore check emails its `wt audit` result.
 - [ ] The memory, disk and service-down timer sends an SNS email when its test hook fires.
