@@ -514,3 +514,72 @@ pub(crate) async fn accessibility(ctx: &Ctx, command: AccessibilityCommand) -> a
     }
     Ok(())
 }
+
+/// `wt answer`'s subcommands (Spec 10, D3).
+#[derive(Debug, Subcommand)]
+pub(crate) enum AnswerCommand {
+    /// Pin a stored answer to a question the owner writes, so every tester who asks it, matched
+    /// after normalization, gets the same passages, excerpts and summary. The answer must have
+    /// been written for that question, be a standard answer and have a summary. Replaces any
+    /// pin on the same question. Owner login.
+    Pin {
+        /// The stored answer, as in its `/a/<id>` link.
+        answer: wt_core::ids::AnswerId,
+        /// The question, as the owner writes it.
+        #[arg(long)]
+        question: String,
+        /// Who pinned it.
+        #[arg(long)]
+        by: String,
+    },
+    /// Remove the pin on a question. Owner login.
+    Unpin {
+        /// The question.
+        #[arg(long)]
+        question: String,
+    },
+    /// List the pins as JSON. Owner login.
+    Pins,
+}
+
+/// `wt answer pin`, `unpin` and `pins`.
+pub(crate) async fn answer(ctx: &Ctx, command: AnswerCommand) -> anyhow::Result<()> {
+    let pool = ctx.pool().await?;
+    match command {
+        AnswerCommand::Pin {
+            answer,
+            question,
+            by,
+        } => {
+            let payload = wt_db::pinned::source(&pool, answer, &question).await?;
+            wt_db::pinned::pin(&pool, &question, &payload, Some(answer), &by).await?;
+            commands::print_json(&serde_json::json!({
+                "pinned": question.trim(),
+                "passages": payload.passage_ids.len(),
+                "sentences": payload.summary.as_ref().map_or(0, |s| s.sentences.len()),
+            }))?;
+        }
+        AnswerCommand::Unpin { question } => {
+            let removed = wt_db::pinned::unpin(&pool, &question).await?;
+            commands::print_json(&serde_json::json!({ "removed": removed }))?;
+        }
+        AnswerCommand::Pins => {
+            let rows: Vec<serde_json::Value> = wt_db::pinned::list(&pool)
+                .await?
+                .into_iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "question": r.question_text,
+                        "source_answer": r.source_answer_id.map(|a| a.to_string()),
+                        "passages": r.passages,
+                        "sentences": r.sentences,
+                        "pinned_by": r.pinned_by,
+                        "pinned_at": r.pinned_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+            commands::print_json(&rows)?;
+        }
+    }
+    Ok(())
+}

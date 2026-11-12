@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select question_text, payload, source_answer_id, pinned_by, pinned_at\n           from pinned_answer order by pinned_at desc",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "question_text"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "payload"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "source_answer_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "source_answer_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned_by",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "pinned_by"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "pinned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "pinned_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "78cfb93bb8ba8643b79fbc24fe4d701aece1f1b85a65fd8c3df5252c344bcd52"
+}

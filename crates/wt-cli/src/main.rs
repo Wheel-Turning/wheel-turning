@@ -89,6 +89,12 @@ enum Command {
         #[command(subcommand)]
         command: talk_cmds::TalkCommand,
     },
+    /// Pinned answers: one stored answer served for every tester who asks its question (Spec 10,
+    /// D3).
+    Answer {
+        #[command(subcommand)]
+        command: admin_cmds::AnswerCommand,
+    },
     /// Testers and their invite links (Spec 06, Invite token access).
     Tester {
         #[command(subcommand)]
@@ -257,6 +263,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Report { command } => admin_cmds::report(&ctx, command).await?,
         Command::Consent { command } => admin_cmds::consent(&ctx, command).await?,
         Command::Tester { command } => admin_cmds::tester(&ctx, command).await?,
+        Command::Answer { command } => admin_cmds::answer(&ctx, command).await?,
         Command::Accessibility { command } => admin_cmds::accessibility(&ctx, command).await?,
         Command::Talk { command } => talk_cmds::talk(&ctx, command).await?,
         Command::Takedown(args) => talk_cmds::takedown(&ctx, args).await?,
@@ -307,6 +314,7 @@ impl Command {
                 | Self::Ingest { .. }
                 | Self::Reindex(_)
                 | Self::Takedown(_)
+                | Self::Answer { .. }
                 | Self::Rights { .. }
                 | Self::Exclusion { .. }
                 | Self::Source { .. }

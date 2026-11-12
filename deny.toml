@@ -14,6 +14,12 @@ ignore = [
     # basic-toml is unmaintained, not vulnerable: askama_derive (0.16.1, the latest) parses
     # askama.toml with it at compile time. No runtime code. Recheck when askama drops it.
     { id = "RUSTSEC-2026-0374", reason = "unmaintained build-time TOML parser used by askama_derive" },
+    # astral-tokio-tar is unmaintained, not vulnerable: testcontainers (0.28) builds the test
+    # database's image context with it. Test support only. Recheck when testcontainers moves.
+    { id = "RUSTSEC-2026-0440", reason = "unmaintained tar crate used by testcontainers in tests" },
+    # pin-utils is unmaintained, not vulnerable: one pin_mut! macro that aws-smithy-http and the
+    # futures crates use. No safe upgrade yet. Recheck when the AWS SDK drops it.
+    { id = "RUSTSEC-2026-0441", reason = "unmaintained pin macro crate used by aws-smithy-http and futures" },
 ]
 
 [licenses]

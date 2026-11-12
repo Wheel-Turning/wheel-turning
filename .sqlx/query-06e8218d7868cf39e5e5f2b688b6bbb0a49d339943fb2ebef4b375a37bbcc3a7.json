@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select question_text, payload from pinned_answer where question_key = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "question_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "question_text"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "pinned_answer",
+            "name": "payload"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "06e8218d7868cf39e5e5f2b688b6bbb0a49d339943fb2ebef4b375a37bbcc3a7"
+}

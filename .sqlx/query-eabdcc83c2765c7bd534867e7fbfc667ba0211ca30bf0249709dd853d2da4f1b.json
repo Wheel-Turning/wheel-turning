@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from pinned_answer where question_key = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eabdcc83c2765c7bd534867e7fbfc667ba0211ca30bf0249709dd853d2da4f1b"
+}
