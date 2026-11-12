@@ -72,6 +72,7 @@ Expected: first sentence at about 1.5 s after the page opens, a finished summary
 
 1. **Answer cache.** A question whose vector is within cosine 0.97 of one answered in the last 7 days, in the same mode and with no change to the serving view since (a counter bumped by indexing, takedown and rights changes), reuses that answer's ranked passages, excerpts and summary. The page still rebuilds everything through `servable_passage`, as permalinks do, so a takedown is honoured. The cache stores vectors and answer payloads, never question text. Reuse across testers needs the owner's decision.
 2. **Prompt caching** on the ranking, summary and verifier system prompts wherever their length qualifies, with the cache-read price added to `llm_prices.toml` so the spend ledger stays right.
+3. **Pinned answers** (owner's decision of November 12, 2026, built ahead of D1). The owner pins a stored answer to a question they write, such as a home page example, with `wt answer pin <answer-id> --question "<text>" --by <name>`; `wt answer pins` lists them and `wt answer unpin --question "<text>"` removes one. The answer must have been written for that question (compared after normalization: case, apostrophes, punctuation and spacing are ignored), be a standard answer to an ordinary question and have a summary. Any tester whose ordinary question normalizes to a pinned one gets a new answer of their own, stored in their privacy mode, that reuses the pinned passages, excerpt spans, notice and summary, with no retrieval, ranking, triage call or model call. The page rebuilds everything through `servable_passage`, as permalinks do. A pin is skipped, and the question runs normally, when any of its passages no longer serves; a takedown deletes every pin that holds a passage it removes. `pinned_answer` holds the owner's question text, never a tester's, and the web role can only read it. `wt eval run` never uses pins, so evaluations measure the pipeline.
 
 ## Workstream E: knowing what a question costs
 
@@ -95,7 +96,7 @@ C1, C4 and C5 first: they deliver the "always shown, under 5 s" goal with no qua
 1. Whether a second provider (A2) is acceptable, and the copy change that goes with it.
 2. The shorter summary format (C2), as a PRD change.
 3. The extractive fallback's heading and wording (C5), for Spec 09.
-4. Whether one tester's question may reuse an answer computed for another's (D1).
+4. Whether one tester's question may reuse an answer computed for another's (D1). Answered yes for pinned answers (D3) on November 12, 2026; still open for the automatic cache.
 5. Whether the 5-second summary target is measured from the page opening, as written here, or from pressing Ask.
 
 ## Acceptance
@@ -106,3 +107,4 @@ C1, C4 and C5 first: they deliver the "always shown, under 5 s" goal with no qua
 - [ ] Judged 7+ candidates at least 95% of the October 15 baseline on the same questions.
 - [ ] Claim audit: no unsupported sentence shown.
 - [ ] `wt report costs` and the per-question cost column in place, with the daily alarm.
+- [x] Pinned answers (D3): a pinned question is answered from its pin for every tester with no model call, a pin with a passage that no longer serves is skipped, and takedown deletes the pins it affects (`crates/wt-db/tests/pinned.rs`, `crates/wt-api/tests/pages.rs`).

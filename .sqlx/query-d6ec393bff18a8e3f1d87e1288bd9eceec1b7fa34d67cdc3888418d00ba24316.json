@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into pinned_answer (question_key, question_text, payload, source_answer_id, pinned_by)\n         values ($1, $2, $3, $4, $5)\n         on conflict (question_key) do update\n            set question_text = excluded.question_text, payload = excluded.payload,\n                source_answer_id = excluded.source_answer_id, pinned_by = excluded.pinned_by,\n                pinned_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d6ec393bff18a8e3f1d87e1288bd9eceec1b7fa34d67cdc3888418d00ba24316"
+}

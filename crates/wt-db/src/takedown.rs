@@ -43,6 +43,8 @@ pub struct TakedownReport {
     pub answers_rewritten: i64,
     /// Themes stripped from those answers.
     pub themes_stripped: i64,
+    /// Pinned answers deleted because they held a removed passage (Spec 10, D3).
+    pub pins_removed: i64,
     /// Evaluation ratings whose notes were cleared.
     pub rating_notes_cleared: i64,
     /// Objects per registered object store: found, in a dry run with a store, or deleted.
@@ -170,6 +172,22 @@ pub(crate) async fn run_in(
         .await?;
         report.answers_rewritten += 1;
     }
+
+    // Spec 10, D3: a pin that holds a removed passage goes with it, so the question runs
+    // normally from then on. A pin is never rewritten, since its summary was written for all
+    // of its passages.
+    report.pins_removed = i64::try_from(
+        sqlx::query!(
+            r#"delete from pinned_answer
+                where exists (select 1 from jsonb_array_elements_text(coalesce(payload->'passage_ids', '[]')) p
+                              where p = any($1))"#,
+            &removed_text
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected(),
+    )
+    .unwrap_or(0);
 
     report.rating_notes_cleared = i64::try_from(
         sqlx::query!(

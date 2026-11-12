@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from pinned_answer\n                where exists (select 1 from jsonb_array_elements_text(coalesce(payload->'passage_ids', '[]')) p\n                              where p = any($1))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86f433c36882b270b22312afc882569f39e47b1c10c27a2e3916686ed29af515"
+}

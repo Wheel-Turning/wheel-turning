@@ -29,6 +29,7 @@ pub mod llm;
 pub mod locator;
 pub mod page_view;
 pub mod parity;
+pub mod pinned;
 pub mod privacy;
 pub mod public_forms;
 pub mod quarantine;

@@ -796,6 +796,7 @@ async fn ask_with(
         gpc: privacy::gpc(headers),
         anyway: form.anyway.is_some(),
         defer_summary: true,
+        pins: true,
     };
     let asked = ask::answer_framed(&state.pool, site, s.tester, &text, framing, gate, sink);
     match wt_extract::for_answer(answer, asked).await {
@@ -878,6 +879,7 @@ async fn ask_curated_with(
         gpc: privacy::gpc(headers),
         anyway: false,
         defer_summary: false,
+        pins: false,
     };
     let text = site.sensitivity.curated_query();
     sink.stage(progress::Stage::Reading);

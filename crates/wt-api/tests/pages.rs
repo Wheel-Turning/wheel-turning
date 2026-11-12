@@ -439,7 +439,12 @@ fn site_with(llm: Arc<dyn LlmClient>) -> Site {
 
 /// Asks `question` and returns the answer page.
 async fn ask(fx: &Fx, question: &str) -> Reply {
-    let cookie = join(fx, "owner").await;
+    ask_labelled(fx, "owner", question).await
+}
+
+/// Asks `question` as a new tester labelled `label` and returns the answer page.
+async fn ask_labelled(fx: &Fx, label: &str, question: &str) -> Reply {
+    let cookie = join(fx, label).await;
     let token = csrf(&send(&fx.app, get("/", Some(&cookie))).await.body);
     let asked = send(
         &fx.app,
@@ -593,6 +598,70 @@ async fn a_verified_summary_renders_with_quoted_lines_and_is_stored_as_spans() {
     let seen = llm.seen.lock().unwrap();
     assert_eq!(seen.len(), 3, "one generation and two verifier calls");
     assert!(seen.iter().all(|(_, class)| *class == DataClass::Real));
+}
+
+/// Spec 10, D3: once the owner pins an answer, any tester who asks its question, however it is
+/// spelled, gets a new answer of their own with the pinned excerpts and summary, and no model
+/// call is made.
+#[tokio::test]
+async fn a_pinned_question_reuses_the_pinned_summary_for_every_tester() {
+    let llm = Arc::new(FakeLlm::new(vec![
+        Ok(summary_reply()),
+        Ok(verdict(true)),
+        Ok(verdict(true)),
+    ]));
+    let fx = start_with(site_with(llm.clone()), true).await;
+    let first = ask_labelled(&fx, "first", "How do I work with anger?").await;
+    assert!(summary_of(&first.body).contains(HEADLINE));
+    let answer: Uuid = sqlx::query_scalar("select id from answer")
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let payload = wt_db::pinned::source(&fx.pool, answer.into(), "How do I work with anger?")
+        .await
+        .unwrap();
+    wt_db::pinned::pin(
+        &fx.pool,
+        "How do I work with anger?",
+        &payload,
+        Some(answer.into()),
+        ACTOR,
+    )
+    .await
+    .unwrap();
+
+    let second = ask_labelled(&fx, "second", "how do i work with ANGER").await;
+    assert_eq!(second.status, StatusCode::OK);
+    let section = summary_of(&second.body);
+    assert!(
+        section.contains(HEADLINE) && section.contains(AGREE),
+        "{section}"
+    );
+    assert!(
+        section.contains("<q>Anger is only energy.</q>"),
+        "quoted lines are sliced from serving rows: {section}"
+    );
+    assert_eq!(second.body.matches("<blockquote>").count(), 2);
+    assert_eq!(
+        llm.seen.lock().unwrap().len(),
+        3,
+        "no model call for the pin"
+    );
+
+    let rows: Vec<(Uuid, String, i32)> = sqlx::query_as(
+        "select a.id, a.summary_status, q.theme_count from answer a
+           join query_log q on q.id = a.query_log_id order by q.created_at",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "the second tester has an answer of their own"
+    );
+    assert_ne!(rows[0].0, rows[1].0);
+    assert_eq!((rows[1].1.as_str(), rows[1].2), ("shown", 2));
 }
 
 /// Spec 11, PB2.2: an excerpt the summary does not cite moves to a collapsed "Also related"

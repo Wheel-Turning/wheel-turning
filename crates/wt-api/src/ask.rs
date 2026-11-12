@@ -147,6 +147,9 @@ pub struct Framing {
     /// (owner's request of October 15, 2026: the page in under 5 seconds). The `/ask` route sets
     /// it; `wt eval run` does not, so an evaluation still scores the summary it waited for.
     pub defer_summary: bool,
+    /// Serve a pinned answer when the owner pinned this question (Spec 10, D3). The `/ask`
+    /// route sets it; `wt eval run` does not, so an evaluation always measures the pipeline.
+    pub pins: bool,
 }
 
 /// Answers a normalized, ordinary question as `tester` and stores the answer with its log row,
@@ -251,6 +254,20 @@ async fn answer_scoped(
         Mode::Standard => None,
     };
     progress.searched(pool, &site.scope_sizes, scope);
+
+    // Spec 10, D3: an ordinary question the owner pinned reuses the pinned passages, excerpts
+    // and summary. A pin whose passages do not all still serve is skipped.
+    if framing.pins
+        && scope.is_none()
+        && framing.level == Level::None
+        && !framing.curated
+        && let Some(pinned) = pinned_served(pool, text).await
+    {
+        if let Some(gate) = gate {
+            gate.abort();
+        }
+        return answer_pinned(pool, site, &question, pinned, timings, progress).await;
+    }
 
     // A named teacher is left out of the search text, so the check's vector no longer fits.
     let vector = framing
@@ -454,6 +471,149 @@ async fn answer_scoped(
         level,
         triaged,
     })))
+}
+
+/// The pin on `text` with its serving rows, when every one of its passages still serves. A
+/// failed read counts as no pin, so the question runs normally.
+async fn pinned_served(
+    pool: &PgPool,
+    text: &str,
+) -> Option<(wt_db::pinned::Pinned, Vec<wt_db::answer::Served>)> {
+    let pinned = match wt_db::pinned::find(pool, text).await {
+        Ok(p) => p?,
+        Err(e) => {
+            tracing::warn!(error = %e, "reading pinned answers");
+            return None;
+        }
+    };
+    let served = wt_db::answer::passages(pool, &pinned.payload.passage_ids)
+        .await
+        .ok()?;
+    if served.len() != pinned.payload.passage_ids.len() {
+        tracing::info!(
+            event = "pin_skipped",
+            pinned = pinned.payload.passage_ids.len(),
+            serving = served.len(),
+            "a pinned passage no longer serves"
+        );
+        return None;
+    }
+    Some((pinned, served))
+}
+
+/// Stores a new answer for the asking tester from a pinned one (Spec 10, D3): the pinned
+/// passages, spans, notice and summary, with no retrieval, ranking or model call. The answer
+/// is the tester's own, kept in their privacy mode like any other.
+async fn answer_pinned(
+    pool: &PgPool,
+    site: &Site,
+    question: &Question<'_>,
+    (pinned, served): (wt_db::pinned::Pinned, Vec<wt_db::answer::Served>),
+    mut timings: StageTimings,
+    progress: &Sink,
+) -> Result<Gated, AskError> {
+    let level = Level::None;
+    let triaged = Triaged::not_run();
+    progress.count(Count::Selected, served.len());
+    let teacher_count = served
+        .iter()
+        .map(|p| p.talk.teacher_id)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let sanghas = served
+        .iter()
+        .map(|p| p.talk.sangha_id)
+        .collect::<BTreeSet<_>>()
+        .len();
+    let mut payload = pinned.payload;
+    payload.summary_pending = false;
+    payload.curated = false;
+    let theme_count = payload.summary.as_ref().map_or(0, |s| s.sentences.len());
+    let summary_status = if payload.summary.is_some() {
+        SummaryStatus::Shown
+    } else {
+        SummaryStatus::NotAttempted
+    };
+    let notice = notice_key(payload.notice.as_deref());
+    let thin = payload.notice.as_deref() == Some("thin_coverage");
+    let passage_count = payload.passage_ids.len();
+    let small = |n: usize| i32::try_from(n).unwrap_or(i32::MAX);
+    let stage = Instant::now();
+    let (kept, privacy_mode) = kept(
+        pool,
+        site,
+        question.tester,
+        question.text,
+        question.framing,
+        level,
+    )
+    .await?;
+    let new = wt_db::answer::NewAnswer {
+        tester: question.tester,
+        query_text: &kept,
+        privacy_mode,
+        text_expires_at: Some(site.privacy.expires_at(privacy_mode)),
+        payload,
+        teacher_count: small(teacher_count),
+        sangha_count: small(sanghas),
+        thin_coverage: thin,
+        latency_ms: i32::try_from(millis(question.started)).unwrap_or(i32::MAX),
+        themes_dropped: 0,
+        sensitive_category: level.as_str(),
+        relevance: None,
+        triage_degraded: false,
+        summary_status,
+        measures: wt_db::answer::Measures {
+            answer_id: wt_extract::current_answer(),
+            first_progress_ms: progress
+                .first_event_ms()
+                .map(|ms| i32::try_from(ms).unwrap_or(i32::MAX)),
+            page_ms: Some(i32::try_from(progress.elapsed_ms()).unwrap_or(i32::MAX)),
+        },
+    };
+    let answer_id = wt_db::answer::persist(pool, &new)
+        .await
+        .map_err(AskError::Persist)?;
+    timings.persist_ms = millis(stage);
+    timings.total_ms = millis(question.started);
+    settled(answer_id, summary_status);
+    tracing::info!(
+        event = "ask_completed",
+        ms = timings.total_ms,
+        latency_ms = timings.total_ms,
+        synth_ms = 0,
+        pinned = true,
+        "answer stored from a pin"
+    );
+    Ok(Gated::Answered(Box::new(Asked {
+        answer_id,
+        mode: Mode::Standard,
+        teacher_count,
+        passage_count,
+        theme_count,
+        themes_dropped: 0,
+        synthesis_failed: false,
+        summary_status,
+        rerank_degraded: false,
+        ranker: "pinned",
+        notice,
+        timings,
+        level,
+        triaged,
+    })))
+}
+
+/// The static notice key for a stored one, as [`Asked`] carries it.
+fn notice_key(stored: Option<&str>) -> Option<&'static str> {
+    [
+        "thin_coverage",
+        "none_found",
+        "named_none",
+        "named_few",
+        "multi_named",
+    ]
+    .into_iter()
+    .find(|k| Some(*k) == stored)
 }
 
 /// The ranker that ordered an answer's excerpts, as `ranker_served` names it: the configured

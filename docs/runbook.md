@@ -393,6 +393,18 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   balancer and addresses about $30). Scale the service to 0 tasks between test rounds to save
   the task's share.
 
+### Pinned answers (Spec 10, D3)
+
+A pinned answer is served to every tester who asks its question, for example a home page example question used in a demo. Pin an answer you have checked on its page, written for exactly that question. Connect as `wt_owner_login` through the batch host forward (its secret is `wt-v1/db_wt_owner_login`), with `WT_DATABASE_NAME=rds-v1`:
+
+```powershell
+wt answer pin <answer-id> --question "What is the difference between practice and trying to improve myself?" --by acowen
+wt answer pins
+wt answer unpin --question "What is the difference between practice and trying to improve myself?"
+```
+
+Pinning again replaces the pin. The question is matched after normalization, so case, punctuation and spacing do not matter. A pin is skipped while any of its passages does not serve, and a takedown deletes it, so after a takedown, check `wt answer pins` and pin a fresh answer if the question still matters. The web service needs migration `0052_pinned_answer.sql`, which the migrate task applies on deploy.
+
 ### The edge: Cloudflare in front of the load balancer
 
 Owner's decision of October 17, 2026 (`docs/adr-edge-cost.md`): Cloudflare proxies `app` and
