@@ -23,7 +23,7 @@ variable "name" {
 
 variable "state_bucket" {
   type    = string
-  default = "wt-tfstate-904883674947"
+  default = "wt-tfstate-<AWS_ACCOUNT_ID>"
 }
 
 variable "batch_instance_types" {
@@ -41,5 +41,5 @@ variable "mail_domain" {
 variable "pc_backup_bucket" {
   description = "The PC's nightly backup bucket (runbook §10), which the audit task may list (Spec 11, PB1.3)."
   type        = string
-  default     = "wheel-turning-backups-904883674947-us-east-2"
+  default     = "wheel-turning-backups-<AWS_ACCOUNT_ID>-us-east-2"
 }

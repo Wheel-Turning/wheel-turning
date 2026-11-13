@@ -208,7 +208,7 @@ def main() -> None:
     p.add_argument("--apply", action="store_true", help="write the answers (default: dry run)")
     p.add_argument("--name", default="wheel-turning-v1")
     p.add_argument("--region", default="us-east-2")
-    p.add_argument("--owner", default="Alexander Cowen")
+    p.add_argument("--owner", default="<OWNER_NAME>")
     args = p.parse_args()
     if args.create:
         create(args)

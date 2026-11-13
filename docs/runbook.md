@@ -304,9 +304,9 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
   From the Cloudflare Tunnel's stage T-B, the edge stack (`infra/terraform/edge`) holds both
   records and points them at the tunnel.
 - Web service: Fargate, 1 vCPU / 3 GB, one task. Its `models` container copies
-  `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-904883674947/` into the
+  `bge-m3-int8/` and `bge-reranker-v2-m3-int8/` from `s3://wt-v1-models-<AWS_ACCOUNT_ID>/` into the
   task before `wt-api` starts; startup takes about a minute. A new model goes to that bucket
-  (`aws s3 sync models/<dir> s3://wt-v1-models-904883674947/<dir>`), then a redeploy. From the
+  (`aws s3 sync models/<dir> s3://wt-v1-models-<AWS_ACCOUNT_ID>/<dir>`), then a redeploy. From the
   Cloudflare Tunnel's stage T-A a third container, `cloudflared`, joins the tunnel once `wt-api`
   passes its container health check (below, "The Cloudflare Tunnel").
 - Settings: `WT_ENV=prod` (Secure cookies), the session secret, database password and Claude key
@@ -338,7 +338,7 @@ wheel-turning` (on Windows, `--use-device-code` works when the browser callback 
 
   Its output is in the `/wt-v1/admin` log group under `eval/eval/<task id>`. For the review page,
   pass `["wt","eval","export-review","--run","<id>","--out","/out/<id>/review.html"]`; the task
-  copies `/out` to `s3://wt-v1-transcripts-904883674947/eval-reviews/`, and the owner downloads it
+  copies `/out` to `s3://wt-v1-transcripts-<AWS_ACCOUNT_ID>/eval-reviews/`, and the owner downloads it
   with `aws s3 cp` (the page quotes transcripts: never share it by public link).
   The metrics are `["wt","eval","report","--run","<id>","--json"]`, in the same log stream;
   Spec 11, PB2.2 reads `summary_use` there. The claim audit is the reviewer's: they rate the
@@ -530,7 +530,7 @@ stack's `variables.tf`, so `deploy.yml` and the next plain apply keep them.
    lifecycle rule never expires `mirror-` tags):
 
    ```bash
-   R=904883674947.dkr.ecr.us-east-2.amazonaws.com/wt-v1
+   R=<AWS_ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/wt-v1
    aws ecr get-login-password | docker login --username AWS --password-stdin ${R%%/*}
    docker pull --platform linux/amd64 cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
    docker tag cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39 $R:mirror-cloudflared-2026.10.3
@@ -771,8 +771,8 @@ are one-time copies, done once, with the owner's go-ahead.
 
    ```powershell
    $env:AWS_PROFILE = "wheel-turning"
-   $env:WT_TRANSCRIPT_BUCKET = "wt-v1-transcripts-904883674947"
-   $env:WT_RECORDS_BUCKET = "wt-records-904883674947"
+   $env:WT_TRANSCRIPT_BUCKET = "wt-v1-transcripts-<AWS_ACCOUNT_ID>"
+   $env:WT_RECORDS_BUCKET = "wt-records-<AWS_ACCOUNT_ID>"
    wt objects sync --from data/objects
    wt records sync --from data/records
    ```
@@ -813,7 +813,7 @@ the owner, in this order, since the deploy role must be able to read each new re
    Cost Explorer's "Tag" grouping from the next day's data.
 4. Check: `/healthz` answers through Cloudflare; one question gets an answer with a summary (the
    web task still reaches the Claude API, SES and the database); after 10 minutes,
-   `aws s3 ls s3://wt-v1-alb-logs-904883674947/alb/ --recursive` lists log files; the `wt-v1`
+   `aws s3 ls s3://wt-v1-alb-logs-<AWS_ACCOUNT_ID>/alb/ --recursive` lists log files; the `wt-v1`
    dashboard shows data in every panel that has traffic.
 
 To undo the egress change, restore the two `-1` rules in `modules/network/main.tf` and apply.
@@ -911,7 +911,7 @@ under `infra/terraform` has a heading here, and every heading names an alarm the
 
 - **Means:** the scratch bucket has held objects for more than 24 hours. Audio must not persist
   (CLAUDE.md rule 6).
-- **First check:** `aws s3 ls s3://wt-v1-scratch-904883674947/ --recursive`, and which job wrote
+- **First check:** `aws s3 ls s3://wt-v1-scratch-<AWS_ACCOUNT_ID>/ --recursive`, and which job wrote
   the objects.
 - **Fix:** delete the objects, then find why the pipeline did not, from the stage's logs. Record
   it in `docs/incidents/` as a data-handling incident.
