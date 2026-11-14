@@ -37,6 +37,8 @@ The PRD does not describe a public beta, and keeps v1 private. Opening to the pu
 - Cost recovery from sanghas (F6).
 - Moving texts earlier than v3 (B11).
 
+**Owner's decision of November 2, 2026.** The site opens to everyone (general availability) after Spec 12, which moves hosting to one server. Gates 1 and 2 are waived for that launch. Spec 12 covers UB1.1 (open access), UB1.2 (mandated talks served as excerpts only, in place of consent-only), UB1.3 (already met by the license allow-list), UB1.4, UB1.5 (geo-block) and UB1.6. The PRD changes listed in Spec 12 wait for the owner's approval of that spec.
+
 ## Increment 1: Private beta
 
 **For:** invited SSZ members and a few teachers. **Value:** a practitioner asks a real question and gets passages a teacher would stand behind. The teacher's rights hold. The owner learns whether the PRD's three hypotheses are true.

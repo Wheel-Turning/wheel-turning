@@ -119,6 +119,7 @@ Each spec below is a tab here and a file under `docs/specs/` in the repository. 
 | 09 Copy and templates | Public page copy, notices, attribution lines, the answer page's labels | M5, M7 |
 | 10 Cost and summary latency | Model cost per question, ranking and excerpt options, a summary that is always shown within 5 seconds | P1, after the MVP test pass |
 | 11 Private beta readiness | Rights on one database, trustworthy answers, honest data handling, alerts and the beta report: every story before the private beta | Private beta |
+| 12 One server and general availability | Moving from AWS to one rented server, anonymous public access, mandated talks as excerpts only, the daily spend ceiling, the EU and UK block (draft, November 2, 2026) | General availability |
 
 ## Blockers outside the code
 
