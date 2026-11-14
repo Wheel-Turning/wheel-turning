@@ -43,15 +43,15 @@ It reads and changes nothing, and prints PASS, WARN or FAIL per control with its
 
 ## The WA Tool workload
 
-The ledger is loaded into the AWS Well-Architected Tool as workload **`wheel-turning-v1`** (id `e32e488e76ed7a801b10971941797b6b`, us-east-2, pre-production, framework lens). All 57 questions are answered: an Implemented best practice is a selected choice, and a Not Applicable one is marked not applicable with the ledger's reason. A Partial or Not Implemented one is left unselected, with its recommendation in the question's notes. 306 of 307 best practices matched a Tool choice; SEC05-BP04's page slug is not the Tool's choice id and is left out.
+The ledger is loaded into the AWS Well-Architected Tool as workload **`wheel-turning-v1`** (id `<WA_WORKLOAD_ID>`, us-east-2, pre-production, framework lens). All 57 questions are answered: an Implemented best practice is a selected choice, and a Not Applicable one is marked not applicable with the ledger's reason. A Partial or Not Implemented one is left unselected, with its recommendation in the question's notes. 306 of 307 best practices matched a Tool choice; SEC05-BP04's page slug is not the Tool's choice id and is left out.
 
 **The Tool scores risk its own way.** It marks a question High when any of its key best practices is unselected, whatever the context. So it shows 29 High-risk questions, where this review, weighing likelihood and the workload's criticality, finds 1 High and 11 Medium findings. Read the Tool's counts as "questions with a gap", and this ledger for how much each gap matters.
 
 To refresh the Tool after the ledger changes:
 
 ```bash
-python scripts/ops/wa_tool_import.py --workload-id e32e488e76ed7a801b10971941797b6b          # dry run
-python scripts/ops/wa_tool_import.py --workload-id e32e488e76ed7a801b10971941797b6b --apply
+python scripts/ops/wa_tool_import.py --workload-id <WA_WORKLOAD_ID>          # dry run
+python scripts/ops/wa_tool_import.py --workload-id <WA_WORKLOAD_ID> --apply
 ```
 
 To take a milestone (a frozen copy the Tool keeps for comparison), use the console's "Save milestone" after an apply.

@@ -39,7 +39,7 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
-  ROLE_ARN: arn:aws:iam::904883674947:role/ci/wt-v1-github-deploy
+  ROLE_ARN: arn:aws:iam::<AWS_ACCOUNT_ID>:role/ci/wt-v1-github-deploy
   TF_DIR: infra/terraform/envs/v1
   ECR_REPOSITORY: wt-v1
   TF_IN_AUTOMATION: "1"

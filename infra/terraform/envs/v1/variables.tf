@@ -19,7 +19,7 @@ variable "alternate_domain_names" {
 variable "alert_email" {
   description = "Receives CloudWatch alarm notifications."
   type        = string
-  default     = "alexandercowen@gmail.com"
+  default     = "<OWNER_ALERT_EMAIL>"
 }
 
 variable "second_alert_email" {
@@ -213,5 +213,5 @@ variable "web_ipv6_only" {
 variable "pc_backup_bucket" {
   description = "The PC's nightly backup bucket (runbook §10), which the audit checks for a dump under 36 hours old (Spec 11, PB1.3). Set to \"\" once the PC keeps no database."
   type        = string
-  default     = "wheel-turning-backups-904883674947-us-east-2"
+  default     = "wheel-turning-backups-<AWS_ACCOUNT_ID>-us-east-2"
 }

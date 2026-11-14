@@ -147,9 +147,9 @@ During the private beta the ceiling is **$260 a month**: the account budget's $2
 | Name | `dharma-gates-monthly` (keeps its old name; see [naming.md](naming.md)) |
 | Type and period | Cost, monthly |
 | Limit | 200.00 USD for the whole account (raised from 75 on 2026-10-13) |
-| Alert at 50% | Actual spend over 100.00 USD, email to `alexandercowen@gmail.com` |
-| Alert at 80% | Actual spend over 160.00 USD, email to `alexandercowen@gmail.com` |
-| Alert at 100% forecast | Forecast spend over 200.00 USD, email to `alexandercowen@gmail.com` |
+| Alert at 50% | Actual spend over 100.00 USD, email to `<OWNER_ALERT_EMAIL>` |
+| Alert at 80% | Actual spend over 160.00 USD, email to `<OWNER_ALERT_EMAIL>` |
+| Alert at 100% forecast | Forecast spend over 200.00 USD, email to `<OWNER_ALERT_EMAIL>` |
 
 Budget emails arrive only when a threshold is crossed; there is no confirmation email. AWS evaluates budgets a few times a day, so an alert can lag spending by hours.
 
@@ -161,15 +161,15 @@ Budget emails arrive only when a threshold is crossed; there is no confirmation 
 |---|---|
 | Name | `Default-Services-Monitor` |
 | Type | Dimensional, by AWS service |
-| ARN | `arn:aws:ce::904883674947:anomalymonitor/d133db83-c78e-4f59-81c0-54ea20376a7b` |
+| ARN | `arn:aws:ce::<AWS_ACCOUNT_ID>:anomalymonitor/<ANOMALY_MONITOR_ID>` |
 | Managed by | AWS; referenced in `infra/terraform/account/terraform.tfvars` |
 
 **Subscriptions.** Both send to the same monitor and the same address, and both are confirmed.
 
 | Subscription | Managed by | Frequency | Alerts when | Email |
 |---|---|---|---|---|
-| `dharma-gates-anomalies` | `infra/terraform/account/` | Daily summary | An anomaly's total impact is 5 USD or more | `alexandercowen@gmail.com` |
-| `Default-Services-Subscription` | AWS, created with the monitor | Daily summary | Total impact is 100 USD or more **and** at least 40% above expected | `alexandercowen@gmail.com` |
+| `dharma-gates-anomalies` | `infra/terraform/account/` | Daily summary | An anomaly's total impact is 5 USD or more | `<OWNER_ALERT_EMAIL>` |
+| `Default-Services-Subscription` | AWS, created with the monitor | Daily summary | Total impact is 100 USD or more **and** at least 40% above expected | `<OWNER_ALERT_EMAIL>` |
 
 The 5 USD subscription is the one that matters at this account's spending level; the default one only fires for large anomalies. Email subscribers get daily or weekly summaries; immediate alerts would need an SNS topic.
 
@@ -180,8 +180,8 @@ Both were created in the October 2026 rebuild and outlive any v1 destroy. Neithe
 | What | Managed by | What it costs |
 |---|---|---|
 | Trail `wt-account`: management events in every region, log file validation on | `infra/terraform/account/guardrails.tf` | Nothing for the events: the first copy of management events in an account is free. A second trail, data events (0.10 USD per 100,000) or CloudTrail Insights would be charged, and none is on |
-| Bucket `wt-cloudtrail-904883674947`: the trail's log files and hourly digest files, kept 365 days, old versions 30 days | `infra/terraform/account/guardrails.tf` | S3 Standard storage at 0.023 USD per GB-month, plus PUT requests at 0.005 USD per 1,000 for each file CloudTrail delivers. At this account's activity both stay well under 1 USD a month, and the 365-day expiry caps how much builds up |
-| Bucket `wt-records-904883674947`: Object Lock, GOVERNANCE default retention, every object under a legal hold | `infra/terraform/records/` | Storage only: Object Lock and legal holds cost nothing extra. It is empty until the M2 takedown code writes to it, and each takedown, exclusion or opt-out record is a few KB |
+| Bucket `wt-cloudtrail-<AWS_ACCOUNT_ID>`: the trail's log files and hourly digest files, kept 365 days, old versions 30 days | `infra/terraform/account/guardrails.tf` | S3 Standard storage at 0.023 USD per GB-month, plus PUT requests at 0.005 USD per 1,000 for each file CloudTrail delivers. At this account's activity both stay well under 1 USD a month, and the 365-day expiry caps how much builds up |
+| Bucket `wt-records-<AWS_ACCOUNT_ID>`: Object Lock, GOVERNANCE default retention, every object under a legal hold | `infra/terraform/records/` | Storage only: Object Lock and legal holds cost nothing extra. It is empty until the M2 takedown code writes to it, and each takedown, exclusion or opt-out record is a few KB |
 
 Measured on 2026-10-05: in its first 8.5 hours, which covered the whole rebuild, the trail wrote 285 files (154 of them digests) totalling 1.1 MB. At that rate a month is about 24,000 files and under 100 MB, or roughly 0.12 USD in requests, and a full year of logs is about 1 GB, or 0.03 USD a month in storage. A quiet month writes less. The records bucket held no objects.
 

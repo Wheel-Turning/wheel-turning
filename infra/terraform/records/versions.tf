@@ -9,7 +9,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket       = "wt-tfstate-904883674947"
+    bucket       = "wt-tfstate-<AWS_ACCOUNT_ID>"
     key          = "records/terraform.tfstate"
     region       = "us-east-2"
     encrypt      = true

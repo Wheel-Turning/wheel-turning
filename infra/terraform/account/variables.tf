@@ -13,7 +13,7 @@ variable "monthly_budget_usd" {
 variable "alert_email" {
   description = "Address that receives budget and cost anomaly alerts."
   type        = string
-  default     = "alexandercowen@gmail.com"
+  default     = "<OWNER_ALERT_EMAIL>"
 }
 
 variable "anomaly_threshold_usd" {
