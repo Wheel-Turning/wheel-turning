@@ -4,7 +4,7 @@
 # no models. The task's models container copies the models from the models bucket into a shared
 # volume before wt-api starts, and wt-api refuses to serve until they load.
 
-FROM rust:1.99-bookworm AS build
+FROM rust:1.100-bookworm AS build
 WORKDIR /src
 ENV SQLX_OFFLINE=true CARGO_TERM_COLOR=never
 COPY . .
